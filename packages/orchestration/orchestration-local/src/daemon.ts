@@ -977,10 +977,19 @@ function modelWorkerEnvelopePrompt(envelope: OperatorContextEnvelopeV1): Content
   return [{ type: 'text', text: renderOperatorContextEnvelopeText(envelope) }]
 }
 
-function modelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['tier'] {
+/**
+ * Classify one native model's allocation tier from its catalog name and
+ * description: named frontier families or a "frontier" description are high,
+ * named fast families or a "fast"/"affordable" description are low.
+ * @param model - one native catalog entry.
+ * @returns the tier used by quality gates and parallel worker selection.
+ */
+export function modelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['tier'] {
   const label = `${model.model} ${model.displayName}`.toLowerCase()
-  if (/\b(?:sol|opus|fable)\b|xhigh|max|ultra/u.test(label)) return 'high'
-  if (/\b(?:luna|spark|haiku|flash)\b/u.test(label)) return 'low'
+  // Catalogs cross the Resident process boundary, where an entry may omit its description.
+  const description = typeof model.description === 'string' ? model.description.toLowerCase() : ''
+  if (/\b(?:astra|sol|opus|fable)\b|xhigh|max|ultra/u.test(label) || /\bfrontier\b/u.test(description)) return 'high'
+  if (/\b(?:luna|spark|haiku|flash)\b/u.test(label) || /\b(?:fast|affordable)\b/u.test(description)) return 'low'
   return 'medium'
 }
 

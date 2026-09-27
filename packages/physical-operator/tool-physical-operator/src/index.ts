@@ -39,6 +39,7 @@ import type {
 import type { TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
 import { inferTaskAttributes, renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
 import { z as zod } from 'zod'
+import z from '@deepseek-ai/schemastery'
 import type {
   PhysicalOperatorExecutionMode,
   PhysicalOperatorExecutionPreference,
@@ -51,6 +52,7 @@ import type {
 } from '@deepseek-ai/dsh-physical-operator'
 import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
+import { ModelEntries, NativeCatalogCache, type LatestModelEntries } from './model-entries.ts'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {
   PhysicalOperatorRoutingOption,
@@ -184,6 +186,45 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 export const name = 'tool-physical-operator'
 export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'agents']
+
+/** Model-menu entries and the retained native catalogs; every field is optional. */
+export interface Config {
+  /**
+   * Operators offered as their own model-menu entries. Omitted, every
+   * available operator is offered.
+   */
+  readonly entryOperatorIds?: string[] | undefined
+  /**
+   * Operators whose newest native models are offered instead of every native
+   * model. The first selected model is shown on the bare operator entry,
+   * which runs that model; the rest are `operator:model` entries, and every
+   * other native model is left out of the menu. Omitted, every native model
+   * of every refreshed catalog is offered.
+   */
+  readonly latestModelEntries?: LatestModelEntries[] | undefined
+  /**
+   * Owner-local directory that retains refreshed native catalogs across
+   * restarts. Omitted, they are kept in memory until the next refresh.
+   */
+  readonly stateRoot?: string
+}
+
+/** Loader schema for the model-menu entry settings. */
+// An omitted list must stay omitted: a plain `z.array` resolves absence to `[]`, which would offer no entry.
+export const Config: z<Config> = z.object({
+  entryOperatorIds: z.union([z.array(z.string()), z.const(undefined)]),
+  latestModelEntries: z.union([
+    z.array(z.object({
+      operatorId: z.string().required(),
+      count: z.natural().min(1).required(),
+    })),
+    z.const(undefined),
+  ]),
+  stateRoot: z.string(),
+})
+
+/** The resolved menu entries and catalogs of one mounted router, keyed by its plugin context. */
+const modelEntries = new WeakMap<Context, ModelEntries>()
 
 const ROUTER_PROVIDER = 'dsh-physical-operator'
 const RESUME_SOURCE = 'physical-operator-resume'
@@ -327,14 +368,23 @@ const profileProjectionSchema = zod.object({
 })
 
 /** Register the fixed discovery-and-execution tool. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config = {}): void {
   const pending = new WeakMap<Agent, Map<string, PendingHostRoute>>()
   const fallbackConfigs = new WeakMap<Agent, LlmCallConfig>()
   const modelTools = new PhysicalOperatorModelToolBridge(ctx)
+  const entries = new ModelEntries(
+    config,
+    new NativeCatalogCache(config.stateRoot, (message) => { ctx.logger.warn(message) }),
+    OPERATOR_MODEL_SEPARATOR,
+  )
   ctx.effect(function* () {
     yield async () => { await modelTools.dispose() }
   }, 'tool-physical-operator: model tool bridge')
-  ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools))
+  ctx.effect(() => {
+    modelEntries.set(ctx, entries)
+    return () => { modelEntries.delete(ctx) }
+  }, 'tool-physical-operator: model entries')
+  ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools, entries))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
     const decision = decideHostRoute(ctx, agent, messages)
@@ -757,6 +807,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
   constructor(
     private readonly ctx: Context,
     private readonly modelTools: PhysicalOperatorModelToolBridge,
+    private readonly entries: ModelEntries,
   ) {
     super()
   }
@@ -771,14 +822,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
   }
 
   /**
-   * Native model catalogs from the last explicit refresh. Qualifying a native
-   * product spawns its CLI, so plain directory reads only consume this cache.
-   */
-  private catalogCache: readonly PhysicalOperatorResidentCatalog[] = []
-
-  /**
-   * List each available operator plus one entry per native model its cached
-   * catalog offers, so the model menu can select an exact native model.
+   * List the model-menu entries: by default each available operator plus one
+   * entry per native model its retained catalog offers; `Config` can narrow
+   * this to chosen operators and each operator's newest native models.
    * @param provider - the physical-operator router provider id.
    * @param options - `refresh` qualifies native products, reloads their catalogs, and surfaces failure.
    * @returns operator entries followed by their `operator:model` entries.
@@ -787,25 +833,16 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     provider: string,
     options?: { readonly refresh?: boolean },
   ): Promise<readonly LlmModelInfo[]> {
-    if (options?.refresh === true) this.catalogCache = await this.ctx.physicalOperators.residentCatalogs()
-    const catalogs = new Map(this.catalogCache
-      .filter(catalog => catalog.available)
-      .map(catalog => [String(catalog.operatorId), catalog]))
-    return this.ctx.physicalOperators.list()
+    if (options?.refresh === true) this.entries.catalogs.replace(await this.ctx.physicalOperators.residentCatalogs())
+    const operators = this.ctx.physicalOperators.list()
       .filter(operator => operator.state !== 'unavailable')
-      .flatMap(operator => [
-        { provider, id: String(operator.id), name: operator.displayName },
-        ...(catalogs.get(String(operator.id))?.models ?? []).map(model => ({
-          provider,
-          id: operatorModelId(String(operator.id), model.model),
-          name: `${operator.displayName} · ${model.displayName}`,
-          ...model.description.length === 0 ? {} : { description: model.description },
-        })),
-      ])
+      .map(operator => ({ id: String(operator.id), displayName: operator.displayName }))
+    return this.entries.rows(operators).map(entry => ({ provider, ...entry }))
   }
 
   /**
-   * Resolve a native `operator:model` entry with the efforts its cached catalog lists.
+   * Resolve an entry with the efforts its retained catalog lists. A bare
+   * operator entry offered through its newest models resolves to the model it runs.
    * @param provider - the physical-operator router provider id.
    * @param model - an operator id or `operator:model` id.
    * @returns the entry's display name and native reasoning efforts when known.
@@ -813,10 +850,8 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
   override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     const { operatorId, nativeModel } = parseOperatorModelId(model)
     const entry = nativeModel === undefined
-      ? undefined
-      : this.catalogCache
-        .find(catalog => String(catalog.operatorId) === operatorId)?.models
-        .find(candidate => candidate.model === nativeModel)
+      ? this.entries.flagship(operatorId)
+      : this.entries.model(operatorId, nativeModel)
     if (entry === undefined || entry.supportedEfforts.length === 0) {
       return Promise.resolve({ provider, id: model, name: entry?.displayName ?? model })
     }
@@ -1145,11 +1180,6 @@ function selectedPhysicalMainOperator(selection: ModelSelection | undefined): Ph
   return isPhysicalOperatorRoutingTarget(operatorId) ? operatorId : undefined
 }
 
-/** Encode one native-model entry of the router provider as `operator:model`. */
-function operatorModelId(operatorId: string, nativeModel: string): string {
-  return `${operatorId}${OPERATOR_MODEL_SEPARATOR}${nativeModel}`
-}
-
 /** Split a router model id into its operator and optional native model. */
 function parseOperatorModelId(id: string): { readonly operatorId: string; readonly nativeModel?: string } {
   const index = id.indexOf(OPERATOR_MODEL_SEPARATOR)
@@ -1159,17 +1189,24 @@ function parseOperatorModelId(id: string): { readonly operatorId: string; readon
 }
 
 /**
- * The native model and effort the selected primary pins for one operator, when
- * the primary is that operator's `operator:model` entry.
+ * The native model and effort the selected primary pins for one operator: an
+ * `operator:model` entry pins its model, and a bare entry of an operator
+ * offered through its newest models pins that operator's flagship.
  */
-function selectedOperatorProfile(agent: Agent, operatorId: string): PhysicalOperatorExecutionPreference | undefined {
+function selectedOperatorProfile(
+  ctx: Context,
+  agent: Agent,
+  operatorId: string,
+): PhysicalOperatorExecutionPreference | undefined {
   const snapshot = readModelSelection(agent)
   const selection = snapshot.installed ? snapshot.selection : undefined
   if (selection?.provider !== ROUTER_PROVIDER) return undefined
   const { operatorId: selected, nativeModel } = parseOperatorModelId(selection.model)
-  if (selected !== operatorId || nativeModel === undefined) return undefined
+  if (selected !== operatorId) return undefined
+  const model = nativeModel ?? modelEntries.get(ctx)?.flagship(operatorId)?.model
+  if (model === undefined) return undefined
   const effort = PROFILE_EFFORTS.find(value => value === selection.reasoningEffort)
-  return { model: nativeModel, ...effort === undefined ? {} : { effort } }
+  return { model, ...effort === undefined ? {} : { effort } }
 }
 
 /** Render one captured model selection in its durable routing explanation. */
@@ -1226,7 +1263,7 @@ function newHostRoute(
 ): PendingHostRoute {
   const executionMode = executionModeFor(ctx, operatorId)
   const residentProfile = executionMode === 'resident' && isPhysicalOperatorProfileOwner(operatorId)
-    ? selectedOperatorProfile(agent, operatorId) ?? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
+    ? selectedOperatorProfile(ctx, agent, operatorId) ?? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
     : undefined
   return {
     commandId: `resident-${createHash('sha256').update(`${agent.id}\0${messageId}`).digest('hex').slice(0, 32)}`,

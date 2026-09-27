@@ -1265,6 +1265,12 @@ export interface Config {
   defaultContextWindow?: number
   /** Advisory models shown by discovery consumers; defaults to V4 Flash, V4 Pro, and V4 Flash Vision Exp. */
   models?: DeepSeekCatalogModel[]
+  /**
+   * Whether an explicit refresh also lists the ids the endpoint's `GET /models`
+   * reports beyond `models` (default true). When false, a refresh makes no
+   * `/models` request and the catalog is exactly `models`.
+   */
+  discoverModels?: boolean
   /** Maximum provider idle time while one stream read is outstanding (default five minutes). */
   streamIdleTimeoutMs?: number
   /** Maximum accumulated base64 image payload per request (default 20 MiB). */
@@ -3079,6 +3085,46 @@ export interface Config {
 
 Source: [`packages/lsp/tool-lsp/src/index.ts:58`](../packages/lsp/tool-lsp/src/index.ts)
 
+<a id="deepseek-aidsh-tool-physical-operator"></a>
+
+## `@deepseek-ai/dsh-tool-physical-operator`
+
+Requires: `tools` · `physicalOperators` · `systemPrompt` · `llm` · `agents`
+
+```ts config-catalog
+/** Model-menu entries and the retained native catalogs; every field is optional. */
+export interface Config {
+  /**
+   * Operators offered as their own model-menu entries. Omitted, every
+   * available operator is offered.
+   */
+  readonly entryOperatorIds?: string[] | undefined
+  /**
+   * Operators whose newest native models are offered instead of every native
+   * model. The first selected model is shown on the bare operator entry,
+   * which runs that model; the rest are `operator:model` entries, and every
+   * other native model is left out of the menu. Omitted, every native model
+   * of every refreshed catalog is offered.
+   */
+  readonly latestModelEntries?: LatestModelEntries[] | undefined
+  /**
+   * Owner-local directory that retains refreshed native catalogs across
+   * restarts. Omitted, they are kept in memory until the next refresh.
+   */
+  readonly stateRoot?: string
+}
+
+/** One operator whose newest native models the model menu offers as entries. */
+export interface LatestModelEntries {
+  /** Stable physical-operator id. */
+  readonly operatorId: string
+  /** Number of newest native models offered; the first one is the bare operator entry. */
+  readonly count: number
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:191`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
 ## `@deepseek-ai/dsh-tool-pwsh`
@@ -3680,7 +3726,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
 - `@deepseek-ai/dsh-tool-debate` — requires `debates` · `tools` · `systemPrompt` ([`packages/orchestration/tool-debate/src/index.ts`](../packages/orchestration/tool-debate/src/index.ts))
 - `@deepseek-ai/dsh-tool-orchestration` — requires `orchestrations` · `tools` · `systemPrompt` ([`packages/orchestration/tool-orchestration/src/index.ts`](../packages/orchestration/tool-orchestration/src/index.ts))
-- `@deepseek-ai/dsh-tool-physical-operator` — requires `tools` · `physicalOperators` · `systemPrompt` · `llm` · `agents` ([`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-ui-debate` — requires `debates` · `webServer` ([`packages/orchestration/ui-debate/src/index.ts`](../packages/orchestration/ui-debate/src/index.ts))
 - `@deepseek-ai/dsh-ui-orchestration` — requires `orchestrations` · `webServer` ([`packages/orchestration/ui-orchestration/src/index.ts`](../packages/orchestration/ui-orchestration/src/index.ts))

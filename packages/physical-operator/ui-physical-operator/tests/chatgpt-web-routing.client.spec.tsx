@@ -187,6 +187,10 @@ async function openPanel(): Promise<void> {
   await screen.findByRole('dialog', { name: '协作方式' })
 }
 
+function openAdvanced(): void {
+  fireEvent.click(screen.getByRole('button', { name: '高级调度' }))
+}
+
 describe('physical primary routing control', () => {
   it('lets a selected Claude primary persist a Codex collaboration preference without changing the primary', async () => {
     window.history.replaceState({}, '', '/')
@@ -211,6 +215,8 @@ describe('physical primary routing control', () => {
     expect(screen.queryByText('Codex 模型偏好')).toBeNull()
     expect(screen.getByText('当前主模型：Claude Code')).toBeTruthy()
     expect(screen.getByText('下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“仅主模型”。')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /优先 Codex/ })).toBeNull()
+    openAdvanced()
     expect(screen.getByRole('button', { name: /优先 Codex/ }).hasAttribute('disabled')).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: /优先 Codex/ }))
     await waitFor(() => { expect(fixture.select).toHaveBeenCalledWith('codex') })
@@ -219,7 +225,7 @@ describe('physical primary routing control', () => {
     expect(fixture.selectProfile).not.toHaveBeenCalled()
   })
 
-  it('lets a selected Codex primary persist a Claude collaboration preference without changing the primary', async () => {
+  it('lets a selected Codex primary pin a Claude collaborator and leaves its model and effort to the model menu', async () => {
     window.history.replaceState({}, '', '/')
     const requestMock = vi.fn(async () => dashboardResponse([
       nativeProvider('codex', [nativeModel('codex-live')]),
@@ -236,16 +242,17 @@ describe('physical primary routing control', () => {
     expect(screen.getByRole('button', { name: '协作 · Codex' })).toBeTruthy()
 
     await openPanel()
-    await waitFor(() => { expect(requestMock).toHaveBeenCalledTimes(1) })
-    expect(await screen.findByText('Codex 模型偏好')).toBeTruthy()
-    expect(screen.queryByText('Claude Code 模型偏好')).toBeNull()
     expect(screen.getByText('当前主模型：Codex')).toBeTruthy()
     expect(screen.getByText('下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“仅主模型”。')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: /智能协作/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /优先 Claude Code/ })).toBeNull()
+    openAdvanced()
+    expect(screen.queryByText('Codex 模型偏好')).toBeNull()
+    expect(requestMock).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /优先 Claude Code/ }))
     await waitFor(() => { expect(fixture.select).toHaveBeenCalledWith('claude-code') })
     expect(screen.getByRole('button', { name: '协作 · Codex' })).toBeTruthy()
-    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '执行模型' }).value).toBe('codex-live')
+    expect(fixture.selectProfile).not.toHaveBeenCalled()
   })
 
   it('treats a selected Codex native-model entry as the Codex primary', async () => {
@@ -280,6 +287,8 @@ describe('physical primary routing control', () => {
     expect(screen.getByRole('button', { name: '协作 · Codex' })).toBeTruthy()
 
     await openPanel()
+    expect(screen.getByText('已固定协作者：优先 Codex（在「高级调度」中更改）')).toBeTruthy()
+    openAdvanced()
     await screen.findByRole('option', { name: 'codex-live' })
     expect(screen.getByText('Codex 模型偏好')).toBeTruthy()
     const model = screen.getByRole('combobox', { name: '执行模型' }) as HTMLSelectElement
@@ -341,14 +350,15 @@ describe('physical primary routing control', () => {
       return dashboardResponse([nativeProvider('codex', [nativeModel('codex-live')])])
     })
     const fixture = createFixture({
-      current: physicalPrimary('codex'),
-      policy: 'claude-code',
+      current: apiPrimary(),
+      policy: 'codex',
       profiles: { codex: { model: 'codex-live', effort: 'high' } },
       request: requestMock,
     })
 
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
+    openAdvanced()
     await screen.findByRole('option', { name: 'codex-live' })
     fireEvent.click(screen.getByRole('button', { name: '刷新模型与算子' }))
     await waitFor(() => {
@@ -499,7 +509,9 @@ describe('physical primary routing control', () => {
     expect(screen.getByText('下一条直接消息将由 Debate 阵容执行；保存的主模型和协作偏好在 Debate 期间不生效。退出后，下一条消息按当前主模型和协作偏好恢复会话路由。')).toBeTruthy()
     expect(screen.queryByText('当前主模型：Codex')).toBeNull()
     expect(screen.queryByRole('combobox', { name: '执行模型' })).toBeNull()
+    openAdvanced()
     expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '基础' }))
 
     fireEvent.click(screen.getByRole('button', { name: '退出 Debate（恢复会话路由）' }))
     await waitFor(() => {
@@ -519,13 +531,14 @@ describe('physical primary routing control', () => {
       ++catalogRequests === 1 ? [codex] : [claude],
     ))
     const fixture = createFixture({
-      current: physicalPrimary('codex'),
-      policy: 'claude-code',
+      current: apiPrimary(),
+      policy: 'codex',
       request: requestMock,
     })
 
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
+    openAdvanced()
     await screen.findByRole('option', { name: 'codex-first' })
 
     act(() => {
@@ -544,14 +557,15 @@ describe('physical primary routing control', () => {
       nativeProvider('codex', [nativeModel('codex-live', ['low', 'medium'])]),
     ]))
     const fixture = createFixture({
-      current: physicalPrimary('codex'),
-      policy: 'claude-code',
+      current: apiPrimary(),
+      policy: 'codex',
       profiles: { codex: { model: 'removed-codex', effort: 'ultra' } },
       request: requestMock,
     })
 
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
+    openAdvanced()
     await screen.findByText('已保存的模型“removed-codex”已不在当前目录中；请选择可用模型或按任务推荐。')
 
     const model = screen.getByRole('combobox', { name: '执行模型' }) as HTMLSelectElement
@@ -573,14 +587,16 @@ describe('physical primary routing control', () => {
       nativeProvider('codex', [nativeModel('codex-live')]),
     ]))
     const fixture = createFixture({
-      current: physicalPrimary('codex'),
-      policy: 'claude-code',
+      current: apiPrimary(),
+      policy: 'codex',
       request: requestMock,
       rlm: 'auto',
       debate: 'auto',
     })
     const view = render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
+    const mechanism = screen.getByRole('combobox', { name: '执行机制' }) as HTMLSelectElement
+    openAdvanced()
     await screen.findByRole('option', { name: 'codex-live' })
 
     const lockedProps = {
@@ -590,7 +606,6 @@ describe('physical primary routing control', () => {
     view.rerender(<PhysicalOperatorRoutingControl {...lockedProps} />)
 
     const model = screen.getByRole('combobox', { name: '执行模型' }) as HTMLSelectElement
-    const mechanism = screen.getByRole('combobox', { name: '执行机制' }) as HTMLSelectElement
     expect(screen.getByRole('button', { name: /^协作 ·/ }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '关闭协作方式' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '基础' }).hasAttribute('disabled')).toBe(true)
@@ -658,6 +673,7 @@ describe('physical primary routing control', () => {
     })
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
+    openAdvanced()
     const effort = screen.getByRole('combobox', { name: 'Claude 思考强度' })
     await waitFor(() => { expect(effort.hasAttribute('disabled')).toBe(false) })
     fireEvent.change(effort, { target: { value: 'auto' } })

@@ -27,6 +27,7 @@ harness LLM（大语言模型）seam 的 DeepSeek chat-completions 适配器：�
         maxDelayMs: 10000
         jitterRatio: 0.1
     defaultContextWindow: 1000000 # optional positive-integer fallback; this is the default
+    discoverModels: true     # optional; false keeps the catalog to `models` and skips GET /models
     models:                  # optional; defaults to V4 Flash and V4 Pro
       - id: deepseek-v4-flash
         name: DeepSeek-V4-Flash
@@ -37,7 +38,7 @@ harness LLM（大语言模型）seam 的 DeepSeek chat-completions 适配器：�
 
 该插件注册唯一提供方路由 `deepseek-official`，同时注册解析后的 `retryPolicy`。请求使用 `provider: deepseek-official` 选择该路由；其 `model` 会作为协议 `model` 字符串原样传递，因此更改 DeepSeek 模型不需要生命周期时注册。省略 `models` 会公布 `deepseek-v4-flash`（名称为 `DeepSeek-V4-Flash`）和 `deepseek-v4-pro`（名称为 `DeepSeek-V4-Pro`），两者的上下文窗口均为 1,000,000 token；显式列表会替换这些默认值，`models: []` 则不公布任何模型。Catalog 配置项通过 `ctx.llm.listModels('deepseek-official')` 公开给 ACP（Agent Client Protocol）编辑器和 Web 选择器等客户端，但仍只提供建议：未列出模型 id 仍原样传递。省略配置项 name 默认为其 id。 实时缓存按解析后的端点与凭据引用隔离；迟到的刷新不能覆盖同一范围内较新的结果。配置项 `streamIdleTimeoutMs` 也限制完整目录请求与 JSON 响应体读取的时间，超时以 `TIMEOUT` 报告。
 
-显式调用 `ctx.llm.listModels('deepseek-official', { refresh: true })` 会向解析后的 `baseURL` 发出 `GET /models`，并使用与提供方请求相同的已解析凭据、应用归因和匿名请求 id。它只读取目录，绝不启动 chat completion 或推理（inference）。省略 options 或传入 `{ refresh: false }` 会在无网络 I/O 的情况下读取当前目录。成功刷新会替换缓存的实时 id；配置项仍保留自己的 name、description 和 modalities，而新报告的 id 只使用既有的仅 text selector 回退，不推断容量、输出上限或速率能力。协议中的无效、空或重复 id 会被丢弃。刷新失败会以提供方错误拒绝，但下一次普通读取仍保留最近成功的目录；缺少凭据会在网络 I/O 前以 `MISSING_CREDENTIAL` 拒绝。
+设置 `discoverModels: false` 时，显式刷新不发出任何请求，目录就是 `models`。否则，显式调用 `ctx.llm.listModels('deepseek-official', { refresh: true })` 会向解析后的 `baseURL` 发出 `GET /models`，并使用与提供方请求相同的已解析凭据、应用归因和匿名请求 id。它只读取目录，绝不启动 chat completion 或推理（inference）。省略 options 或传入 `{ refresh: false }` 会在无网络 I/O 的情况下读取当前目录。成功刷新会替换缓存的实时 id；配置项仍保留自己的 name、description 和 modalities，而新报告的 id 只使用既有的仅 text selector 回退，不推断容量、输出上限或速率能力。协议中的无效、空或重复 id 会被丢弃。刷新失败会以提供方错误拒绝，但下一次普通读取仍保留最近成功的目录；缺少凭据会在网络 I/O 前以 `MISSING_CREDENTIAL` 拒绝。
 
 `contextWindow` 对每个已配置模型都可选，不会通过建议 catalog 公开。`ctx.llm.resolveModelInfo('deepseek-official', model).context` 先返回精确模型值，再对不含容量的配置项或未列出原样传递 id 返回 `defaultContextWindow`。适配器默认值为 1,000,000；因此，压力敏感插件可以获得由部署决定的容量，不会将模型 selector 视为权威。为 `deepseek-official` 注册另一个适配器会抛出 `LlmError('DUPLICATE_ADAPTER')`。
 

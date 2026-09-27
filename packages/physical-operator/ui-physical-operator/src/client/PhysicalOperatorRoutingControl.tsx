@@ -324,9 +324,9 @@ export function PhysicalOperatorRoutingControl({
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLElement>(null)
   const selectedMainModel = physicalOperatorMainModel(modelDirectory)
-  const selectedProfileOwner = selectedMainModel === 'codex' || selectedMainModel === 'claude-code'
-    ? selectedMainModel
-    : undefined
+  // A Codex primary takes its model and effort from the model menu entry, so
+  // only a Claude Code primary still reads a primary-owned native profile.
+  const selectedProfileOwner = selectedMainModel === 'claude-code' ? selectedMainModel : undefined
   const effectiveMechanism = physicalOperatorEffectiveExecutionMechanism(
     orchestrationPreferences?.rlm,
     debatePreferences?.mode,
@@ -574,6 +574,25 @@ export function PhysicalOperatorRoutingControl({
     })
   }
 
+  const basicRoutingOptions = routing.options.filter(option => option.value === 'auto' || option.value === 'direct')
+  const pinnedRoutingOptions = routing.options.filter(option => option.value !== 'auto' && option.value !== 'direct')
+  const pinnedCollaborator = pinnedRoutingOptions.some(option => option.value === routing.currentValue)
+  const routingOptions = (options: typeof routing.options) => options.map(option => (
+    <button
+      key={option.value}
+      type="button"
+      data-selected={option.value === routing.currentValue || undefined}
+      disabled={routingPreferencesLocked}
+      onClick={() => { choose(option.value) }}
+    >
+      <span className="dshDesktopOperatorStrategyRadio" aria-hidden="true" />
+      <span>
+        <strong>{physicalOperatorRoutingLabel(option.value)}</strong>
+        <small>{physicalOperatorRoutingDescription(option.value)}</small>
+      </span>
+    </button>
+  ))
+
   return (
     <span className="dshDesktopOperatorRoutingWrap">
       <button
@@ -626,21 +645,19 @@ export function PhysicalOperatorRoutingControl({
             </nav>
             <div className="dshDesktopOperatorStrategyBody">
               <div className="dshDesktopOperatorStrategyOptions" hidden={page !== 'basic' || webPrimary}>
-                {routing.options.map(option => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    data-selected={option.value === routing.currentValue || undefined}
-                    disabled={routingPreferencesLocked}
-                    onClick={() => { choose(option.value) }}
-                  >
-                    <span className="dshDesktopOperatorStrategyRadio" aria-hidden="true" />
-                    <span>
-                      <strong>{physicalOperatorRoutingLabel(option.value)}</strong>
-                      <small>{physicalOperatorRoutingDescription(option.value)}</small>
-                    </span>
-                  </button>
-                ))}
+                {routingOptions(basicRoutingOptions)}
+                {pinnedCollaborator && (
+                  <p role="status">{`已固定协作者：${physicalOperatorRoutingLabel(routing.currentValue)}（在「高级调度」中更改）`}</p>
+                )}
+              </div>
+              <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'advanced' || webPrimary} role="group" aria-label="固定协作者">
+                <div>
+                  <strong>固定协作者</strong>
+                  <small>默认由智能协作按任务选择协作者；只有需要时才固定其中一个。</small>
+                </div>
+                <div className="dshDesktopOperatorStrategyOptions">
+                  {routingOptions(pinnedRoutingOptions)}
+                </div>
               </div>
               {selectedMainModel !== undefined && effectiveMechanism !== 'debate' && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
@@ -686,7 +703,7 @@ export function PhysicalOperatorRoutingControl({
                 </div>
               )}
               {profileOwner !== undefined && effectiveMechanism !== 'debate' && (
-                <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'basic'}>
+                <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'advanced'}>
                   <div>
                     <strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 模型偏好</strong>
                     <small>{selectedMainModel === undefined

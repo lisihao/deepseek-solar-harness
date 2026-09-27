@@ -1,14 +1,15 @@
 {
   "native": {
+    "basicRoutes": [
+      "智能协作",
+      "仅主模型"
+    ],
     "chip": "协作 · Codex",
     "mainModel": "Select model, current Codex",
     "claudeAdvisorDisabled": false,
     "webAdvisorDisabled": false,
     "webAdvisorSelected": "true",
-    "executionModels": [
-      "按任务推荐",
-      "Fake Codex Main"
-    ]
+    "primaryProfileCount": 0
   },
   "debate": {
     "chip": "协作 · Debate（多 Agent 辩论）",

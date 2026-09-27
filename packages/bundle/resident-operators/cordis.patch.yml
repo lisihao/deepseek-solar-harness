@@ -47,5 +47,25 @@
             description: Analyzes codebases, architecture, and long-context reviews through the user's native Claude subscription.
             tags: [analysis, architecture, review, long-context, coding, subscription]
             maxConcurrency: 4
+    # The model menu offers ChatGPT Web and Codex's two newest models; the bare
+    # `codex` entry runs the flagship. Claude Code and the other native models
+    # stay registered for delegation. Refreshed catalogs survive restarts.
     - id: tool-physical-operator
       name: '@deepseek-ai/dsh-tool-physical-operator'
+      config:
+        entryOperatorIds: [chatgpt-web]
+        latestModelEntries:
+          - operatorId: codex
+            count: 2
+        stateRoot: !!js dshHomePath('physical-operator')
+
+# The DeepSeek model-menu entry is V4-Pro, and a refresh does not add the
+# endpoint's other models. Other DeepSeek models can be added back from the
+# Models settings page; delegated work still reaches them.
+- id: llm-deepseek
+  config:
+    discoverModels: false
+    models:
+      - id: deepseek-v4-pro
+        name: DeepSeek-V4-Pro
+        contextWindow: 1000000

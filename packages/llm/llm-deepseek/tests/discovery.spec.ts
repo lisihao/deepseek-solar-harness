@@ -134,6 +134,16 @@ function listingResponse(ids: readonly string[]): Response {
 }
 
 describe('DeepSeek model catalog refresh', () => {
+  it('keeps the catalog to the configured models without a /models request when discovery is off', async () => {
+    const server = await listingServer([{ body: JSON.stringify({ data: [{ id: 'endpoint-only-model' }] }) }])
+    const ctx = await harness(server.url, { models: [{ id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' }], discoverModels: false })
+
+    const models = await ctx.llm.listModels('deepseek-official', { refresh: true })
+
+    expect(models.map(model => model.id)).toEqual(['deepseek-v4-pro'])
+    expect(server.requests.filter(request => request.path.endsWith('/models'))).toEqual([])
+  })
+
   it('isolates cached ids when the endpoint or credential reference changes', async () => {
     const serverA = await listingServer([
       { body: JSON.stringify({ data: [{ id: 'account-a-model' }] }) },

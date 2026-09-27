@@ -84,6 +84,12 @@ export interface Config {
   defaultContextWindow?: number
   /** Advisory models shown by discovery consumers; defaults to V4 Flash, V4 Pro, and V4 Flash Vision Exp. */
   models?: DeepSeekCatalogModel[]
+  /**
+   * Whether an explicit refresh also lists the ids the endpoint's `GET /models`
+   * reports beyond `models` (default true). When false, a refresh makes no
+   * `/models` request and the catalog is exactly `models`.
+   */
+  discoverModels?: boolean
   /** Maximum provider idle time while one stream read is outstanding (default five minutes). */
   streamIdleTimeoutMs?: number
   /** Maximum accumulated base64 image payload per request (default 20 MiB). */
@@ -109,6 +115,7 @@ export const Config: z<Config> = z.object({
   maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_TOKENS),
   defaultContextWindow: z.number().step(1).min(1).default(DEFAULT_CONTEXT_WINDOW),
   models: z.array(catalogModel).default(DEFAULT_MODELS),
+  discoverModels: z.boolean().default(true),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
   retryPolicy: RetryPolicySchema,
@@ -223,6 +230,7 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
     maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
     defaultContextWindow: config.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
     models: resolveModels(config.models),
+    discoverModels: config.discoverModels ?? true,
     streamIdleTimeoutMs,
     maxRequestImageBytes,
     retryPolicy: resolveRetryPolicy(config.retryPolicy, 'llm-deepseek: retryPolicy'),

@@ -69,6 +69,8 @@ export interface DeepSeekConnectionOptions {
   defaultContextWindow: number
   /** Advisory models exposed to discovery consumers; requests remain unrestricted. */
   models: readonly DeepSeekCatalogModel[]
+  /** Whether an explicit refresh adds the endpoint's `GET /models` ids to `models`. */
+  discoverModels: boolean
   /** Maximum provider idle time while one stream read is outstanding. */
   streamIdleTimeoutMs: number
   /** Maximum accumulated base64 image payload in one request. */
@@ -199,7 +201,7 @@ export class DeepSeekAdapter extends LlmAdapter {
   ): Promise<readonly LlmModelInfo[]> {
     const connection = this.config.options()
     const scope = discoveryScope(connection)
-    if (options?.refresh === true) {
+    if (options?.refresh === true && connection.discoverModels) {
       const generation = (this.discoveryGenerations.get(scope) ?? 0) + 1
       this.discoveryGenerations.set(scope, generation)
       const apiKey = await this.config.resolveApiKey(connection)
