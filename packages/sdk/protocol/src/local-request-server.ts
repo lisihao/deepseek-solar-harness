@@ -23,6 +23,7 @@ export type LocalJsonRpcRequestHandler = (
  */
 export class LocalJsonRpcRequestServer {
   private readonly server: Server
+  private readonly connections = new Set<Socket>()
   private ready: Promise<void> | undefined
 
   constructor(
@@ -51,18 +52,27 @@ export class LocalJsonRpcRequestServer {
     return this.ready
   }
 
-  /** Close the listener and remove only its filesystem-backed socket. */
+  /**
+   * Close the listener, destroy its open connections, and remove only its
+   * filesystem-backed socket. A later {@link start} listens again on the same endpoint.
+   */
   async dispose(): Promise<void> {
     if (this.ready === undefined) return
-    await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
+    const closed = new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
+    for (const socket of this.connections) socket.destroy()
+    await closed
     if (this.endpoint.directory !== undefined) rmSync(this.endpoint.path, { force: true })
     this.ready = undefined
   }
 
   private accept(socket: Socket): void {
     const transport = new JsonRpcLineTransport(socket, socket)
+    this.connections.add(socket)
     transport.onRequest(this.onRequest)
-    socket.on('close', () => { transport.close() })
+    socket.on('close', () => {
+      this.connections.delete(socket)
+      transport.close()
+    })
     transport.start()
   }
 }
