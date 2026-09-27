@@ -47,9 +47,11 @@ export const fixture = {
 }
 
 class NativeOperator implements PhysicalOperator {
+  readonly id: 'codex' | 'claude-code' | 'chatgpt-web'
   readonly descriptor
 
-  constructor(readonly id: 'codex' | 'claude-code' | 'chatgpt-web', displayName: string) {
+  constructor(id: 'codex' | 'claude-code' | 'chatgpt-web', displayName: string) {
+    this.id = id
     this.descriptor = {
       id: PhysicalOperatorId(id),
       displayName,
