@@ -175,22 +175,26 @@ describe('web e2e: physical operator qualification and routing', () => {
   it('keeps a selected primary in charge while exposing bounded downstream and Web coordination controls', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-routing'))
     // Neither the closed Resident action nor the closed collaboration control
-    // may qualify native providers or start a native-product operation.
+    // may qualify native providers or start a native-product operation. The
+    // model menu's mount-time directory read qualifies them once in the
+    // background; wait for it so later counts belong to the controls.
     expect(qualificationRequests).toEqual([])
     const codexQualification = join(
       scaffold.harnessHome,
       'physical-routing-qualification-count',
     )
-    expect(await numberInFile(codexQualification)).toBe(0)
+    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(0)
+    const menuQualifications = await numberInFile(codexQualification)
 
     const dialog = await collaborationPanel()
     expect(qualificationRequests).toEqual([])
+    expect(await numberInFile(codexQualification)).toBe(menuQualifications)
     const basicRoutes = await dialog.getByRole('button', { name: /智能协作|仅主模型|优先 Codex|优先 Claude Code|ChatGPT 网页订阅/ })
       .evaluateAll(nodes => nodes.filter(node => node.checkVisibility()).map(node => node.querySelector('strong')?.textContent ?? ''))
     await showPage(dialog, '高级调度')
     await dialog.getByRole('button', { name: /优先 Claude Code/ }).click()
     await expect.poll(() => qualificationRequests.length, { timeout: 10_000 }).toBeGreaterThan(0)
-    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(0)
+    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(menuQualifications)
     await expect.poll(() => dialog.getByText(/AUTH_MODE_MISMATCH/).isVisible(), { timeout: 10_000 }).toBe(true)
 
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
