@@ -8,8 +8,8 @@
   ],
   "desktop": {
     "sourcePath": "products/desktop",
-    "currentVersion": "3.24.0",
+    "currentVersion": "3.24.1",
     "stableTagPattern": "^DSH-desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$",
-    "tagExample": "DSH-desktop-v3.24.0"
+    "tagExample": "DSH-desktop-v3.24.1"
   }
 }

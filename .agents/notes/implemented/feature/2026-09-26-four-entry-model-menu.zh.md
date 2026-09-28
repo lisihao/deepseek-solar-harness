@@ -10,7 +10,7 @@ Desktop 模型菜单约有 37 行：三个 DeepSeek 模型、每个物理算子�
 
 ## 决策
 
-Solar 产品提供五个入口：DeepSeek-V4-Pro、DeepSeek-V4-Flash、Codex 最新最强的两款原生模型和 ChatGPT Web。
+Solar 产品提供五个入口：DeepSeek-V4-Pro、DeepSeek-V4.1-Flash、Codex 最新最强的两款原生模型和 ChatGPT Web。
 
 `tool-physical-operator` 新增可选的 `Config` 字段，不设置时菜单保持原样。
 - `entryOperatorIds` 列出作为独立入口的算子。
@@ -18,7 +18,7 @@ Solar 产品提供五个入口：DeepSeek-V4-Pro、DeepSeek-V4-Flash、Codex 最
 - `stateRoot` 把刷新得到的目录保存在 `native-catalogs.json`。刷新时某个目录不可用，会保留该算子上一次成功的模型。
 - 普通的菜单读取立即返回已保存的入口。若上一次原生目录读取早于 `catalogMaxAgeMs`（十分钟），会在后台重读一次，之后的读取无需显式刷新就能显示产品升级后的模型。被更新的刷新超过的后台读取结果会被丢弃。
 
-Desktop 与 Product Server 都会加载的 resident-operators bundle 设置 `entryOperatorIds: [chatgpt-web]`、Codex 的 `count: 2`，以及 `stateRoot: $DSH_HOME/physical-operator`。它还把 `llm-deepseek.models` 收窄为 V4-Pro 和 V4-Flash（V4-Pro 在前），并设置新增的 `discoverModels: false`，因此刷新既不调用 `GET /models`，也不添加端点 id。产品默认模型仍是 `codex` 本身的入口，它现在运行最新的旗舰模型。
+Desktop 与 Product Server 都会加载的 resident-operators bundle 设置 `entryOperatorIds: [chatgpt-web]`、Codex 的 `count: 2`，以及 `stateRoot: $DSH_HOME/physical-operator`。它还把 `llm-deepseek.models` 收窄为 `deepseek-v4-pro` 和 `deepseek-flash`（端点对当前 Flash 模型 DeepSeek-V4.1-Flash 使用的 id），V4-Pro 在前，并设置新增的 `discoverModels: false`，因此刷新既不调用 `GET /models`，也不添加端点 id。产品默认模型仍是 `codex` 本身的入口，它现在运行最新的旗舰模型。
 
 协作面板的基础页提供智能协作和仅主模型。Codex、Claude Code 和 ChatGPT Web 偏好移到高级调度页，作为「固定协作者」，与固定的原生模型和强度放在一起。Codex 主模型的模型和强度来自其菜单入口，因此没有主模型自有的配置。分配器的档位规则加入 `astra`，并把目录描述含 "frontier" 的模型视为高档、含 "fast" 或 "affordable" 的视为低档。
 

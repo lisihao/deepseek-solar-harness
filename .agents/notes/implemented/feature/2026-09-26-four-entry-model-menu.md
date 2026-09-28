@@ -10,7 +10,7 @@ The Desktop model menu listed about 37 rows: three DeepSeek models, one row per 
 
 ## Decision
 
-The Solar product offers five entries: DeepSeek-V4-Pro, DeepSeek-V4-Flash, Codex's two strongest newest native models, and ChatGPT Web.
+The Solar product offers five entries: DeepSeek-V4-Pro, DeepSeek-V4.1-Flash, Codex's two strongest newest native models, and ChatGPT Web.
 
 `tool-physical-operator` gains optional `Config` fields. Leaving them unset keeps the previous menu.
 - `entryOperatorIds` lists the operators offered as their own entries.
@@ -18,7 +18,7 @@ The Solar product offers five entries: DeepSeek-V4-Pro, DeepSeek-V4-Flash, Codex
 - `stateRoot` retains refreshed catalogs in `native-catalogs.json`. A refresh that finds a catalog unavailable keeps that operator's last successful models.
 - A plain menu read returns the retained entries at once. When the last native catalog read is older than `catalogMaxAgeMs` (ten minutes), it starts one in the background, so a later read shows a product's upgraded models without an explicit refresh. A background read that a newer refresh overtakes is discarded.
 
-The resident-operators bundle, which Desktop and the Product Server both load, sets `entryOperatorIds: [chatgpt-web]`, Codex with `count: 2`, and `stateRoot: $DSH_HOME/physical-operator`. It also narrows `llm-deepseek.models` to V4-Pro and V4-Flash, V4-Pro first, and sets the new `discoverModels: false`, so a refresh neither calls `GET /models` nor adds endpoint ids. The product default model stays the bare `codex` entry, which now runs the newest flagship.
+The resident-operators bundle, which Desktop and the Product Server both load, sets `entryOperatorIds: [chatgpt-web]`, Codex with `count: 2`, and `stateRoot: $DSH_HOME/physical-operator`. It also narrows `llm-deepseek.models` to `deepseek-v4-pro` and `deepseek-flash`, the endpoint's id for its current Flash model (DeepSeek-V4.1-Flash), V4-Pro first, and sets the new `discoverModels: false`, so a refresh neither calls `GET /models` nor adds endpoint ids. The product default model stays the bare `codex` entry, which now runs the newest flagship.
 
 The collaboration panel's basic page offers Smart Collaboration and Current Model Only. The Codex, Claude Code, and ChatGPT Web preferences move to the advanced page as a pinned collaborator, together with the pinned native model and effort. A Codex primary takes its model and effort from its menu entry, so it has no primary-owned profile. The allocator's tier rule adds `astra` and treats a catalog description containing "frontier" as high and "fast" or "affordable" as low.
 
