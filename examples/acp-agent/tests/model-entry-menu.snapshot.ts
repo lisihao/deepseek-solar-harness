@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 import { runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
 
-it('snapshot: the model menu offers DeepSeek, Codex\'s two newest models, and ChatGPT Web across refreshes and a restart', async () => {
+it('snapshot: the model menu offers DeepSeek Pro and Flash, Codex\'s two newest models, and ChatGPT Web, and follows a Codex upgrade without a refresh', async () => {
   const driver = fileURLToPath(new URL('./fixtures/model-entry-menu/driver.ts', import.meta.url))
   const expected = new URL('./fixtures/model-entry-menu/expected.json', import.meta.url)
   const { stdout } = await runLoaderSmoke({

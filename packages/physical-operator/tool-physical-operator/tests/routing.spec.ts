@@ -1772,7 +1772,7 @@ describe('host physical-operator routing', () => {
     await expect(ctx.llm.listModels('dsh-physical-operator', { refresh: true })).rejects.toThrow('catalog offline')
   })
 
-  it('lists only operator entries until an explicit refresh qualifies native catalogs', async () => {
+  it('lists retained entries at once and qualifies stale native catalogs in the background for later reads', async () => {
     const { ctx, codex } = await setup()
     const catalog = codex.residentCatalog.bind(codex)
     let qualifications = 0
@@ -1781,12 +1781,23 @@ describe('host physical-operator routing', () => {
       return catalog()
     }
     expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toEqual(['codex', 'claude-code', 'chatgpt-web'])
-    await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex:gpt-5.6-sol')).resolves.toMatchObject({ name: 'codex:gpt-5.6-sol' })
-    expect(qualifications).toBe(0)
+    await vi.waitFor(async () => {
+      expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toContain('codex:gpt-5.6-sol')
+    })
+    expect(qualifications).toBe(1)
 
     expect((await ctx.llm.listModels('dsh-physical-operator', { refresh: true })).map(model => model.id)).toContain('codex:gpt-5.6-sol')
-    expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toContain('codex:gpt-5.6-sol')
-    expect(qualifications).toBe(1)
+    expect(qualifications).toBe(2)
+  })
+
+  it('logs a failed background catalog read and keeps the retained entries', async () => {
+    const { ctx, codex } = await setup()
+    const warn = vi.spyOn(ctx.logger, 'warn')
+    codex.residentCatalog = () => Promise.reject(new Error('catalog offline'))
+    expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toEqual(['codex', 'claude-code', 'chatgpt-web'])
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('background native catalog read failed'))
+    })
   })
 
   it('offers the configured entries, moves the Codex entries on refresh, and runs the bare entry on its flagship', async () => {

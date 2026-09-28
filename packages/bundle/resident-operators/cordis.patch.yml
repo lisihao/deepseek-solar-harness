@@ -63,13 +63,16 @@
             count: 2
         stateRoot: !!js dshHomePath('physical-operator')
 
-# The DeepSeek model-menu entry is V4-Pro, and a refresh does not add the
-# endpoint's other models. Other DeepSeek models can be added back from the
-# Models settings page; delegated work still reaches them.
+# The DeepSeek model-menu entries are V4-Pro and V4-Flash, and a refresh does
+# not add the endpoint's other models. Other DeepSeek models can be added back
+# from the Models settings page; delegated work still reaches them.
 - id: llm-deepseek
   config:
     discoverModels: false
     models:
       - id: deepseek-v4-pro
         name: DeepSeek-V4-Pro
+        contextWindow: 1000000
+      - id: deepseek-v4-flash
+        name: DeepSeek-V4-Flash
         contextWindow: 1000000

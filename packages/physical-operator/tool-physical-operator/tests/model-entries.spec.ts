@@ -199,4 +199,50 @@ describe('LiveCatalogs', () => {
     expect(await live.current()).toBe(refreshed)
     expect(reads).toBe(2)
   })
+
+  function deferredReads() {
+    const releases: ((catalogs: readonly PhysicalOperatorResidentCatalog[]) => void)[] = []
+    const seen: string[] = []
+    const live = new LiveCatalogs(
+      () => new Promise((resolve) => { releases.push(resolve) }),
+      0,
+      (catalogs) => { seen.push(catalogs[0]?.models[0]?.model ?? '') },
+    )
+    return { live, releases, seen }
+  }
+
+  it('prefetches in the background and reports a failed read', async () => {
+    const { live, releases, seen } = deferredReads()
+    live.prefetch(() => {})
+    expect(releases).toHaveLength(1)
+    releases[0]!([catalog('codex', [model('gpt-7-nova')])])
+    await vi.waitFor(() => { expect(seen).toEqual(['gpt-7-nova']) })
+
+    const onError = vi.fn()
+    new LiveCatalogs(() => Promise.reject(new Error('qualification failed')), 0, () => {}).prefetch(onError)
+    await vi.waitFor(() => { expect(onError).toHaveBeenCalledWith(new Error('qualification failed')) })
+  })
+
+  it('discards a read overtaken by a newer recorded read or finished after close', async () => {
+    const { live, releases, seen } = deferredReads()
+    const overtaken = live.current()
+    const newer = [catalog('codex', [model('gpt-7-nova')])]
+    live.record(newer)
+    releases[0]!([catalog('codex', [model('gpt-6-astra')])])
+    expect(await overtaken).toBe(newer)
+
+    const late = live.current()
+    live.close()
+    releases[1]!([catalog('codex', [model('gpt-8')])])
+    expect((await late)[0]?.models[0]?.model).toBe('gpt-7-nova')
+    expect(seen).toEqual([])
+
+    const unread = deferredReads()
+    const first = unread.live.current()
+    unread.live.close()
+    const catalogs = [catalog('codex', [model('gpt-6-sol')])]
+    unread.releases[0]!(catalogs)
+    expect(await first).toBe(catalogs)
+    expect(unread.seen).toEqual([])
+  })
 })

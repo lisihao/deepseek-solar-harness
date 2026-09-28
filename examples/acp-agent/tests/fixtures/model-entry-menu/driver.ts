@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Drive the model menu of the Loader-composed physical-operator route across refreshes and a restart. */
+/** Drive the model menu of the Loader-composed physical-operator route across background reads, a refresh, and a restart. */
 
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import type { Context } from '@deepseek-ai/cordis'
@@ -37,6 +37,16 @@ async function menu(api: ReturnType<typeof createApiProxy>, refresh: boolean): P
   return response.result.value.groups.flatMap(group => group.models.map(model => `${group.name} / ${model.name}`))
 }
 
+/** Read the menu until a background catalog read changes it. */
+async function menuAfterBackgroundRead(api: ReturnType<typeof createApiProxy>, previous: readonly string[]): Promise<string[]> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const entries = await menu(api, false)
+    if (JSON.stringify(entries) !== JSON.stringify(previous)) return entries
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error('no background catalog read changed the model menu')
+}
+
 /** Send one request from a DeepSeek main model under Smart Collaboration and report the routed collaborator. */
 async function delegate(ctx: Context, id: string, text: string) {
   const agent = ctx.agentLoop.create(SessionId(id), { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, { cwd: process.cwd() })
@@ -57,16 +67,19 @@ async function delegate(ctx: Context, id: string, text: string) {
 
 const before = await withHost(async (_ctx, api) => {
   const cold = await menu(api, false)
+  const background = await menuAfterBackgroundRead(api, cold)
+  fixture.codexModels = codexCatalogs.gpt7
+  const staleUntilReread = await menu(api, false)
+  const upgraded = await menuAfterBackgroundRead(api, staleUntilReread)
+  fixture.codexModels = codexCatalogs.gpt6
   const refreshed = await menu(api, true)
   fixture.codexModels = codexCatalogs.gpt7
-  const upgraded = await menu(api, true)
-  return { cold, refreshed, upgraded }
+  await menu(api, true)
+  return { cold, background, staleUntilReread, upgraded, refreshed }
 })
 
 const restarted = await withHost(async (ctx, api) => {
-  const reads = fixture.catalogReads
   const entries = await menu(api, false)
-  if (fixture.catalogReads !== reads) throw new Error('a plain menu read qualified native products')
   const agent = ctx.agents.get(sessionId)
   if (agent === undefined) throw new Error('the session agent is missing')
   const idle = new Promise<void>((resolve) => {
@@ -92,9 +105,11 @@ const restarted = await withHost(async (ctx, api) => {
 })
 
 process.stdout.write(`${JSON.stringify({
-  menuBeforeRefresh: before.cold,
-  menuAfterRefresh: before.refreshed,
-  menuAfterCodexUpgrade: before.upgraded,
+  menuOnFirstRead: before.cold,
+  menuAfterBackgroundRead: before.background,
+  menuRightAfterCodexUpgrade: before.staleUntilReread,
+  menuAfterCodexUpgradeReread: before.upgraded,
+  menuAfterExplicitRefresh: before.refreshed,
   menuAfterRestart: restarted.entries,
   codexEntryRuns: restarted.codexEntryRuns,
   reply: restarted.reply,

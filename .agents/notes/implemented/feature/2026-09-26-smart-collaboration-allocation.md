@@ -6,7 +6,7 @@ English | [中文](2026-09-26-smart-collaboration-allocation.zh.md)
 
 ## Problem
 
-With an API main model, Smart Collaboration delegated recognized work through a text classifier: implementation-shaped requests went to Codex and analysis-shaped requests to Claude Code, with the saved native profile or the product default model and effort. It ignored quota, capacity, and model tier, and could not move work to the other product when one was unavailable. The quota-aware allocator already chose models for TaskGraph nodes, but it ran only inside the orchestration daemon. After the [four model-menu entries](2026-09-26-four-entry-model-menu.md) change, the remaining native models are meant to be chosen per task by that kind of allocator.
+With an API main model, Smart Collaboration delegated recognized work through a text classifier: implementation-shaped requests went to Codex and analysis-shaped requests to Claude Code, with the saved native profile or the product default model and effort. It ignored quota, capacity, and model tier, and could not move work to the other product when one was unavailable. The quota-aware allocator already chose models for TaskGraph nodes, but it ran only inside the orchestration daemon. After the [product model-menu entries](2026-09-26-four-entry-model-menu.md) change, the remaining native models are meant to be chosen per task by that kind of allocator.
 
 ## Decision
 
