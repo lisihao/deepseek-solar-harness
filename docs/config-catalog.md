@@ -3115,7 +3115,10 @@ export interface Config {
   /**
    * Oldest native catalog read, in milliseconds, that Smart Collaboration
    * reuses when it asks `ctx.modelAllocation` for a collaborator; an older
-   * read qualifies the native products again. Defaults to ten minutes.
+   * read qualifies the native products again. A plain model-menu read with
+   * an older read starts one in the background, so the menu follows a
+   * product's model upgrade without an explicit refresh. Defaults to ten
+   * minutes.
    */
   readonly catalogMaxAgeMs?: number
 }

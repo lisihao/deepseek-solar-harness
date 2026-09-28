@@ -214,7 +214,10 @@ export interface Config {
   /**
    * Oldest native catalog read, in milliseconds, that Smart Collaboration
    * reuses when it asks `ctx.modelAllocation` for a collaborator; an older
-   * read qualifies the native products again. Defaults to ten minutes.
+   * read qualifies the native products again. A plain model-menu read with
+   * an older read starts one in the background, so the menu follows a
+   * product's model upgrade without an explicit refresh. Defaults to ten
+   * minutes.
    */
   readonly catalogMaxAgeMs?: number
 }
@@ -402,7 +405,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   }, 'tool-physical-operator: model tool bridge')
   ctx.effect(() => {
     routerCatalogs.set(ctx, { entries, live })
-    return () => { routerCatalogs.delete(ctx) }
+    return () => {
+      routerCatalogs.delete(ctx)
+      live.close()
+    }
   }, 'tool-physical-operator: model entries')
   ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools, entries, live))
 
@@ -847,7 +853,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
    * entry per native model its retained catalog offers; `Config` can narrow
    * this to chosen operators and each operator's newest native models.
    * @param provider - the physical-operator router provider id.
-   * @param options - `refresh` qualifies native products, reloads their catalogs, and surfaces failure.
+   * @param options - `refresh` qualifies native products, reloads their catalogs, and surfaces failure;
+   * without it the retained entries return at once and a catalog read older than `catalogMaxAgeMs`
+   * is repeated in the background for later reads.
    * @returns operator entries followed by their `operator:model` entries.
    */
   override async listModels(
@@ -858,6 +866,8 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       const catalogs = await this.ctx.physicalOperators.residentCatalogs()
       this.entries.catalogs.replace(catalogs)
       this.live.record(catalogs)
+    } else {
+      this.live.prefetch((error) => { this.ctx.logger.warn(`physical-operator: background native catalog read failed: ${String(error)}`) })
     }
     const operators = this.ctx.physicalOperators.list()
       .filter(operator => operator.state !== 'unavailable')

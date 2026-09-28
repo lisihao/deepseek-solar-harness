@@ -260,11 +260,14 @@ export class ModelEntries {
  * time they were read. Reading them qualifies every native product, which
  * spawns its CLI, so a caller reuses a read younger than `maxAgeMs`; an
  * explicit menu refresh also records its read here. Concurrent stale reads
- * share one qualification.
+ * share one qualification. A read that finishes after a newer one was
+ * recorded, or after `close()`, is not adopted.
  */
 export class LiveCatalogs {
   private value: readonly PhysicalOperatorResidentCatalog[] | undefined
   private observedAt = 0
+  private generation = 0
+  private closed = false
   private pending: Promise<readonly PhysicalOperatorResidentCatalog[]> | undefined
 
   /**
@@ -285,21 +288,40 @@ export class LiveCatalogs {
    * @param catalogs - catalogs just returned by a qualification.
    */
   record(catalogs: readonly PhysicalOperatorResidentCatalog[]): void {
+    this.generation += 1
     this.value = catalogs
     this.observedAt = this.now()
   }
 
   /**
    * Catalogs no older than `maxAgeMs`, qualifying products only when the last read is older.
-   * @returns the reused or freshly read catalogs.
+   * @returns the reused catalogs, the fresh read, or a newer read recorded while it ran.
    */
   current(): Promise<readonly PhysicalOperatorResidentCatalog[]> {
     if (this.value !== undefined && this.now() - this.observedAt < this.maxAgeMs) return Promise.resolve(this.value)
-    this.pending ??= this.read().then((catalogs) => {
-      this.record(catalogs)
-      this.onRead(catalogs)
-      return catalogs
-    }).finally(() => { this.pending = undefined })
+    if (this.pending === undefined) {
+      const generation = this.generation
+      this.pending = this.read().then((catalogs) => {
+        if (this.closed || this.generation !== generation) return this.value ?? catalogs
+        this.record(catalogs)
+        this.onRead(catalogs)
+        return catalogs
+      }).finally(() => { this.pending = undefined })
+    }
     return this.pending
+  }
+
+  /**
+   * Start `current()` in the background, so a later caller sees catalogs no
+   * older than `maxAgeMs` without waiting for the qualification now.
+   * @param onError - receives a failed background read.
+   */
+  prefetch(onError: (error: unknown) => void): void {
+    this.current().catch(onError)
+  }
+
+  /** Stop adopting reads; a read still running is discarded when it finishes. */
+  close(): void {
+    this.closed = true
   }
 }
