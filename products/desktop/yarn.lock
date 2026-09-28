@@ -3295,7 +3295,7 @@ __metadata:
 
 "@deepseek-ai/dsh-resident-operators@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-resident-operators@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz::hash=964c88&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-resident-operators@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz::hash=c5fa37&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-model-allocation-local": "npm:^0.1.0-rc.5"
     "@deepseek-ai/dsh-physical-operator": "npm:^0.1.0-rc.5"
@@ -3309,7 +3309,7 @@ __metadata:
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
-  checksum: 10c0/191162fd1028b04fdc153490f119c62eee3fd3dc1a1b7c0eaba9c1714fb090ed08f8515076ceb193dde14cb40cce079f57ea84815d6d6e01b9c0b61e04757a97
+  checksum: 10c0/de41ec74dcb3d3ce75d50493a4d45e976800e281deb23d1eec4b0bde529197cb83feb29ef5c4a47f802f436e85de83bf0bc8bbcce57fa5ed5de347cfe7c458cd
   languageName: node
   linkType: hard
 
