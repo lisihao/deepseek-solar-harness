@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-29-native-tool-authority-and-catalog-freshness.md
-2026-09-29-native-tool-authority-and-catalog-freshness.md: 938a9fe350660e19ac141752e0d79958b750f202
-2026-09-29-native-tool-authority-and-catalog-freshness.zh.md: 26ffcdca1ba9fe0529f39e76d77d8b9f6f5d0ca0
+2026-09-29-native-tool-authority-and-catalog-freshness.md: 3ca3bd25a22224ca43cc9fc56177591f4dced4e0
+2026-09-29-native-tool-authority-and-catalog-freshness.zh.md: 5dafde933868e54d9d7436277d85f4e48a5ae357

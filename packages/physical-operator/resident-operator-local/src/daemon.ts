@@ -668,9 +668,11 @@ export class ResidentDaemon {
     const existing = this.active.get(accepted.turnId)
     if (existing !== undefined && modelToolBridge !== undefined
       && existing.bridgeAttachment.descriptor?.socketPath !== modelToolBridge.socketPath) {
-      await verifyModelToolBridgeReady(modelToolBridge, bridgeAdmissionTimeoutMs === undefined
-        ? existing.controller.signal
-        : AbortSignal.any([existing.controller.signal, AbortSignal.timeout(bridgeAdmissionTimeoutMs)]))
+      if (nativeToolPolicy === 'dsh-tools-authoritative') {
+        await verifyModelToolBridgeReady(modelToolBridge, bridgeAdmissionTimeoutMs === undefined
+          ? existing.controller.signal
+          : AbortSignal.any([existing.controller.signal, AbortSignal.timeout(bridgeAdmissionTimeoutMs)]))
+      }
       existing.bridgeAttachment.descriptor = modelToolBridge
     }
     if (accepted.state === 'accepted' && existing === undefined) {

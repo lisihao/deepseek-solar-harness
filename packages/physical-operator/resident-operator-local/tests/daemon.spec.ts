@@ -1245,22 +1245,26 @@ describe('ResidentDaemon', () => {
 })
 
 
-it('reattaches an active native tool callback to the new Host without replaying the turn', async () => {
+it.each(['dsh-tools-authoritative', 'disabled'] as const)('reattaches %s native callbacks without replaying the turn', async (policy) => {
   const root = temporaryRoot()
   const workspace = join(root, 'workspace')
   mkdirSync(workspace)
   const calls: string[] = []
+  const toolName = policy === 'disabled' ? 'typescript_repl' : 'echo'
   const makeBridge = async (owner: string) => {
     const socketPath = localIpcAddress(root, owner)
     const server = new LocalJsonRpcRequestServer({ path: socketPath }, (method) => {
-      if (method === 'tool.describe') return Promise.resolve({ version: 1, sessionId: 'binding', tools: ['echo'] })
+      if (method === 'tool.describe') {
+        if (policy === 'disabled') throw new Error('RLM bridge only supports tool.call')
+        return Promise.resolve({ version: 1, sessionId: 'binding', tools: [toolName] })
+      }
       calls.push(owner)
       return Promise.resolve({ value: owner })
     })
     await server.start()
     const descriptor: PhysicalOperatorModelToolBridgeV1 = {
       version: 1, socketPath, sessionId: 'binding',
-      tools: [{ name: 'echo', description: 'Echo through DSH', inputSchema: { type: 'object' } }],
+      tools: [{ name: toolName, description: 'Echo through DSH', inputSchema: { type: 'object' } }],
     }
     return { server, descriptor }
   }
@@ -1280,7 +1284,7 @@ it('reattaches an active native tool callback to the new Host without replaying 
         return current
       })
       request.onRunning('native-reattach', 'native-turn')
-      const call = { threadId: 'native-reattach', turnId: 'native-turn', tool: 'echo', arguments: {} }
+      const call = { threadId: 'native-reattach', turnId: 'native-turn', tool: toolName, arguments: {} }
       await handler({ ...call, callId: 'first' })
       firstCall.resolve(true)
       await resume.promise
@@ -1294,7 +1298,7 @@ it('reattaches an active native tool callback to the new Host without replaying 
   const request = {
     commandId: 'bridge-owner-reattach', operatorId: 'codex', workspace,
     prompt: [{ type: 'text', text: 'two calls across Host restart' }],
-    nativeToolPolicy: 'dsh-tools-authoritative' as const,
+    nativeToolPolicy: policy,
   }
   try {
     const original = await client(root).execute({ ...request, modelToolBridge: oldOwner.descriptor, signal: ownerSignal.signal })
@@ -1310,7 +1314,7 @@ it('reattaches an active native tool callback to the new Host without replaying 
     expect(calls).toEqual(['old-owner', 'new-owner'])
     await expect(client(root).execute({
       ...request, commandId: 'changed-native-catalog', signal: new AbortController().signal,
-      modelToolBridge: { ...newOwner.descriptor, tools: [{ name: 'other', description: 'Different tool', inputSchema: { type: 'object' } }] },
+      modelToolBridge: { ...newOwner.descriptor, tools: [{ name: toolName, description: 'Different tool', inputSchema: { type: 'object' } }] },
     })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
     expect(executions).toBe(1)
 
