@@ -10,7 +10,7 @@ import {
 
 export const inject = ['browser']
 
-/** Mount a deterministic external page with delayed editor initialization. */
+/** Mount a deterministic external page with independent editor and model-control initialization. */
 export function apply(ctx: Context): void {
   const provider: BrowserProvider = {
     descriptor: {
@@ -33,6 +33,27 @@ export function apply(ctx: Context): void {
       })
       let inspections = 0
       let submitted = false
+      let modelSelected = false
+      const mountModelPicker = () => {
+        const form = document.querySelector('form')!
+        form.insertAdjacentHTML('beforeend', '<button id="model-trigger" type="button" aria-label="Select model" aria-haspopup="menu" aria-controls="model-menu">Select model</button><div id="model-menu" role="menu" style="display:none"><button type="button" role="menuitemradio" data-model-id="Latest" aria-checked="false">Latest</button></div>')
+        const trigger = document.querySelector<HTMLElement>('#model-trigger')!
+        const menu = document.querySelector<HTMLElement>('#model-menu')!
+        const row = menu.querySelector<HTMLElement>('[role="menuitemradio"]')!
+        trigger.addEventListener('click', () => {
+          menu.style.display = 'block'
+          trigger.setAttribute('aria-expanded', 'true')
+        })
+        row.addEventListener('click', () => {
+          row.setAttribute('aria-checked', 'true')
+          modelSelected = true
+        })
+        menu.addEventListener('keydown', (event) => {
+          if (event.key !== 'Escape') return
+          menu.style.display = 'none'
+          trigger.setAttribute('aria-expanded', 'false')
+        })
+      }
       const browser = {
         async run(operation: BrowserOperationV1): Promise<unknown> {
           if (operation.kind === 'open' || operation.kind === 'navigate') return {}
@@ -42,6 +63,7 @@ export function apply(ctx: Context): void {
           if (target === null) throw new Error('operator targeted a missing element')
           if (operation.kind === 'fill') {
             if (!target.matches('.ProseMirror[contenteditable="true"]')) throw new Error('operator filled the uninitialized textarea')
+            if (!modelSelected) throw new Error('operator filled before verifying the requested model')
             target.innerText = operation.value
             const send = document.createElement('button')
             send.type = 'submit'
@@ -58,6 +80,8 @@ export function apply(ctx: Context): void {
         async evaluate(_page: string, expression: string, argument?: BrowserJsonValue): Promise<BrowserJsonValue> {
           inspections++
           if (inspections === 2 && !submitted) document.body.innerHTML = '<form><div class="ProseMirror" contenteditable="true" role="textbox"></div></form>'
+          // Mount after the first model-control probe, independently of editor readiness.
+          if (inspections === 3 && !submitted) dom.window.setTimeout(mountModelPicker, 0)
           return await new Script(`(${expression})(${JSON.stringify(argument)})`).runInContext(dom.getInternalVMContext()) as BrowserJsonValue
         },
       }

@@ -603,6 +603,61 @@ describe('ChatGPT Web model catalog', () => {
     expect(browser.operations.map(operation => operation.kind)).toEqual(['select-page', 'open'])
   })
 
+  it('waits for a delayed model trigger before applying an explicit latest and Pro selection', async () => {
+    const page = mountLivePage()
+    const form = page.modelTrigger.parentElement
+    if (form === null) throw new Error('live picker fixture has no form')
+    page.modelTrigger.remove()
+    const { ctx, browser } = await browserFixture()
+    const evaluate = browser.evaluate.bind(browser)
+    let firstEvaluation = true
+    browser.evaluate = async (pageName, evaluator, input) => {
+      if (firstEvaluation) {
+        firstEvaluation = false
+        setTimeout(() => form.append(page.modelTrigger), 0)
+      }
+      return await evaluate(pageName, evaluator, input)
+    }
+
+    const catalog = await applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      timeoutMs: 1_000,
+      selection: { model: '最新', effort: 'gpt-6-pro:' },
+    })
+
+    expect(catalog.selectedModel).toBe('最新')
+    expect(catalog.selectedEffort).toBe('gpt-6-pro:')
+    expect(page.selectedModel()).toBe('最新')
+    expect(page.selectedEffort()).toBe('gpt-6-pro:')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+    expect(page.menu.style.display).toBe('none')
+  })
+
+  it('fails closed when the ready composer has no model trigger', async () => {
+    const page = mountLivePage()
+    page.modelTrigger.remove()
+    const { ctx } = await browserFixture()
+
+    await expect(discoverWebModels(ctx, { ...discoveryOptions(), timeoutMs: 10 }))
+      .rejects.toThrow('unique visible model picker')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
+  it('fails closed when the ready composer has ambiguous model triggers', async () => {
+    const page = mountLivePage()
+    const duplicate = page.modelTrigger.cloneNode(true) as HTMLButtonElement
+    makeVisible(duplicate)
+    page.modelTrigger.parentElement?.append(duplicate)
+    const { ctx } = await browserFixture()
+
+    await expect(discoverWebModels(ctx, { ...discoveryOptions(), timeoutMs: 10 }))
+      .rejects.toThrow('unique visible model picker')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
   it('ignores sidebar chats and projects whose titles mention models when finding the picker', async () => {
     mountLivePage()
     const nav = document.createElement('nav')
