@@ -614,7 +614,7 @@ describe('ChatGPT Web model catalog', () => {
     browser.evaluate = async (pageName, evaluator, input) => {
       if (firstEvaluation) {
         firstEvaluation = false
-        setTimeout(() => form.append(page.modelTrigger), 0)
+        setTimeout(() => { form.append(page.modelTrigger) }, 0)
       }
       return await evaluate(pageName, evaluator, input)
     }
