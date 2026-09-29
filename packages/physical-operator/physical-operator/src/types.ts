@@ -214,7 +214,7 @@ export interface PhysicalOperatorUsage {
 export interface PhysicalOperatorResult {
   /** Final or partial canonical content returned by the backing execution. */
   readonly output: ContentBlock[]
-  /** Why the execution ended. Only `completed` is a successful result. */
+  /** Why the execution ended. `completed` means a normal provider turn end, not verified task acceptance. */
   readonly stopReason: PhysicalOperatorStopReason
   /** Native product usage when the Provider exposes authoritative counters. */
   readonly usage?: PhysicalOperatorUsage

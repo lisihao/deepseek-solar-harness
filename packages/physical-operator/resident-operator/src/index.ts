@@ -23,7 +23,7 @@ export { ResidentOperatorError } from './error.ts'
 /** Current local control protocol version. */
 export const RESIDENT_PROTOCOL_VERSION = 14
 /** Current forward-only daemon state schema version. */
-export const RESIDENT_STATE_SCHEMA_VERSION = 5
+export const RESIDENT_STATE_SCHEMA_VERSION = 6
 
 /** Opaque identity for one operator/workspace/lane Resident Session. */
 export type ResidentOperatorSessionId = Branded<'ResidentOperatorSessionId'>
@@ -252,8 +252,10 @@ export interface ResidentDriverExecuteRequest {
   readonly profile: ResidentExecutionProfile
   readonly nativeSessionId?: string
   readonly signal: AbortSignal
-  /** Genuine host-tool bridge sealed before native thread dispatch. */
-  readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
+  /** Configured owner-connection deadline for bridge admission, in milliseconds. */
+  readonly modelToolBridgeAdmissionTimeoutMs?: number
+  /** Sealed tools with the current owner endpoint; read again for each new tool call. */
+  readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1 | undefined
   /** Daemon-normalized native product tool policy; direct Driver callers inherit when omitted. */
   readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void

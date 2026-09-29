@@ -291,6 +291,19 @@ describe('Claude Code resident driver environment', () => {
     })
   })
 
+  it('identifies the exact DSH bridge tools despite shell and editor names', () => {
+    const prompt = nativeToolSystemPrompt('Task context', 'dsh-tools-authoritative', {
+      version: 1, socketPath: '/tmp/dsh-tools.sock', sessionId: 'session',
+      tools: [
+        { name: 'bash', description: 'Run commands', inputSchema: { type: 'object' } },
+        { name: 'str_replace_editor', description: 'Edit files', inputSchema: { type: 'object' } },
+      ],
+    })
+    expect(prompt).toContain('The DSH bridge tools for this turn are: "bash", "str_replace_editor".')
+    expect(prompt).toContain('These named tools are DSH-owned')
+    expect(prompt).toContain('any product-native approval request will be declined')
+  })
+
   it('removes the Claude native tool surface for a sealed no-tool execution', () => {
     expect(claudeNativeToolOptions('disabled')).toEqual({ tools: [], allowedTools: [] })
     expect(claudeNativeToolOptions('dsh-tools-authoritative')).toEqual({ tools: [], allowedTools: [] })

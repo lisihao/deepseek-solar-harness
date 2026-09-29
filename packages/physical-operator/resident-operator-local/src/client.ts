@@ -355,6 +355,7 @@ export class ResidentDaemonClient {
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { model_tool_bridge: request.modelToolBridge },
       native_tool_policy: request.nativeToolPolicy ?? 'inherit',
+      bridge_admission_timeout_ms: this.options.connectTimeoutMs,
     }, request.signal)
     let settled = false
     const observation = new AbortController()

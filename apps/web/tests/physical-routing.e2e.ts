@@ -15,6 +15,7 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const ROUTE_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-options.json', import.meta.url))
 const CLI_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-cli-runtimes.json', import.meta.url))
+const RESIDENT_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-resident-panel.json', import.meta.url))
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/physical-routing-fixtures.mjs', import.meta.url))
 
@@ -333,6 +334,49 @@ describe('web e2e: physical operator qualification and routing', () => {
     const transcript = `${JSON.stringify({ recommended, activated, afterActivation: await rows(), refused }, null, 2)}\n`
     if (scaffold.mode === 'refresh') await writeFile(CLI_SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(CLI_SNAPSHOT, 'utf8'))
+    await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
+  it('labels a normally ended Resident turn as unverified in the assembled panel', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-resident-unverified'))
+    const action = page.getByRole('button', { name: /^物理算子：/ })
+    await action.waitFor({ timeout: 15_000 })
+    await action.click()
+    const panel = page.getByRole('dialog', { name: 'Resident 物理算子' })
+    await panel.waitFor({ timeout: 15_000 })
+
+    const sessionRow = panel.locator('.dshDesktopResidentSession').filter({ hasText: 'Codex · Create and test a file' })
+    await sessionRow.waitFor({ timeout: 15_000 })
+    await expect.poll(() => sessionRow.getAttribute('data-selected'), { timeout: 15_000 }).toBe('true')
+    await sessionRow.getByText('执行结束（未验收）', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
+
+    const activityRow = panel.locator('.dshDesktopResidentEvents > ol > li > button').filter({ hasText: 'Create and test a file' })
+    await activityRow.waitFor({ timeout: 15_000 })
+    const output = panel.getByText('Cannot write files; tests were not run.', { exact: true })
+    await output.waitFor({ state: 'visible', timeout: 15_000 })
+    const unverified = panel.getByText('执行结束（未验收）', { exact: true })
+    await expect.poll(() => unverified.count(), { timeout: 15_000 }).toBeGreaterThan(0)
+    expect(await panel.getByText('任务已完成', { exact: true }).count()).toBe(0)
+    expect(await panel.getByText('已完成', { exact: true }).count()).toBe(0)
+
+    const transcript = `${JSON.stringify({
+      session: {
+        task: await sessionRow.locator('strong').textContent(),
+        phase: await sessionRow.getByText('执行结束（未验收）', { exact: true }).textContent(),
+      },
+      activity: {
+        task: await activityRow.locator('strong').textContent(),
+        status: await activityRow.locator('span').textContent(),
+      },
+      output: await output.textContent(),
+      unverifiedCount: await unverified.count(),
+      falseCompletedCount: await panel.getByText('任务已完成', { exact: true }).count()
+        + await panel.getByText('已完成', { exact: true }).count(),
+    }, null, 2)}\n`
+    if (scaffold.mode === 'refresh') await writeFile(RESIDENT_SNAPSHOT, transcript)
+    expect(transcript).toBe(await readFile(RESIDENT_SNAPSHOT, 'utf8'))
+
     await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)

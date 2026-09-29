@@ -30,9 +30,14 @@ import {
   CodexResidentDriver,
 } from './drivers.ts'
 import { residentDriverManifestSha256 } from './driver-modules.ts'
-import { validateResidentModelToolBridge } from './model-tool-bridge.ts'
+import { validateResidentModelToolBridge, verifyModelToolBridgeReady } from './model-tool-bridge.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
-import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
+import {
+  canonicalCompactRequestHash,
+  canonicalNativeToolCatalogHash,
+  canonicalRequestHash,
+  ResidentStore,
+} from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
 /** Public protocol-v14 method set advertised by daemon handshake. */
@@ -52,7 +57,12 @@ export const RESIDENT_METHODS = Object.freeze([
   'event.read',
 ] as const)
 
+interface BridgeAttachment {
+  descriptor: PhysicalOperatorModelToolBridgeV1 | undefined
+}
+
 interface ActiveTurn {
+  readonly bridgeAttachment: BridgeAttachment
   readonly commandId: string
   readonly controller: AbortController
   readonly done: Promise<void>
@@ -584,6 +594,12 @@ export class ResidentDaemon {
     const nativeContext = nativeContextParam(params)
     const requestedProfile = profileParam(params)
     const nativeToolPolicy = nativeToolPolicyParam(params)
+    const bridgeAdmissionTimeoutMs = params.bridge_admission_timeout_ms === undefined
+      ? undefined
+      : integerParam(params, 'bridge_admission_timeout_ms')
+    if (bridgeAdmissionTimeoutMs !== undefined && (bridgeAdmissionTimeoutMs < 1 || bridgeAdmissionTimeoutMs > 60_000)) {
+      throw new ResidentOperatorError('bridge admission timeout must be between 1 and 60000 milliseconds', 'INVALID_RESULT')
+    }
     const modelToolBridge = validateResidentModelToolBridge(modelToolBridgeParam(params), nativeToolPolicy)
     if (nativeToolPolicy === 'dsh-tools-authoritative' && modelToolBridge === undefined) {
       throw new ResidentOperatorError('a DSH-tool-authoritative resident turn requires a model tool bridge', 'INVALID_RESULT')
@@ -633,6 +649,9 @@ export class ResidentDaemon {
       nativeToolPolicy,
       nativeContext,
     )
+    const nativeToolCatalogSha256 = operatorId === 'codex'
+      ? canonicalNativeToolCatalogHash(nativeToolPolicy, modelToolBridge)
+      : undefined
     const accepted = this.store.accept(
       commandId,
       requestHash,
@@ -643,8 +662,19 @@ export class ResidentDaemon {
       supersedesCommandId,
       taskLabel,
       laneId,
+      nativeToolPolicy,
+      modelToolBridge,
     )
-    if (accepted.state === 'accepted' && !this.active.has(accepted.turnId)) {
+    const existing = this.active.get(accepted.turnId)
+    if (existing !== undefined && modelToolBridge !== undefined
+      && existing.bridgeAttachment.descriptor?.socketPath !== modelToolBridge.socketPath) {
+      await verifyModelToolBridgeReady(modelToolBridge, bridgeAdmissionTimeoutMs === undefined
+        ? existing.controller.signal
+        : AbortSignal.any([existing.controller.signal, AbortSignal.timeout(bridgeAdmissionTimeoutMs)]))
+      existing.bridgeAttachment.descriptor = modelToolBridge
+    }
+    if (accepted.state === 'accepted' && existing === undefined) {
+      const bridgeAttachment = { descriptor: modelToolBridge }
       const controller = new AbortController()
       const done = this.runDriver(
         driver,
@@ -654,11 +684,13 @@ export class ResidentDaemon {
         prompt,
         systemPrompt,
         resolved.profile,
-        modelToolBridge,
+        bridgeAttachment,
         nativeToolPolicy,
+        nativeToolCatalogSha256,
+        bridgeAdmissionTimeoutMs,
         controller,
       )
-      this.active.set(accepted.turnId, { commandId, controller, done })
+      this.active.set(accepted.turnId, { commandId, controller, done, bridgeAttachment })
       void done.finally(() => { this.active.delete(accepted.turnId) })
     }
     return accepted
@@ -747,8 +779,10 @@ export class ResidentDaemon {
     prompt: ContentBlock[],
     systemPrompt: string | undefined,
     profile: Parameters<ResidentProductDriver['execute']>[0]['profile'],
-    modelToolBridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+    bridgeAttachment: BridgeAttachment,
     nativeToolPolicy: PhysicalOperatorNativeToolPolicy,
+    nativeToolCatalogSha256: string | undefined,
+    bridgeAdmissionTimeoutMs: number | undefined,
     controller: AbortController,
   ): Promise<void> {
     const heartbeat = setInterval(
@@ -765,12 +799,13 @@ export class ResidentDaemon {
         prompt,
         ...systemPrompt === undefined ? {} : { systemPrompt },
         profile,
-        ...modelToolBridge === undefined ? {} : { modelToolBridge },
+        get modelToolBridge() { return bridgeAttachment.descriptor },
+        ...bridgeAdmissionTimeoutMs === undefined ? {} : { modelToolBridgeAdmissionTimeoutMs: bridgeAdmissionTimeoutMs },
         nativeToolPolicy,
         ...nativeSessionId === undefined ? {} : { nativeSessionId },
         signal: controller.signal,
         onRunning: (nativeSessionId, nativeTurnId) => {
-          this.store.markRunning(commandId, nativeSessionId, nativeTurnId)
+          this.store.markRunning(commandId, nativeSessionId, nativeTurnId, nativeToolCatalogSha256)
         },
         onProgress: (phase) => {
           this.store.progress(commandId, phase)
@@ -779,7 +814,7 @@ export class ResidentDaemon {
           this.store.observe(commandId, observation)
         },
       })
-      this.store.markRunning(commandId, result.nativeSessionId)
+      this.store.markRunning(commandId, result.nativeSessionId, undefined, nativeToolCatalogSha256)
       this.store.settle(commandId, result)
     } catch (error) {
       const aborted = controller.signal.aborted
