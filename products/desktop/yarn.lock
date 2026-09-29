@@ -9443,14 +9443,14 @@ __metadata:
 
 "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.7.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 1.1.7
-  resolution: "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.7.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.7.tgz::hash=0bb1db&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.7.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.7.tgz::hash=2952e0&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-home-paths": "npm:^0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.2.0"
-  checksum: 10c0/0ae9f3a69cb203e86bdf8bfa6df3a8392e6ec6fa5969065f0063db9a95e22ad617c301266b85bcfae446e5f251a0e3594b8815e340a7fa081eae620f912b0657
+  checksum: 10c0/edef2e207f19339e18155eeed4a6a34bf206a9972f4b2c8579dde0d6a2b61c01499f924f0b7fbae4efa76428544b0018dc4d15d294af5c7dd0ac574779df5403
   languageName: node
   linkType: hard
 
