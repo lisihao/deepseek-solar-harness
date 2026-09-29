@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -595,7 +595,8 @@ describe('physical primary routing control', () => {
     })
     const view = render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
-    const mechanism = screen.getByRole('combobox', { name: '执行机制' }) as HTMLSelectElement
+    const mechanismGroup = screen.getByRole('radiogroup', { name: '执行机制' })
+    const mechanismRadios = within(mechanismGroup).getAllByRole('radio') as HTMLInputElement[]
     openAdvanced()
     await screen.findByRole('option', { name: 'codex-live' })
 
@@ -611,10 +612,10 @@ describe('physical primary routing control', () => {
     expect(screen.getByRole('button', { name: '基础' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '高级调度' }).hasAttribute('disabled')).toBe(true)
     expect(model.disabled).toBe(true)
-    expect(mechanism.disabled).toBe(true)
+    expect(mechanismRadios.every(radio => radio.disabled)).toBe(true)
 
     fireEvent.change(model, { target: { value: 'codex-live' } })
-    fireEvent.change(mechanism, { target: { value: 'standard' } })
+    fireEvent.click(mechanismRadios.find(radio => radio.value === 'standard')!)
     fireEvent.click(screen.getByRole('button', { name: /优先 Claude Code/ }))
     expect(fixture.select).not.toHaveBeenCalled()
     expect(fixture.selectProfile).not.toHaveBeenCalled()
@@ -622,13 +623,34 @@ describe('physical primary routing control', () => {
     expect(fixture.selectDebateMode).not.toHaveBeenCalled()
   })
 
+  it('shows four execution mechanisms with one selection and persists Standard to Auto', async () => {
+    const fixture = createFixture({ current: apiPrimary(), rlm: 'disabled', debate: 'disabled' })
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+
+    const group = screen.getByRole('radiogroup', { name: '执行机制' })
+    const radios = within(group).getAllByRole('radio') as HTMLInputElement[]
+    expect(radios.map(radio => radio.value)).toEqual(['auto', 'standard', 'rlm', 'debate'])
+    expect(radios.filter(radio => radio.checked)).toHaveLength(1)
+    expect(radios.find(radio => radio.value === 'standard')?.checked).toBe(true)
+
+    fireEvent.click(screen.getByRole('radio', { name: '自动（系统选择）' }))
+    await waitFor(() => {
+      expect(fixture.selectOrchestrationStrategy).toHaveBeenCalledWith(
+        'auto', 'auto', 'auto', 'balanced', 'codex-sol', 'luna-first',
+      )
+      expect(fixture.selectDebateMode).toHaveBeenCalledWith('auto')
+    })
+  })
+
   it('prevents direct Debate during Plan and preserves model-invoked planning settings', async () => {
     const fixture = createFixture({ current: apiPrimary(), rlm: 'auto', debate: 'disabled', plan: { active: true, pending: false } })
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
-    expect(screen.getByRole('option', { name: 'Debate（多 Agent 辩论）' }).hasAttribute('disabled')).toBe(true)
+    const debate = screen.getByRole('radio', { name: 'Debate（多 Agent 辩论）' }) as HTMLInputElement
+    expect(debate.disabled).toBe(true)
     expect(screen.getByText('Plan 与直接 Debate 不能同时执行')).toBeTruthy()
-    fireEvent.change(screen.getByRole('combobox', { name: '执行机制' }), { target: { value: 'debate' } })
+    fireEvent.click(debate)
     expect(fixture.selectDebateMode).not.toHaveBeenCalled()
     expect(fixture.selectOrchestrationStrategy).not.toHaveBeenCalled()
   })
@@ -651,7 +673,7 @@ describe('physical primary routing control', () => {
     const fixture = createFixture({ current: apiPrimary(), rlm: 'enabled', debate: 'disabled', autonomous: 'enabled' })
     const view = render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
-    fireEvent.change(screen.getByRole('combobox', { name: '执行机制' }), { target: { value: 'standard' } })
+    fireEvent.click(screen.getByRole('radio', { name: '标准（关闭 RLM / Debate）' }))
     await waitFor(() => {
       expect(fixture.selectOrchestrationStrategy).toHaveBeenCalledWith(
         'disabled', 'disabled', 'auto', 'balanced', 'codex-sol', 'luna-first',

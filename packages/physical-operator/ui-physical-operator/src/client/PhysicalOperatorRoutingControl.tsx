@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -300,6 +300,7 @@ export function PhysicalOperatorRoutingControl({
   selectOrchestrationStrategy,
   selectDebateMode,
 }: PhysicalOperatorRoutingControlProps) {
+  const mechanismGroupName = useId()
   const routing = useProjection('physicalOperatorRouting')
   const modelDirectory = useSyncExternalStore(
     fn => directory.subscribe(fn),
@@ -784,22 +785,27 @@ export function PhysicalOperatorRoutingControl({
                         ? '当前路径不使用这些设置；已保存的 TaskGraph 偏好保留，当前不可编辑。'
                         : '仅在 TaskGraph 节点执行时使用，不决定普通聊天的回答模型。'}</small>
                   </div>
-                  <label>
-                    <span>执行机制</span>
-                    <select
-                      aria-label="执行机制"
-                      value={orchestrationExecutionMechanism(orchestrationPreferences.rlm, debatePreferences.mode)}
-                      disabled={locked}
-                      onChange={(event) => {
-                        chooseExecutionMechanism(event.currentTarget.value as OrchestrationExecutionMechanism)
-                      }}
-                    >
-                      <option value="auto">{orchestrationExecutionMechanismLabel('auto')}</option>
-                      <option value="standard">{orchestrationExecutionMechanismLabel('standard')}</option>
-                      <option value="rlm" disabled={taskGraphInactive}>{orchestrationExecutionMechanismLabel('rlm')}</option>
-                      <option value="debate" disabled={planSelected}>{orchestrationExecutionMechanismLabel('debate')}</option>
-                    </select>
-                  </label>
+                  <fieldset
+                    className="dshDesktopExecutionMechanisms"
+                    role="radiogroup"
+                    aria-label="执行机制"
+                    hidden={page !== 'basic'}
+                  >
+                    <legend>执行机制</legend>
+                    {(['auto', 'standard', 'rlm', 'debate'] as const).map(mechanism => (
+                      <label key={mechanism}>
+                        <input
+                          type="radio"
+                          name={mechanismGroupName}
+                          value={mechanism}
+                          checked={orchestrationExecutionMechanism(orchestrationPreferences.rlm, debatePreferences.mode) === mechanism}
+                          disabled={locked || mechanism === 'rlm' && taskGraphInactive || mechanism === 'debate' && planSelected}
+                          onChange={() => { chooseExecutionMechanism(mechanism) }}
+                        />
+                        <span>{orchestrationExecutionMechanismLabel(mechanism)}</span>
+                      </label>
+                    ))}
+                  </fieldset>
                   <label>
                     <span>自主闭环</span>
                     <select
