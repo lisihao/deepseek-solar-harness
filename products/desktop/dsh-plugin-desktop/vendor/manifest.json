@@ -210,6 +210,16 @@
       "name": "Smart Collaboration executable tool bridge, continuity and fresh native model catalog",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "a7ec0553cc5f3447cf536228e475d659df52d8b2"
+    },
+    {
+      "name": "Smart Collaboration executable tool bridge, continuity and fresh native model catalog",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "51d096b784b69a24de08e1dc47eff53f082f775a"
+    },
+    {
+      "name": "Smart Collaboration executable tool bridge, continuity and fresh native model catalog",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "f5d3b30f6dc35ffd49b3b71a0a2833a19c03a8aa"
     }
   ],
   "sourcePackages": {
@@ -372,7 +382,7 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "4f5adc2fa30759099cf740e7ac07954f2cc252f6e0983501275530700433792c",
     "dsh-packages/deepseek-ai-dsh-physical-operator-subagent-0.1.0-rc.5.tgz": "9f3e0ee1832d50a8dca771dccde0f436e66981301170e8abbeebe77576982a7d",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "fe9b9caad329e23be8899a4f930796afb7453b93471400eeafd43b2a6a7b8b3a",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "7762fe848892a8682d6dea42d1c92505bade9738435d168e055a5a745ab793c7",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "ec2b5317bee6e5c81d31dd9b71ef3c4451c52782b76ee7edb7ae62d8d723e1a5",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "a2e1e7eaf60a692241c366be0b5f39ac8b4bd071403dacc02e71a4f32f82fc8c",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "e3159591d26997979572f15ffa850cd88debdff3fcb0a8e9273fa8bc3a4a986e",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "6947ab672f81971354d22e4e93e00eaafa6dc6afbe3c04464d0836edb8da22aa",

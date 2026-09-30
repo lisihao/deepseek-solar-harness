@@ -3257,7 +3257,7 @@ __metadata:
 
 "@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::hash=12660b&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::hash=cc04af&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@anthropic-ai/claude-agent-sdk": "npm:0.3.220"
     "@anthropic-ai/sdk": "npm:0.93.0"
@@ -3276,7 +3276,7 @@ __metadata:
     "@deepseek-ai/dsh-subagent": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subagent-codex": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
-  checksum: 10c0/ffada26d44af2be1654e49ac04c4a621b6b8e54706eb4c8e9f5d255311ceee04390accb090e2b0bac4d3360e2b46bada159cca5b7139d4cc01927b2c5129b0de
+  checksum: 10c0/473bbbd1ebf0291ec3e68f2d4c92174db9151971650c19a17e9dcadacc89b0214419576eab8c6c0cbda28ee269bf28040959c5051957a0266a26f04cf10fd830
   languageName: node
   linkType: hard
 
