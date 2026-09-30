@@ -7,6 +7,8 @@ import ResidentOperatorService, {
   ResidentOperatorSessionId,
   ResidentOperatorTurnId,
   type ResidentExecuteRequest,
+  type ResidentProviderQueryOptions,
+  type ResidentProviderStatus,
 } from '@deepseek-ai/dsh-resident-operator'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { buildOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
@@ -44,6 +46,7 @@ class OneShotProvider implements SubagentProvider {
 
 class ResidentStub extends ResidentOperatorService {
   requests: ResidentExecuteRequest[] = []
+  readonly providerOptions: Array<ResidentProviderQueryOptions | undefined> = []
 
   constructor(
     ctx: Context,
@@ -52,7 +55,23 @@ class ResidentStub extends ResidentOperatorService {
     super(ctx)
   }
 
-  providers() { return Promise.resolve([]) }
+  providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]> {
+    this.providerOptions.push(options)
+    return Promise.resolve([{
+      operatorId: 'codex',
+      product: 'codex',
+      displayName: 'Codex',
+      description: 'Test Resident Provider.',
+      tags: ['coding'],
+      maxConcurrency: 1,
+      injectionBoundaries: ['pre-dispatch'],
+      available: true,
+      authentication: 'native-subscription',
+      productVersion: 'test',
+      protocolHash: 'test',
+      models: [],
+    }])
+  }
   execute(request: ResidentExecuteRequest) {
     this.requests.push(request)
     return Promise.resolve({
@@ -77,6 +96,24 @@ class ResidentStub extends ResidentOperatorService {
 }
 
 describe('physical-operator-resident', () => {
+  it('forwards explicit model refresh from Resident catalogs to the provider', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(PhysicalOperatorRuntime)
+    const resident = new ResidentStub(ctx)
+    await ctx.plugin(provider, {
+      operators: [{
+        id: 'codex', residentProvider: 'codex',
+        displayName: 'Codex', description: 'Runs Codex through the user subscription.',
+      }],
+    })
+
+    await expect(ctx.physicalOperators.residentCatalogs({ refreshModels: true })).resolves.toMatchObject([
+      { operatorId: 'codex', models: [] },
+    ])
+    expect(resident.providerOptions).toEqual([{ refreshModels: true }])
+  })
+
   it('registers a resident-only product and fails loud when ephemeral mode is requested', async () => {
     const ctx = new Context()
     await ctx.plugin(SubagentRuntime)

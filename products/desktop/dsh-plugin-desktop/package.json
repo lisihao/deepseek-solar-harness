@@ -204,6 +204,7 @@
     "@deepseek-ai/dsh-message-feedback": "0.1.0-rc.6",
     "@deepseek-ai/dsh-model-allocation": "file:vendor/dsh-packages/deepseek-ai-dsh-model-allocation-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-model-allocation-local": "file:vendor/dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-model-catalog-local": "0.1.0-rc.6",
     "@deepseek-ai/dsh-model-worker": "file:vendor/dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-model-worker-deepseek": "file:vendor/dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz",

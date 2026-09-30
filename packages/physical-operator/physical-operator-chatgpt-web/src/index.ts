@@ -11,8 +11,10 @@ export type {} from './receipt-events.ts'
 
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { ChatGptWebModelControls } from './model-controls.ts'
+import { chatGptWebCatalogSource } from './model-catalog-source.ts'
 import { ProgressLog, settleForDisposal, textPromptForRequest } from './run-support.ts'
 import { registerWebSetup } from './setup.ts'
 import { ChatGptWebModelWorker } from './model-worker.ts'
@@ -932,6 +934,10 @@ export function apply(ctx: Context, config: Config): void {
       await controls.dispose()
     }
   }, 'physical-operator-chatgpt-web: operator lifecycle')
+  ctx.inject(['modelCatalogs'], (catalogCtx) => {
+    const dispose = catalogCtx.modelCatalogs.register(chatGptWebCatalogSource(resolved.id, controls))
+    catalogCtx.effect(() => dispose, 'physical-operator-chatgpt-web: model catalog source')
+  })
   ctx.inject(['modelWorkers'], (workerCtx) => {
     workerCtx.modelWorkers.register(new ChatGptWebModelWorker(workerCtx, resolved.id))
   })

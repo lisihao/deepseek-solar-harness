@@ -67,10 +67,12 @@ async function listenMockDaemon(
   readonly server: ReturnType<typeof createServer>
   readonly methods: string[][]
   readonly handshakeParams: Record<string, unknown>[]
+  readonly operatorListParams: Record<string, unknown>[]
   readonly shutdownParams: Record<string, unknown>[]
 }> {
   const methods: string[][] = []
   const handshakeParams: Record<string, unknown>[] = []
+  const operatorListParams: Record<string, unknown>[] = []
   const shutdownParams: Record<string, unknown>[] = []
   const server = createServer((socket) => {
     const connectionMethods: string[] = []
@@ -106,6 +108,7 @@ async function listenMockDaemon(
             value = handshake(params)
             qualified = true
           } else if (frame.method === 'operator.list') {
+            operatorListParams.push(params)
             value = { providers: [] }
           } else if (frame.method === 'session.list') {
             value = { sessions: [] }
@@ -145,7 +148,7 @@ async function listenMockDaemon(
   })
   server.listen(socketPath)
   await once(server, 'listening')
-  return { server, methods, handshakeParams, shutdownParams }
+  return { server, methods, handshakeParams, operatorListParams, shutdownParams }
 }
 
 function createMockAuthority(root: string, pid: number, instanceId: string): () => void {
@@ -224,6 +227,20 @@ describe('ResidentDaemonClient request qualification', () => {
         ['system.handshake'],
         ['system.handshake', 'operator.list'],
       ])
+    } finally {
+      await closeMockDaemon(mock.server)
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('passes explicit model refresh intent while normal provider reads stay unchanged', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-resident-client-'))
+    const client = new ResidentDaemonClient({ root, autoStart: false, connectTimeoutMs: 1_000, pollIntervalMs: 10 })
+    const mock = await listenMockDaemon(client.socketPath, mockHandshake)
+    try {
+      await expect(client.providers()).resolves.toEqual([])
+      await expect(client.providers({ refreshModels: true })).resolves.toEqual([])
+      expect(mock.operatorListParams).toEqual([{}, { refresh_models: true }])
     } finally {
       await closeMockDaemon(mock.server)
       rmSync(root, { recursive: true, force: true })

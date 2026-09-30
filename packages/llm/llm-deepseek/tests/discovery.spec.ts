@@ -39,6 +39,8 @@ interface MutableDiscoveryConfig {
   baseURL: string
   apiKeyEnv: string
   streamIdleTimeoutMs?: number
+  models?: LlmDeepSeek.DeepSeekCatalogModel[]
+  discoverModels?: boolean
 }
 
 beforeEach(() => {
@@ -112,7 +114,8 @@ function directAdapter(
     options: () => LlmDeepSeek.resolveAdapterOptions({
       baseURL: config.baseURL,
       apiKeyEnv: config.apiKeyEnv,
-      models: [],
+      models: config.models ?? [],
+      ...config.discoverModels === undefined ? {} : { discoverModels: config.discoverModels },
       ...config.streamIdleTimeoutMs === undefined ? {} : { streamIdleTimeoutMs: config.streamIdleTimeoutMs },
     }),
     resolveApiKey: async connection => keys.get(String(connection.apiKeyEnv)) ?? '',
@@ -134,6 +137,138 @@ function listingResponse(ids: readonly string[]): Response {
 }
 
 describe('DeepSeek model catalog refresh', () => {
+  it('preserves configured metadata and applies selector fallbacks in catalog rows', () => {
+    expect(LlmDeepSeek.catalogModels({
+      configuredModels: [
+        { id: 'configured', name: 'Configured label', description: 'Configured detail' },
+        { id: 'configured-only', description: 'Configured-only detail' },
+      ],
+      discoveredModelIds: ['configured', 'live-unknown'],
+      discoveryEnabled: true,
+    })).toEqual([
+      {
+        id: 'configured', name: 'Configured label', description: 'Configured detail',
+        provider: 'deepseek-official', model: 'configured', availability: 'available', evidence: 'api-list',
+      },
+      {
+        id: 'live-unknown', name: 'live-unknown', description: DISCOVERED,
+        provider: 'deepseek-official', model: 'live-unknown', availability: 'available', evidence: 'api-list',
+      },
+      {
+        id: 'configured-only', name: 'configured-only', description: 'Configured-only detail',
+        provider: 'deepseek-official', model: 'configured-only', availability: 'unknown', evidence: 'configuration',
+      },
+    ])
+  })
+
+  it('publishes API-list evidence separately from configuration-only models and refreshes again', async () => {
+    const server = await listingServer([
+      { body: JSON.stringify({ data: [{ id: 'configured' }, { id: 'live-one' }] }) },
+      { body: JSON.stringify({ data: [{ id: 'live-two' }] }) },
+    ])
+    const config: MutableDiscoveryConfig = {
+      baseURL: server.url,
+      apiKeyEnv: String(credentialRef('DEEPSEEK_SOURCE')),
+      models: [{ id: 'configured', name: 'Configured label' }],
+    }
+    const adapter = directAdapter(config, new Map([[config.apiKeyEnv, 'source-key']]))
+    const source = LlmDeepSeek.deepSeekCatalogSource(adapter)
+
+    await expect(source.refresh(new AbortController().signal)).resolves.toEqual({
+      available: true,
+      models: [
+        {
+          id: 'configured', name: 'Configured label', provider: 'deepseek-official', model: 'configured',
+          availability: 'available', evidence: 'api-list',
+        },
+        {
+          id: 'live-one', name: 'live-one', description: DISCOVERED,
+          provider: 'deepseek-official', model: 'live-one', availability: 'available', evidence: 'api-list',
+        },
+      ],
+    })
+    await expect(source.refresh(new AbortController().signal)).resolves.toEqual({
+      available: true,
+      models: [
+        {
+          id: 'live-two', name: 'live-two', description: DISCOVERED,
+          provider: 'deepseek-official', model: 'live-two', availability: 'available', evidence: 'api-list',
+        },
+        {
+          id: 'configured', name: 'Configured label', provider: 'deepseek-official', model: 'configured',
+          availability: 'unknown', evidence: 'configuration',
+        },
+      ],
+    })
+    expect(server.requests.map(request => request.path)).toEqual(['/models', '/models'])
+    expect(server.requests.some(request => request.path.endsWith('/chat/completions'))).toBe(false)
+  })
+
+  it('reports discovery disabled instead of treating configured models as a successful observation', async () => {
+    const server = await listingServer([{ body: JSON.stringify({ data: [{ id: 'endpoint-only' }] }) }])
+    const config: MutableDiscoveryConfig = {
+      baseURL: server.url,
+      apiKeyEnv: String(credentialRef('DEEPSEEK_DISABLED')),
+      models: [{ id: 'configured' }],
+      discoverModels: false,
+    }
+    const adapter = directAdapter(config, new Map([[config.apiKeyEnv, 'disabled-key']]))
+    const source = LlmDeepSeek.deepSeekCatalogSource(adapter)
+
+    await expect(source.refresh(new AbortController().signal)).resolves.toEqual({
+      available: false,
+      reason: 'DeepSeek model discovery is disabled by configuration',
+    })
+    expect(server.requests).toEqual([])
+  })
+
+  it('passes source cancellation through to the listing fetch', async () => {
+    const config: MutableDiscoveryConfig = {
+      baseURL: 'https://cancelled.example.test',
+      apiKeyEnv: String(credentialRef('DEEPSEEK_CANCELLED')),
+    }
+    const adapter = directAdapter(config, new Map([[config.apiKeyEnv, 'cancelled-key']]))
+    const source = LlmDeepSeek.deepSeekCatalogSource(adapter)
+    let aborted = false
+    vi.stubGlobal('fetch', (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      if (init?.signal?.aborted) {
+        aborted = true
+        reject(new Error('listing aborted'))
+        return
+      }
+      init?.signal?.addEventListener('abort', () => {
+        aborted = true
+        reject(new Error('listing aborted'))
+      }, { once: true })
+    }))
+    const controller = new AbortController()
+    const pending = source.refresh(controller.signal)
+    controller.abort(new Error('source disposed'))
+    await expect(pending).rejects.toMatchObject({ code: 'TRANSPORT' })
+    expect(aborted).toBe(true)
+  })
+
+  it('registers the optional source and disposes it with the plugin fiber', async () => {
+    const server = await listingServer([])
+    const sources: Array<{ readonly id: string; readonly name: string; readonly provider: string; readonly menuVisible: boolean }> = []
+    let disposals = 0
+    const ctx = new Context()
+    ctx.provide('modelCatalogs', {
+      register(source: { id: string; name: string; provider: string; menuVisible: boolean }): () => void {
+        sources.push(source)
+        return () => { disposals += 1 }
+      },
+    } as never)
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmDeepSeek, { baseURL: server.url })
+
+    expect(sources).toEqual([expect.objectContaining({
+      id: 'deepseek:deepseek-official', name: 'DeepSeek', provider: 'deepseek-official', menuVisible: true,
+    })])
+    await ctx.fiber.dispose()
+    expect(disposals).toBe(1)
+  })
+
   it('keeps the catalog to the configured models without a /models request when discovery is off', async () => {
     const server = await listingServer([{ body: JSON.stringify({ data: [{ id: 'endpoint-only-model' }] }) }])
     const ctx = await harness(server.url, { models: [{ id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' }], discoverModels: false })
@@ -210,6 +345,32 @@ describe('DeepSeek model catalog refresh', () => {
     await expect(adapter.listModels('deepseek-official')).resolves.toEqual([
       { provider: 'deepseek-official', id: 'newer-model', name: 'newer-model', description: DISCOVERED, inputModalities: ['text'] },
     ])
+  })
+
+  it('does not expose an older direct snapshot while a newer refresh is still pending', async () => {
+    const config: MutableDiscoveryConfig = {
+      baseURL: 'https://discovery-snapshot.example.test/openai/v1',
+      apiKeyEnv: String(credentialRef('DEEPSEEK_SNAPSHOT_CONCURRENT')),
+    }
+    const adapter = directAdapter(config, new Map([[config.apiKeyEnv, 'snapshot-key']]))
+    const first = deferred<Response>()
+    const second = deferred<Response>()
+    let calls = 0
+    vi.stubGlobal('fetch', (_input: RequestInfo | URL, _init?: RequestInit) => {
+      calls += 1
+      return (calls === 1 ? first : second).promise
+    })
+
+    const older = adapter.refreshCatalog()
+    await Promise.resolve()
+    const newer = adapter.refreshCatalog()
+    await Promise.resolve()
+    expect(calls).toBe(2)
+
+    first.resolve(listingResponse(['older-model']))
+    await expect(older).resolves.toMatchObject({ discoveredModelIds: [] })
+    second.resolve(listingResponse(['newer-model']))
+    await expect(newer).resolves.toMatchObject({ discoveredModelIds: ['newer-model'] })
   })
 
   it('aborts stalled directory fetches and body reads while retaining the last good catalog', async () => {

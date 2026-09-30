@@ -23,6 +23,7 @@ import {
   type ResidentEventPage,
   type ResidentCompactResult,
   type NativeContext,
+  type ResidentProviderQueryOptions,
   type ResidentProviderStatus,
   type ResidentSessionSnapshot,
   type ResidentTurnSnapshot,
@@ -285,10 +286,13 @@ export class ResidentDaemonClient {
 
   /**
    * Read current native product qualification snapshots.
+   * @param options - optional native model catalog refresh policy.
    * @returns one status per configured product Driver.
    */
-  async providers(): Promise<ResidentProviderStatus[]> {
-    return (await this.request<ProviderResponse>('operator.list', {})).providers
+  async providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]> {
+    return (await this.request<ProviderResponse>('operator.list', {
+      ...options?.refreshModels === true ? { refresh_models: true } : {},
+    })).providers
   }
 
   /**

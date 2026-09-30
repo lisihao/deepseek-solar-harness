@@ -27,6 +27,7 @@ import type {
   ResidentModelOption,
   ResidentObservation,
   ResidentProductDriver,
+  ResidentProviderQueryOptions,
   ResidentProviderStatus,
   ResidentQuotaPool,
   ResidentQuotaWindow,
@@ -1006,15 +1007,25 @@ export function codexExecutionFailure(error: unknown): ResidentOperatorError {
 /** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
 export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   readonly operatorId = 'claude-code' as const
-  private modelCatalog: { readonly executable: string; readonly promise: Promise<ResidentModelOption[]> } | undefined
+  private modelCatalog: {
+    readonly executable: string
+    readonly promise: Promise<ResidentModelOption[]>
+    settled: boolean
+  } | undefined
 
-  private models(executable: string): Promise<ResidentModelOption[]> {
-    if (this.modelCatalog?.executable === executable) return this.modelCatalog.promise
-    const catalog = { executable, promise: claudeModels(executable) }
+  private models(executable: string, refreshModels = false): Promise<ResidentModelOption[]> {
+    if (this.modelCatalog?.executable === executable && (!refreshModels || !this.modelCatalog.settled)) {
+      return this.modelCatalog.promise
+    }
+    const catalog = { executable, promise: claudeModels(executable), settled: false }
     this.modelCatalog = catalog
-    void catalog.promise.catch(() => {
-      if (this.modelCatalog === catalog) this.modelCatalog = undefined
-    })
+    void catalog.promise.then(
+      () => { catalog.settled = true },
+      () => {
+        catalog.settled = true
+        if (this.modelCatalog === catalog) this.modelCatalog = undefined
+      },
+    )
     return catalog.promise
   }
 
@@ -1038,13 +1049,13 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     return this.qualify()
   }
 
-  async qualify(): Promise<ResidentProviderStatus> {
+  async qualify(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus> {
     try {
       const { stdout: version, executable } = await command('claude', ['--version'])
       const parsed = await claudeAuthenticationStatus(executable)
       const subscription = isClaudeNativeSubscription(parsed)
       const exactVersion = claudeCliCompatible(version)
-      const models = subscription && exactVersion ? await this.models(executable) : []
+      const models = subscription && exactVersion ? await this.models(executable, options?.refreshModels === true) : []
       const catalogReady = models.length > 0
       const unavailableCode = !subscription
         ? 'AUTH_MODE_MISMATCH'

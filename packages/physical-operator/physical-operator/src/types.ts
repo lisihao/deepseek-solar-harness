@@ -146,6 +146,12 @@ export interface PhysicalOperatorResidentCatalog {
   readonly quotaPools?: readonly PhysicalOperatorQuotaPool[]
 }
 
+/** Optional read policy for registered Resident model catalogs. */
+export interface PhysicalOperatorResidentCatalogOptions {
+  /** Re-enumerate native product models before returning catalogs. */
+  readonly refreshModels?: boolean
+}
+
 /** Native product tool surface allowed for one sealed physical execution. */
 export type PhysicalOperatorNativeToolPolicy = 'inherit' | 'dsh-tools-authoritative' | 'disabled'
 
@@ -275,7 +281,7 @@ export interface PhysicalOperator {
   /** Resolve current transport or deployment availability, optionally for one requested lifetime. */
   availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability
   /** Optionally publish the live model/quota catalog for Resident scheduling. */
-  residentCatalog?(): Promise<PhysicalOperatorResidentCatalog>
+  residentCatalog?(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog>
   /** Reattach observation to a previously accepted durable turn after caller restart. */
   reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>
   /** Interrupt an accepted durable turn without deleting its Resident Session. */

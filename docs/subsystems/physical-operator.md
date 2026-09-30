@@ -65,9 +65,10 @@ status(id: string): PhysicalOperatorStatus
 
 /**
  * Return every registered Resident model/quota catalog in registration order.
+ * @param options - optional native model catalog refresh policy.
  * @returns the current validated Resident catalogs.
  */
-async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]>
+async residentCatalogs(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog[]>
 
 /**
  * Admit and publish one execution. Capacity is reserved synchronously before
@@ -79,7 +80,7 @@ async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]>
 async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:97`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:99`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="ctxresidentoperators--residentoperatorservice-abstract-seam"></a>
 
@@ -90,9 +91,16 @@ Abstract provider-neutral resident session/control surface.
 ```ts cordis-catalog
 /**
  * Qualify every configured native product provider.
+ * @param options - optional native model catalog refresh policy.
  * @returns current version, protocol, and native-subscription availability snapshots.
  */
-abstract providers(): Promise<ResidentProviderStatus[]>
+abstract providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]>
+
+/**
+ * Read the latest completed qualification without contacting native products.
+ * @returns the observed provider snapshot, or undefined when none is retained.
+ */
+providerSnapshot(): { readonly observedAt: number; readonly providers: ResidentProviderStatus[] } | undefined
 
 /**
  * Start one explicit owner-local native-subscription login flow.
@@ -178,7 +186,7 @@ compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:480`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:486`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 
@@ -199,7 +207,7 @@ A stable operator became discoverable.
 'physical-operator/added'(operator: PhysicalOperator): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:74`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:76`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorend--emit"></a>
 
@@ -216,7 +224,7 @@ A published execution settled.
 'physical-operator/end'(info: PhysicalOperatorExecutionEndInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:92`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:94`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorremoved--emit"></a>
 
@@ -233,7 +241,7 @@ An operator stopped accepting new executions. Accepted runs survive.
 'physical-operator/removed'(id: PhysicalOperatorId): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:80`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:82`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorstart--emit"></a>
 
@@ -250,5 +258,5 @@ A provider published an accepted execution.
 'physical-operator/start'(info: PhysicalOperatorExecutionInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:86`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:88`](../../packages/physical-operator/physical-operator/src/index.ts)
 <!-- END GENERATED cordis-surface -->

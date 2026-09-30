@@ -96,6 +96,16 @@ export interface DeepSeekAdapterOptions {
   resolveAttachments?: () => AttachmentStore | undefined
 }
 
+/** Snapshot used by the persistent catalog source to separate configuration from live listing evidence. */
+export interface DeepSeekCatalogSnapshot {
+  /** Models configured for this provider route, whether or not the endpoint listed them. */
+  readonly configuredModels: readonly DeepSeekCatalogModel[]
+  /** IDs returned by the last successful endpoint listing, in endpoint order. */
+  readonly discoveredModelIds: readonly string[]
+  /** Whether the provider is configured to perform endpoint discovery. */
+  readonly discoveryEnabled: boolean
+}
+
 /** Default maximum idle interval while an adapter stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 /** Default combined request/response context capacity. */
@@ -195,26 +205,49 @@ export class DeepSeekAdapter extends LlmAdapter {
     return this.config.options().retryPolicy
   }
 
+  /**
+   * Refresh the endpoint catalog and return the evidence-separated snapshot.
+   * @param signal - optional caller cancellation for the directory request.
+   * @returns configured models and the latest successfully observed model IDs.
+   */
+  async refreshCatalog(signal?: AbortSignal): Promise<DeepSeekCatalogSnapshot> {
+    const connection = this.config.options()
+    if (!connection.discoverModels) {
+      return {
+        configuredModels: connection.models,
+        discoveredModelIds: [],
+        discoveryEnabled: false,
+      }
+    }
+    const scope = discoveryScope(connection)
+    const generation = (this.discoveryGenerations.get(scope) ?? 0) + 1
+    this.discoveryGenerations.set(scope, generation)
+    const apiKey = await this.config.resolveApiKey(connection)
+    const userId = this.config.resolveUserId()
+    const discovered = await discoverDeepSeekModels({
+      baseURL: connection.baseURL,
+      apiKey,
+      userId: String(userId),
+      timeoutMs: connection.streamIdleTimeoutMs,
+      ...signal === undefined ? {} : { signal },
+    })
+    if (this.discoveryGenerations.get(scope) === generation) {
+      this.discoveredModelIds.set(scope, discovered)
+    }
+    return {
+      configuredModels: connection.models,
+      discoveredModelIds: this.discoveredModelIds.get(scope) ?? [],
+      discoveryEnabled: true,
+    }
+  }
+
   override async listModels(
     provider: string,
     options?: { readonly refresh?: boolean },
   ): Promise<readonly LlmModelInfo[]> {
     const connection = this.config.options()
-    const scope = discoveryScope(connection)
     if (options?.refresh === true && connection.discoverModels) {
-      const generation = (this.discoveryGenerations.get(scope) ?? 0) + 1
-      this.discoveryGenerations.set(scope, generation)
-      const apiKey = await this.config.resolveApiKey(connection)
-      const userId = this.config.resolveUserId()
-      const discovered = await discoverDeepSeekModels({
-        baseURL: connection.baseURL,
-        apiKey,
-        userId: String(userId),
-        timeoutMs: connection.streamIdleTimeoutMs,
-      })
-      if (this.discoveryGenerations.get(scope) === generation) {
-        this.discoveredModelIds.set(scope, discovered)
-      }
+      await this.refreshCatalog()
     }
     return this.catalog(provider, connection)
   }

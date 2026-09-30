@@ -402,6 +402,47 @@ function discoveryOptions(): DiscoverWebModelsOptions {
 }
 
 describe('ChatGPT Web model catalog', () => {
+  it('rejects a late non-cooperative browser result after cancellation', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(BrowserRuntime)
+    const pending = Promise.withResolvers<BrowserRunProgramResultV1>()
+    const browser: BrowserProvider = {
+      descriptor: {
+        id: BrowserProviderId('model-catalog-late-result'),
+        layers: ['browser-js-v1'],
+        capabilities: CAPABILITIES,
+      },
+      available: () => true,
+      runProgram: async (_program: BrowserRunProgramV1, _signal?: AbortSignal) => await pending.promise,
+    }
+    ctx.browser.registerProvider(browser)
+    const controller = new AbortController()
+    const discovery = discoverWebModels(ctx, discoveryOptions(), controller.signal)
+    const cancellation = new Error('catalog deadline')
+    controller.abort(cancellation)
+    pending.resolve({
+      version: 1,
+      workspace: {
+        id: BrowserWorkspaceId('model-catalog-late-result'),
+        name: 'fixture-chatgpt-web',
+        lifecycle: 'active',
+        control: 'agent',
+      },
+      output: {
+        kind: 'json',
+        value: {
+          status: 'ok',
+          models: [{ id: 'late-model', label: 'Late model' }],
+          efforts: [],
+          observedAt: '2026-09-30T00:00:00.000Z',
+        },
+      },
+    })
+
+    await expect(discovery).rejects.toBe(cancellation)
+  })
+
   it('applies a requested model and effort on the selected page before sending', async () => {
     const page = mountPage({ selectedModel: 'gpt-2031-cascade', selectedEffort: 'deliberate' })
     page.draft.replaceChildren()

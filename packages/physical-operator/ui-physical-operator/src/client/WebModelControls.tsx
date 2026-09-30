@@ -20,6 +20,8 @@ export interface WebModelCatalog {
 export interface WebModelPreferences {
   readonly model?: string
   readonly effort?: string
+  /** Whether the primary model menu pins this Session's Web model. */
+  readonly modelSelectionPinned?: boolean
 }
 
 /** Server acknowledgment for one explicit ChatGPT Web profile change. */
@@ -70,10 +72,12 @@ export function parseWebModelPreferences(value: unknown): WebModelPreferences | 
   if (!isRecord(value)) return undefined
   const model = optionalText(value, 'model')
   const effort = optionalText(value, 'effort')
-  if (model === INVALID_TEXT || effort === INVALID_TEXT) return undefined
+  const modelSelectionPinned = optionalBoolean(value, 'modelSelectionPinned')
+  if (model === INVALID_TEXT || effort === INVALID_TEXT || modelSelectionPinned === INVALID_BOOLEAN) return undefined
   return {
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
+    ...(modelSelectionPinned === undefined ? {} : { modelSelectionPinned }),
   }
 }
 
@@ -124,13 +128,14 @@ export function WebModelControls({
 
   const savedModel = profile?.model
   const savedEffort = profile?.effort
+  const modelSelectionPinned = profile?.modelSelectionPinned === true
   const selectedModel = savedModel ?? catalog?.selectedModel
   const modelKnown = savedModel !== undefined && catalog?.models.some(choice => choice.id === savedModel)
   const effortKnown = savedEffort !== undefined && catalog?.efforts.some(choice => choice.id === savedEffort)
   const modelCatalogMismatch = savedModel !== undefined
     && catalog !== undefined
     && catalog.selectedModel !== savedModel
-  const modelDisabled = disabled || busy || reading || catalog === undefined || catalog.models.length === 0
+  const modelDisabled = modelSelectionPinned || disabled || busy || reading || catalog === undefined || catalog.models.length === 0
   const effortDisabled = disabled || busy || reading || catalog === undefined || catalog.efforts.length === 0
     || selectedModel === undefined || modelCatalogMismatch
   const hasProfile = savedModel !== undefined || savedEffort !== undefined
@@ -242,6 +247,7 @@ export function WebModelControls({
           )}
           {catalog?.models.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select>
+        {modelSelectionPinned && <small>模型跟随主模型菜单</small>}
       </label>
       <label>
         <span>推理强度</span>
@@ -283,6 +289,7 @@ export function WebModelControls({
 }
 
 const INVALID_TEXT = Symbol('invalid web model text')
+const INVALID_BOOLEAN = Symbol('invalid web model pinned flag')
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -297,6 +304,11 @@ function optionalText(record: Record<string, unknown>, key: string): string | un
   const value = record[key]
   if (typeof value !== 'string' || value.trim() === '') return INVALID_TEXT
   return value
+}
+
+function optionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined | typeof INVALID_BOOLEAN {
+  if (!hasOwn(record, key)) return undefined
+  return typeof record[key] === 'boolean' ? record[key] : INVALID_BOOLEAN
 }
 
 function parseChoices(value: unknown): readonly WebModelChoice[] | undefined {

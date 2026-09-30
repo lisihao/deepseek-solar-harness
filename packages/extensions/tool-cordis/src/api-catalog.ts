@@ -1150,6 +1150,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'modelCatalogs',
+    summary: 'Local SQLite provider and dynamic registry exposed as `ctx.modelCatalogs`.',
+    description: 'Local SQLite provider and dynamic registry exposed as `ctx.modelCatalogs`.',
+    methods: [
+      {
+        signature: 'register(source: ModelCatalogSource): () => Promise<void>',
+        description: 'Register a discovery source until its disposer runs. Source metadata is persisted at the next catalog read or refresh, while its callback stays process-local.',
+        parameters: [{ name: 'source', description: 'source that owns one existing DSH dispatch provider.' }],
+        returns: 'async disposer that aborts and drains that source\'s refresh.',
+      },
+      {
+        signature: 'list(): ModelCatalogSnapshot[]',
+        description: 'Read durable snapshots for exactly the active source registrations. Reading never invokes an upstream refresh callback.',
+        parameters: [],
+        returns: 'active-source snapshots with current models in upstream order.',
+      },
+      {
+        signature: 'async refresh(sourceIds?: readonly string[]): Promise<ModelCatalogSnapshot[]>',
+        description: 'Refresh selected sources, or every active source when omitted. A source failure becomes its durable error snapshot so healthy sources still return.',
+        parameters: [{ name: 'sourceIds', description: 'optional active source ids, deduplicated in caller order.' }],
+        returns: 'one current snapshot per selected source.',
+      },
+    ],
+  },
+  {
     key: 'modelWorkers',
     summary: 'Registry authority; concrete billed or local inference Providers remain separate plugins.',
     description: 'Registry authority; concrete billed or local inference Providers remain separate plugins.',
@@ -1345,9 +1370,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the current status snapshot.',
       },
       {
-        signature: 'async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]>',
+        signature: 'async residentCatalogs(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog[]>',
         description: 'Return every registered Resident model/quota catalog in registration order.',
-        parameters: [],
+        parameters: [{ name: 'options', description: 'optional native model catalog refresh policy.' }],
         returns: 'the current validated Resident catalogs.',
       },
       {
@@ -1444,10 +1469,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Abstract provider-neutral resident session/control surface.',
     methods: [
       {
-        signature: 'abstract providers(): Promise<ResidentProviderStatus[]>',
+        signature: 'abstract providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]>',
         description: 'Qualify every configured native product provider.',
-        parameters: [],
+        parameters: [{ name: 'options', description: 'optional native model catalog refresh policy.' }],
         returns: 'current version, protocol, and native-subscription availability snapshots.',
+      },
+      {
+        signature: 'providerSnapshot(): { readonly observedAt: number; readonly providers: ResidentProviderStatus[] } | undefined',
+        description: 'Read the latest completed qualification without contacting native products.',
+        parameters: [],
+        returns: 'the observed provider snapshot, or undefined when none is retained.',
       },
       {
         signature: 'authenticate(_operatorId: string): Promise<ResidentProviderStatus>',
@@ -3812,6 +3843,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CapsuleSnapshotRequest {\n    readonly capabilityTags?: readonly string[];\n}',
   },
   {
+    name: 'CatalogModel',
+    declaration: 'export interface CatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly availability: ModelAvailability;\n    readonly unavailableReason?: string;\n    readonly evidence: ModelCatalogEvidence;\n    readonly reasoning?: CatalogReasoning;\n    readonly featuredRank?: number;\n}',
+  },
+  {
+    name: 'CatalogReasoning',
+    declaration: 'export interface CatalogReasoning {\n    readonly efforts: readonly {\n        readonly id: string;\n        readonly name: string;\n        readonly description?: string;\n    }[];\n    readonly defaultEffort?: string;\n}',
+  },
+  {
+    name: 'CatalogRefreshResult',
+    declaration: 'export type CatalogRefreshResult = {\n    readonly available: true;\n    readonly models: readonly CatalogModel[];\n} | {\n    readonly available: false;\n    readonly reason: string;\n};',
+  },
+  {
     name: 'ClientResponse',
     declaration: 'export interface ClientResponse {\n    type: \'client-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
   },
@@ -4936,6 +4979,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
   },
   {
+    name: 'ModelAvailability',
+    declaration: 'export type ModelAvailability = \'available\' | \'unavailable\' | \'unknown\';',
+  },
+  {
+    name: 'ModelCatalogEvidence',
+    declaration: 'export type ModelCatalogEvidence = \'api-list\' | \'native-list\' | \'web-picker\' | \'configuration\';',
+  },
+  {
+    name: 'ModelCatalogSnapshot',
+    declaration: 'export interface ModelCatalogSnapshot {\n    readonly id: string;\n    readonly name: string;\n    readonly provider: string;\n    readonly menuVisible: boolean;\n    readonly state: \'unrefreshed\' | \'ready\' | \'unavailable\' | \'error\';\n    readonly lastAttemptAt?: string;\n    readonly lastSuccessAt?: string;\n    readonly error?: string;\n    readonly models: readonly StoredCatalogModel[];\n}',
+  },
+  {
+    name: 'ModelCatalogSource',
+    declaration: 'export interface ModelCatalogSource {\n    readonly id: string;\n    readonly name: string;\n    readonly provider: string;\n    readonly menuVisible: boolean;\n    refresh(signal: AbortSignal): Promise<CatalogRefreshResult>;\n}',
+  },
+  {
     name: 'ModelExecutionOffer',
     declaration: 'export interface ModelExecutionOffer {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly displayName: string;\n    readonly source: \'native-subscription\' | \'metered-api\';\n    readonly tier: \'low\' | \'medium\' | \'high\';\n    readonly available: boolean;\n    readonly maxConcurrency: number;\n    readonly activeCount: number;\n    readonly tags: readonly string[];\n    readonly unavailableReasonCode?: ModelAllocationFallbackReasonCode;\n    readonly quotaPool?: ModelQuotaPool;\n    readonly quotaGuard?: ModelQuotaGuard;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly rank?: number;\n}',
   },
@@ -5165,7 +5224,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperator',
-    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    residentCatalog?(): Promise<PhysicalOperatorResidentCatalog>;\n    reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>;\n    interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    residentCatalog?(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog>;\n    reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>;\n    interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
   },
   {
     name: 'PhysicalOperatorAcceptedReceipt',
@@ -5246,6 +5305,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PhysicalOperatorResidentCatalog',
     declaration: 'export interface PhysicalOperatorResidentCatalog {\n    readonly operatorId: PhysicalOperatorId;\n    readonly product: string;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly supportsModelToolBridge: boolean;\n    readonly location: \'local\' | \'remote\';\n    readonly supportsWorkspaceMutationReturn: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly PhysicalOperatorResidentModel[];\n    readonly quotaPools?: readonly PhysicalOperatorQuotaPool[];\n}',
+  },
+  {
+    name: 'PhysicalOperatorResidentCatalogOptions',
+    declaration: 'export interface PhysicalOperatorResidentCatalogOptions {\n    readonly refreshModels?: boolean;\n}',
   },
   {
     name: 'PhysicalOperatorResidentModel',
@@ -5502,6 +5565,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResidentOperatorTurnId',
     declaration: 'export type ResidentOperatorTurnId = Branded<\'ResidentOperatorTurnId\'>;',
+  },
+  {
+    name: 'ResidentProviderQueryOptions',
+    declaration: 'export interface ResidentProviderQueryOptions {\n    readonly refreshModels?: boolean;\n}',
   },
   {
     name: 'ResidentProviderStatus',
@@ -6302,6 +6369,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'StorageForms',
     declaration: 'export interface StorageForms {\n}',
+  },
+  {
+    name: 'StoredCatalogModel',
+    declaration: 'export interface StoredCatalogModel extends CatalogModel {\n    readonly sourceId: string;\n    readonly lastSeenAt: string;\n    readonly checkedAt: string;\n}',
   },
   {
     name: 'StoredImageAttachment',

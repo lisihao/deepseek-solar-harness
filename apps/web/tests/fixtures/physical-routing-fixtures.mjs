@@ -163,6 +163,7 @@ function residentOperators() {
       await recordQualification()
       return [codex, claude]
     },
+    providerSnapshot() { return undefined },
     async authenticate() {
       throw Object.assign(new Error('fake Claude subscription is not authenticated'), { code: 'AUTH_MODE_MISMATCH' })
     },

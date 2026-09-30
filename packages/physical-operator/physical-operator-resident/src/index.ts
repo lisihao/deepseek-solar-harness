@@ -11,6 +11,7 @@ import {
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResidentCatalog,
+  type PhysicalOperatorResidentCatalogOptions,
 } from '@deepseek-ai/dsh-physical-operator'
 import { residentProgressPage, ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
 import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
@@ -74,7 +75,7 @@ function subagentReason(name: string, provider: SubagentProvider | undefined): s
 
 class DualModePhysicalOperator implements PhysicalOperator {
   readonly descriptor: PhysicalOperatorDescriptor
-  readonly residentCatalog?: () => Promise<PhysicalOperatorResidentCatalog>
+  readonly residentCatalog?: (options?: PhysicalOperatorResidentCatalogOptions) => Promise<PhysicalOperatorResidentCatalog>
 
   // Both provider forms project the same immutable discovery descriptor.
   /* jscpd:ignore-start */
@@ -94,8 +95,8 @@ class DualModePhysicalOperator implements PhysicalOperator {
       ],
     }
     if (config.residentProvider !== undefined) {
-      this.residentCatalog = async () => {
-        const provider = (await this.ctx.residentOperators.providers())
+      this.residentCatalog = async (options) => {
+        const provider = (await this.ctx.residentOperators.providers(options))
           .find(value => value.operatorId === config.residentProvider)
         if (provider === undefined) {
           throw new PhysicalOperatorError(

@@ -842,6 +842,40 @@ stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 
 Source: [`packages/llm/llm/src/index.ts:288`](../../packages/llm/llm/src/index.ts)
 
+<a id="ctxmodelcatalogs--modelcatalogs"></a>
+
+### `ctx.modelCatalogs` — `ModelCatalogs`
+
+Local SQLite provider and dynamic registry exposed as `ctx.modelCatalogs`.
+
+```ts cordis-catalog
+/**
+ * Register a discovery source until its disposer runs. Source metadata is
+ * persisted at the next catalog read or refresh, while its callback stays
+ * process-local.
+ * @param source - source that owns one existing DSH dispatch provider.
+ * @returns async disposer that aborts and drains that source's refresh.
+ */
+register(source: ModelCatalogSource): () => Promise<void>
+
+/**
+ * Read durable snapshots for exactly the active source registrations.
+ * Reading never invokes an upstream refresh callback.
+ * @returns active-source snapshots with current models in upstream order.
+ */
+list(): ModelCatalogSnapshot[]
+
+/**
+ * Refresh selected sources, or every active source when omitted. A source
+ * failure becomes its durable error snapshot so healthy sources still return.
+ * @param sourceIds - optional active source ids, deduplicated in caller order.
+ * @returns one current snapshot per selected source.
+ */
+async refresh(sourceIds?: readonly string[]): Promise<ModelCatalogSnapshot[]>
+```
+
+Source: [`packages/llm/model-catalog-local/src/index.ts:219`](../../packages/llm/model-catalog-local/src/index.ts)
+
 <a id="llm-events"></a>
 
 ### `llm/*` events

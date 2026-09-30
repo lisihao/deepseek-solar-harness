@@ -8,6 +8,7 @@
 
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
 import { assembleContextFor, readModelSelection, type Agent, type ModelSelection, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   isAgentLoopRequest,
@@ -53,6 +54,11 @@ import type {
 import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
 import { LiveCatalogs, latestNativeModels, ModelEntries, NativeCatalogCache, type LatestModelEntries } from './model-entries.ts'
+import {
+  NATIVE_CATALOG_PROVIDER,
+  NativeCatalogSources,
+  nativeReasoningEffortName,
+} from './native-catalog-sources.ts'
 import { nativeModelTier, type ModelAllocationPlan, type ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {
@@ -244,7 +250,7 @@ interface RouterCatalogs {
 }
 const routerCatalogs = new WeakMap<Context, RouterCatalogs>()
 
-const ROUTER_PROVIDER = 'dsh-physical-operator'
+const ROUTER_PROVIDER = NATIVE_CATALOG_PROVIDER
 const RESUME_SOURCE = 'physical-operator-resume'
 const TASKGRAPH_SOURCE = 'physical-operator-taskgraph'
 const ORCHESTRATION_TOOL = 'orchestration'
@@ -372,11 +378,6 @@ const PROFILE_EFFORTS = [
 /** Separates the operator from the native model in a router model id. */
 const OPERATOR_MODEL_SEPARATOR = ':'
 
-/** Model-menu names of native reasoning efforts. */
-const EFFORT_NAMES: Record<PhysicalOperatorReasoningEffort, string> = {
-  low: '低', medium: '中', high: '高', xhigh: '很高', max: '最大', ultra: '极限',
-}
-
 const profileProjectionSchema = zod.object({
   profiles: zod.record(zod.string(), zod.object({
     model: zod.string().optional(),
@@ -400,6 +401,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     config.catalogMaxAgeMs ?? DEFAULT_CATALOG_MAX_AGE_MS,
     (catalogs) => { entries.catalogs.replace(catalogs) },
   )
+  const nativeCatalogSources = new NativeCatalogSources(
+    options => ctx.physicalOperators.residentCatalogs(options),
+    operatorId => ctx.physicalOperators.list().find(operator => String(operator.id) === operatorId)?.displayName,
+    entries.catalogs,
+    live,
+  )
   ctx.effect(function* () {
     yield async () => { await modelTools.dispose() }
   }, 'tool-physical-operator: model tool bridge')
@@ -407,9 +414,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     routerCatalogs.set(ctx, { entries, live })
     return () => {
       routerCatalogs.delete(ctx)
+      nativeCatalogSources.close()
       live.close()
     }
   }, 'tool-physical-operator: model entries')
+  ctx.inject(['modelCatalogs'], (catalogCtx) => {
+    for (const source of nativeCatalogSources.all()) {
+      catalogCtx.modelCatalogs.register(source)
+    }
+  })
   ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools, entries, live))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
@@ -895,7 +908,10 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       id: model,
       name: entry.displayName,
       reasoning: {
-        efforts: entry.supportedEfforts.map(effort => ({ id: ReasoningEffortId(effort), name: EFFORT_NAMES[effort] })),
+        efforts: entry.supportedEfforts.map(effort => ({
+          id: ReasoningEffortId(effort),
+          name: nativeReasoningEffortName(effort),
+        })),
         ...entry.defaultEffort === undefined ? {} : { defaultEffort: ReasoningEffortId(entry.defaultEffort) },
       },
     })

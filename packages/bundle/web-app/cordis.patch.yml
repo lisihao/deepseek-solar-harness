@@ -96,6 +96,12 @@
 
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
+    - id: model-catalog-local
+      name: '@deepseek-ai/dsh-model-catalog-local'
+      config:
+        databasePath: !!js dshHomePath('model-catalog/models.sqlite')
+        refreshTimeoutMs: 30000
+
     - id: api-gateway
       name: '@deepseek-ai/dsh-host-apiproxy'
 

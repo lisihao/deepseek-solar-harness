@@ -275,12 +275,18 @@ export interface ResidentDriverCompactRequest {
   readonly signal: AbortSignal
 }
 
+/** Optional policy for reading native provider model catalogs. */
+export interface ResidentProviderQueryOptions {
+  /** Re-enumerate native product models instead of reusing a Driver catalog. */
+  readonly refreshModels?: boolean
+}
+
 /** Native product qualification and resumable-turn adapter loaded by a daemon Provider. */
 export interface ResidentProductDriver {
   /** Stable physical product identity. */
   readonly operatorId: string
   /** @returns current version, protocol, and native-subscription qualification. */
-  qualify(): Promise<ResidentProviderStatus>
+  qualify(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus>
   /**
    * Start one explicit owner-initiated native-subscription login flow.
    * Drivers must not read, copy, or persist product credentials themselves.
@@ -484,9 +490,18 @@ export abstract class ResidentOperatorService extends Service {
 
   /**
    * Qualify every configured native product provider.
+   * @param options - optional native model catalog refresh policy.
    * @returns current version, protocol, and native-subscription availability snapshots.
    */
-  abstract providers(): Promise<ResidentProviderStatus[]>
+  abstract providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]>
+
+  /**
+   * Read the latest completed qualification without contacting native products.
+   * @returns the observed provider snapshot, or undefined when none is retained.
+   */
+  providerSnapshot(): { readonly observedAt: number; readonly providers: ResidentProviderStatus[] } | undefined {
+    return undefined
+  }
 
   /**
    * Start one explicit owner-local native-subscription login flow.

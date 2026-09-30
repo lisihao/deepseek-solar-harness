@@ -37,7 +37,7 @@ import type { PresetBearingSession } from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {
   ApiProxy, ConfigurableProviderView, CredentialView, GoalRef, HistoryEntry, HostFrame,
-  ModelCatalogFailure, ModelProviderGroup,
+  ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup,
   ModelReasoning, MuxFrame, PromptContentPart, QuestionResponsePayload, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem,
   QueuedInboxItem, SessionSummary, SettingsNamespaceView, SubagentAddress, JobView, ToolEventView,
   WorkspaceId, WorkspaceView,
@@ -90,6 +90,10 @@ import type { ApprovalOutcome, ApprovalRequestId } from '@deepseek-ai/dsh-user-a
 // Side-effect type import: resolves the `approval/request` waterfall and
 // `ctx.get('approval')` without a value dependency on the seam (optional composition).
 import type {} from '@deepseek-ai/dsh-user-approval'
+// Type-only optional seam: persistent catalog snapshots replace legacy
+// adapter listings for the providers whose active sources own them.
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
+import type { ModelCatalogSnapshot, StoredCatalogModel } from '@deepseek-ai/dsh-model-catalog-local/types'
 import { approvalResponsePayloadSchema } from './api/approvals.schema.ts'
 import { imageLimitsProjectionSchema, sessionListMetadataProjectionSchema } from './api/sessions.schema.ts'
 import { questionResponsePayloadSchema } from './api/questions.schema.ts'
@@ -110,6 +114,7 @@ import {
   inspectApiRemoteSession,
 } from '@deepseek-ai/dsh-api-remotes'
 import { canOpenNativePath, openNativePath, openNativeTextFile } from './native-path-opener.ts'
+import { selectFeaturedModels } from './catalog-shortlist.ts'
 
 /** Page size when history is called without maxMessages. */
 const DEFAULT_MAX_MESSAGES = 50
@@ -320,13 +325,136 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
   return { rpcId: request.rpcId, result: { ok: true, value } }
 }
 
+/** Translate adapter-owned reasoning metadata into the client catalog view. */
+function adapterReasoning(reasoning: Awaited<ReturnType<Context['llm']['resolveModelInfo']>>['reasoning']): ModelReasoning | undefined {
+  return reasoning === undefined
+    ? undefined
+    : {
+      efforts: reasoning.efforts.map(effort => ({
+        id: effort.id,
+        name: effort.name,
+        ...effort.description === undefined
+          ? {}
+          : { description: effort.description },
+      })),
+      ...reasoning.defaultEffort === undefined
+        ? {}
+        : { defaultEffort: reasoning.defaultEffort },
+    }
+}
+
+/** Project the persisted reasoning choices for a catalog-selected model. */
+function catalogReasoning(model: StoredCatalogModel): ModelReasoning | undefined {
+  return model.reasoning === undefined
+    ? undefined
+    : {
+      efforts: model.reasoning.efforts.map(effort => ({
+        id: effort.id,
+        name: effort.name,
+        ...effort.description === undefined
+          ? {}
+          : { description: effort.description },
+      })),
+      ...model.reasoning.defaultEffort === undefined
+        ? {}
+        : { defaultEffort: model.reasoning.defaultEffort },
+    }
+}
+
+/** Project one available persistent model without changing its dispatch token. */
+function catalogModel(model: StoredCatalogModel, sourceName: string): ModelCatalogModel {
+  const reasoning = catalogReasoning(model)
+  return {
+    id: model.model,
+    name: model.name,
+    availability: 'available',
+    checkedAt: model.checkedAt,
+    sourceName,
+    ...model.description === undefined ? {} : { description: model.description },
+    ...reasoning === undefined ? {} : { reasoning },
+  }
+}
+
+/** Report a persistent-source state that cannot safely populate a menu. */
+function catalogFailure(snapshot: ModelCatalogSnapshot): ModelCatalogFailure | undefined {
+  if (snapshot.state === 'ready') return undefined
+  if (snapshot.state === 'unrefreshed') {
+    return {
+      id: snapshot.id,
+      name: snapshot.name,
+      message: '尚未刷新，请点击刷新模型与算子',
+    }
+  }
+  if (snapshot.state === 'error') {
+    return {
+      id: snapshot.id,
+      name: snapshot.name,
+      message: snapshot.error ?? 'model catalog refresh failed',
+    }
+  }
+  const message = snapshot.error
+    ?? snapshot.models.find(model => model.unavailableReason !== undefined)?.unavailableReason
+    ?? 'model catalog source is unavailable'
+  return { id: snapshot.id, name: snapshot.name, message }
+}
+
+/** Read one legacy adapter catalog while preserving its existing failure behavior. */
+async function buildLegacyProviderCatalog(
+  ctx: Context,
+  provider: { readonly id: string; readonly name: string },
+  options?: { readonly refresh?: boolean },
+): Promise<{ group?: ModelProviderGroup; failure?: ModelCatalogFailure }> {
+  try {
+    const models = await ctx.llm.listModels(provider.id, options)
+    const entries = await Promise.all(models.map(async (model) => {
+      const resolved = await ctx.llm.resolveModelInfo(provider.id, model.id)
+      const reasoning = adapterReasoning(resolved.reasoning)
+      return {
+        id: model.id,
+        name: model.name,
+        ...model.description === undefined ? {} : { description: model.description },
+        ...reasoning === undefined ? {} : { reasoning },
+      }
+    }))
+    return {
+      group: {
+        id: provider.id,
+        name: provider.name,
+        models: entries,
+      },
+    }
+  } catch (error: unknown) {
+    return {
+      failure: {
+        id: provider.id,
+        name: provider.name,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    }
+  }
+}
+
+/** Build the pre-catalog service view from every registered legacy route. */
+async function buildLegacyModelCatalog(
+  ctx: Context,
+  options?: { readonly refresh?: boolean },
+): Promise<{
+  groups: ModelProviderGroup[]
+  failures: ModelCatalogFailure[]
+}> {
+  const catalog = await Promise.all(ctx.llm.listProviders().map(provider => buildLegacyProviderCatalog(ctx, provider, options)))
+  return {
+    groups: catalog.flatMap(item => item.group === undefined || item.group.models.length === 0 ? [] : [item.group]),
+    failures: catalog.flatMap(item => item.failure === undefined ? [] : [item.failure]),
+  }
+}
+
 /**
- * Build the provider/model catalog over every registered route. Shared by the
- * session-scoped `session.models` and host-scoped `llm.models`. Catalog
- * membership stays advisory: an unlisted session selection remains valid for
- * provider dispatch, but is not injected back into the selector after its
- * owning catalog stops advertising it. Per-provider failures ride `failures`
- * without failing the sound groups; groups that advertise nothing are dropped.
+ * Build the provider/model catalog over every registered route. When the
+ * persistent catalog service is mounted, active source snapshots replace the
+ * legacy listing for every provider they own, including failed or empty
+ * sources. An explicit refresh invokes the service once; ordinary reads use
+ * only its durable SQLite snapshots.
  */
 async function buildModelCatalog(
   ctx: Context,
@@ -335,51 +463,52 @@ async function buildModelCatalog(
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
-  const catalog = await Promise.all(ctx.llm.listProviders().map(async (provider) => {
-    try {
-      const models = await ctx.llm.listModels(provider.id, options)
-      const entries = await Promise.all(models.map(async (model) => {
-        const resolved = await ctx.llm.resolveModelInfo(provider.id, model.id)
-        const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined
-          ? undefined
-          : {
-            efforts: resolved.reasoning.efforts.map(effort => ({
-              id: effort.id,
-              name: effort.name,
-              ...effort.description === undefined
-                ? {}
-                : { description: effort.description },
-            })),
-            ...resolved.reasoning.defaultEffort === undefined
-              ? {}
-              : { defaultEffort: resolved.reasoning.defaultEffort },
-          }
-        return {
-          id: model.id,
-          name: model.name,
-          ...model.description === undefined ? {} : { description: model.description },
-          ...reasoning === undefined ? {} : { reasoning },
-        }
-      }))
-      const group: ModelProviderGroup = {
-        id: provider.id,
-        name: provider.name,
-        models: entries,
-      }
-      return { kind: 'group' as const, group }
-    } catch (error: unknown) {
-      const failure: ModelCatalogFailure = {
-        id: provider.id,
-        name: provider.name,
-        message: error instanceof Error ? error.message : String(error),
-      }
-      return { kind: 'failure' as const, failure }
+  const catalogs = ctx.get('modelCatalogs')
+  if (catalogs === undefined) return buildLegacyModelCatalog(ctx, options)
+
+  const snapshots = options?.refresh === true
+    ? await catalogs.refresh()
+    : catalogs.list()
+  const providers = ctx.llm.listProviders()
+  const providerNames = new Map(providers.map(provider => [provider.id, provider.name]))
+  const managedProviderIds = new Set(snapshots.map(snapshot => snapshot.provider))
+  const managedGroups = new Map<string, ModelProviderGroup>()
+  const sourceFailures = snapshots.flatMap((snapshot) => {
+    const failure = catalogFailure(snapshot)
+    return failure === undefined ? [] : [failure]
+  })
+
+  for (const snapshot of snapshots) {
+    const selected = selectFeaturedModels(snapshot)
+    if (selected.length === 0) continue
+    const existing = managedGroups.get(snapshot.provider)
+    const group = existing ?? {
+      id: snapshot.provider,
+      name: providerNames.get(snapshot.provider) ?? snapshot.name,
+      models: [],
     }
-  }))
-  return {
-    groups: catalog.flatMap(item => item.kind === 'group' ? [item.group] : []).filter(group => group.models.length > 0),
-    failures: catalog.flatMap(item => item.kind === 'failure' ? [item.failure] : []),
+    for (const model of selected) {
+      if (group.models.some(entry => entry.id === model.model)) continue
+      group.models.push(catalogModel(model, snapshot.name))
+    }
+    if (group.models.length > 0) managedGroups.set(snapshot.provider, group)
   }
+
+  const legacy = await Promise.all(providers
+    .filter(provider => !managedProviderIds.has(provider.id))
+    .map(provider => buildLegacyProviderCatalog(ctx, provider, options)))
+  const legacyGroups = new Map(legacy.flatMap(item => item.group === undefined || item.group.models.length === 0
+    ? []
+    : [[item.group.id, item.group] as const]))
+  const legacyFailures = legacy.flatMap(item => item.failure === undefined ? [] : [item.failure])
+  const groups = providers.flatMap((provider) => {
+    const group = managedGroups.get(provider.id) ?? legacyGroups.get(provider.id)
+    return group === undefined ? [] : [group]
+  })
+  for (const [provider, group] of managedGroups) {
+    if (!providerNames.has(provider)) groups.push(group)
+  }
+  return { groups, failures: [...sourceFailures, ...legacyFailures] }
 }
 
 /** Wrap an error result echoing the request's rpcId. */

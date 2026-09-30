@@ -12,6 +12,7 @@ import type {
   ResidentDriverExecuteRequest,
   ResidentDriverCompactRequest,
   ResidentProductDriver,
+  ResidentProviderQueryOptions,
   ResidentProviderStatus,
 } from '@deepseek-ai/dsh-resident-operator'
 import {
@@ -35,6 +36,15 @@ const MODELS = [{
   description: 'Balanced everyday test model',
   supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'] as const,
   defaultEffort: 'medium' as const,
+  isDefault: true,
+  supportsAdaptiveThinking: false,
+}]
+const REFRESHED_MODELS = [{
+  model: 'gpt-refreshed',
+  displayName: 'GPT Refreshed',
+  description: 'Fresh model catalog',
+  supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'] as const,
+  defaultEffort: 'high' as const,
   isDefault: true,
   supportsAdaptiveThinking: false,
 }]
@@ -309,6 +319,7 @@ class BlockingQualificationDriver extends MemoryDriver {
   qualificationCount = 0
   activeQualifications = 0
   maximumActiveQualifications = 0
+  readonly qualificationOptions: Array<ResidentProviderQueryOptions | undefined> = []
   readonly blockingQualificationEntered: Promise<void>
   readonly releaseQualification: () => void
   private readonly markBlockingQualificationEntered: () => void
@@ -329,8 +340,9 @@ class BlockingQualificationDriver extends MemoryDriver {
     this.blockQualifications = true
   }
 
-  override async qualify(): Promise<ResidentProviderStatus> {
+  override async qualify(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus> {
     this.qualificationCount += 1
+    this.qualificationOptions.push(options)
     this.activeQualifications += 1
     this.maximumActiveQualifications = Math.max(this.maximumActiveQualifications, this.activeQualifications)
     try {
@@ -338,7 +350,8 @@ class BlockingQualificationDriver extends MemoryDriver {
         this.markBlockingQualificationEntered()
         await this.qualificationReleased
       }
-      return await super.qualify()
+      const status = await super.qualify()
+      return options?.refreshModels === true ? { ...status, models: REFRESHED_MODELS } : status
     } finally {
       this.activeQualifications -= 1
     }
@@ -691,6 +704,55 @@ describe('ResidentDaemon', () => {
     } finally {
       driver.releaseQualification()
       await Promise.all([first, second])
+      await daemon.close()
+    }
+  })
+
+  it('queues one model refresh after a normal qualification and shares it across callers', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    await connected.ready()
+    driver.beginBlocking()
+    const ordinary = connected.providers()
+    try {
+      await driver.blockingQualificationEntered
+      const firstRefresh = connected.providers({ refreshModels: true })
+      const secondRefresh = connected.providers({ refreshModels: true })
+      await new Promise<void>(resolve => setTimeout(resolve, 25))
+      expect(driver.qualificationCount).toBe(1)
+      driver.releaseQualification()
+      const [ordinaryProviders, firstRefreshedProviders, secondRefreshedProviders] = await Promise.all([
+        ordinary,
+        firstRefresh,
+        secondRefresh,
+      ])
+      expect(ordinaryProviders[0]?.models).toEqual(MODELS)
+      expect(firstRefreshedProviders[0]?.models).toEqual(REFRESHED_MODELS)
+      expect(secondRefreshedProviders[0]?.models).toEqual(REFRESHED_MODELS)
+      expect(driver.qualificationOptions).toEqual([undefined, { refreshModels: true }])
+      expect(driver.qualificationCount).toBe(2)
+      expect(driver.maximumActiveQualifications).toBe(1)
+      expect(driver.commandIds).toEqual([])
+    } finally {
+      driver.releaseQualification()
+      await daemon.close()
+    }
+  })
+
+  it('rejects malformed model refresh intent before native qualification', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    try {
+      await expect(qualifiedRawRequest(daemon.socketPath, 'operator.list', { refresh_models: 'yes' }))
+        .rejects.toMatchObject({ code: 'INVALID_RESULT' })
+      expect(driver.qualificationCount).toBe(0)
+      expect(driver.commandIds).toEqual([])
+    } finally {
       await daemon.close()
     }
   })
