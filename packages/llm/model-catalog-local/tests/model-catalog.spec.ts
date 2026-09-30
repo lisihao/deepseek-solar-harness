@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { existsSync } from 'node:fs'
-import { chmod, mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -17,10 +17,27 @@ import type {
   ModelCatalogSource,
 } from '../src/index.ts'
 
+const fsHarness = vi.hoisted(() => ({
+  openSyncFailure: undefined as NodeJS.ErrnoException | undefined,
+}))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    openSync: (...args: Parameters<typeof actual.openSync>) => {
+      const failure = fsHarness.openSyncFailure
+      if (failure !== undefined) throw failure
+      return actual.openSync(...args)
+    },
+  }
+})
+
 const fibers: Fiber[] = []
 const directories: string[] = []
 
 afterEach(async () => {
+  fsHarness.openSyncFailure = undefined
   for (const fiber of fibers.splice(0).reverse()) await fiber.dispose()
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
 })
@@ -477,14 +494,12 @@ describe('ModelCatalogs', () => {
     expect(() => wrongColumnCatalog.catalog.list()).toThrow(/invalid schema/)
   })
 
-  it('propagates a filesystem error that is not an existing catalog file', async () => {
-    if (process.platform === 'win32') return
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-model-catalog-readonly-'))
-    directories.push(directory)
-    await chmod(directory, 0o500)
-    const catalog = await openCatalog(join(directory, 'catalog.sqlite'))
+  it('propagates an injected open failure before SQLite is loaded', async () => {
+    const path = await databasePath()
+    fsHarness.openSyncFailure = Object.assign(new Error('EACCES: injected catalog-file failure'), { code: 'EACCES' })
+    const catalog = await openCatalog(path)
     expect(() => catalog.catalog.list()).toThrow(expect.objectContaining({ code: 'EACCES' }))
-    await chmod(directory, 0o700)
+    expect(existsSync(path)).toBe(false)
   })
 
   it('rolls back a malformed successful result before recording its source error', async () => {
