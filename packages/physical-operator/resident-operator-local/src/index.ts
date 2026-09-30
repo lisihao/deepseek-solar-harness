@@ -15,6 +15,7 @@ import ResidentOperatorService, {
   type ResidentExecuteRequest,
   type ResidentIndeterminateResolutionRequest,
   type ResidentInterruptRequest,
+  type ResidentProviderQueryOptions,
   type ResidentProviderStatus,
   type ResidentResetRequest,
   type ResidentSessionSnapshot,
@@ -84,6 +85,8 @@ export const Config: z<Config> = z.object({
 class LocalResidentOperatorService extends ResidentOperatorService {
   private readonly client: ResidentDaemonClient
   private readonly runtimes: CliRuntimeManager
+  private catalogSnapshot: ReturnType<ResidentOperatorService['providerSnapshot']>
+  private catalogGeneration = 0
 
   constructor(
     ctx: Context,
@@ -107,11 +110,20 @@ class LocalResidentOperatorService extends ResidentOperatorService {
     })
   }
 
-  providers(): Promise<ResidentProviderStatus[]> {
-    return this.client.providers()
+  async providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]> {
+    const generation = ++this.catalogGeneration
+    const providers = await this.client.providers(options)
+    if (generation === this.catalogGeneration) this.catalogSnapshot = { observedAt: Date.now(), providers }
+    return providers
+  }
+
+  override providerSnapshot(): ReturnType<ResidentOperatorService['providerSnapshot']> {
+    return this.catalogSnapshot
   }
 
   override authenticate(operatorId: string): Promise<ResidentProviderStatus> {
+    this.catalogSnapshot = undefined
+    this.catalogGeneration++
     return this.client.authenticate(operatorId)
   }
 

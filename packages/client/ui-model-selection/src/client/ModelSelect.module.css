@@ -188,7 +188,16 @@
   min-width: 0;
 }
 
+.modelRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .modelName {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: inherit;
   font-size: 14px;
@@ -196,6 +205,16 @@
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.availability {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--dsw-alias-state-success-tertiary);
+  color: var(--dsw-alias-state-success-primary);
+  font-size: 11px;
+  line-height: 16px;
 }
 
 .description {

@@ -7,6 +7,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { BrowserCapabilityV1, BrowserJsonValue, BrowserRunProgramV1 } from '@deepseek-ai/dsh-browser'
+import { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 
 const MIN_OUTPUT_MAX_BYTES = 1_024
 const MAX_TIMER_DELAY_MS = 2_147_483_647
@@ -34,6 +35,12 @@ export interface WebModelPreferences {
   readonly model?: string
   /** Exact advertised opaque reasoning option identifier or label. */
   readonly effort?: string
+}
+
+/** Effective Web controls returned to one Session owner. */
+export interface WebModelProfile extends WebModelPreferences {
+  /** Whether the DSH primary model menu, rather than this profile, pins the model. */
+  readonly modelSelectionPinned?: boolean
 }
 
 /** The currently observable ChatGPT model controls for one owned browser page. */
@@ -602,12 +609,15 @@ return await browser.evaluate(page, ${JSON.stringify(MODEL_CATALOG_EVALUATOR)}, 
  * its own pickers.
  * @param ctx - Context exposing the provider-neutral browser service.
  * @param options - browser bounds and optional explicit user-authorized selection.
- * @param signal - cancellation of the owned browser operation.
+ * @param signal - cancellation of the owned browser operation; a late browser result after abort is rejected.
  * @returns the verified visible model catalog.
  */
 export async function discoverWebModels(ctx: Context, options: DiscoverWebModelsOptions, signal?: AbortSignal): Promise<WebModelCatalog> {
   const program = buildWebModelCatalogProgram(options)
   const result = await ctx.browser.runProgram(program, signal)
+  if (signal?.aborted) {
+    throw signal.reason ?? new PhysicalOperatorError('ChatGPT Web model discovery was aborted', 'OPERATOR_ABORTED')
+  }
   if (result.output.kind !== 'json') {
     throw new Error('ChatGPT Web model discovery returned an unexpected browser output type')
   }

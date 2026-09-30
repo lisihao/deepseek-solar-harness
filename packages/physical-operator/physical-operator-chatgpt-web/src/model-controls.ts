@@ -1,8 +1,14 @@
 /** Account-observed ChatGPT Web model and reasoning controls. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { readModelSelection, type Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { discoverWebModels, type WebModelCatalog, type WebModelPreferences } from './model-catalog.ts'
+import {
+  discoverWebModels,
+  type WebModelCatalog,
+  type WebModelPreferences,
+  type WebModelProfile,
+} from './model-catalog.ts'
 import { webModelPreferences } from './model-preferences.ts'
 import { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 import { WebModelCatalogCache } from './model-catalog-cache.ts'
@@ -25,6 +31,7 @@ export class ChatGptWebModelControls {
   private catalogValue: WebModelCatalog | undefined
   private catalogPending: Promise<WebModelCatalog> | undefined
   private catalogAbort: AbortController | undefined
+  private catalogAbortCleanup: (() => void) | undefined
   private catalogScope: string | undefined
 
   constructor(private readonly ctx: Context, private readonly config: WebModelControlsConfig) {
@@ -49,9 +56,13 @@ export class ChatGptWebModelControls {
   /**
    * Refresh visible account choices without sending a model prompt.
    * @param sessionId - optional Session whose already-selected model scopes reasoning choices.
-   * @returns the website-observed catalog; failures retain the previous catalog.
+   * @param signal - cancellation owned by the caller's catalog-refresh lifecycle.
+   * @returns the website-observed catalog; failures retain the private cache but reject the active refresh.
    */
-  refreshCatalog(sessionId?: string): Promise<WebModelCatalog> {
+  refreshCatalog(sessionId?: string, signal?: AbortSignal): Promise<WebModelCatalog> {
+    if (signal?.aborted) {
+      return Promise.reject(new PhysicalOperatorError('ChatGPT Web catalog refresh was aborted', 'OPERATOR_ABORTED'))
+    }
     if (this.status().active) return Promise.reject(new PhysicalOperatorError('Wait for the current Web task before refreshing its controls', 'OPERATOR_BUSY'))
     const model = sessionId === undefined ? undefined : this.preferences(sessionId).model
     if (this.catalogPending !== undefined) {
@@ -60,6 +71,7 @@ export class ChatGptWebModelControls {
     }
     const controller = new AbortController()
     this.catalogAbort = controller
+    this.catalogAbortCleanup = forwardCatalogAbort(signal, controller)
     this.catalogScope = model
     const operation = discoverWebModels(this.ctx, this.catalogOptions(), controller.signal).then(async (observed) => {
       // Removed saved models remain visible as unavailable preferences while discovery still succeeds.
@@ -71,6 +83,8 @@ export class ChatGptWebModelControls {
       return catalog
     }).finally(() => {
       if (this.catalogPending === operation) {
+        this.catalogAbortCleanup?.()
+        this.catalogAbortCleanup = undefined
         this.catalogPending = undefined
         this.catalogAbort = undefined
         this.catalogScope = undefined
@@ -85,37 +99,52 @@ export class ChatGptWebModelControls {
    * @param sessionId - exact DSH Session identity.
    * @returns independent Web overrides, without borrowing a native CLI profile.
    */
-  preferences(sessionId: string): WebModelPreferences {
+  preferences(sessionId: string): WebModelProfile {
     const agent = this.ctx.get('agents')?.get(SessionId(sessionId))
-    return agent === undefined ? {} : webModelPreferences(agent.session.events)
+    if (agent === undefined) return {}
+    const saved = webModelPreferences(agent.session.events)
+    const primaryModel = primaryWebModel(agent, this.config.id)
+    if (primaryModel === undefined) return saved
+    return {
+      model: primaryModel,
+      ...saved.model === primaryModel && saved.effort !== undefined ? { effort: saved.effort } : {},
+      modelSelectionPinned: true,
+    }
   }
 
   /**
    * Verify explicit controls on the website before publishing a Session preference.
    * @param sessionId - currently loaded DSH Session.
-   * @param selection - whole-value model and reasoning preference.
+   * @param selection - whole-value model and reasoning preference; an effort-only selection adopts a primary Web model pin.
    * @returns verified account catalog after the selection.
    */
   async selectPreferences(sessionId: string, selection: WebModelPreferences): Promise<WebModelCatalog | undefined> {
     const agent = this.ctx.get('agents')?.get(SessionId(sessionId))
     if (agent === undefined) throw new Error('Open the DSH conversation before selecting its Web model')
+    const primaryModel = primaryWebModel(agent, this.config.id)
+    if (selection.model !== undefined && primaryModel !== undefined && selection.model !== primaryModel) {
+      throw new PhysicalOperatorError('ChatGPT Web model follows the primary model menu for this conversation', 'MODEL_SELECTION_UNAVAILABLE')
+    }
     if (this.status().active || this.catalogPending !== undefined) throw new PhysicalOperatorError('Wait for the current Web operation before selecting its model', 'OPERATOR_BUSY')
     if (selection.model === undefined && selection.effort === undefined) {
       agent.session.append('chatgpt-web/profile', {}, { ignorable: true })
       return this.catalogValue
     }
+    const effectiveSelection = primaryModel !== undefined && selection.model === undefined
+      ? { model: primaryModel, ...selection.effort === undefined ? {} : { effort: selection.effort } }
+      : selection
     const controller = new AbortController()
     this.catalogAbort = controller
-    const operation = discoverWebModels(this.ctx, { ...this.catalogOptions(), selection }, controller.signal)
+    const operation = discoverWebModels(this.ctx, { ...this.catalogOptions(), selection: effectiveSelection }, controller.signal)
     this.catalogPending = operation
-    this.catalogScope = selection.model
+    this.catalogScope = effectiveSelection.model
     try {
       const catalog = await operation
       if (catalog.selectedModel === undefined) throw new Error('ChatGPT Web could not verify the selected model')
-      if (selection.effort !== undefined && catalog.selectedEffort === undefined) throw new Error('ChatGPT Web could not verify the selected reasoning control')
+      if (effectiveSelection.effort !== undefined && catalog.selectedEffort === undefined) throw new Error('ChatGPT Web could not verify the selected reasoning control')
       const profile = {
         model: catalog.selectedModel,
-        ...selection.effort === undefined ? {} : { effort: catalog.selectedEffort as string },
+        ...effectiveSelection.effort === undefined ? {} : { effort: catalog.selectedEffort as string },
       }
       agent.session.append('chatgpt-web/profile', profile, { ignorable: true })
       this.rememberCatalog(catalog)
@@ -153,4 +182,22 @@ export class ChatGptWebModelControls {
     this.catalogAbort?.abort(new Error('ChatGPT Web catalog was unloaded'))
     if (this.catalogPending !== undefined) await Promise.allSettled([this.catalogPending])
   }
+}
+
+/** Return the exact Web model selected through the primary model menu, if this operator owns it. */
+function primaryWebModel(agent: Agent, operatorId: string): string | undefined {
+  const selection = readModelSelection(agent).selection
+  if (selection?.provider !== 'dsh-physical-operator') return undefined
+  const prefix = `${operatorId}:`
+  return selection.model.startsWith(prefix) && selection.model.length > prefix.length
+    ? selection.model.slice(prefix.length)
+    : undefined
+}
+
+/** Link a caller-owned refresh signal to the local browser-discovery controller. */
+function forwardCatalogAbort(signal: AbortSignal | undefined, controller: AbortController): () => void {
+  if (signal === undefined) return () => {}
+  const forward = (): void => { controller.abort(signal.reason) }
+  signal.addEventListener('abort', forward, { once: true })
+  return () => { signal.removeEventListener('abort', forward) }
 }

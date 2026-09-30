@@ -1184,7 +1184,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/host/remote-auth/src/index.ts:71`](../packages/host/remote-auth/src/index.ts)
+来源：[`packages/host/remote-auth/src/index.ts:123`](../packages/host/remote-auth/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 
@@ -1300,7 +1300,7 @@ export interface DeepSeekCatalogModel {
 
 依赖：[`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
 
-来源：[`packages/llm/llm-deepseek/src/index.ts:72`](../packages/llm/llm-deepseek/src/index.ts)
+来源：[`packages/llm/llm-deepseek/src/index.ts:82`](../packages/llm/llm-deepseek/src/index.ts)
 
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 
@@ -1704,6 +1704,22 @@ export interface Config {
 
 来源：[`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
 
+<a id="deepseek-aidsh-model-catalog-local"></a>
+
+## `@deepseek-ai/dsh-model-catalog-local`
+
+```ts config-catalog
+/** Service configuration. */
+export interface Config {
+  /** Required `:memory:` or filesystem location of this catalog's SQLite database. */
+  readonly databasePath: string
+  /** Maximum time a source may spend on one discovery call; defaults to 15,000 ms. */
+  readonly refreshTimeoutMs?: number
+}
+```
+
+来源：[`packages/llm/model-catalog-local/src/index.ts:38`](../packages/llm/model-catalog-local/src/index.ts)
+
 <a id="deepseek-aidsh-orchestration-local"></a>
 
 ## `@deepseek-ai/dsh-orchestration-local`
@@ -1837,7 +1853,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:76`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:78`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-resident"></a>
 
@@ -1871,7 +1887,7 @@ export interface OperatorConfig {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:49`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:50`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
@@ -2036,7 +2052,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/physical-operator/resident-operator-local/src/index.ts:54`](../packages/physical-operator/resident-operator-local/src/index.ts)
+来源：[`packages/physical-operator/resident-operator-local/src/index.ts:55`](../packages/physical-operator/resident-operator-local/src/index.ts)
 
 <a id="deepseek-aidsh-rlm-runtime-local"></a>
 
@@ -2130,7 +2146,7 @@ export interface JsonRpcConfig {
 
 依赖：`Readable`（`node:stream`）· `Writable`（`node:stream`）
 
-来源：[`packages/sdk/server/src/index.ts:29`](../packages/sdk/server/src/index.ts)
+来源：[`packages/sdk/server/src/index.ts:25`](../packages/sdk/server/src/index.ts)
 
 <a id="deepseek-aidsh-session-persistence-jsonl"></a>
 
@@ -3134,7 +3150,7 @@ export interface LatestModelEntries {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:195`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:201`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
@@ -3431,7 +3447,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'code' | 'both'
 ```
 
-来源：[`packages/core/tools/src/index.ts:654`](../packages/core/tools/src/index.ts)
+来源：[`packages/core/tools/src/index.ts:656`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 

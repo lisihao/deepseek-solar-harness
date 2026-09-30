@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Script } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { ModelCatalogSource } from '@deepseek-ai/dsh-model-catalog-local'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime, {
   BrowserError,
@@ -337,6 +339,41 @@ describe('ChatGPT Web physical operator', () => {
     await expect(explicitRun.result).resolves.toMatchObject({ stopReason: 'completed' })
     expect(serializedProgramRequest(provider.programs[1]!)).toMatchObject({ model: 'explicit-model' })
     expect(serializedProgramRequest(provider.programs[1]!)).not.toHaveProperty('effort')
+  })
+
+  it('registers the optional Web catalog source and disposes it with the plugin fiber', async () => {
+    const sources: ModelCatalogSource[] = []
+    let disposals = 0
+    const stateRoot = mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-catalog-source-'))
+    const ctx = new Context()
+    ctx.provide('modelCatalogs', {
+      register(source: ModelCatalogSource): () => void {
+        sources.push(source)
+        return () => { disposals += 1 }
+      },
+    } as never)
+    try {
+      await ctx.plugin(BrowserRuntime)
+      await ctx.plugin(PhysicalOperatorRuntime)
+      ctx.browser.registerProvider(new StubBrowserProvider())
+      await ctx.plugin(adapter, {
+        stateRoot,
+        workspaceName: 'fixture-chatgpt-web',
+        generationTimeoutMs: 1_000,
+        submissionTimeoutMs: 100,
+        pollIntervalMs: 10,
+        progressIntervalMs: 20,
+        outputMaxBytes: 2_048,
+      })
+
+      expect(sources).toEqual([expect.objectContaining({
+        id: 'web:chatgpt-web', name: 'ChatGPT Web', provider: 'dsh-physical-operator', menuVisible: true,
+      })])
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+    expect(disposals).toBe(1)
   })
 
   it('registers an ephemeral, single-flight browser operator and submits the merged text prompt', async () => {

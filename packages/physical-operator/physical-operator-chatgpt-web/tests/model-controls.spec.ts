@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { Inbox, type Agent, type AgentOptions } from '@deepseek-ai/dsh-agent'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorId,
   type PhysicalOperatorResult,
@@ -48,7 +48,7 @@ afterEach(async () => {
   }
 })
 
-async function harness(stateRoot?: string): Promise<Harness> {
+async function harness(stateRoot?: string, agentOptions: AgentOptions = {}): Promise<Harness> {
   const ctx = new Context()
   await ctx.plugin(AgentRegistry).await()
   await ctx.plugin(PhysicalOperatorRuntime).await()
@@ -57,7 +57,7 @@ async function harness(stateRoot?: string): Promise<Harness> {
   const inbox = new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} })
   const agent: Agent = {
     id: session.id,
-    options: {},
+    options: agentOptions,
     session,
     inbox,
     status: 'idle',
@@ -118,6 +118,78 @@ describe('ChatGptWebModelControls catalog and preferences', () => {
     appendProfile(session, { model: 'old-model', effort: 'low' })
     appendProfile(session, { model: 'saved-model', effort: 'high' })
     expect(controls.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+  })
+
+  it('uses a Web primary model pin and retains effort only when its saved model matches', async () => {
+    const { controls, session } = await harness(undefined, {
+      provider: 'dsh-physical-operator',
+      model: 'chatgpt-web-fixture:primary-model',
+    })
+    appendProfile(session, { model: 'saved-model', effort: 'high' })
+
+    expect(controls.preferences(String(session.id))).toEqual({
+      model: 'primary-model',
+      modelSelectionPinned: true,
+    })
+
+    appendProfile(session, { model: 'primary-model', effort: 'high' })
+    expect(controls.preferences(String(session.id))).toEqual({
+      model: 'primary-model',
+      effort: 'high',
+      modelSelectionPinned: true,
+    })
+  })
+
+  it('ignores foreign primary models and preserves a bare Web route as a saved-profile route', async () => {
+    const foreign = await harness(undefined, { provider: 'dsh-codex', model: 'chatgpt-web-fixture:foreign-model' })
+    appendProfile(foreign.session, { model: 'saved-model', effort: 'high' })
+    expect(foreign.controls.preferences(String(foreign.session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+
+    const bare = await harness(undefined, { provider: 'dsh-physical-operator', model: 'chatgpt-web-fixture' })
+    appendProfile(bare.session, { model: 'saved-model', effort: 'high' })
+    expect(bare.controls.preferences(String(bare.session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+  })
+
+  it('rejects a conflicting saved model before browser selection and clears only saved effort under a primary pin', async () => {
+    const { controls, session } = await harness(undefined, {
+      provider: 'dsh-physical-operator',
+      model: 'chatgpt-web-fixture:primary-model',
+    })
+    appendProfile(session, { model: 'primary-model', effort: 'high' })
+
+    await expect(controls.selectPreferences(String(session.id), { model: 'other-model' }))
+      .rejects.toMatchObject({ code: 'MODEL_SELECTION_UNAVAILABLE' })
+    expect(discover).not.toHaveBeenCalled()
+
+    await expect(controls.selectPreferences(String(session.id), {})).resolves.toBeUndefined()
+    expect(controls.preferences(String(session.id))).toEqual({
+      model: 'primary-model',
+      modelSelectionPinned: true,
+    })
+    expect(discover).not.toHaveBeenCalled()
+  })
+
+  it('binds an effort-only preference to the primary Web model before browser discovery', async () => {
+    const { controls, session } = await harness(undefined, {
+      provider: 'dsh-physical-operator',
+      model: 'chatgpt-web-fixture:primary-model',
+    })
+    const verified = catalog({
+      models: [{ id: 'primary-model', label: 'Primary model' }],
+      selectedModel: 'primary-model',
+      selectedEffort: 'low',
+    })
+    discover.mockResolvedValueOnce(verified)
+
+    await expect(controls.selectPreferences(String(session.id), { effort: 'low' })).resolves.toBe(verified)
+
+    const calls = discover.mock.calls as unknown as Array<[Context, DiscoverWebModelsOptions, AbortSignal | undefined]>
+    expect(calls[0]?.[1].selection).toEqual({ model: 'primary-model', effort: 'low' })
+    expect(controls.preferences(String(session.id))).toEqual({
+      model: 'primary-model',
+      effort: 'low',
+      modelSelectionPinned: true,
+    })
   })
 
   it('refreshes a saved model and scopes the follow-up to the offered model only', async () => {
@@ -208,6 +280,45 @@ describe('ChatGptWebModelControls catalog and preferences', () => {
     pending.resolve(catalog())
     await expect(first).resolves.toEqual(expect.objectContaining({ selectedModel: 'saved-model' }))
     expect(controls.transitioning).toBe(false)
+  })
+
+  it('forwards source refresh cancellation to the live browser discovery', async () => {
+    const { controls } = await harness()
+    const pending = Promise.withResolvers<WebModelCatalog>()
+    let observedSignal: AbortSignal | undefined
+    discover.mockImplementation(async (_ctx, _options, signal) => {
+      observedSignal = signal
+      return await pending.promise
+    })
+    const controller = new AbortController()
+    const refresh = controls.refreshCatalog(undefined, controller.signal)
+
+    controller.abort(new Error('catalog deadline'))
+    expect(observedSignal?.aborted).toBe(true)
+    pending.reject(controller.signal.reason)
+    await expect(refresh).rejects.toBe(controller.signal.reason)
+  })
+
+  it('does not publish a late canceled discovery result into the private catalog cache', async () => {
+    const { controls } = await harness()
+    const previous = catalog()
+    discover.mockResolvedValueOnce(previous)
+    await controls.refreshCatalog()
+
+    const pending = Promise.withResolvers<WebModelCatalog>()
+    discover.mockImplementation(async (_ctx, _options, signal) => {
+      const result = await pending.promise
+      if (signal?.aborted) throw signal.reason
+      return result
+    })
+    const controller = new AbortController()
+    const refresh = controls.refreshCatalog(undefined, controller.signal)
+    const cancellation = new Error('catalog deadline')
+    controller.abort(cancellation)
+    pending.resolve(catalog({ selectedModel: 'new-model', selectedEffort: 'low' }))
+
+    await expect(refresh).rejects.toBe(cancellation)
+    expect(controls.status().catalog).toBe(previous)
   })
 
   it('commits a selection only after the requested controls are verified', async () => {

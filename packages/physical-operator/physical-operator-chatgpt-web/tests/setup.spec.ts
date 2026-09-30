@@ -3,7 +3,7 @@ import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 import { request as httpRequest } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WebModelCatalog, WebModelPreferences } from '../src/model-catalog.ts'
+import type { WebModelCatalog, WebModelPreferences, WebModelProfile } from '../src/model-catalog.ts'
 import {
   CHATGPT_WEB_SETUP_PATH,
   registerWebSetup,
@@ -19,12 +19,12 @@ interface RunningServer {
 
 interface SetupFixture {
   refreshCatalog: ReturnType<typeof vi.fn<(sessionId?: string) => Promise<WebModelCatalog>>>
-  preferences: ReturnType<typeof vi.fn<(sessionId: string) => WebModelPreferences>>
+  preferences: ReturnType<typeof vi.fn<(sessionId: string) => WebModelProfile>>
   selectPreferences: ReturnType<typeof vi.fn<(sessionId: string, profile: WebModelPreferences) => Promise<WebModelCatalog | undefined>>>
   setup: WebSetup
   status: WebSetupStatus
   catalog: WebModelCatalog
-  profile: WebModelPreferences
+  profile: WebModelProfile
 }
 
 let running: RunningServer | undefined
@@ -51,7 +51,7 @@ function fixture(overrides: Partial<WebSetupStatus> = {}): SetupFixture {
     observedAt: '2026-09-23T00:00:00.000Z',
   }
   value.refreshCatalog = vi.fn<(sessionId?: string) => Promise<WebModelCatalog>>(async () => value.catalog)
-  value.preferences = vi.fn<(sessionId: string) => WebModelPreferences>(() => ({ ...value.profile }))
+  value.preferences = vi.fn<(sessionId: string) => WebModelProfile>(() => ({ ...value.profile }))
   value.selectPreferences = vi.fn<
     (sessionId: string, profile: WebModelPreferences) => Promise<WebModelCatalog | undefined>
   >(async (_sessionId, next) => {
@@ -140,6 +140,17 @@ describe('ChatGPT Web setup route', () => {
       catalog: value.catalog,
     })
     expect(value.refreshCatalog).toHaveBeenCalledWith('session-42')
+  })
+
+  it('returns the primary-menu pin with the session profile', async () => {
+    const value = fixture()
+    value.profile = { model: 'gpt-5', modelSelectionPinned: true }
+    const port = await start(value.setup)
+
+    const response = await request(port, `${CHATGPT_WEB_SETUP_PATH}?session_id=session-42`)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ ...value.status, profile: value.profile })
   })
 
   it('saves a session-scoped profile selection and returns the saved profile', async () => {

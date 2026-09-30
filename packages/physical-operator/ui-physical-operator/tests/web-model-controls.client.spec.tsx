@@ -217,6 +217,17 @@ describe('ChatGPT Web model controls', () => {
     expect(screen.getByRole('button', { name: '清除推理强度' })).toBeTruthy()
   })
 
+  it('shows a primary-menu pin on the duplicate model control while keeping reasoning selectable', () => {
+    renderControls({
+      catalog,
+      profile: { model: 'future/lattice-9', effort: 'sprint', modelSelectionPinned: true },
+    })
+
+    expect(selectControl('ChatGPT Web 模型').disabled).toBe(true)
+    expect(selectControl('ChatGPT Web 推理强度').disabled).toBe(false)
+    expect(screen.getByText('模型跟随主模型菜单')).toBeTruthy()
+  })
+
   it('disables and hides stale reasoning choices when the saved model differs from the observed page model', () => {
     const observedOtherModel = { ...catalog, selectedModel: 'account/custom', selectedEffort: 'deep-dive' }
     renderControls({ catalog: observedOtherModel, profile: { model: 'future/lattice-9', effort: 'sprint' } })
@@ -231,7 +242,9 @@ describe('ChatGPT Web model controls', () => {
 describe('ChatGPT Web model response parsers', () => {
   it('reject malformed nested fields while accepting an empty preference', () => {
     expect(parseWebModelPreferences({})).toEqual({})
+    expect(parseWebModelPreferences({ model: 'm', modelSelectionPinned: true })).toEqual({ model: 'm', modelSelectionPinned: true })
     expect(parseWebModelPreferences({ effort: null })).toBeUndefined()
+    expect(parseWebModelPreferences({ modelSelectionPinned: 'yes' })).toBeUndefined()
     expect(parseWebModelCatalog({ models: [], efforts: [], observedAt: 'now' })).toEqual({
       models: [], efforts: [], observedAt: 'now',
     })

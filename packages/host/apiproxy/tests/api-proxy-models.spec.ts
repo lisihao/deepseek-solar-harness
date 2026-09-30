@@ -15,6 +15,8 @@ import type {
   LlmResolvedModelInfo, StreamChunk,
   UserMessage,
 } from '@deepseek-ai/dsh-llm'
+import ModelCatalogs from '@deepseek-ai/dsh-model-catalog-local'
+import type { CatalogModel, CatalogRefreshResult, ModelCatalogSource } from '@deepseek-ai/dsh-model-catalog-local'
 import SessionStore from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -126,6 +128,38 @@ function registerTextOnly(ctx: Context): void {
       return Promise.resolve({ provider, id: model, name: model, inputModalities: ['text'] })
     }
   }('Text Only', []))
+}
+
+function persistentModel(
+  id: string,
+  provider: string,
+  model: string,
+  options: {
+    readonly name?: string
+    readonly description?: string
+    readonly reasoning?: CatalogModel['reasoning']
+  } = {},
+): CatalogModel {
+  return {
+    id,
+    name: options.name ?? id,
+    provider,
+    model,
+    availability: 'available',
+    evidence: 'native-list',
+    ...options.description === undefined ? {} : { description: options.description },
+    ...options.reasoning === undefined ? {} : { reasoning: options.reasoning },
+  }
+}
+
+function persistentSource(
+  id: string,
+  name: string,
+  provider: string,
+  menuVisible: boolean,
+  refresh: (signal: AbortSignal) => Promise<CatalogRefreshResult>,
+): ModelCatalogSource {
+  return { id, name, provider, menuVisible, refresh }
 }
 
 describe('Web session model selection', () => {
@@ -553,6 +587,151 @@ describe('Web session model selection', () => {
     expect(catalog.current).toEqual({ provider: 'deleted-gateway', model: 'deleted-model' })
     expect(catalog.groups.flatMap(group => group.models.map(model => `${group.id}/${model.id}`)))
       .not.toContain('deleted-gateway/deleted-model')
+    await ctx.fiber.dispose()
+  })
+})
+
+describe('persistent model catalog API projection', () => {
+  it('reads durable snapshots without upstream I/O, refreshes once, and replaces a provider menu', async () => {
+    const { ctx, sessionId } = await harness()
+    await ctx.plugin(ModelCatalogs, { databasePath: ':memory:' })
+    const provider = 'dsh-physical-operator'
+    ctx.llm.registerAdapter([provider], new CatalogAdapter('Physical Operator', [
+      { provider, id: 'legacy-static', name: 'Legacy Static' },
+    ]))
+    let rows: CatalogModel[] = [persistentModel('gpt-6-astra', provider, 'codex:gpt-6-astra', {
+      name: 'GPT-6 Astra',
+      reasoning: {
+        efforts: [{ id: 'high', name: 'High' }],
+        defaultEffort: 'high',
+      },
+    })]
+    const discover = vi.fn(async (_signal: AbortSignal): Promise<CatalogRefreshResult> => ({
+      available: true,
+      models: rows,
+    }))
+    ctx.modelCatalogs.register(persistentSource('native:codex', 'Codex', provider, true, discover))
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const unrefreshed = expectValue(await api.llm.models(request({})))
+    expect(discover).not.toHaveBeenCalled()
+    expect(unrefreshed.groups.find(group => group.id === provider)).toBeUndefined()
+    expect(unrefreshed.failures).toContainEqual({
+      id: 'native:codex', name: 'Codex', message: '尚未刷新，请点击刷新模型与算子',
+    })
+
+    const refreshed = expectValue(await api.sessions.models(request({ sessionId, refresh: true })))
+    expect(discover).toHaveBeenCalledTimes(1)
+    expect(refreshed.groups.find(group => group.id === provider)).toMatchObject({
+      id: provider,
+      name: 'Physical Operator',
+      models: [{
+        id: 'codex:gpt-6-astra',
+        name: 'GPT-6 Astra',
+        availability: 'available',
+        sourceName: 'Codex',
+        reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' },
+      }],
+    })
+    expect(refreshed.groups.find(group => group.id === provider)?.models[0]?.checkedAt).toMatch(/T/u)
+    expect(refreshed.groups.find(group => group.id === provider)?.models.map(model => model.id))
+      .not.toContain('legacy-static')
+
+    expectValue(await api.llm.models(request({})))
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    rows = [persistentModel('gpt-6.1-sol', provider, 'codex:gpt-6.1-sol', { name: 'GPT-6.1 Sol' })]
+    const replaced = expectValue(await api.llm.models(request({ refresh: true })))
+    expect(discover).toHaveBeenCalledTimes(2)
+    expect(replaced.groups.find(group => group.id === provider)?.models.map(model => model.id))
+      .toEqual(['codex:gpt-6.1-sol'])
+    await ctx.fiber.dispose()
+  })
+
+  it('combines healthy physical sources, omits hidden Claude rows, and drops failed source rows', async () => {
+    const { ctx, sessionId } = await harness()
+    await ctx.plugin(ModelCatalogs, { databasePath: ':memory:' })
+    const provider = 'dsh-physical-operator'
+    ctx.llm.registerAdapter([provider], new CatalogAdapter('Physical Operator', [
+      { provider, id: 'legacy-static', name: 'Legacy Static' },
+    ]))
+    let codexBroken = false
+    let claudeUnavailable = false
+    const codexRefresh = vi.fn(async (_signal: AbortSignal): Promise<CatalogRefreshResult> => {
+      if (codexBroken) throw new Error('Codex catalog unavailable')
+      return {
+        available: true,
+        models: [
+          persistentModel('gpt-6-astra', provider, 'codex:gpt-6-astra', { name: 'GPT-6 Astra' }),
+          persistentModel('gpt-6.1-sol', provider, 'codex:gpt-6.1-sol', { name: 'GPT-6.1 Sol' }),
+        ],
+      }
+    })
+    const webRefresh = vi.fn(async (_signal: AbortSignal): Promise<CatalogRefreshResult> => ({
+      available: true,
+      models: [
+        persistentModel('pro', provider, 'chatgpt:pro', { name: 'ChatGPT Pro' }),
+        persistentModel('thinking', provider, 'chatgpt:thinking', { name: 'ChatGPT Thinking' }),
+      ],
+    }))
+    const claudeRefresh = vi.fn(async (_signal: AbortSignal): Promise<CatalogRefreshResult> => claudeUnavailable
+      ? { available: false, reason: 'Claude account is unavailable' }
+      : {
+        available: true,
+        models: [persistentModel('claude-sonnet', provider, 'claude:sonnet', { name: 'Claude Sonnet' })],
+      })
+    ctx.modelCatalogs.register(persistentSource('native:codex', 'Codex', provider, true, codexRefresh))
+    ctx.modelCatalogs.register(persistentSource('web:chatgpt-web', 'ChatGPT', provider, true, webRefresh))
+    ctx.modelCatalogs.register(persistentSource('native:claude-code', 'Claude Code', provider, false, claudeRefresh))
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const initial = expectValue(await api.sessions.models(request({ sessionId, refresh: true })))
+    expect(initial.groups.find(group => group.id === provider)?.models.map(model => model.id)).toEqual([
+      'codex:gpt-6-astra', 'codex:gpt-6.1-sol', 'chatgpt:pro', 'chatgpt:thinking',
+    ])
+    expect(initial.groups.find(group => group.id === provider)?.models.map(model => model.sourceName)).toEqual([
+      'Codex', 'Codex', 'ChatGPT', 'ChatGPT',
+    ])
+    expect(initial.groups.find(group => group.id === provider)?.models.map(model => model.id))
+      .not.toContain('claude:sonnet')
+    expect(initial.groups.find(group => group.id === 'deepseek-official')).toBeDefined()
+    expect(ctx.modelCatalogs.list().find(source => source.id === 'native:claude-code')?.models)
+      .toMatchObject([{ id: 'claude-sonnet', availability: 'available' }])
+
+    codexBroken = true
+    claudeUnavailable = true
+    const partial = expectValue(await api.llm.models(request({ refresh: true })))
+    expect(partial.groups.find(group => group.id === provider)?.models.map(model => model.id)).toEqual([
+      'chatgpt:pro', 'chatgpt:thinking',
+    ])
+    expect(partial.groups.find(group => group.id === provider)?.models.map(model => model.id))
+      .not.toContain('legacy-static')
+    expect(partial.failures).toEqual(expect.arrayContaining([
+      { id: 'native:codex', name: 'Codex', message: 'Codex catalog unavailable' },
+      { id: 'native:claude-code', name: 'Claude Code', message: 'Claude account is unavailable' },
+    ]))
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps the legacy catalog response when the optional service is absent', async () => {
+    const { ctx, sessionId } = await harness()
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const catalog = expectValue(await api.sessions.models(request({ sessionId })))
+    expect(catalog.groups.find(group => group.id === 'deepseek-official')?.models[0]).toEqual({
+      id: 'deepseek-chat',
+      name: 'DeepSeek Chat',
+      reasoning: REASONING,
+    })
     await ctx.fiber.dispose()
   })
 })

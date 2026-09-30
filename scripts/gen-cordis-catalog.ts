@@ -80,6 +80,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   invariants: 'invariants.md',
   intentCompiler: 'orchestration.md',
   llm: 'llm-streaming.md',
+  modelCatalogs: 'llm-streaming.md',
   lsp: 'lsp.md',
   messageFeedback: 'feedback.md',
   modelAllocation: 'orchestration.md',
@@ -539,6 +540,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   PhysicalOperatorId: 'physical-operator.md',
   PhysicalOperatorProviderRun: 'physical-operator.md',
   PhysicalOperatorResidentCatalog: 'physical-operator.md',
+  PhysicalOperatorResidentCatalogOptions: 'physical-operator.md',
   PhysicalOperatorResult: 'physical-operator.md',
   PhysicalOperatorRun: 'physical-operator.md',
   PhysicalOperatorStartRequest: 'physical-operator.md',
@@ -561,6 +563,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   ResidentOperatorSessionId: 'physical-operator.md',
   ResidentOperatorTurnId: 'physical-operator.md',
   ResidentProviderStatus: 'physical-operator.md',
+  ResidentProviderQueryOptions: 'physical-operator.md',
   ResidentReceiptState: 'physical-operator.md',
   ResidentResetRequest: 'physical-operator.md',
   ResidentSessionSnapshot: 'physical-operator.md',
@@ -696,6 +699,8 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  ModelCatalogSource: 'discovery source registration is owned by packages/llm/model-catalog-local/README.md',
+  ModelCatalogSnapshot: 'durable catalog inventory is owned by packages/llm/model-catalog-local/README.md',
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',
   BeginCommandRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
   InsertReferenceRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',

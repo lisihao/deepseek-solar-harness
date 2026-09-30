@@ -21,6 +21,7 @@ import type {
   PhysicalOperatorProviderRun,
   PhysicalOperatorProviderStartRequest,
   PhysicalOperatorResidentCatalog,
+  PhysicalOperatorResidentCatalogOptions,
   PhysicalOperatorRun,
   PhysicalOperatorStartRequest,
   PhysicalOperatorStatus,
@@ -47,6 +48,7 @@ export type {
   PhysicalOperatorQuotaWindow,
   PhysicalOperatorUsage,
   PhysicalOperatorResidentCatalog,
+  PhysicalOperatorResidentCatalogOptions,
   PhysicalOperatorResidentModel,
   PhysicalOperatorExecutionInfo,
   PhysicalOperatorReasoningEffort,
@@ -155,12 +157,13 @@ export class PhysicalOperatorRuntime extends Service {
 
   /**
    * Return every registered Resident model/quota catalog in registration order.
+   * @param options - optional native model catalog refresh policy.
    * @returns the current validated Resident catalogs.
    */
-  async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]> {
+  async residentCatalogs(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog[]> {
     const catalogs = await Promise.all([...this.operators.values()].flatMap(async (operator) => {
       if (operator.residentCatalog === undefined) return []
-      const catalog = await operator.residentCatalog()
+      const catalog = await operator.residentCatalog(options)
       if (catalog.operatorId !== operator.descriptor.id) {
         throw new PhysicalOperatorError(
           `physical operator "${operator.descriptor.id}" published catalog for "${catalog.operatorId}"`,

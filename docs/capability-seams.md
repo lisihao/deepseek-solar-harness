@@ -18,6 +18,11 @@ flowchart LR
   pkg_llm_replay["llm-replay"]
   pkg_agent_loop["agent-loop"]
   pkg_compaction_basic["compaction-basic"]
+  pkg_model_catalog_local["model-catalog-local"]
+  svc_modelCatalogs["ctx.modelCatalogs<br/>Persistent account model catalog"]
+  pkg_host_apiproxy["host-apiproxy"]
+  pkg_tool_physical_operator["tool-physical-operator"]
+  pkg_physical_operator_chatgpt_web["physical-operator-chatgpt-web"]
   pkg_token_meter["token-meter"]
   svc_tokenMeter["ctx.tokenMeter<br/>Replay token measurement"]
   pkg_compaction_tool_result_pruner["compaction-tool-result-pruner"]
@@ -58,7 +63,6 @@ flowchart LR
   svc_physicalOperators["ctx.physicalOperators<br/>Physical operator registry"]
   pkg_physical_operator_subagent["physical-operator-subagent"]
   pkg_physical_operator_resident["physical-operator-resident"]
-  pkg_tool_physical_operator["tool-physical-operator"]
   pkg_resident_operator["resident-operator"]
   svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
   pkg_resident_operator_local["resident-operator-local"]
@@ -138,7 +142,6 @@ flowchart LR
   svc_commands["ctx.commands<br/>Human command registry"]
   pkg_session_projection["session-projection"]
   svc_sessionProjections["ctx.sessionProjections<br/>Session projection units"]
-  pkg_host_apiproxy["host-apiproxy"]
   pkg_session_projection_cache["session-projection-cache"]
   svc_sessionProjectionCache["ctx.sessionProjectionCache<br/>Persisted projection cache"]
   pkg_skill["skill"]
@@ -294,6 +297,7 @@ flowchart LR
   pkg_message_feedback --> svc_messageFeedback
   pkg_model_allocation --> svc_modelAllocation
   pkg_model_allocation_local --> svc_modelAllocation
+  pkg_model_catalog_local --> svc_modelCatalogs
   pkg_model_worker --> svc_modelWorkers
   pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
@@ -411,6 +415,10 @@ flowchart LR
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
   svc_modelAllocation --> pkg_orchestration_local
+  svc_modelCatalogs --> pkg_host_apiproxy
+  svc_modelCatalogs --> pkg_llm_deepseek
+  svc_modelCatalogs --> pkg_physical_operator_chatgpt_web
+  svc_modelCatalogs --> pkg_tool_physical_operator
   svc_modelWorkers --> pkg_orchestration_local
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
@@ -509,6 +517,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- | --- |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | `host-runtime`, [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | The host commits accepted images before session events; provider adapters resolve authorized durable references into provider-native content. |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | Adapters register provider implementations; the loop and compaction call the provider-neutral stream service. |
+| `ctx.modelCatalogs` | `core` | [`model-catalog-local`](../packages/llm/model-catalog-local) | - | [`host-apiproxy`](../packages/host/apiproxy), [`llm-deepseek`](../packages/llm/llm-deepseek), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`physical-operator-chatgpt-web`](../packages/physical-operator/physical-operator-chatgpt-web) | - | Discovery plugins register sources; the SQLite service stores complete inventories and the host projects available menu shortcuts. |
 | `ctx.tokenMeter` | `core` | [`token-meter`](../packages/llm/token-meter) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | Owns isolated per-session replay folds; pressure consumers share immutable revisioned measurements. |
 | `ctx.toolResultPruner` | `core` | [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | Rewrites oversized current tool results through replayable single-node surface replacements before summary compaction. |
 | `ctx.sessions` | `core` | [`session`](../packages/core/session) | - | [`agent-loop`](../packages/core/agent-loop), [`agent`](../packages/core/agent), [`session-persistence`](../packages/session/session-persistence), [`session-query`](../packages/session-query/session-query), [`session-query-sqlite`](../packages/session-query/session-query-sqlite), `subagent-inprocess`, [`invariants`](../packages/runtime-diagnostics/invariants), [`message-feedback`](../packages/feedback/message-feedback) | - | Owns append-only Session instances and emits the durable session event feed. |

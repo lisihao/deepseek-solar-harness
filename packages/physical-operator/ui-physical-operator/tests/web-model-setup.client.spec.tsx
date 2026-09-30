@@ -82,6 +82,21 @@ describe('ChatGPT Web model setup', () => {
     })
   })
 
+  it('passes a primary-menu model pin through to the duplicate Web control', async () => {
+    const request = vi.fn(async () => response({
+      active: false,
+      profile: { model: 'future/lattice-9', effort: 'sprint', modelSelectionPinned: true },
+      catalog,
+    }))
+
+    renderSetup(request, 'session-1')
+    const model = await screen.findByRole<HTMLSelectElement>('combobox', { name: 'ChatGPT Web 模型' })
+
+    expect(model.disabled).toBe(true)
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'ChatGPT Web 推理强度' }).disabled).toBe(false)
+    expect(screen.getByText('模型跟随主模型菜单')).toBeTruthy()
+  })
+
   it('retains a model preference save error in the nested controls', async () => {
     const request = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
       init?.method === 'POST'

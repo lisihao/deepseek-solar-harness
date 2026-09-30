@@ -21,6 +21,7 @@ import {
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
   type NativeContext,
+  type ResidentProviderQueryOptions,
   type ResidentProviderStatus,
   type ResidentProductDriver,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -71,6 +72,12 @@ interface ActiveTurn {
 interface ActiveCompaction {
   readonly controller: AbortController
   readonly done: Promise<unknown>
+}
+
+interface PendingQualification {
+  readonly refreshModels: boolean
+  readonly token: object
+  readonly promise: Promise<ResidentProviderStatus>
 }
 
 /** Construction inputs for one independent local daemon. */
@@ -155,6 +162,15 @@ function integerParam(params: Record<string, unknown>, name: string): number {
     throw new ResidentOperatorError(`resident protocol requires non-negative integer ${name}`, 'INVALID_RESULT')
   }
   return Number(value)
+}
+
+function refreshModelsParam(params: Record<string, unknown>): boolean {
+  const value = params.refresh_models
+  if (value === undefined) return false
+  if (typeof value !== 'boolean') {
+    throw new ResidentOperatorError('resident protocol refresh_models must be a boolean', 'INVALID_RESULT')
+  }
+  return value
 }
 
 function promptParam(params: Record<string, unknown>): ContentBlock[] {
@@ -296,7 +312,7 @@ export class ResidentDaemon {
   private readonly sockets = new Set<Socket>()
   private readonly active = new Map<string, ActiveTurn>()
   private readonly activeCompactions = new Map<string, ActiveCompaction>()
-  private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
+  private readonly qualifications = new Map<string, PendingQualification>()
   private readonly authentications = new Map<string, Promise<ResidentProviderStatus>>()
   private authorityOwned = false
   private closing = false
@@ -423,7 +439,9 @@ export class ResidentDaemon {
       case 'system.handshake':
         return this.handshake(params)
       case 'operator.list': {
-        const providers = await this.providerStatuses()
+        const providers = await this.providerStatuses(
+          refreshModelsParam(params) ? { refreshModels: true } : undefined,
+        )
         return { providers, sessions: this.store.list() }
       }
       case 'operator.authenticate':
@@ -521,22 +539,43 @@ export class ResidentDaemon {
     }
   }
 
-  private providerStatuses(): Promise<ResidentProviderStatus[]> {
-    return Promise.all([...this.drivers.values()].map(driver => this.qualify(driver)))
+  private providerStatuses(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]> {
+    return Promise.all([...this.drivers.values()].map(driver => this.qualify(driver, options)))
   }
 
-  private qualify(driver: ResidentProductDriver): Promise<ResidentProviderStatus> {
+  private qualify(
+    driver: ResidentProductDriver,
+    options?: ResidentProviderQueryOptions,
+  ): Promise<ResidentProviderStatus> {
+    const refreshModels = options?.refreshModels === true
     const current = this.qualifications.get(driver.operatorId)
-    if (current !== undefined) return current
-    const pending = driver.qualify().then(status => ({
+    if (current === undefined) return this.startQualification(driver, refreshModels)
+    if (!refreshModels || current.refreshModels) return current.promise
+    return this.startQualification(driver, true, current.promise)
+  }
+
+  private startQualification(
+    driver: ResidentProductDriver,
+    refreshModels: boolean,
+    after?: Promise<ResidentProviderStatus>,
+  ): Promise<ResidentProviderStatus> {
+    const options = refreshModels ? { refreshModels: true } : undefined
+    const qualification = after === undefined
+      ? driver.qualify(options)
+      : after.then(
+        () => driver.qualify(options),
+        () => driver.qualify(options),
+      )
+    const token = {}
+    const pending = qualification.then(status => ({
       ...status,
       supportsExplicitAuthentication: driver.authenticate !== undefined,
     })).finally(() => {
-      if (this.qualifications.get(driver.operatorId) === pending) {
+      if (this.qualifications.get(driver.operatorId)?.token === token) {
         this.qualifications.delete(driver.operatorId)
       }
     })
-    this.qualifications.set(driver.operatorId, pending)
+    this.qualifications.set(driver.operatorId, { refreshModels, token, promise: pending })
     return pending
   }
 

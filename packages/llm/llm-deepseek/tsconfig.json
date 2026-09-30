@@ -37,6 +37,9 @@
     },
     {
       "path": "../../identity/anonymous-user-id"
+    },
+    {
+      "path": "../../llm/model-catalog-local"
     }
   ]
 }

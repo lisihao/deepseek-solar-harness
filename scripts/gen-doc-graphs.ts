@@ -118,6 +118,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Adapters register provider implementations; the loop and compaction call the provider-neutral stream service.',
   },
   {
+    key: 'modelCatalogs',
+    pkg: 'model-catalog-local',
+    title: 'Persistent account model catalog',
+    mode: 'core',
+    consumers: ['host-apiproxy', 'llm-deepseek', 'tool-physical-operator', 'physical-operator-chatgpt-web'],
+    note: 'Discovery plugins register sources; the SQLite service stores complete inventories and the host projects available menu shortcuts.',
+  },
+  {
     key: 'tokenMeter',
     pkg: 'token-meter',
     title: 'Replay token measurement',

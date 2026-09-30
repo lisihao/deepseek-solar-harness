@@ -1,0 +1,147 @@
+{
+  "first": {
+    "calls": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "menu": {
+      "groups": [
+        "物理算子",
+        "DeepSeek"
+      ],
+      "models": [
+        "Fixture Codex Astra",
+        "Fixture Codex Sol",
+        "Fixture ChatGPT Pro",
+        "Fixture ChatGPT Thinking",
+        "Fixture DeepSeek Pro",
+        "Fixture DeepSeek Flash"
+      ]
+    },
+    "database": {
+      "sourceStates": [
+        {
+          "id": "deepseek:deepseek-official",
+          "menuVisible": 1,
+          "state": "ready",
+          "error": null
+        },
+        {
+          "id": "native:claude-code",
+          "menuVisible": 0,
+          "state": "ready",
+          "error": null
+        },
+        {
+          "id": "native:codex",
+          "menuVisible": 1,
+          "state": "ready",
+          "error": null
+        },
+        {
+          "id": "web:chatgpt-web",
+          "menuVisible": 1,
+          "state": "ready",
+          "error": null
+        }
+      ],
+      "inventoryCount": 14,
+      "availableCount": 14,
+      "dispatch": [
+        [
+          "deepseek-v3-legacy",
+          "deepseek-official",
+          "deepseek-v3-legacy"
+        ],
+        [
+          "deepseek-v4-flash",
+          "deepseek-official",
+          "deepseek-v4-flash"
+        ],
+        [
+          "deepseek-v4-pro",
+          "deepseek-official",
+          "deepseek-v4-pro"
+        ]
+      ]
+    }
+  },
+  "second": {
+    "calls": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "menu": {
+      "groups": [
+        "物理算子",
+        "DeepSeek"
+      ],
+      "models": [
+        "Fixture Codex Astra",
+        "Fixture Codex Sol",
+        "Fixture DeepSeek Next",
+        "Fixture DeepSeek Flash"
+      ]
+    },
+    "database": {
+      "sourceStates": [
+        {
+          "id": "deepseek:deepseek-official",
+          "menuVisible": 1,
+          "state": "ready",
+          "error": null
+        },
+        {
+          "id": "native:claude-code",
+          "menuVisible": 0,
+          "state": "ready",
+          "error": null
+        },
+        {
+          "id": "native:codex",
+          "menuVisible": 1,
+          "state": "ready",
+          "error": null
+        },
+        {
+          "id": "web:chatgpt-web",
+          "menuVisible": 1,
+          "state": "error",
+          "error": "fixture ChatGPT Web discovery failed"
+        }
+      ],
+      "inventoryCount": 15,
+      "unavailable": [
+        [
+          "deepseek:deepseek-official",
+          "deepseek-v4-pro",
+          "unavailable"
+        ],
+        [
+          "deepseek:deepseek-official",
+          "deepseek-v4-vision",
+          "unavailable"
+        ],
+        [
+          "web:chatgpt-web",
+          "chatgpt-web:fixture-fast",
+          "unknown"
+        ],
+        [
+          "web:chatgpt-web",
+          "chatgpt-web:fixture-pro",
+          "unknown"
+        ],
+        [
+          "web:chatgpt-web",
+          "chatgpt-web:fixture-thinking",
+          "unknown"
+        ]
+      ]
+    }
+  }
+}

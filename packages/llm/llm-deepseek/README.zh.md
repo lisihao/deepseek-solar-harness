@@ -40,6 +40,8 @@ harness LLM（大语言模型）seam 的 DeepSeek chat-completions 适配器：�
 
 设置 `discoverModels: false` 时，显式刷新不发出任何请求，目录就是 `models`。否则，显式调用 `ctx.llm.listModels('deepseek-official', { refresh: true })` 会向解析后的 `baseURL` 发出 `GET /models`，并使用与提供方请求相同的已解析凭据、应用归因和匿名请求 id。它只读取目录，绝不启动 chat completion 或推理（inference）。省略 options 或传入 `{ refresh: false }` 会在无网络 I/O 的情况下读取当前目录。成功刷新会替换缓存的实时 id；配置项仍保留自己的 name、description 和 modalities，而新报告的 id 只使用既有的仅 text selector 回退，不推断容量、输出上限或速率能力。协议中的无效、空或重复 id 会被丢弃。刷新失败会以提供方错误拒绝，但下一次普通读取仍保留最近成功的目录；缺少凭据会在网络 I/O 前以 `MISSING_CREDENTIAL` 拒绝。
 
+挂载可选的 `ctx.modelCatalogs` 服务时，本插件会注册 source `deepseek:deepseek-official`，并保留现有的 `deepseek-official` 调度路由。该 source 的刷新复用同一个只读 `GET /models`：返回的 id 以 `api-list` 证据标为 `available`，未出现在本次 listing 中的配置 id 保留为 `unknown`，证据为 `configuration`。设置 `discoverModels: false` 时，source 会报告未启用发现，而不会把配置 id 冒充账号观察结果。source 注册跟随插件 fiber 生命周期，且不会发起 completion 或推理请求。
+
 `contextWindow` 对每个已配置模型都可选，不会通过建议 catalog 公开。`ctx.llm.resolveModelInfo('deepseek-official', model).context` 先返回精确模型值，再对不含容量的配置项或未列出原样传递 id 返回 `defaultContextWindow`。适配器默认值为 1,000,000；因此，压力敏感插件可以获得由部署决定的容量，不会将模型 selector 视为权威。为 `deepseek-official` 注册另一个适配器会抛出 `LlmError('DUPLICATE_ADAPTER')`。
 
 `maxTokens` 是适配器为对话请求配置的输出上限，默认值为 256,000。Catalog 配置项可以自带 `maxTokens`，它对该模型胜出；不含该上限的配置项以及任何未列出原样传递 id 都解析为 profile 值，因此新增按模型的上限只改变一个模型，而非整条路由。确切模型解析会将胜出值公开为 `defaultMaxTokens`；`LlmRuntime` 会在 agent loop（智能体循环）写入 `request/header` 前，将该值填入 `GenerateOptions.maxTokens`，从而仍可根据持久记录重建协议请求。显式的请求值或 `AgentOptions.maxTokens` 值优先，并会序列化为 `max_tokens`。适配器不会根据 `contextWindow` 自动调低该请求预算；上下文或提供方输出上限较小的部署必须配置与其相容的 `maxTokens`。

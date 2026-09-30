@@ -7,9 +7,17 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CODEX_APP_SERVER_METHODS } from '@deepseek-ai/dsh-subagent-codex'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
+
+const claudeSdk = vi.hoisted(() => ({ query: vi.fn() }))
+vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@anthropic-ai/claude-agent-sdk')>()
+  claudeSdk.query.mockImplementation(actual.query)
+  return { ...actual, query: claudeSdk.query }
+})
+
 import {
   claudeEnvironment,
   claudeAuthenticationFailureCode,
@@ -102,6 +110,64 @@ describe('Claude Code resident driver environment', () => {
       else process.env.TEST_CLAUDE_AUTH_MARKER = previousMarker
       if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY
       else process.env.ANTHROPIC_API_KEY = previousApiKey
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it.runIf(process.platform !== 'win32')('refreshes the cached Claude model catalog without prompting or logging in', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-claude-model-catalog-'))
+    const executable = join(root, 'claude')
+    const marker = join(root, 'invocations.txt')
+    const previousPath = process.env.PATH
+    const previousMarker = process.env.TEST_CLAUDE_CATALOG_MARKER
+    const catalogs = [
+      [{
+        value: 'claude-old', displayName: 'Claude Old', description: 'Old catalog',
+        supportedEffortLevels: ['low'], supportsAdaptiveThinking: false,
+      }],
+      [{
+        value: 'claude-new', displayName: 'Claude New', description: 'New catalog',
+        supportedEffortLevels: ['high'], supportsAdaptiveThinking: true,
+      }],
+    ]
+    const supportedModels = vi.fn(async () => catalogs.shift() ?? [])
+    const close = vi.fn()
+    claudeSdk.query
+      .mockImplementationOnce(() => ({ supportedModels, close }) as never)
+      .mockImplementationOnce(() => ({ supportedModels, close }) as never)
+    try {
+      writeFileSync(executable, [
+        '#!/bin/sh',
+        'printf "%s\\n" "$*" >> "$TEST_CLAUDE_CATALOG_MARKER"',
+        'if [ "$1" = "--version" ]; then',
+        '  printf "%s\\n" "2.1.239 (Claude Code)"',
+        '  exit 0',
+        'fi',
+        'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then',
+        '  printf "%s\\n" \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"pro"}\'',
+        '  exit 0',
+        'fi',
+        'exit 64',
+        '',
+      ].join('\n'))
+      chmodSync(executable, 0o700)
+      process.env.PATH = [root, '/usr/bin', '/bin'].join(delimiter)
+      process.env.TEST_CLAUDE_CATALOG_MARKER = marker
+      const driver = new ClaudeCodeResidentDriver()
+
+      await expect(driver.qualify()).resolves.toMatchObject({ models: [{ model: 'claude-old' }] })
+      await expect(driver.qualify()).resolves.toMatchObject({ models: [{ model: 'claude-old' }] })
+      await expect(driver.qualify({ refreshModels: true })).resolves.toMatchObject({ models: [{ model: 'claude-new' }] })
+
+      expect(supportedModels).toHaveBeenCalledTimes(2)
+      expect(claudeSdk.query).toHaveBeenCalledTimes(2)
+      expect(close).toHaveBeenCalledTimes(2)
+      expect(readFileSync(marker, 'utf8')).not.toContain('auth login')
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      if (previousMarker === undefined) delete process.env.TEST_CLAUDE_CATALOG_MARKER
+      else process.env.TEST_CLAUDE_CATALOG_MARKER = previousMarker
       rmSync(root, { recursive: true, force: true })
     }
   })

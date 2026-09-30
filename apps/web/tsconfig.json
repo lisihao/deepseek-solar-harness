@@ -41,6 +41,7 @@
     "tests/models-settings.e2e.ts",
     "tests/default-model.e2e.ts",
     "tests/physical-routing.e2e.ts",
+    "tests/model-catalog.e2e.ts",
     "tests/declared-reasoning.e2e.ts",
     "tests/onboarding-deepseek-config.e2e.ts",
     "tests/onboarding-usable-provider.e2e.ts",
