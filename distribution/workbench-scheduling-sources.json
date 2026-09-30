@@ -1,0 +1,844 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Source manifest for migrating Codex Workbench scheduling code into DSH. Records what was read, at which revision and hash, and what happens to it. Nothing here proves a port, a test, or a deployment.",
+  "sources": {
+    "A": {
+      "role": "MacBook old main (base interfaces only)",
+      "repository": "/Users/sihaoli/Projects/Codex-Workbench",
+      "commit": "ff51e1e4ae098bf54e8215fe5c84b5e0676166aa",
+      "dirty": [
+        "docs/AI_INSTALL.md (modified)",
+        "_to_delete/",
+        "docs/audit-2026-09-07.html"
+      ],
+      "note": "Lacks priority_snapshots.py and model_alerts.py."
+    },
+    "B": {
+      "role": "Mac mini primary source",
+      "repository": "/Users/lisihao/Projects/Codex-Workbench",
+      "commit": "b358d53978ebc90c53e842c1626011cf40e73b6a",
+      "dirty": [],
+      "note": "Exact-commit extraction with git archive. Source HEAD only, not a deployed or accepted scheduling version."
+    },
+    "C": {
+      "role": "Unified-scheduling a3 implementation worktree",
+      "worktree": "/Volumes/MacMini-Active/workbench/worktrees/wb-unified-demand-radar-policy-r2-20260909/implement-unified-scheduling-a3",
+      "task": "wb-unified-demand-radar-policy-r2-20260909",
+      "commit": "6c040a5eb113c25346cdf93e0353846e27d0f42c",
+      "dirty": "24 tracked files changed (+1695/-367), 32 status entries; the work exists only in the working tree",
+      "note": "Task state needs_approval; verification indeterminate. Files are read from the working tree, not from a commit."
+    }
+  },
+  "findings": [
+    "Radar and AI Frontier provider sources and CLIs are byte-identical in A, B and C.",
+    "The provider tests in A and C are stale: 5 of 27 fail against the identical provider code. B passes 27 of 27 (Python 3.12).",
+    "B is newer than a3's base: quota.py, claude_quota.py, performance.py, planner.py, routing.py, routing_v3.py, execution_attribution.py and performance_report.py differ from A and C. The a3 patch must not be applied to B without a three-way merge.",
+    "priority_snapshots.py, model_alerts.py, their tests and docs/unified-scheduling-policy.md exist only in C."
+  ],
+  "files": [
+    {
+      "relativePath": "docs/unified-scheduling-policy.md",
+      "sha256": {
+        "A": null,
+        "B": null,
+        "C": "42427a1b9a506f94bbb29318e2231a4d103c2cf1d1b8a7661e828028866a5c24"
+      },
+      "baseline": "C",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Policy defaults (fusion 0.6/0.55/0.45, collection 30 min-24 h, activation 1 h-7 d) are unverified starting values, not measured optima."
+      ]
+    },
+    {
+      "relativePath": "plugins/codex-radar-provider/LICENSE-WineChord-Codex-Radar",
+      "sha256": {
+        "A": "5e3c7d3539fd4f5ed943bfb143c2e02cd384add58a7f6fa8aaa97b0fbde54012",
+        "B": "5e3c7d3539fd4f5ed943bfb143c2e02cd384add58a7f6fa8aaa97b0fbde54012",
+        "C": "5e3c7d3539fd4f5ed943bfb143c2e02cd384add58a7f6fa8aaa97b0fbde54012"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/LICENSE-WineChord-Codex-Radar",
+      "license": "MIT (wineandchord/codex-radar)",
+      "tests": [],
+      "knownGaps": [
+        "MIT notice of the upstream WineChord/codex-radar the provider derives from; must ship with the copied provider."
+      ]
+    },
+    {
+      "relativePath": "pyproject.toml",
+      "sha256": {
+        "A": "2acf6315d4f2376bd92c7db2ae2579a24609c13ef6a9f6065fcd915f8b5783a7",
+        "B": "0c574a004620757654ed4985ac0e41a030598ac252506f326c0c00d230e1790a",
+        "C": "11eb02ef41b02478be2cd1bbee05fd6725d412e53f2578af5f58ddfbe801ecd8"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "requires-python >=3.11; the repository root has no LICENSE file, so copied Workbench code rests on the owner authorization in the migration request."
+      ]
+    },
+    {
+      "relativePath": "scripts/install-squilla-advisor.py",
+      "sha256": {
+        "A": "58e2e466dcffb38465ecd22dd035b67b1895ba1a216677bd33efe15d60dd8524",
+        "B": "58e2e466dcffb38465ecd22dd035b67b1895ba1a216677bd33efe15d60dd8524",
+        "C": "58e2e466dcffb38465ecd22dd035b67b1895ba1a216677bd33efe15d60dd8524"
+      },
+      "baseline": "C",
+      "action": "adapt",
+      "destination": "python/scheduling-demand/install-squilla-advisor.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_squilla_advisor.py",
+        "tests/test_squilla_installer.py"
+      ],
+      "knownGaps": [
+        "OpenSquilla code and model-weight licenses are separate and were not audited; the weights are never bundled."
+      ]
+    },
+    {
+      "relativePath": "src/ai_frontier_provider/__init__.py",
+      "sha256": {
+        "A": "408900f23085a7436ba3bbcbfc586a894bf435106bd7156889442b0d5f2352b9",
+        "B": "408900f23085a7436ba3bbcbfc586a894bf435106bd7156889442b0d5f2352b9",
+        "C": "408900f23085a7436ba3bbcbfc586a894bf435106bd7156889442b0d5f2352b9"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/src/ai_frontier_provider/__init__.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_ai_frontier_provider.py"
+      ],
+      "knownGaps": []
+    },
+    {
+      "relativePath": "src/ai_frontier_provider/cli.py",
+      "sha256": {
+        "A": "8b8e88e3a64e45513a437447107b90920d063eeec4b6930a89ea992757e0eef0",
+        "B": "8b8e88e3a64e45513a437447107b90920d063eeec4b6930a89ea992757e0eef0",
+        "C": "8b8e88e3a64e45513a437447107b90920d063eeec4b6930a89ea992757e0eef0"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/src/ai_frontier_provider/cli.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_ai_frontier_provider.py"
+      ],
+      "knownGaps": []
+    },
+    {
+      "relativePath": "src/ai_frontier_provider/provider.py",
+      "sha256": {
+        "A": "ce6a324da416be2da54e31b61f6f26ff66558682322286b38aa13242eee2fb67",
+        "B": "ce6a324da416be2da54e31b61f6f26ff66558682322286b38aa13242eee2fb67",
+        "C": "ce6a324da416be2da54e31b61f6f26ff66558682322286b38aa13242eee2fb67"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/src/ai_frontier_provider/provider.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_ai_frontier_provider.py"
+      ],
+      "knownGaps": []
+    },
+    {
+      "relativePath": "src/codex_radar_provider/__init__.py",
+      "sha256": {
+        "A": "45c5e4d1c21c8f56960f651f3ac4268a673042825046a13b3c4b62a7c7ce565a",
+        "B": "45c5e4d1c21c8f56960f651f3ac4268a673042825046a13b3c4b62a7c7ce565a",
+        "C": "45c5e4d1c21c8f56960f651f3ac4268a673042825046a13b3c4b62a7c7ce565a"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/src/codex_radar_provider/__init__.py",
+      "license": "MIT (wineandchord/codex-radar)",
+      "tests": [
+        "tests/test_radar_provider.py"
+      ],
+      "knownGaps": []
+    },
+    {
+      "relativePath": "src/codex_radar_provider/cli.py",
+      "sha256": {
+        "A": "f965340c327afbf533cefb97a1ece72e2f8afe16a76b4a69f2904c8436e84ee8",
+        "B": "f965340c327afbf533cefb97a1ece72e2f8afe16a76b4a69f2904c8436e84ee8",
+        "C": "f965340c327afbf533cefb97a1ece72e2f8afe16a76b4a69f2904c8436e84ee8"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/src/codex_radar_provider/cli.py",
+      "license": "MIT (wineandchord/codex-radar)",
+      "tests": [
+        "tests/test_radar_provider.py"
+      ],
+      "knownGaps": []
+    },
+    {
+      "relativePath": "src/codex_radar_provider/provider.py",
+      "sha256": {
+        "A": "db444ac0980166a1f4a639a98e6fbc0606fb7ebabbaca35b6afb64293e7f20d2",
+        "B": "db444ac0980166a1f4a639a98e6fbc0606fb7ebabbaca35b6afb64293e7f20d2",
+        "C": "db444ac0980166a1f4a639a98e6fbc0606fb7ebabbaca35b6afb64293e7f20d2"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/src/codex_radar_provider/provider.py",
+      "license": "MIT (wineandchord/codex-radar)",
+      "tests": [
+        "tests/test_radar_provider.py"
+      ],
+      "knownGaps": []
+    },
+    {
+      "relativePath": "src/codex_workbench/ai_frontier.py",
+      "sha256": {
+        "A": "fa7d8d895aad8fb75affd8484c423bfd7521fff84c60ff8c5a02bc41c657b2c4",
+        "B": "fa7d8d895aad8fb75affd8484c423bfd7521fff84c60ff8c5a02bc41c657b2c4",
+        "C": "f9a52dca9b3e6d89c9d2dc3e63bf05cb83b250a0779520acf75a3e66ea0c6981"
+      },
+      "baseline": "C",
+      "action": "rewrite",
+      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "C differs from A and B; a3 was cut from 6c040a5e, older than B."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/capabilities.py",
+      "sha256": {
+        "A": "894a100c4f36f49818023b920c17acf2ca13d968d6afb59c300fb95fffb315b5",
+        "B": "894a100c4f36f49818023b920c17acf2ca13d968d6afb59c300fb95fffb315b5",
+        "C": "dcc96cf9f3e129c3819d2e8c132d25bb0d8b0bc73330996ff3a5e8450f6bf357"
+      },
+      "baseline": "C",
+      "action": "rewrite",
+      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "C differs from A and B; a3 was cut from 6c040a5e, older than B."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/claude_quota.py",
+      "sha256": {
+        "A": "311d1b7b3786cd796a5e9e8b3dc80feb7365b0f100ccbdc89bad6bdfd05b8b35",
+        "B": "584d49daed8eb1db2e959a614a70ec1e0925a8f144a60a36211f01dea5a4e42c",
+        "C": "52620c2168cefee2fa50d57a9bbda0ba259ab034c7f514f97f42fe866ce3d4a5"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/config.py",
+      "sha256": {
+        "A": "a99bbf36aed1b4c71719bcd29b6af5739dc787b466ae713ba559b0f4bdc06564",
+        "B": "a99bbf36aed1b4c71719bcd29b6af5739dc787b466ae713ba559b0f4bdc06564",
+        "C": "feb41102967dcf6abef8690a2dc3ae7db83a29ce7f2e7586ce772a61303a8be0"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/data/model-performance-baseline-v1.json",
+      "sha256": {
+        "A": "a3f68cfb695e0a31d0706aff9103c246680d971e706fa56065283c1b509d7a3e",
+        "B": "a3f68cfb695e0a31d0706aff9103c246680d971e706fa56065283c1b509d7a3e",
+        "C": "a3f68cfb695e0a31d0706aff9103c246680d971e706fa56065283c1b509d7a3e"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Static research baseline, not calibrated success rates; must not auto-enable old models."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/data/opensquilla-router-source.json",
+      "sha256": {
+        "A": "895c0f7540aa1b35fa34a19bf713e192a14e0de5c3f1fd1978bf2c7e52ea54de",
+        "B": "895c0f7540aa1b35fa34a19bf713e192a14e0de5c3f1fd1978bf2c7e52ea54de",
+        "C": "895c0f7540aa1b35fa34a19bf713e192a14e0de5c3f1fd1978bf2c7e52ea54de"
+      },
+      "baseline": "C",
+      "action": "adapt",
+      "destination": "python/scheduling-demand/opensquilla-router-source.json",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_squilla_advisor.py",
+        "tests/test_squilla_installer.py"
+      ],
+      "knownGaps": [
+        "OpenSquilla code and model-weight licenses are separate and were not audited; the weights are never bundled."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/evidence.py",
+      "sha256": {
+        "A": "dd8b90fdcd29e038bd5936b12113cda9cb204e2fe69402e46aadf3fee503bcdd",
+        "B": "dd8b90fdcd29e038bd5936b12113cda9cb204e2fe69402e46aadf3fee503bcdd",
+        "C": "dd8b90fdcd29e038bd5936b12113cda9cb204e2fe69402e46aadf3fee503bcdd"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/execution_attribution.py",
+      "sha256": {
+        "A": null,
+        "B": "3d1a96eec1d406e05cc0f6a174d5d8b65e112af305c9e0e640116067b09930aa",
+        "C": "89391730ceaf13f24606e6967bac4e15c66c0532c0a5aba5bee1cb684976050b"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/model_alerts.py",
+      "sha256": {
+        "A": null,
+        "B": null,
+        "C": "2a25539d71e2d558399421be95bc81f28b61b1508e4eb1830bd98566241f621f"
+      },
+      "baseline": "C",
+      "action": "rewrite",
+      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_model_alerts.py"
+      ],
+      "knownGaps": [
+        "Exists only in the uncommitted a3 worktree; absent from A and B.",
+        "priority_snapshots imports ai_frontier, capabilities, config, model_alerts, performance, radar."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/performance.py",
+      "sha256": {
+        "A": "53d7ff9d4a436bbd58d72c45f751d436e1c9d210f40ab5549466ef51c15951c9",
+        "B": "da95c369495afc4599716774ebff41ca5dd97f67b0886ec987378517b2c15668",
+        "C": "a7652f529e694440e3247c9f04e9774ed2260360fa8d15d19eeffde32f4d443d"
+      },
+      "baseline": "B+C",
+      "action": "rewrite",
+      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "C differs from A and B; a3 was cut from 6c040a5e, older than B.",
+        "Imports model_identities.py, which this manifest does not list; fetch it before porting.",
+        "A, B and C all differ: three-way merge required."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/performance_report.py",
+      "sha256": {
+        "A": "9de975526b06d97cfa86f2fe282abfd91b44643b5bc714c1b26e81799c9795e7",
+        "B": "2ad2dabf1246bd6420d129279dd2c7f89579ccf9a092e0b1e71e742d80af5f22",
+        "C": "2ad2dabf1246bd6420d129279dd2c7f89579ccf9a092e0b1e71e742d80af5f22"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/planner.py",
+      "sha256": {
+        "A": "3324fef8057f82c6edaf74a4c6fb54dc431a50bdf18ce62520e787957daae879",
+        "B": "ab20984e1475bbb034ec750b57f8371ae9c64945de32deda474705bfe9993ab1",
+        "C": "fe730ebfbf507be7c7624baf6156e651c1553c693f367818d46d4fd5936b8724"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/priority_snapshots.py",
+      "sha256": {
+        "A": null,
+        "B": null,
+        "C": "87c83926346b0f545de123e21dcc946c8251e87fdb08145cd2f42abf5fcf127c"
+      },
+      "baseline": "C",
+      "action": "rewrite",
+      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_priority_snapshots.py"
+      ],
+      "knownGaps": [
+        "Exists only in the uncommitted a3 worktree; absent from A and B.",
+        "priority_snapshots imports ai_frontier, capabilities, config, model_alerts, performance, radar."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/public_evidence_ranking.py",
+      "sha256": {
+        "A": "47b591ca6a75392359303f5a4c306ab45ce6b563bbdf1f7e94c5fec90c90b35c",
+        "B": "47b591ca6a75392359303f5a4c306ab45ce6b563bbdf1f7e94c5fec90c90b35c",
+        "C": "97d7abcc805cbb8533fd0a1ad90604038c2fdee206bce73cfe13fb5e3353d696"
+      },
+      "baseline": "C",
+      "action": "rewrite",
+      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "C differs from A and B; a3 was cut from 6c040a5e, older than B."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/quota.py",
+      "sha256": {
+        "A": "d5a2a7f0bbaaa9af4a050f25b61be22e07e5713ad9ee6149a661f442b1d707a1",
+        "B": "31564c873e1d43d691f374196fc554b3fc863fbbc26b7fcba3efb1a852822bbf",
+        "C": "d5a2a7f0bbaaa9af4a050f25b61be22e07e5713ad9ee6149a661f442b1d707a1"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/quota_productivity.py",
+      "sha256": {
+        "A": "3193f60090d440b9d44b64bfd6577a29b8fb4977c31a109fc98d98361be7f3d6",
+        "B": "3193f60090d440b9d44b64bfd6577a29b8fb4977c31a109fc98d98361be7f3d6",
+        "C": "3193f60090d440b9d44b64bfd6577a29b8fb4977c31a109fc98d98361be7f3d6"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/radar.py",
+      "sha256": {
+        "A": "88eb544205ec68b804aa433c412999df26797bf215af47c1a3a80a7a9b7777b2",
+        "B": "88eb544205ec68b804aa433c412999df26797bf215af47c1a3a80a7a9b7777b2",
+        "C": "c5ec34c9bf2cc7c69929927e22ce5a84b246e077b5b2e70bdfa452535400b7d0"
+      },
+      "baseline": "C",
+      "action": "rewrite",
+      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "C differs from A and B; a3 was cut from 6c040a5e, older than B."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/routing.py",
+      "sha256": {
+        "A": "847d5f355d5b3a7aab886a7a2a57daf23b7baea4b66103d34f79da2f4b4f20b3",
+        "B": "35fe54a5ddd134340a6508656f6d63f8b9f7639f8123656acf00f1ad475fa715",
+        "C": "567c45033d5006c10c54b492cd09fa36405bcc8b63353e8ceda7391f4e3339e0"
+      },
+      "baseline": "B+C",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "A, B and C all differ. Extract hard gates, ordering and receipts; do not copy the v1/v2 + v3 double decision."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/routing_evaluation.py",
+      "sha256": {
+        "A": "78eda122971ad7818db52e9dd1973914612770dd921a9342d557f860774a54ca",
+        "B": "78eda122971ad7818db52e9dd1973914612770dd921a9342d557f860774a54ca",
+        "C": "78eda122971ad7818db52e9dd1973914612770dd921a9342d557f860774a54ca"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Workbench host dependency (planner, config, quota, attribution, evidence); read for semantics only."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/routing_v3.py",
+      "sha256": {
+        "A": "81ecd788ea4cb2605e13b5ad3dc8b7ce9a9d618bc10efb600614270314cbfeb3",
+        "B": "f28a0ee2dddcd6d21815c3484d3ac79b0803343be739618ffbc48fe58dbe76f3",
+        "C": "aab4533a16e0ad3920fa594a3dae38e7a9f481b53c874fe54ea90b43b53ced8b"
+      },
+      "baseline": "B+C",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "A, B and C all differ. Extract hard gates, ordering and receipts; do not copy the v1/v2 + v3 double decision."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/squilla_advisor.py",
+      "sha256": {
+        "A": "f80e3876ffe4ea4361e9a8a2a7e89e1b2079ff862d4a505d0fee1035c010ef29",
+        "B": "f80e3876ffe4ea4361e9a8a2a7e89e1b2079ff862d4a505d0fee1035c010ef29",
+        "C": "a2abbea9302cfe46412d6ea2088afd277f3565971eae7b8774db721c47fb7c2e"
+      },
+      "baseline": "C",
+      "action": "adapt",
+      "destination": "python/scheduling-demand/squilla_advisor.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_squilla_advisor.py",
+        "tests/test_squilla_planner_wiring.py"
+      ],
+      "knownGaps": [
+        "Imports codex_workbench.config; the request/advice types must be lifted out of the Workbench config."
+      ]
+    },
+    {
+      "relativePath": "src/codex_workbench/squilla_advisor_worker.py",
+      "sha256": {
+        "A": "fa85f4a6961d987c9a03308c962a00d4875180bf9c15fd9e98d54c57c22fe9d7",
+        "B": "fa85f4a6961d987c9a03308c962a00d4875180bf9c15fd9e98d54c57c22fe9d7",
+        "C": "fa85f4a6961d987c9a03308c962a00d4875180bf9c15fd9e98d54c57c22fe9d7"
+      },
+      "baseline": "C",
+      "action": "adapt",
+      "destination": "python/scheduling-demand/squilla_advisor_worker.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [
+        "tests/test_squilla_advisor.py",
+        "tests/test_squilla_installer.py"
+      ],
+      "knownGaps": [
+        "OpenSquilla code and model-weight licenses are separate and were not audited; the weights are never bundled."
+      ]
+    },
+    {
+      "relativePath": "tests/test_ai_frontier_provider.py",
+      "sha256": {
+        "A": "4bf4929b1aa84d2a9326a604e25f096eef86173f8bea7378cbac3798f0ec0803",
+        "B": "6af305c5c35ac27318e176bacdacd63592783294a124aa644727a9fc0cf668d8",
+        "C": "4bf4929b1aa84d2a9326a604e25f096eef86173f8bea7378cbac3798f0ec0803"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/tests/test_ai_frontier_provider.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "A and C hold older versions that fail 5 of 27 tests against the identical provider code; B is the baseline."
+      ]
+    },
+    {
+      "relativePath": "tests/test_ai_frontier_workbench.py",
+      "sha256": {
+        "A": "3dbccf6ade04b003f64dbbf4af32f1e6c7f6709547b1d562600ca4b06720f804",
+        "B": "3dbccf6ade04b003f64dbbf4af32f1e6c7f6709547b1d562600ca4b06720f804",
+        "C": "3dbccf6ade04b003f64dbbf4af32f1e6c7f6709547b1d562600ca4b06720f804"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_capabilities.py",
+      "sha256": {
+        "A": "510ba3a5df906fc02502784f6315aec5660e15a505682d3c47d6dd3593e512df",
+        "B": "510ba3a5df906fc02502784f6315aec5660e15a505682d3c47d6dd3593e512df",
+        "C": "a975ccacf0d7f9fdea34144e958e0ff33fec907edb69c88d3b495a5175d5198d"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_model_alerts.py",
+      "sha256": {
+        "A": null,
+        "B": null,
+        "C": "eec4f8f32e4cdbc26208ef94bba736b1a4dabbd09977365deab1478a046676c0"
+      },
+      "baseline": "C",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_performance.py",
+      "sha256": {
+        "A": "46d42a0e618a14d969e21c73d3576da38e6ef9b62fbde91a8c02775680ce41f4",
+        "B": "ed17a8c616764abf4dbe0be14609cff135eba227944d59c6dbcf48d5764d9188",
+        "C": "897f4abf62a1861dd680a59b76e8d6bcc2c2eddf8677936ac4f13c92c503931c"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_performance_identity_integration.py",
+      "sha256": {
+        "A": "c3c12c1d49f642694b069311f731fd803257d5d885b36471543f0c2dca10429c",
+        "B": "c3c12c1d49f642694b069311f731fd803257d5d885b36471543f0c2dca10429c",
+        "C": "c3c12c1d49f642694b069311f731fd803257d5d885b36471543f0c2dca10429c"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_priority_snapshots.py",
+      "sha256": {
+        "A": null,
+        "B": null,
+        "C": "69a8ce4d1930c43c8bbd4cdf827d3b6a86e7718ada5c615701daf4117d185190"
+      },
+      "baseline": "C",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_public_evidence_ranking.py",
+      "sha256": {
+        "A": "02dfbe98c7bdc7e10a35a8296197181d256d7581fcd7634ebcab60d177856256",
+        "B": "02dfbe98c7bdc7e10a35a8296197181d256d7581fcd7634ebcab60d177856256",
+        "C": "b3f9b7ed49b59aa4634dc1109dfdc460f3b051d73fdfa7aea7ef1d97f5070419"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_radar_provider.py",
+      "sha256": {
+        "A": "a2a3e4b5c06261b07fbbb4abc872964cdf88e0464c5fbe9517f2fb34cb203c23",
+        "B": "4b6842d288415ae92f945dc02c451393e47eb028db57e653d2e2169ac8dd94ca",
+        "C": "a2a3e4b5c06261b07fbbb4abc872964cdf88e0464c5fbe9517f2fb34cb203c23"
+      },
+      "baseline": "B",
+      "action": "copy",
+      "destination": "python/scheduling-evidence/tests/test_radar_provider.py",
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "A and C hold older versions that fail 5 of 27 tests against the identical provider code; B is the baseline."
+      ]
+    },
+    {
+      "relativePath": "tests/test_radar_workbench.py",
+      "sha256": {
+        "A": "647f891d26235a3d12a6eaa3ee52f601cfdbb9b0fc30c6acd49a66a1a09491bb",
+        "B": "647f891d26235a3d12a6eaa3ee52f601cfdbb9b0fc30c6acd49a66a1a09491bb",
+        "C": "4e8c86ff01e309fc4c15d854682f74dfa03b6e406ec2fb65895d643c6549ddd9"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_routing.py",
+      "sha256": {
+        "A": "f1c36dcb02272162b0a731d063c0f8b9150cdf7657a783d3dc02dae49db808a5",
+        "B": "1916f721b9fb35d733da13e2bf5f9e238e0dcb9488207298dcb57fb9645a9889",
+        "C": "e390ba692c44f705da328c3f26d04a35934a316b0023a051cd8284617e7f6617"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_routing_evaluation.py",
+      "sha256": {
+        "A": "3bd7371d775fd68e87f3ace7b23d992d9fdc8764d778fb6148f38c5fc29feab4",
+        "B": "3bd7371d775fd68e87f3ace7b23d992d9fdc8764d778fb6148f38c5fc29feab4",
+        "C": "ec09b2eadd5f823744f35267b779b529517ae3ab3e5c265df57bb27f312c57eb"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_routing_v3.py",
+      "sha256": {
+        "A": "1e2a215d70df48d40b92ef4ab89fae50ed7809ef31b88eb60465b5e18b0f30ed",
+        "B": "dc2344fa0b3fa5da21c81a044b9556f6d22cac9cf7d717ab1935948a645d027e",
+        "C": "d43fae675325cae247506d4eaee2532b717fcb63ed6cc9c2610130c445015335"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_routing_v3_public_evidence.py",
+      "sha256": {
+        "A": "d3ae54e551d9ea93f7442a4a1f8c0d7aa86d215b7f6b916a9ba8fded8bb76390",
+        "B": "d3ae54e551d9ea93f7442a4a1f8c0d7aa86d215b7f6b916a9ba8fded8bb76390",
+        "C": "e77bb96e8c92915f301928350ed7eba90369b92f78137e6a8c0aa98c86e7f10f"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_squilla_advisor.py",
+      "sha256": {
+        "A": "ed09da0280bf477adbd20d6cfd10857c0b01f507adf6fdfbffb96fc11ff294a9",
+        "B": "ed09da0280bf477adbd20d6cfd10857c0b01f507adf6fdfbffb96fc11ff294a9",
+        "C": "0214268b5706045f82b348970b2cb07dbe0b7909c13b5b7dead70e0037923c88"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_squilla_installer.py",
+      "sha256": {
+        "A": "0f34169748b22ad4f3f662d64cbf72f10d5001d95aa9c2bc71347c110081ddd2",
+        "B": "0f34169748b22ad4f3f662d64cbf72f10d5001d95aa9c2bc71347c110081ddd2",
+        "C": "0f34169748b22ad4f3f662d64cbf72f10d5001d95aa9c2bc71347c110081ddd2"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    },
+    {
+      "relativePath": "tests/test_squilla_planner_wiring.py",
+      "sha256": {
+        "A": "5b96dd362bb4b30c12d045c8950649a62dc9b0145cdafc07e50be370f154d677",
+        "B": "61a2b850ccbc569ca7a1a40380cd4dade4637ed30832e2db83679dea1a814e6e",
+        "C": "63a332ea1a5dd9f6215536d63c5016afb10bc1f3cd5d4e5f8363471183bada5a"
+      },
+      "baseline": "B",
+      "action": "reference",
+      "destination": null,
+      "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
+      "tests": [],
+      "knownGaps": [
+        "Golden vectors and fixtures are extracted per ported function."
+      ]
+    }
+  ]
+}
