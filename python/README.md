@@ -10,6 +10,7 @@ Python packages for driving DeepSeek Harness as a subprocess. The client SDK com
 |---|---|---|
 | [sdk](sdk/README.md) | `deepseek-harness-sdk` / `deepseek_harness` | High-level turns API and lower-level JSON-RPC client |
 | [sdk-runtime](sdk-runtime/README.md) | `deepseek-harness-runtime-bin` / `deepseek_harness_runtime` | Bundled runtime binaries and default agent configuration |
+| [scheduling-evidence](scheduling-evidence/README.md) | unpublished / `codex_radar_provider`, `ai_frontier_provider` | Radar and AI Frontier evidence collectors for scheduling |
 
 ## Behavior
 
