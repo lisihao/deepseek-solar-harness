@@ -123,6 +123,9 @@ const processBoundTests = [
   // responsiveness contract. Keep it off the shared fork pool so a small CI
   // runner cannot spend that contract competing with aggregate build gates.
   'packages/client/ui-primitives/tests/code-block.client.spec.tsx',
+  // Real nested Worker termination and fault-injection cases share the
+  // process-sensitive lifecycle of the worker-session suite.
+  'packages/workflow/workflow-worker-thread/tests/workflow-worker-thread.spec.ts',
   'packages/workflow/workflow-worker-thread/tests/session.spec.ts',
 ]
 
