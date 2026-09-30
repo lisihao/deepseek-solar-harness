@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from '../src/store.ts'
+import {
+  canonicalCompactRequestHash,
+  canonicalNativeToolCatalogHash,
+  canonicalRequestHash,
+  ResidentStore,
+} from '../src/store.ts'
 
 const roots: string[] = []
 const PROFILE = { model: 'test-model', effort: 'high' as const }
@@ -33,6 +38,55 @@ describe('ResidentStore', () => {
 
     expect(first).not.toBe(second)
     expect(first).not.toBe(legacy)
+  })
+
+  it('canonicalizes native tool catalogs independently of tool and schema key order', () => {
+    const first = {
+      version: 1 as const,
+      socketPath: '/tmp/first.sock',
+      sessionId: 'first-owner-session',
+      tools: [
+        {
+          name: 'read_file',
+          description: 'Read one file.',
+          inputSchema: {
+            type: 'object',
+            properties: { path: { type: 'string' }, encoding: { type: 'string' } },
+            required: ['path'],
+          },
+        },
+        {
+          name: 'write_file',
+          description: 'Write one file.',
+          inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },
+        },
+      ],
+    }
+    const reordered = {
+      version: 1 as const,
+      socketPath: '/tmp/reconnected.sock',
+      sessionId: 'reconnected-owner-session',
+      tools: [
+        first.tools[1]!,
+        {
+          name: 'read_file',
+          description: 'Read one file.',
+          inputSchema: {
+            required: ['path'],
+            properties: { encoding: { type: 'string' }, path: { type: 'string' } },
+            type: 'object',
+          },
+        },
+      ],
+    }
+
+    const hash = canonicalNativeToolCatalogHash('dsh-tools-authoritative', first)
+    expect(canonicalNativeToolCatalogHash('dsh-tools-authoritative', reordered)).toBe(hash)
+    expect(canonicalNativeToolCatalogHash('disabled', reordered)).not.toBe(hash)
+    expect(canonicalNativeToolCatalogHash('dsh-tools-authoritative', {
+      ...reordered,
+      tools: [{ ...reordered.tools[0]!, description: 'Replace one file.' }, reordered.tools[1]!],
+    })).not.toBe(hash)
   })
 
   it('deduplicates one command and rejects conflicting content', () => {
@@ -303,6 +357,38 @@ describe('ResidentStore', () => {
     migrated.close()
   })
 
+  it('migrates schema v5 catalog state without losing a native session or settled receipt', () => {
+    const path = root()
+    const bootstrap = new ResidentStore(path)
+    const accepted = bootstrap.accept('v5-source', 'v5-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    bootstrap.markRunning('v5-source', 'v5-native', 'v5-turn')
+    bootstrap.settle('v5-source', { output: [], stopReason: 'completed' })
+    bootstrap.close()
+
+    const legacy = new DatabaseSync(join(path, 'state.sqlite'))
+    legacy.exec('ALTER TABLE resident_sessions DROP COLUMN native_tool_catalog_sha256; PRAGMA user_version = 5;')
+    legacy.close()
+
+    const migrated = new ResidentStore(path)
+    expect(migrated.inspectSession(accepted.sessionId)).toMatchObject({ nativeSessionId: 'v5-native' })
+    expect(migrated.inspectTurn(accepted.turnId)).toMatchObject({ state: 'settled', nativeTurnId: 'v5-turn' })
+    const columns = (migrated as unknown as { db: DatabaseSync }).db
+      .prepare('PRAGMA table_info(resident_sessions)').all() as Array<{ name: string }>
+    expect(columns.map(column => column.name)).toContain('native_tool_catalog_sha256')
+    const authoritativeBridge = {
+      version: 1 as const,
+      socketPath: '/tmp/v5-authoritative.sock',
+      sessionId: 'v5-authoritative-owner',
+      tools: [{ name: 'read_file', description: 'Read one file.', inputSchema: { type: 'object' } }],
+    }
+    expect(() => migrated.accept(
+      'v5-authoritative-resume', 'v5-authoritative-resume-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', authoritativeBridge,
+    )).toThrow(expect.objectContaining({ code: 'PROTOCOL_MISMATCH', message: expect.stringContaining('session.reset') as unknown }))
+    expect(migrated.inspectTurn(accepted.turnId)).toMatchObject({ state: 'settled' })
+    migrated.close()
+  })
+
   it('keeps a settled product terminal healthy and owner-only on disk', () => {
     const path = root()
     const store = new ResidentStore(path)
@@ -386,6 +472,124 @@ describe('ResidentStore', () => {
     expect(reset.executionProfile).toBeUndefined()
     expect(reset.stateRevision).toBe(snapshot.stateRevision + 1)
     store.close()
+  })
+
+  it('rejects a changed Codex catalog until an explicit reset clears its native association', () => {
+    const store = new ResidentStore(root())
+    const firstBridge = {
+      version: 1 as const,
+      socketPath: '/tmp/catalog-first.sock',
+      sessionId: 'catalog-first-owner',
+      tools: [{
+        name: 'read_file', description: 'Read one file.',
+        inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+      }],
+    }
+    const secondBridge = {
+      ...firstBridge,
+      socketPath: '/tmp/catalog-second.sock',
+      sessionId: 'catalog-second-owner',
+      tools: [{
+        name: 'read_file', description: 'Read one file.',
+        inputSchema: { type: 'object', properties: { path: { type: 'string' }, encoding: { type: 'string' } }, required: ['path'] },
+      }],
+    }
+    const first = store.accept(
+      'catalog-source', 'catalog-source-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', firstBridge,
+    )
+    store.markRunning(
+      'catalog-source', 'catalog-native', 'catalog-turn',
+      canonicalNativeToolCatalogHash('dsh-tools-authoritative', firstBridge),
+    )
+    store.settle('catalog-source', { output: [], stopReason: 'completed' })
+    const beforeReset = store.inspectSession(first.sessionId)
+
+    expect(() => store.accept(
+      'catalog-changed', 'catalog-changed-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', secondBridge,
+    )).toThrow(expect.objectContaining({ code: 'PROTOCOL_MISMATCH', message: expect.stringContaining('session.reset') as unknown }))
+    expect(store.inspectSession(first.sessionId)).toMatchObject({ nativeSessionId: 'catalog-native', latestTurn: { commandId: 'catalog-source' } })
+
+    const reset = store.reset(first.sessionId, beforeReset.stateRevision, 'catalog changed')
+    expect(reset.nativeSessionId).toBeUndefined()
+    const resumed = store.accept(
+      'catalog-after-reset', 'catalog-after-reset-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', secondBridge,
+    )
+    expect(resumed.sessionId).toBe(first.sessionId)
+    store.close()
+  })
+
+  it('persists a known Codex catalog across reopen and admits a reordered descriptor', () => {
+    const path = root()
+    const firstBridge = {
+      version: 1 as const,
+      socketPath: '/tmp/reopen-first.sock',
+      sessionId: 'reopen-first-owner',
+      tools: [
+        { name: 'read_file', description: 'Read one file.', inputSchema: { type: 'object' } },
+        { name: 'write_file', description: 'Write one file.', inputSchema: { type: 'object' } },
+      ],
+    }
+    const first = new ResidentStore(path)
+    const accepted = first.accept(
+      'reopen-source', 'reopen-source-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', firstBridge,
+    )
+    const catalogHash = canonicalNativeToolCatalogHash('dsh-tools-authoritative', firstBridge)
+    first.markRunning('reopen-source', 'reopen-native', 'reopen-turn', catalogHash)
+    first.settle('reopen-source', { output: [], stopReason: 'completed' })
+    first.close()
+
+    const reopened = new ResidentStore(path)
+    const reorderedBridge = {
+      ...firstBridge,
+      socketPath: '/tmp/reopen-second.sock',
+      sessionId: 'reopen-second-owner',
+      tools: [firstBridge.tools[1]!, firstBridge.tools[0]!],
+    }
+    const resumed = reopened.accept(
+      'reopen-resume', 'reopen-resume-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', reorderedBridge,
+    )
+    expect(resumed.sessionId).toBe(accepted.sessionId)
+    reopened.markRunning('reopen-resume', 'reopen-native', 'reopen-turn-2', catalogHash)
+    reopened.settle('reopen-resume', { output: [], stopReason: 'completed' })
+    reopened.close()
+  })
+
+  it('keeps an indeterminate receipt indeterminate when a catalog mismatch blocks continuation', () => {
+    const path = root()
+    const firstBridge = {
+      version: 1 as const,
+      socketPath: '/tmp/indeterminate-first.sock',
+      sessionId: 'indeterminate-first-owner',
+      tools: [{ name: 'read_file', description: 'Read one file.', inputSchema: { type: 'object' } }],
+    }
+    const changedBridge = {
+      ...firstBridge,
+      tools: [{ name: 'write_file', description: 'Write one file.', inputSchema: { type: 'object' } }],
+    }
+    const first = new ResidentStore(path)
+    const accepted = first.accept(
+      'indeterminate-source', 'indeterminate-source-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', firstBridge,
+    )
+    first.markRunning(
+      'indeterminate-source', 'indeterminate-native', 'indeterminate-turn',
+      canonicalNativeToolCatalogHash('dsh-tools-authoritative', firstBridge),
+    )
+    first.close()
+
+    const recovered = new ResidentStore(path)
+    expect(recovered.inspectTurn(accepted.turnId)).toMatchObject({ state: 'indeterminate' })
+    expect(() => recovered.accept(
+      'indeterminate-changed', 'indeterminate-changed-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+      undefined, undefined, 'legacy', 'dsh-tools-authoritative', changedBridge,
+    )).toThrow(expect.objectContaining({ code: 'PROTOCOL_MISMATCH' }))
+    expect(recovered.inspectTurn(accepted.turnId)).toMatchObject({ state: 'indeterminate' })
+    recovered.close()
   })
 
   it('recovers an interrupted native compaction as indeterminate and never replays it', () => {

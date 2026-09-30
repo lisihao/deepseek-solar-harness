@@ -1208,11 +1208,19 @@ describe('host physical-operator routing', () => {
     expect(preferred.codex.requests).toHaveLength(1)
     expect(preferred.deepseek.requests).toHaveLength(0)
 
-    const automatic = await setup()
+    const automatic = await setup({ codexBridgeTool: 'subscription_echo' })
     send(automatic.agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
     await automatic.agent.whenIdle()
     expect(automatic.codex.requests).toHaveLength(1)
     expect(automatic.deepseek.requests).toHaveLength(0)
+    expect(automatic.echoCalls).toEqual(['hello'])
+    expect(automatic.codex.requests[0]?.nativeToolPolicy).toBe('dsh-tools-authoritative')
+    expect(automatic.agent.session.events.filter(event => event.type === 'physical-operator/tool-call')).toHaveLength(1)
+    expect(automatic.agent.session.events.filter(event => event.type === 'physical-operator/tool-result')).toHaveLength(1)
+    const answer = lastAssistantMessage(automatic.agent).content[0]
+    if (answer?.type !== 'text') throw new Error('expected the bridged tool response')
+    const result: unknown = JSON.parse(answer.text)
+    expect(result).toEqual({ isError: false, content: [{ type: 'text', text: 'subscription:hello' }], value: 'subscription:hello' })
   })
 
   it('falls back from an automatically selected unauthenticated Claude to Codex with a distinct durable trace', async () => {

@@ -56,7 +56,7 @@ export interface Config {
   readonly dshHome?: string
   /** Start an independent local daemon when no compatible socket is reachable. */
   readonly autoStart?: boolean
-  /** Bounded socket connection and daemon startup wait in milliseconds. */
+  /** Bounded socket connection, daemon startup, and model-tool bridge admission wait in milliseconds. */
   readonly connectTimeoutMs?: number
   /** Turn-settlement polling interval in milliseconds. */
   readonly pollIntervalMs?: number

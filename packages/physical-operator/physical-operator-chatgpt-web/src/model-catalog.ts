@@ -466,7 +466,7 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
     if (loginRequired()) {
       outcome = { status: 'auth-required' };
     } else {
-      const modelTrigger = triggerFor('model');
+      const modelTrigger = await waitFor(() => triggerFor('model'));
       const modelMenu = await open(modelPickerRoot, modelTrigger);
       if (modelMenu === undefined) {
         outcome = { status: 'model-picker-unavailable' };

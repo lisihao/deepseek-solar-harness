@@ -4,7 +4,10 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
+import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
+import { createCodexRlmToolHandler } from '../src/drivers.ts'
+import { JsonRpcLineTransport, LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
 import type {
   ResidentDriverExecuteRequest,
   ResidentDriverCompactRequest,
@@ -1205,7 +1208,7 @@ describe('ResidentDaemon', () => {
       tools: [{ name: 'typescript_repl', description: 'Execute TypeScript.', inputSchema: { type: 'object' } }],
     }
     const bridged = await connected.execute({
-      commandId: 'rlm-tools', operatorId: 'codex', workspace,
+      commandId: 'rlm-tools', operatorId: 'codex', workspace, laneId: 'rlm-tools',
       prompt: [{ type: 'text', text: 'reason with the repl' }], nativeToolPolicy: 'disabled', modelToolBridge,
       signal: new AbortController().signal,
     })
@@ -1227,7 +1230,7 @@ describe('ResidentDaemon', () => {
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
     const authoritative = await connected.execute({
-      commandId: 'dsh-tools', operatorId: 'codex', workspace,
+      commandId: 'dsh-tools', operatorId: 'codex', workspace, laneId: 'dsh-tools',
       prompt: [{ type: 'text', text: 'use DSH tools' }], nativeToolPolicy: 'dsh-tools-authoritative',
       modelToolBridge: {
         version: 1, socketPath: join(root, 'bridge.sock'), sessionId: 'bridge-session',
@@ -1239,4 +1242,86 @@ describe('ResidentDaemon', () => {
     expect(driver.nativeToolPolicies).toEqual(['disabled', 'disabled', 'dsh-tools-authoritative'])
     await daemon.close()
   })
+})
+
+
+it.each(['dsh-tools-authoritative', 'disabled'] as const)('reattaches %s native callbacks without replaying the turn', async (policy) => {
+  const root = temporaryRoot()
+  const workspace = join(root, 'workspace')
+  mkdirSync(workspace)
+  const calls: string[] = []
+  const toolName = policy === 'disabled' ? 'typescript_repl' : 'echo'
+  const makeBridge = async (owner: string) => {
+    const socketPath = localIpcAddress(root, owner)
+    const server = new LocalJsonRpcRequestServer({ path: socketPath }, (method) => {
+      if (method === 'tool.describe') {
+        if (policy === 'disabled') throw new Error('RLM bridge only supports tool.call')
+        return Promise.resolve({ version: 1, sessionId: 'binding', tools: [toolName] })
+      }
+      calls.push(owner)
+      return Promise.resolve({ value: owner })
+    })
+    await server.start()
+    const descriptor: PhysicalOperatorModelToolBridgeV1 = {
+      version: 1, socketPath, sessionId: 'binding',
+      tools: [{ name: toolName, description: 'Echo through DSH', inputSchema: { type: 'object' } }],
+    }
+    return { server, descriptor }
+  }
+  const oldOwner = await makeBridge('old-owner')
+  const newOwner = await makeBridge('new-owner')
+  const firstCall = Promise.withResolvers<true>()
+  const resume = Promise.withResolvers<true>()
+  let executions = 0
+  class BridgedDriver extends MemoryDriver {
+    override async execute(request: ResidentDriverExecuteRequest) {
+      executions += 1
+      const bridge = request.modelToolBridge
+      if (bridge === undefined) throw new Error('expected bridge')
+      const handler = createCodexRlmToolHandler(String(request.commandId), bridge, request.signal, () => {
+        const current = request.modelToolBridge
+        if (current === undefined) throw new Error('bridge detached')
+        return current
+      })
+      request.onRunning('native-reattach', 'native-turn')
+      const call = { threadId: 'native-reattach', turnId: 'native-turn', tool: toolName, arguments: {} }
+      await handler({ ...call, callId: 'first' })
+      firstCall.resolve(true)
+      await resume.promise
+      const result = await handler({ ...call, callId: 'second' })
+      return { nativeSessionId: 'native-reattach', output: [{ type: 'text' as const, text: result.text }], stopReason: 'completed' as const }
+    }
+  }
+  const daemon = new ResidentDaemon({ root, drivers: [new BridgedDriver()] })
+  await daemon.start()
+  const ownerSignal = new AbortController()
+  const request = {
+    commandId: 'bridge-owner-reattach', operatorId: 'codex', workspace,
+    prompt: [{ type: 'text', text: 'two calls across Host restart' }],
+    nativeToolPolicy: policy,
+  }
+  try {
+    const original = await client(root).execute({ ...request, modelToolBridge: oldOwner.descriptor, signal: ownerSignal.signal })
+    await firstCall.promise
+    ownerSignal.abort(new Error('Host stopped'))
+    await expect(original.result).rejects.toThrow('Host stopped')
+    await oldOwner.server.dispose()
+    const attached = await client(root).execute({ ...request, modelToolBridge: newOwner.descriptor, signal: new AbortController().signal })
+    expect(attached.turnId).toBe(original.turnId)
+    resume.resolve(true)
+    await expect(attached.result).resolves.toMatchObject({ output: [{ text: '{"value":"new-owner"}' }] })
+    expect(executions).toBe(1)
+    expect(calls).toEqual(['old-owner', 'new-owner'])
+    await expect(client(root).execute({
+      ...request, commandId: 'changed-native-catalog', signal: new AbortController().signal,
+      modelToolBridge: { ...newOwner.descriptor, tools: [{ name: toolName, description: 'Different tool', inputSchema: { type: 'object' } }] },
+    })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+    expect(executions).toBe(1)
+
+  } finally {
+    resume.resolve(true)
+    await daemon.close()
+    await oldOwner.server.dispose()
+    await newOwner.server.dispose()
+  }
 })
