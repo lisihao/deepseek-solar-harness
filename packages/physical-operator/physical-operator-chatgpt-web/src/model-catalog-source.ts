@@ -31,6 +31,13 @@ export function chatGptWebCatalogSource(
           model: `${operatorId}:${choice.id}`,
           availability: 'available',
           evidence: 'web-picker',
+          ...choice.reasoning === undefined ? {} : {
+            reasoning: {
+              efforts: choice.reasoning.efforts.map(effort => ({ id: effort.id, name: effort.label })),
+              ...choice.reasoning.defaultEffort === undefined ? {} : { defaultEffort: choice.reasoning.defaultEffort },
+            },
+          },
+          ...choice.featuredRank === undefined ? {} : { featuredRank: choice.featuredRank },
         })),
       }
     },

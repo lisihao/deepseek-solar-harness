@@ -67,7 +67,7 @@ export const DEFAULT_OUTPUT_MAX_BYTES = 24 * 1024
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 const MIN_OUTPUT_MAX_BYTES = 1_024
-const MAX_MODEL_LENGTH = 160
+const MAX_MODEL_LENGTH = 256
 const REQUIRED_BROWSER_CAPABILITIES: readonly BrowserCapabilityV1[] = Object.freeze([
   'authenticated-profile-reuse',
   'named-workspace',
@@ -598,6 +598,8 @@ if (request.model !== undefined || request.effort !== undefined) {
     case 'model-options-unavailable':
     case 'model-selection-unavailable':
     case 'menu-close-failed':
+    case 'catalog-restore-unavailable':
+    case 'latest-model-unavailable':
       return { status: 'model-selection-unavailable' };
     default: return { status: 'protocol-error' };
   }

@@ -4,11 +4,22 @@ import { chatGptWebCatalogSource } from '../src/model-catalog-source.ts'
 
 const catalog: WebModelCatalog = {
   models: [
-    { id: 'future/lattice-9', label: 'Lattice 9 Preview' },
-    { id: 'account/custom', label: 'Account Custom' },
+    {
+      id: 'web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future%2Flattice-9%22%5D',
+      label: 'future/lattice-9',
+      reasoning: {
+        efforts: [
+          { id: 'future/lattice-9:fast', label: 'Fast' },
+          { id: 'future/lattice-9:deep', label: 'Deep' },
+        ],
+        defaultEffort: 'future/lattice-9:fast',
+      },
+      featuredRank: 0,
+    },
+    { id: 'account/custom', label: 'Account Custom', featuredRank: 1 },
   ],
   efforts: [{ id: 'sprint', label: 'Sprint Reasoning' }],
-  selectedModel: 'future/lattice-9',
+  selectedModel: 'web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future%2Flattice-9%22%5D',
   selectedEffort: 'sprint',
   observedAt: '2026-09-30T00:00:00.000Z',
 }
@@ -25,12 +36,20 @@ describe('ChatGPT Web model catalog source', () => {
       available: true,
       models: [
         {
-          id: 'future/lattice-9',
-          name: 'ChatGPT Web · Lattice 9 Preview',
+          id: 'web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future%2Flattice-9%22%5D',
+          name: 'ChatGPT Web · future/lattice-9',
           provider: 'dsh-physical-operator',
-          model: 'chatgpt-web:future/lattice-9',
+          model: 'chatgpt-web:web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future%2Flattice-9%22%5D',
           availability: 'available',
           evidence: 'web-picker',
+          reasoning: {
+            efforts: [
+              { id: 'future/lattice-9:fast', name: 'Fast' },
+              { id: 'future/lattice-9:deep', name: 'Deep' },
+            ],
+            defaultEffort: 'future/lattice-9:fast',
+          },
+          featuredRank: 0,
         },
         {
           id: 'account/custom',
@@ -39,6 +58,7 @@ describe('ChatGPT Web model catalog source', () => {
           model: 'chatgpt-web:account/custom',
           availability: 'available',
           evidence: 'web-picker',
+          featuredRank: 1,
         },
       ],
     })

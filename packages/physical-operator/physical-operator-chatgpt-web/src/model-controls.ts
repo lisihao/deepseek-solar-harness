@@ -105,10 +105,13 @@ export class ChatGptWebModelControls {
     const saved = webModelPreferences(agent.session.events)
     const primaryModel = primaryWebModel(agent, this.config.id)
     if (primaryModel === undefined) return saved
+    const primaryEffort = readModelSelection(agent).selection?.reasoningEffort
+    const effort = primaryEffort ?? (saved.model === primaryModel ? saved.effort : undefined)
     return {
       model: primaryModel,
-      ...saved.model === primaryModel && saved.effort !== undefined ? { effort: saved.effort } : {},
+      ...effort === undefined ? {} : { effort },
       modelSelectionPinned: true,
+      ...primaryEffort === undefined ? {} : { effortSelectionPinned: true },
     }
   }
 
@@ -124,6 +127,10 @@ export class ChatGptWebModelControls {
     const primaryModel = primaryWebModel(agent, this.config.id)
     if (selection.model !== undefined && primaryModel !== undefined && selection.model !== primaryModel) {
       throw new PhysicalOperatorError('ChatGPT Web model follows the primary model menu for this conversation', 'MODEL_SELECTION_UNAVAILABLE')
+    }
+    const primaryEffort = primaryModel === undefined ? undefined : readModelSelection(agent).selection?.reasoningEffort
+    if (selection.effort !== undefined && primaryEffort !== undefined && selection.effort !== primaryEffort) {
+      throw new PhysicalOperatorError('ChatGPT Web reasoning follows the primary model menu for this conversation', 'MODEL_SELECTION_UNAVAILABLE')
     }
     if (this.status().active || this.catalogPending !== undefined) throw new PhysicalOperatorError('Wait for the current Web operation before selecting its model', 'OPERATOR_BUSY')
     if (selection.model === undefined && selection.effort === undefined) {

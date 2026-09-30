@@ -22,6 +22,8 @@ export interface WebModelPreferences {
   readonly effort?: string
   /** Whether the primary model menu pins this Session's Web model. */
   readonly modelSelectionPinned?: boolean
+  /** Whether the primary model menu pins this Session's Web reasoning effort. */
+  readonly effortSelectionPinned?: boolean
 }
 
 /** Server acknowledgment for one explicit ChatGPT Web profile change. */
@@ -73,11 +75,14 @@ export function parseWebModelPreferences(value: unknown): WebModelPreferences | 
   const model = optionalText(value, 'model')
   const effort = optionalText(value, 'effort')
   const modelSelectionPinned = optionalBoolean(value, 'modelSelectionPinned')
-  if (model === INVALID_TEXT || effort === INVALID_TEXT || modelSelectionPinned === INVALID_BOOLEAN) return undefined
+  const effortSelectionPinned = optionalBoolean(value, 'effortSelectionPinned')
+  if (model === INVALID_TEXT || effort === INVALID_TEXT
+    || modelSelectionPinned === INVALID_BOOLEAN || effortSelectionPinned === INVALID_BOOLEAN) return undefined
   return {
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
     ...(modelSelectionPinned === undefined ? {} : { modelSelectionPinned }),
+    ...(effortSelectionPinned === undefined ? {} : { effortSelectionPinned }),
   }
 }
 
@@ -129,6 +134,7 @@ export function WebModelControls({
   const savedModel = profile?.model
   const savedEffort = profile?.effort
   const modelSelectionPinned = profile?.modelSelectionPinned === true
+  const effortSelectionPinned = profile?.effortSelectionPinned === true
   const selectedModel = savedModel ?? catalog?.selectedModel
   const modelKnown = savedModel !== undefined && catalog?.models.some(choice => choice.id === savedModel)
   const effortKnown = savedEffort !== undefined && catalog?.efforts.some(choice => choice.id === savedEffort)
@@ -136,7 +142,7 @@ export function WebModelControls({
     && catalog !== undefined
     && catalog.selectedModel !== savedModel
   const modelDisabled = modelSelectionPinned || disabled || busy || reading || catalog === undefined || catalog.models.length === 0
-  const effortDisabled = disabled || busy || reading || catalog === undefined || catalog.efforts.length === 0
+  const effortDisabled = effortSelectionPinned || disabled || busy || reading || catalog === undefined || catalog.efforts.length === 0
     || selectedModel === undefined || modelCatalogMismatch
   const hasProfile = savedModel !== undefined || savedEffort !== undefined
 
@@ -205,6 +211,7 @@ export function WebModelControls({
   }
 
   const chooseEffort = (value: string): void => {
+    if (effortSelectionPinned) return
     if (selectedModel === undefined) return
     if (value !== '' && catalog?.efforts.some(choice => choice.id === value) !== true) return
     void save({
@@ -214,6 +221,7 @@ export function WebModelControls({
   }
 
   const clearEffort = (): void => {
+    if (effortSelectionPinned) return
     if (selectedModel === undefined) {
       void save({})
       return
@@ -263,12 +271,13 @@ export function WebModelControls({
           )}
           {!modelCatalogMismatch && catalog?.efforts.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select>
+        {effortSelectionPinned && <small>推理强度跟随主模型菜单</small>}
       </label>
       {modelCatalogMismatch && (
         <p role="status">当前保存的模型与 ChatGPT Web 目录不一致；请刷新后重新选择模型，推理强度暂不可用。</p>
       )}
       {catalog !== undefined && catalog.efforts.length === 0 && savedEffort !== undefined && (
-        <button type="button" disabled={disabled || busy} onClick={clearEffort}>
+        <button type="button" disabled={effortSelectionPinned || disabled || busy} onClick={clearEffort}>
           清除推理强度
         </button>
       )}
