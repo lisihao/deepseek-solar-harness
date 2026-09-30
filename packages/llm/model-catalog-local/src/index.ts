@@ -164,6 +164,13 @@ function storedEnum<T extends string>(field: string, value: string, allowed: Rea
   return value as T
 }
 
+/** Reject a source row whose persisted visibility no longer has SQLite's boolean encoding. */
+function assertStoredMenuVisibility(value: number): void {
+  if (value !== 0 && value !== 1) {
+    throw new Error('model-catalog-local: stored source menu visibility is invalid')
+  }
+}
+
 /** Parse and validate the JSON field written by this service for reasoning metadata. */
 function storedReasoning(value: string): CatalogReasoning {
   let parsed: unknown
@@ -212,33 +219,34 @@ function storedReasoning(value: string): CatalogReasoning {
 export class ModelCatalogs extends Service {
   static Config: z<Config> = Config
 
-  private readonly db: DatabaseSync
+  private db: DatabaseSync | undefined
   private readonly config: ResolvedConfig
   private readonly sources = new Map<string, SourceRegistration>()
   private closed = false
 
   /**
-   * Open the dedicated catalog database and register the service.
+   * Register the service. Its dedicated catalog database opens on the first
+   * {@link ModelCatalogs.list} or {@link ModelCatalogs.refresh} call.
    * @param ctx - Cordis context that receives `ctx.modelCatalogs`.
    * @param config - required database location and optional refresh deadline.
    */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'modelCatalogs')
     this.config = resolveConfig(config)
-    this.db = openModelCatalogDatabase(this.config.databasePath)
     ctx.effect(() => async () => {
       this.closed = true
       const active = [...this.sources.values()]
       for (const registration of active) this.deactivate(registration)
       await Promise.all(active.map(registration => this.drain(registration)))
       this.sources.clear()
-      this.db.close()
+      this.db?.close()
     }, 'modelCatalogs lifecycle')
   }
 
   /**
    * Register a discovery source until its disposer runs. Source metadata is
-   * durable, while its callback stays process-local.
+   * persisted at the next catalog read or refresh, while its callback stays
+   * process-local.
    * @param source - source that owns one existing DSH dispatch provider.
    * @returns async disposer that aborts and drains that source's refresh.
    */
@@ -257,7 +265,6 @@ export class ModelCatalogs extends Service {
     }
     return this.ctx.effect(() => {
       this.assertOpen()
-      this.upsertSource(registration)
       this.sources.set(registration.id, registration)
       return async () => {
         this.deactivate(registration)
@@ -273,6 +280,7 @@ export class ModelCatalogs extends Service {
    */
   list(): ModelCatalogSnapshot[] {
     this.assertOpen()
+    this.database()
     return [...this.sources.values()].map(source => this.snapshot(source))
   }
 
@@ -284,6 +292,7 @@ export class ModelCatalogs extends Service {
    */
   async refresh(sourceIds?: readonly string[]): Promise<ModelCatalogSnapshot[]> {
     this.assertOpen()
+    this.database()
     const ids = sourceIds === undefined ? [...this.sources.keys()] : [...new Set(sourceIds)]
     const registrations = ids.map((id) => {
       const registration = this.sources.get(id)
@@ -292,6 +301,7 @@ export class ModelCatalogs extends Service {
       }
       return registration
     })
+    for (const registration of registrations) this.upsertSource(registration)
     return Promise.all(registrations.map(registration => this.refreshSource(registration)))
   }
 
@@ -349,8 +359,9 @@ export class ModelCatalogs extends Service {
 
   /** Persist source metadata at registration without resetting its last snapshot. */
   private upsertSource(source: SourceRegistration): void {
-    transaction(this.db, () => {
-      this.db.prepare(`
+    const db = this.database()
+    transaction(db, () => {
+      db.prepare(`
         INSERT INTO model_catalog_sources (
           id, name, provider, menu_visible, state, last_attempt_at, last_success_at, error
         ) VALUES (?, ?, ?, ?, 'unrefreshed', NULL, NULL, NULL)
@@ -359,7 +370,7 @@ export class ModelCatalogs extends Service {
           provider = excluded.provider,
           menu_visible = excluded.menu_visible
       `).run(source.id, source.name, source.provider, source.menuVisible ? 1 : 0)
-      this.db.prepare(`
+      db.prepare(`
         UPDATE model_catalog_models
         SET dispatch_provider = ?
         WHERE source_id = ?
@@ -370,14 +381,15 @@ export class ModelCatalogs extends Service {
   /** Apply a successful available or account-unavailable discovery transaction. */
   private persistSuccess(source: SourceRegistration, refreshed: CatalogRefreshResult): void {
     const checkedAt = new Date().toISOString()
+    const db = this.database()
     if (!refreshed.available) {
-      transaction(this.db, () => {
-        this.db.prepare(`
+      transaction(db, () => {
+        db.prepare(`
           UPDATE model_catalog_sources
           SET state = 'unavailable', last_attempt_at = ?, last_success_at = ?, error = ?
           WHERE id = ?
         `).run(checkedAt, checkedAt, refreshed.reason, source.id)
-        this.db.prepare(`
+        db.prepare(`
           UPDATE model_catalog_models
           SET availability = 'unavailable', unavailable_reason = ?, in_current_snapshot = 0, checked_at = ?
           WHERE source_id = ?
@@ -386,18 +398,18 @@ export class ModelCatalogs extends Service {
       return
     }
     assertModels(source, refreshed.models)
-    transaction(this.db, () => {
-      this.db.prepare(`
+    transaction(db, () => {
+      db.prepare(`
         UPDATE model_catalog_sources
         SET state = 'ready', last_attempt_at = ?, last_success_at = ?, error = NULL
         WHERE id = ?
       `).run(checkedAt, checkedAt, source.id)
-      this.db.prepare(`
+      db.prepare(`
         UPDATE model_catalog_models
         SET availability = 'unavailable', unavailable_reason = ?, in_current_snapshot = 0, checked_at = ?
         WHERE source_id = ?
       `).run(MISSING_MODEL_REASON, checkedAt, source.id)
-      const store = this.db.prepare(`
+      const store = db.prepare(`
         INSERT INTO model_catalog_models (
           source_id, upstream_model_id, name, description, dispatch_provider, dispatch_model,
           availability, unavailable_reason, evidence, reasoning_json, featured_rank, model_order,
@@ -442,13 +454,14 @@ export class ModelCatalogs extends Service {
   /** Record a failed source without deleting its last successful model facts. */
   private persistError(source: SourceRegistration, error: unknown): void {
     const checkedAt = new Date().toISOString()
-    transaction(this.db, () => {
-      this.db.prepare(`
+    const db = this.database()
+    transaction(db, () => {
+      db.prepare(`
         UPDATE model_catalog_sources
         SET state = 'error', last_attempt_at = ?, error = ?
         WHERE id = ?
       `).run(checkedAt, errorMessage(error), source.id)
-      this.db.prepare(`
+      db.prepare(`
         UPDATE model_catalog_models
         SET availability = 'unknown', unavailable_reason = NULL, checked_at = ?
         WHERE source_id = ?
@@ -456,20 +469,25 @@ export class ModelCatalogs extends Service {
     })
   }
 
-  /** Read one active source's durable record and order models by snapshot order. */
+  /** Upsert one active source, then read its durable record in snapshot order. */
   private snapshot(source: SourceRegistration): ModelCatalogSnapshot {
-    const row = this.db.prepare(`
+    const db = this.database()
+    const existing = db.prepare(
+      'SELECT menu_visible FROM model_catalog_sources WHERE id = ?',
+    ).get(source.id) as { menu_visible: number } | undefined
+    if (existing !== undefined) assertStoredMenuVisibility(existing.menu_visible)
+    this.upsertSource(source)
+    const row = db.prepare(`
       SELECT id, name, provider, menu_visible, state, last_attempt_at, last_success_at, error
       FROM model_catalog_sources
       WHERE id = ?
     `).get(source.id) as SourceRow | undefined
+    /* v8 ignore next 3 -- an active registration is upserted immediately before this read. */
     if (row === undefined) {
       throw new Error(`model-catalog-local: active source "${source.id}" has no durable record`)
     }
-    if (row.menu_visible !== 0 && row.menu_visible !== 1) {
-      throw new Error('model-catalog-local: stored source menu visibility is invalid')
-    }
-    const rows = this.db.prepare(`
+    assertStoredMenuVisibility(row.menu_visible)
+    const rows = db.prepare(`
       SELECT upstream_model_id, name, description, dispatch_provider, dispatch_model, availability,
         unavailable_reason, evidence, reasoning_json, featured_rank, last_seen_at, checked_at
       FROM model_catalog_models
@@ -536,6 +554,12 @@ export class ModelCatalogs extends Service {
   /** Reject operations after the service lifecycle has begun teardown. */
   private assertOpen(): void {
     if (this.closed) throw new Error('model-catalog-local: service is disposed')
+  }
+
+  /** Open the dedicated SQLite medium only when a caller reads or refreshes a catalog. */
+  private database(): DatabaseSync {
+    this.assertOpen()
+    return this.db ??= openModelCatalogDatabase(this.config.databasePath)
   }
 }
 

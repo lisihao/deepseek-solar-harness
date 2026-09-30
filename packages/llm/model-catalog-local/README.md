@@ -12,7 +12,7 @@ Local SQLite catalog service for account-observed model menus. It owns `ctx.mode
 
 ## Configuration
 
-- `databasePath` is required. Use `:memory:` for a process-local test database or a filesystem path for a durable catalog.
+- `databasePath` is required. Use `:memory:` for a process-local test database or a filesystem path for a durable catalog. SQLite opens only on the first `list()` or `refresh()`; registering and disposing an unused source creates no database file.
 - `refreshTimeoutMs` defaults to 15,000 ms. A source that ignores cancellation cannot write after its refresh race settles or its registration is disposed.
 
 ## Persistence and refresh

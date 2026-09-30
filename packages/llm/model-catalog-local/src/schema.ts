@@ -1,8 +1,9 @@
 /** SQLite schema and open-time validation for the local model catalog. */
 
 import { closeSync, mkdirSync, openSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 
 /** Current physical layout of one model-catalog database. */
 export const MODEL_CATALOG_SCHEMA_VERSION = 1
@@ -148,6 +149,7 @@ export function openModelCatalogDatabase(databasePath: string): DatabaseSync {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
     createDatabaseFile(path)
   }
+  const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
   const db = new DatabaseSync(path)
   try {
     configureDatabase(db, path)

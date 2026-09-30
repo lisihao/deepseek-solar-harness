@@ -857,7 +857,8 @@ Local SQLite provider and dynamic registry exposed as `ctx.modelCatalogs`.
 ```ts cordis-catalog
 /**
  * Register a discovery source until its disposer runs. Source metadata is
- * durable, while its callback stays process-local.
+ * persisted at the next catalog read or refresh, while its callback stays
+ * process-local.
  * @param source - source that owns one existing DSH dispatch provider.
  * @returns async disposer that aborts and drains that source's refresh.
  */
@@ -879,7 +880,7 @@ list(): ModelCatalogSnapshot[]
 async refresh(sourceIds?: readonly string[]): Promise<ModelCatalogSnapshot[]>
 ```
 
-Source: [`packages/llm/model-catalog-local/src/index.ts:212`](../../packages/llm/model-catalog-local/src/index.ts)
+Source: [`packages/llm/model-catalog-local/src/index.ts:219`](../../packages/llm/model-catalog-local/src/index.ts)
 
 <a id="llm-events"></a>
 

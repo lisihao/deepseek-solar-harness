@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
+import { existsSync } from 'node:fs'
 import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -123,6 +124,19 @@ describe('ModelCatalogs', () => {
     const ctx = new Context()
     new ModelCatalogs(ctx, { databasePath: ':memory:' })
     await ctx.fiber.dispose()
+  })
+
+  it('does not load SQLite or create a catalog file until list or refresh uses a registration', async () => {
+    const path = await databasePath()
+    const { catalog, fiber } = await openCatalog(path)
+    const dispose = catalog.register(source('unused', 'physical-route', async () => ({
+      available: true,
+      models: [],
+    })))
+    expect(existsSync(path)).toBe(false)
+    await dispose()
+    await fiber.dispose()
+    expect(existsSync(path)).toBe(false)
   })
 
   it('rejects duplicate or unknown active source ids', async () => {
@@ -361,14 +375,16 @@ describe('ModelCatalogs', () => {
     const path = await databasePath()
     const { catalog } = await openCatalog(path)
     const provider = 'physical-route'
-    catalog.register(source('broken-medium', provider, async () => ({
-      available: true,
-      models: [model('unwritable', provider)],
-    })))
+    const pending = deferred<CatalogRefreshResult>()
+    catalog.register(source('broken-medium', provider, async () => pending.promise))
+    catalog.list()
+    const refresh = catalog.refresh()
+    await nextTurn()
     const db = new DatabaseSync(path)
     db.exec('DROP TABLE model_catalog_sources')
     db.close()
-    await expect(catalog.refresh()).rejects.toThrow(/no such table: model_catalog_sources/)
+    pending.resolve({ available: true, models: [model('unwritable', provider)] })
+    await expect(refresh).rejects.toThrow(/no such table: model_catalog_sources/)
   })
 
   it('rejects public operations after its service fiber closes', async () => {
@@ -386,13 +402,15 @@ describe('ModelCatalogs', () => {
     const newer = new DatabaseSync(newerPath)
     newer.exec('PRAGMA user_version = 2')
     newer.close()
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: newerPath })).rejects.toThrow(/newer schema version 2/)
+    const newerCatalog = await openCatalog(newerPath)
+    expect(() => newerCatalog.catalog.list()).toThrow(/newer schema version 2/)
 
     const invalidPath = await databasePath()
     const invalid = new DatabaseSync(invalidPath)
     invalid.exec('PRAGMA user_version = 1')
     invalid.close()
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: invalidPath })).rejects.toThrow(/invalid schema/)
+    const invalidCatalog = await openCatalog(invalidPath)
+    expect(() => invalidCatalog.catalog.list()).toThrow(/invalid schema/)
   })
 
   it('rejects unversioned and version-one SQLite layouts that do not belong to this package', async () => {
@@ -400,7 +418,8 @@ describe('ModelCatalogs', () => {
     const unversioned = new DatabaseSync(unversionedPath)
     unversioned.exec('CREATE TABLE unrelated (id TEXT)')
     unversioned.close()
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: unversionedPath })).rejects.toThrow(/invalid schema/)
+    const unversionedCatalog = await openCatalog(unversionedPath)
+    expect(() => unversionedCatalog.catalog.list()).toThrow(/invalid schema/)
 
     const missingPath = await databasePath()
     const missing = new DatabaseSync(missingPath)
@@ -411,7 +430,8 @@ describe('ModelCatalogs', () => {
       CREATE TABLE unrelated_two (id TEXT);
     `)
     missing.close()
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: missingPath })).rejects.toThrow(/invalid schema/)
+    const missingCatalog = await openCatalog(missingPath)
+    expect(() => missingCatalog.catalog.list()).toThrow(/invalid schema/)
 
     const loosePath = await databasePath()
     const loose = new DatabaseSync(loosePath)
@@ -422,7 +442,8 @@ describe('ModelCatalogs', () => {
       CREATE TABLE model_catalog_models (id TEXT);
     `)
     loose.close()
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: loosePath })).rejects.toThrow(/invalid schema/)
+    const looseCatalog = await openCatalog(loosePath)
+    expect(() => looseCatalog.catalog.list()).toThrow(/invalid schema/)
 
     const shortPath = await databasePath()
     const short = new DatabaseSync(shortPath)
@@ -433,7 +454,8 @@ describe('ModelCatalogs', () => {
       CREATE TABLE model_catalog_models (id TEXT) STRICT;
     `)
     short.close()
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: shortPath })).rejects.toThrow(/invalid schema/)
+    const shortCatalog = await openCatalog(shortPath)
+    expect(() => shortCatalog.catalog.list()).toThrow(/invalid schema/)
 
     const wrongColumnPath = await databasePath()
     const wrongColumn = new DatabaseSync(wrongColumnPath)
@@ -451,7 +473,8 @@ describe('ModelCatalogs', () => {
       ) STRICT;
     `)
     wrongColumn.close()
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: wrongColumnPath })).rejects.toThrow(/invalid schema/)
+    const wrongColumnCatalog = await openCatalog(wrongColumnPath)
+    expect(() => wrongColumnCatalog.catalog.list()).toThrow(/invalid schema/)
   })
 
   it('propagates a filesystem error that is not an existing catalog file', async () => {
@@ -459,8 +482,8 @@ describe('ModelCatalogs', () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-model-catalog-readonly-'))
     directories.push(directory)
     await chmod(directory, 0o500)
-    await expect(new Context().plugin(ModelCatalogs, { databasePath: join(directory, 'catalog.sqlite') }))
-      .rejects.toMatchObject({ code: 'EACCES' })
+    const catalog = await openCatalog(join(directory, 'catalog.sqlite'))
+    expect(() => catalog.catalog.list()).toThrow(expect.objectContaining({ code: 'EACCES' }))
     await chmod(directory, 0o700)
   })
 
@@ -565,10 +588,6 @@ describe('ModelCatalogs', () => {
       {
         sql: "UPDATE model_catalog_models SET evidence = 'broken' WHERE source_id = 'corrupt'",
         message: /stored model evidence is invalid/,
-      },
-      {
-        sql: "DELETE FROM model_catalog_sources WHERE id = 'corrupt'",
-        message: /has no durable record/,
       },
     ] as const
     for (const item of corruption) {

@@ -160,14 +160,11 @@ export class NativeCatalogSources {
       : this.startRefresh()
     const caller = { signal }
     pending.callers.add(caller)
-    let rejectAbort!: (reason: unknown) => void
-    const aborted = new Promise<never>((_resolve, reject) => {
-      rejectAbort = reject
-    })
-    const onAbort = (): void => { rejectAbort(abortError(signal)) }
+    const cancellation = Promise.withResolvers<never>()
+    const onAbort = (): void => { cancellation.reject(abortError(signal)) }
     signal.addEventListener('abort', onAbort, { once: true })
     try {
-      return await Promise.race([pending.catalogs, aborted])
+      return await Promise.race([pending.catalogs, cancellation.promise])
     } finally {
       signal.removeEventListener('abort', onAbort)
       pending.callers.delete(caller)

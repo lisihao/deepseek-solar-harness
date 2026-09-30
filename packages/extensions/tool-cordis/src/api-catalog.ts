@@ -1156,7 +1156,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'register(source: ModelCatalogSource): () => Promise<void>',
-        description: 'Register a discovery source until its disposer runs. Source metadata is durable, while its callback stays process-local.',
+        description: 'Register a discovery source until its disposer runs. Source metadata is persisted at the next catalog read or refresh, while its callback stays process-local.',
         parameters: [{ name: 'source', description: 'source that owns one existing DSH dispatch provider.' }],
         returns: 'async disposer that aborts and drains that source\'s refresh.',
       },

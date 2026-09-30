@@ -12,7 +12,7 @@
 
 ## 配置
 
-- `databasePath` 为必填项。测试可使用 `:memory:` 进程内数据库，持久化目录可使用文件系统路径。
+- `databasePath` 为必填项。测试可使用 `:memory:` 进程内数据库，持久化目录可使用文件系统路径。SQLite 只会在首次 `list()` 或 `refresh()` 时打开；注册后未使用即释放的 source 不会创建数据库文件。
 - `refreshTimeoutMs` 默认是 15,000 ms。即使 source 忽略取消，它也无法在刷新竞争结束或注册释放后写入。
 
 ## 持久化与刷新
