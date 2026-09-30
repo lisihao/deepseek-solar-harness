@@ -39,7 +39,45 @@ const effort = {
   defaultEffort: 'low',
 }
 
-function model(id, name, source, modelId, featuredRank) {
+const WEB_VIRTUAL_MODELS = [
+  {
+    id: 'web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future-lattice-42%22%5D',
+    name: 'ChatGPT Web · Future Lattice 42',
+    family: 'future-lattice-42',
+    efforts: [{ id: 'future-lattice-42:research', name: 'Research' }],
+    defaultEffort: 'future-lattice-42:research',
+  },
+  {
+    id: 'web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22gpt-5-6-thinking%22%5D',
+    name: 'ChatGPT Web · GPT-5.6 Thinking',
+    family: 'gpt-5-6-thinking',
+    efforts: [
+      { id: 'gpt-5-6-thinking:standard', name: 'Standard' },
+      { id: 'gpt-5-6-thinking:extended', name: 'Extended' },
+      { id: 'gpt-5-6-thinking:max', name: 'Max' },
+    ],
+    defaultEffort: 'gpt-5-6-thinking:standard',
+  },
+  {
+    id: 'web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22gpt-5-6%22%5D',
+    name: 'ChatGPT Web · GPT-5.6',
+    family: 'gpt-5-6',
+    efforts: [{ id: 'gpt-5-6:', name: 'Default' }],
+    defaultEffort: 'gpt-5-6:',
+  },
+  {
+    id: 'gpt-5.6-sol',
+    name: 'ChatGPT Web · GPT-5.6 Sol',
+    family: 'gpt-5.6-sol',
+  },
+  {
+    id: 'gpt-5.5',
+    name: 'ChatGPT Web · GPT-5.5',
+    family: 'gpt-5.5',
+  },
+]
+
+function model(id, name, source, modelId, featuredRank, reasoning) {
   return {
     id,
     name,
@@ -49,6 +87,7 @@ function model(id, name, source, modelId, featuredRank) {
     evidence: source.id.startsWith('deepseek:') ? 'api-list'
       : source.id.startsWith('native:') ? 'native-list' : 'web-picker',
     ...(featuredRank === undefined ? {} : { featuredRank }),
+    ...(reasoning === undefined ? {} : { reasoning }),
     ...(source.id === SOURCES.deepseek.id || source.id === SOURCES.codex.id
       ? { reasoning: effort }
       : {}),
@@ -84,6 +123,19 @@ function modelsFor(source, phase) {
         model('claude-code:claude-opus-5', 'Fixture Claude Opus', source, 'claude-code:claude-opus-5'),
       ]
     case SOURCES.web.id:
+      if (phase >= 3) {
+        return WEB_VIRTUAL_MODELS.map((entry, index) => model(
+          entry.id,
+          entry.name,
+          source,
+          `${SOURCES.web.id.split(':')[1]}:${entry.id}`,
+          index,
+          entry.efforts === undefined ? undefined : {
+            efforts: entry.efforts,
+            defaultEffort: entry.defaultEffort,
+          },
+        ))
+      }
       return [
         model('chatgpt-web:fixture-pro', 'Fixture ChatGPT Pro', source, 'chatgpt-web:fixture-pro', 0),
         model('chatgpt-web:fixture-thinking', 'Fixture ChatGPT Thinking', source, 'chatgpt-web:fixture-thinking', 1),
@@ -113,7 +165,7 @@ function source(source) {
     async refresh(signal) {
       if (signal.aborted) throw signal.reason ?? new Error('model-catalog-fixture: refresh aborted')
       const phase = await nextPhase(source)
-      if (source.id === SOURCES.web.id && phase >= 2) {
+      if (source.id === SOURCES.web.id && phase === 2) {
         throw new Error('fixture ChatGPT Web discovery failed')
       }
       return { available: true, models: modelsFor(source, phase) }
@@ -125,6 +177,7 @@ const physicalModels = [
   ...modelsFor(SOURCES.codex, 1),
   ...modelsFor(SOURCES.claude, 1),
   ...modelsFor(SOURCES.web, 1),
+  ...modelsFor(SOURCES.web, 3),
 ]
 
 const physicalAdapter = {

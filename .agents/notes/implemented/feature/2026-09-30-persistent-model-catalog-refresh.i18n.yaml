@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-30-persistent-model-catalog-refresh.md
-2026-09-30-persistent-model-catalog-refresh.md: dd5a4767fc23e48244f9d329dd43e357eb2dc555
-2026-09-30-persistent-model-catalog-refresh.zh.md: ed7b88938e2d73ede9c2ae0a00048325f53102a1
+2026-09-30-persistent-model-catalog-refresh.md: dbb04e20904566016178a63b7a1f302fdb0bea9b
+2026-09-30-persistent-model-catalog-refresh.zh.md: cb2b33e21406d988edd2fe873ed4c51b871c55a9

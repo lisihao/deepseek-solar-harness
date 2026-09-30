@@ -36,7 +36,15 @@ async function readCount(harnessHome: string, sourceName: string): Promise<numbe
 
 function readCatalog(harnessHome: string): {
   sources: Array<{ id: string; menuVisible: number; state: string; error: string | null }>
-  models: Array<{ source_id: string; upstream_model_id: string; availability: string; dispatch_provider: string; dispatch_model: string }>
+  models: Array<{
+    source_id: string
+    upstream_model_id: string
+    availability: string
+    dispatch_provider: string
+    dispatch_model: string
+    reasoning_json: string | null
+    featured_rank: number | null
+  }>
 } {
   const db = new DatabaseSync(join(harnessHome, 'model-catalog/models.sqlite'))
   try {
@@ -47,14 +55,27 @@ function readCatalog(harnessHome: string): {
         ORDER BY id
       `).all() as Array<{ id: string; menuVisible: number; state: string; error: string | null }>,
       models: db.prepare(`
-        SELECT source_id, upstream_model_id, availability, dispatch_provider, dispatch_model
+        SELECT source_id, upstream_model_id, availability, dispatch_provider, dispatch_model,
+          reasoning_json, featured_rank
         FROM model_catalog_models
         ORDER BY source_id, upstream_model_id
-      `).all() as Array<{ source_id: string; upstream_model_id: string; availability: string; dispatch_provider: string; dispatch_model: string }>,
+      `).all() as Array<{
+        source_id: string
+        upstream_model_id: string
+        availability: string
+        dispatch_provider: string
+        dispatch_model: string
+        reasoning_json: string | null
+        featured_rank: number | null
+      }>,
     }
   } finally {
     db.close()
   }
+}
+
+function parseJson(value: string | null): unknown {
+  return value === null ? null : JSON.parse(value) as unknown
 }
 
 async function openModelPane(page: Page, expectModels = true): Promise<void> {
@@ -172,6 +193,59 @@ describe('web e2e: persistent model catalog refresh and menu projection', () => 
       error: 'fixture ChatGPT Web discovery failed',
     })
 
+    await page.keyboard.press('Escape')
+    await scaffold.close()
+    scaffold = await launchWebScaffold({ extraOverlayPath: overlay, harnessHome })
+    await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    await connectFreshWorkspace(page, scaffold.workspaceCwd, 'model-catalog-reopen')
+    await openModelPane(page)
+    const reopenedMenu = await modelMenu(page)
+    expect(await counts()).toEqual([2, 2, 2, 2])
+    expect(reopenedMenu.models).toEqual(secondMenu.models)
+    expect(readCatalog(harnessHome).sources.find(source => source.id === 'web:chatgpt-web')?.state).toBe('error')
+
+    await refreshFromRoot(page, counts, 3)
+    await openModelPane(page)
+    const thirdMenu = await modelMenu(page)
+    const thirdDatabase = readCatalog(harnessHome)
+    const webRows = thirdDatabase.models
+      .filter(model => model.source_id === 'web:chatgpt-web' && model.availability === 'available')
+    const dynamicRows = webRows
+      .filter(model => model.upstream_model_id.startsWith('web-v1:'))
+      .sort((left, right) => (left.featured_rank ?? Number.MAX_SAFE_INTEGER) - (right.featured_rank ?? Number.MAX_SAFE_INTEGER))
+    expect(thirdMenu.models).toEqual([
+      'Fixture Codex Astra',
+      'Fixture Codex Sol',
+      'ChatGPT Web · Future Lattice 42',
+      'ChatGPT Web · GPT-5.6 Thinking',
+      'Fixture DeepSeek Next',
+      'Fixture DeepSeek Flash',
+    ])
+    expect(webRows).toHaveLength(5)
+    expect(dynamicRows).toHaveLength(3)
+    expect(dynamicRows.map(model => model.featured_rank)).toEqual([0, 1, 2])
+    expect(dynamicRows[0]).toMatchObject({
+      upstream_model_id: 'web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future-lattice-42%22%5D',
+      dispatch_provider: 'dsh-physical-operator',
+      dispatch_model: 'chatgpt-web:web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future-lattice-42%22%5D',
+      featured_rank: 0,
+    })
+    expect(parseJson(dynamicRows[0]!.reasoning_json)).toEqual({
+      efforts: [{ id: 'future-lattice-42:research', name: 'Research' }],
+      defaultEffort: 'future-lattice-42:research',
+    })
+    expect(parseJson(dynamicRows[1]!.reasoning_json)).toEqual({
+      efforts: [
+        { id: 'gpt-5-6-thinking:standard', name: 'Standard' },
+        { id: 'gpt-5-6-thinking:extended', name: 'Extended' },
+        { id: 'gpt-5-6-thinking:max', name: 'Max' },
+      ],
+      defaultEffort: 'gpt-5-6-thinking:standard',
+    })
+    expect(webRows.some(model => model.upstream_model_id === 'gpt-5.6-sol')).toBe(true)
+    expect(webRows.some(model => model.upstream_model_id === 'gpt-5.5')).toBe(true)
+
     const transcript = `${JSON.stringify({
       first: {
         calls: firstCalls,
@@ -193,20 +267,21 @@ describe('web e2e: persistent model catalog refresh and menu projection', () => 
             .map(model => [model.source_id, model.upstream_model_id, model.availability]),
         },
       },
+      third: {
+        calls: await counts(),
+        menu: thirdMenu,
+        database: {
+          inventoryCount: thirdDatabase.models.length,
+          webRows: webRows.map(model => ({
+            id: model.upstream_model_id,
+            dispatch: [model.dispatch_provider, model.dispatch_model],
+            featuredRank: model.featured_rank,
+            reasoning: parseJson(model.reasoning_json),
+          })),
+        },
+      },
     }, null, 2)}\n`
     if (scaffold.mode === 'refresh') await writeFile(SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(SNAPSHOT, 'utf8'))
-
-    await page.keyboard.press('Escape')
-    await scaffold.close()
-    scaffold = await launchWebScaffold({ extraOverlayPath: overlay, harnessHome })
-    await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
-    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-    await connectFreshWorkspace(page, scaffold.workspaceCwd, 'model-catalog-reopen')
-    await openModelPane(page)
-    const reopenedMenu = await modelMenu(page)
-    expect(await counts()).toEqual([2, 2, 2, 2])
-    expect(reopenedMenu.models).toEqual(secondMenu.models)
-    expect(readCatalog(harnessHome).sources.find(source => source.id === 'web:chatgpt-web')?.state).toBe('error')
   }, 120_000)
 })

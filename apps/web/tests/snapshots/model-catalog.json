@@ -143,5 +143,109 @@
         ]
       ]
     }
+  },
+  "third": {
+    "calls": [
+      3,
+      3,
+      3,
+      3
+    ],
+    "menu": {
+      "groups": [
+        "物理算子",
+        "DeepSeek"
+      ],
+      "models": [
+        "Fixture Codex Astra",
+        "Fixture Codex Sol",
+        "ChatGPT Web · Future Lattice 42",
+        "ChatGPT Web · GPT-5.6 Thinking",
+        "Fixture DeepSeek Next",
+        "Fixture DeepSeek Flash"
+      ]
+    },
+    "database": {
+      "inventoryCount": 20,
+      "webRows": [
+        {
+          "id": "gpt-5.5",
+          "dispatch": [
+            "dsh-physical-operator",
+            "chatgpt-web:gpt-5.5"
+          ],
+          "featuredRank": 4,
+          "reasoning": null
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "dispatch": [
+            "dsh-physical-operator",
+            "chatgpt-web:gpt-5.6-sol"
+          ],
+          "featuredRank": 3,
+          "reasoning": null
+        },
+        {
+          "id": "web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future-lattice-42%22%5D",
+          "dispatch": [
+            "dsh-physical-operator",
+            "chatgpt-web:web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22future-lattice-42%22%5D"
+          ],
+          "featuredRank": 0,
+          "reasoning": {
+            "efforts": [
+              {
+                "id": "future-lattice-42:research",
+                "name": "Research"
+              }
+            ],
+            "defaultEffort": "future-lattice-42:research"
+          }
+        },
+        {
+          "id": "web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22gpt-5-6%22%5D",
+          "dispatch": [
+            "dsh-physical-operator",
+            "chatgpt-web:web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22gpt-5-6%22%5D"
+          ],
+          "featuredRank": 2,
+          "reasoning": {
+            "efforts": [
+              {
+                "id": "gpt-5-6:",
+                "name": "Default"
+              }
+            ],
+            "defaultEffort": "gpt-5-6:"
+          }
+        },
+        {
+          "id": "web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22gpt-5-6-thinking%22%5D",
+          "dispatch": [
+            "dsh-physical-operator",
+            "chatgpt-web:web-v1:%5B%22%E6%9C%80%E6%96%B0%22%2C%22gpt-5-6-thinking%22%5D"
+          ],
+          "featuredRank": 1,
+          "reasoning": {
+            "efforts": [
+              {
+                "id": "gpt-5-6-thinking:standard",
+                "name": "Standard"
+              },
+              {
+                "id": "gpt-5-6-thinking:extended",
+                "name": "Extended"
+              },
+              {
+                "id": "gpt-5-6-thinking:max",
+                "name": "Max"
+              }
+            ],
+            "defaultEffort": "gpt-5-6-thinking:standard"
+          }
+        }
+      ]
+    }
   }
 }

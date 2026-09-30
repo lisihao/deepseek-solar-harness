@@ -12,7 +12,9 @@ Status: implemented
 
 `@deepseek-ai/dsh-model-catalog-local` 通过 SQLite 提供 `ctx.modelCatalogs`。已注册来源包括 DeepSeek 显式的 `GET /models`、Codex 全新的短生命周期原生元数据、Claude Code 显式的 `supportedModels` 调用，以及已启用的 ChatGPT Web picker。中心刷新会对每个活动来源调用一次；普通 list/read 调用返回持久化快照，UI 面板除非显式请求刷新，否则使用缓存结果。每个来源都会持久化完整目录和状态。成功刷新会把新快照中缺失的模型标记为不可用；刷新失败会保留已存模型事实并标记为未知，同时让该来源不进入菜单。
 
-主菜单从每个可见的 DeepSeek、Codex 和 Web 来源中最多选择两个可用入口：按上游顺序选择最新旗舰与主线家族（DeepSeek Pro/Flash、Codex Astra/最新 Sol、Web Pro/Thinking），再按上游顺序回退。Claude 刷新的完整目录会为提供方使用与委派而存储，但不作为主菜单来源。这是家族与展示策略，不是基准排名。推理控制取精确的原生模型元数据或选定的 Web profile；目录不声称 Web 存在统一的推理强度表。刷新不会发布、安装或更新提供方软件。
+主菜单从每个可见的 DeepSeek、Codex 和 Web 来源中最多选择两个可用入口：按上游顺序选择最新旗舰与主线家族（DeepSeek Pro/Flash、Codex Astra/最新 Sol、Web Pro/Thinking），再按上游顺序回退。Claude 刷新的完整目录会为提供方使用与委派而存储，但不作为主菜单来源。这是家族与展示策略，不是基准排名。推理控制取精确的原生模型元数据或按模型划分的 Web picker 选项；目录不声称 Web 存在统一的推理强度表。刷新不会发布、安装或更新提供方软件。
+
+Web 的最新模型行代表多个由原生强度滑块选择的底层模型。发现过程按模型对实际观测到的不透明滑块选项分组，记录每个模型的精确强度，并从已观测滑块的最高强度端开始排列这些分组；旧的显式模型行仍保留在完整目录中。组合路由绑定精确的原生模型行和已观测模型家族；执行在提交文本前验证模型行及所请求的同模型强度。发现过程恢复此前的模型与强度，并拒绝不完整的观测或恢复。新增滑块模型沿用这条观测路径，不依赖内置模型名称列表。主菜单中显式选定的推理强度优先于辅助 Web 控件。
 
 ## Alternatives considered
 

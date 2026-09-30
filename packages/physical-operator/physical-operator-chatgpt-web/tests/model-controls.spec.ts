@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { Inbox, type Agent, type AgentOptions } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { Inbox, installModelSelection, type ModelSelectionRef, type Agent, type AgentOptions } from '@deepseek-ai/dsh-agent'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorId,
   type PhysicalOperatorResult,
@@ -138,6 +139,30 @@ describe('ChatGptWebModelControls catalog and preferences', () => {
       effort: 'high',
       modelSelectionPinned: true,
     })
+  })
+
+  it('keeps the captured main-menu Web effort authoritative without native effort aliases', async () => {
+    const { controls, session, agent } = await harness()
+    await agent.ctx.plugin(SystemPrompt)
+    const selection: ModelSelectionRef = {
+      current: {
+        provider: 'dsh-physical-operator', model: 'chatgpt-web-fixture:future-model',
+        reasoningEffort: 'future-model:research' as NonNullable<NonNullable<ModelSelectionRef['current']>['reasoningEffort']>,
+      },
+      assembled: undefined,
+    }
+    const dispose = installModelSelection(agent.ctx, selection)
+    await agent.ctx.get('systemPrompt')!.assemble()
+    appendProfile(session, { model: 'future-model', effort: 'old-effort' })
+    expect(controls.preferences(String(session.id))).toEqual({
+      model: 'future-model', effort: 'future-model:research', modelSelectionPinned: true, effortSelectionPinned: true,
+    })
+    await expect(controls.selectPreferences(String(session.id), { effort: 'different:effort' }))
+      .rejects.toMatchObject({ code: 'MODEL_SELECTION_UNAVAILABLE' })
+    expect(discover).not.toHaveBeenCalled()
+    await controls.selectPreferences(String(session.id), {})
+    expect(controls.preferences(String(session.id)).effort).toBe('future-model:research')
+    dispose()
   })
 
   it('ignores foreign primary models and preserves a bare Web route as a saved-profile route', async () => {

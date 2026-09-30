@@ -21,17 +21,29 @@ export const WEB_MODEL_CATALOG_CAPABILITIES: readonly BrowserCapabilityV1[] = Ob
   'page-evaluate',
 ])
 
-/** One exact visible option from a native ChatGPT picker. */
+/** Per-model reasoning choices observed from the native ChatGPT picker. */
+export interface WebModelReasoning {
+  /** Exact visible efforts that belong to this one model choice. */
+  readonly efforts: readonly WebModelChoice[]
+  /** First visible effort for this model choice. */
+  readonly defaultEffort?: string
+}
+
+/** One account-observed ChatGPT model or effort choice. */
 export interface WebModelChoice {
-  /** Opaque native option identifier when the page exposes one, otherwise its visible label. */
+  /** Exact native identifier, visible label, or bounded projected-model route. */
   readonly id: string
-  /** Exact normalized text currently visible to the account in the picker. */
+  /** Exact normalized picker text or a readable projection of an observed model family. */
   readonly label: string
+  /** Reasoning choices observed for this exact projected model. */
+  readonly reasoning?: WebModelReasoning
+  /** Zero-based account-observed menu rank when this choice is featured. */
+  readonly featuredRank?: number
 }
 
 /** Explicit user-authorized ChatGPT controls to apply in the owned browser page. */
 export interface WebModelPreferences {
-  /** Exact advertised model identifier or label. */
+  /** Exact advertised model row or projected catalog identifier. */
   readonly model?: string
   /** Exact advertised opaque reasoning option identifier or label. */
   readonly effort?: string
@@ -41,6 +53,8 @@ export interface WebModelPreferences {
 export interface WebModelProfile extends WebModelPreferences {
   /** Whether the DSH primary model menu, rather than this profile, pins the model. */
   readonly modelSelectionPinned?: boolean
+  /** Whether the DSH primary model menu pins the selected Web reasoning effort. */
+  readonly effortSelectionPinned?: boolean
 }
 
 /** The currently observable ChatGPT model controls for one owned browser page. */
@@ -465,6 +479,102 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
     }
     return state.selected === choice.id ? choice : undefined;
   };
+  const latestModel = (choices) => {
+    const matches = choices.filter((choice) => /^(?:latest|最新)$/iu.test(choice.label));
+    return matches.length === 1 ? matches[0] : undefined;
+  };
+  const familyFrom = (effort) => {
+    const separator = effort.lastIndexOf(':');
+    return separator > 0 ? effort.slice(0, separator) : undefined;
+  };
+  const multipleFamilies = (choices) => new Set(choices.map((choice) => familyFrom(choice.id))).size > 1;
+  const projectedModelId = (row, family) => {
+    const id = 'web-v1:' + encodeURIComponent(JSON.stringify([row, family]));
+    return id.length <= ${MAX_OPTION_LENGTH} ? id : undefined;
+  };
+  const projectedSelection = (requested) => {
+    if (!requested.startsWith('web-v1:')) return { kind: 'ordinary' };
+    try {
+      const decoded = JSON.parse(decodeURIComponent(requested.slice('web-v1:'.length)));
+      if (!Array.isArray(decoded) || decoded.length !== 2) return { kind: 'invalid' };
+      const [row, family] = decoded;
+      if (strictText(row) === undefined || strictText(family) === undefined
+        || projectedModelId(row, family) !== requested) return { kind: 'invalid' };
+      return { kind: 'projected', row, family };
+    } catch {
+      return { kind: 'invalid' };
+    }
+  };
+  const displayFamily = (family) => {
+    const match = /^gpt-([0-9]+)(?:-([0-9]+))?(?:-([a-z0-9]+(?:-[a-z0-9]+)*))?$/i.exec(family);
+    if (match === null) return family;
+    const words = match[3] === undefined ? '' : ' ' + match[3].split('-')
+      .map((word) => word.slice(0, 1).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+    return 'GPT-' + match[1] + (match[2] === undefined ? '' : '.' + match[2]) + words;
+  };
+  const projectLatestModels = (latest, control, rows) => {
+    const groups = [];
+    const byFamily = new Map();
+    for (const effort of control.choices) {
+      const family = familyFrom(effort.id);
+      if (family === undefined) return undefined;
+      let group = byFamily.get(family);
+      if (group === undefined) {
+        group = { family, efforts: [] };
+        byFamily.set(family, group);
+        groups.push(group);
+      }
+      group.efforts.push(effort);
+    }
+    const projected = groups.map((group, index) => {
+      const id = projectedModelId(latest.id, group.family);
+      return id === undefined ? undefined : {
+        id,
+        label: displayFamily(group.family),
+        reasoning: { efforts: group.efforts, defaultEffort: group.efforts[0].id },
+        featuredRank: groups.length - index - 1,
+      };
+    });
+    if (projected.some((choice) => choice === undefined)) return undefined;
+    const ordinary = rows.filter((row) => row.id !== latest.id).map((row, index) => ({
+      ...row, featuredRank: groups.length + index,
+    }));
+    if (projected.length + ordinary.length > ${MAX_OPTIONS}) return undefined;
+    return { models: [...projected, ...ordinary], groups };
+  };
+  const projectedModelFor = (models, latest, effort) => {
+    const family = familyFrom(effort);
+    if (family === undefined) return undefined;
+    const id = projectedModelId(latest.id, family);
+    return id === undefined ? undefined : models.find((model) => model.id === id);
+  };
+  const restoreLiveSelection = async (menu, saved) => {
+    const restored = await chooseLiveModel(menu, saved.model);
+    if (restored === undefined || !await restoreView(menu)) return undefined;
+    let control = liveReasoning(menu.root);
+    if (saved.effort === undefined) return control.kind === 'absent' ? control : undefined;
+    if (control.kind !== 'ok') return undefined;
+    if (control.selected !== saved.effort && await chooseLiveEffort(menu, saved.effort) === undefined) return undefined;
+    control = liveReasoning(menu.root);
+    return control.kind === 'ok' && control.selected === saved.effort ? control : undefined;
+  };
+  const inspectLatestAndRestore = async (menu, latest, saved) => {
+    let status;
+    let latestControl;
+    try {
+      const selected = await chooseLiveModel(menu, latest.id);
+      if (selected === undefined || !await restoreView(menu)) {
+        status = 'catalog-restore-unavailable';
+      } else {
+        const observed = liveReasoning(menu.root);
+        if (observed.kind !== 'ok') status = 'reasoning-options-unavailable';
+        else latestControl = observed;
+      }
+    } finally {
+      if (await restoreLiveSelection(menu, saved) === undefined) status = 'catalog-restore-unavailable';
+    }
+    return status === undefined ? { kind: 'ok', latestControl } : { kind: 'error', status };
+  };
   const loginRequired = () => [...document.querySelectorAll('button,a')].filter(visible).some((element) =>
     /^(?:log in|sign in|登录)$/i.test(text(element)),
   );
@@ -484,11 +594,16 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
           outcome = { status: 'model-options-unavailable' };
         } else {
           let selectedModel = livePicker ? modelRead.selected : selectedFrom(modelRead.choices, modelRead.nodes, modelTrigger);
+          let requestedProjection = { kind: 'ordinary' };
           if (request.selection?.model !== undefined) {
+            if (livePicker) requestedProjection = projectedSelection(request.selection.model);
+            const requestedModel = requestedProjection.kind === 'projected'
+              ? requestedProjection.row
+              : request.selection.model;
             const selected = livePicker
-              ? await chooseLiveModel(modelMenu, request.selection.model)
+              ? requestedProjection.kind === 'invalid' ? undefined : await chooseLiveModel(modelMenu, requestedModel)
               : await choose(request.selection.model, modelRead.choices, modelRead.nodes, modelTrigger);
-            if (selected === undefined) {
+            if (selected === undefined || requestedProjection.kind === 'invalid') {
               outcome = { status: 'model-selection-unavailable' };
             } else {
               selectedModel = selected.id;
@@ -502,21 +617,98 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
               outcome = { status: 'reasoning-options-unavailable' };
             } else if (outcome.status === 'protocol-error' && liveControl.kind === 'ok') {
               let selectedEffort = liveControl.selected;
-              if (request.selection?.effort !== undefined) {
+              if (requestedProjection.kind === 'projected') {
+                const familyChoices = liveControl.choices.filter((choice) => familyFrom(choice.id) === requestedProjection.family);
+                const requestedEffort = request.selection?.effort;
+                const targetEffort = requestedEffort ?? familyChoices[0]?.id;
+                if (selectedModel !== requestedProjection.row || targetEffort === undefined
+                  || familyFrom(targetEffort) !== requestedProjection.family
+                  || !familyChoices.some((choice) => choice.id === targetEffort)) {
+                  outcome = { status: 'effort-selection-unavailable' };
+                } else if (selectedEffort !== targetEffort) {
+                  const selected = await chooseLiveEffort(modelMenu, targetEffort);
+                  if (selected === undefined) outcome = { status: 'effort-selection-unavailable' };
+                  else selectedEffort = selected.id;
+                }
+              } else if (request.selection?.effort !== undefined) {
                 const selected = await chooseLiveEffort(modelMenu, request.selection.effort);
                 if (selected === undefined) outcome = { status: 'effort-selection-unavailable' };
                 else selectedEffort = selected.id;
               }
               if (outcome.status === 'protocol-error') {
-                const verified = liveReasoning(modelMenu.root);
+                let verified = liveReasoning(modelMenu.root);
                 if (verified.kind !== 'ok') outcome = { status: 'reasoning-options-unavailable' };
-                else outcome = {
-                  status: 'ok', models: modelRead.choices, efforts: verified.choices,
-                  ...(selectedModel === undefined ? {} : { selectedModel }),
-                  selectedEffort: verified.selected, observedAt: new Date().toISOString(),
-                };
+                else {
+                  let models = modelRead.choices;
+                  let efforts = verified.choices;
+                  const latest = latestModel(modelRead.choices);
+                  if (latest !== undefined) {
+                    if (selectedModel === undefined || requestedProjection.kind === 'projected' && latest.id !== requestedProjection.row) {
+                      outcome = { status: 'model-selection-unavailable' };
+                    } else {
+                      let latestControl = verified;
+                      const saved = { model: selectedModel, effort: verified.selected };
+                      if (selectedModel !== latest.id) {
+                        const inspected = await inspectLatestAndRestore(modelMenu, latest, saved);
+                        if (inspected.kind === 'error') {
+                          outcome = { status: inspected.status };
+                        } else {
+                          latestControl = inspected.latestControl;
+                          verified = liveReasoning(modelMenu.root);
+                          if (verified.kind !== 'ok' || verified.selected !== saved.effort) {
+                            outcome = { status: 'catalog-restore-unavailable' };
+                          } else {
+                            efforts = verified.choices;
+                          }
+                        }
+                      }
+                      if (outcome.status === 'protocol-error') {
+                        const projected = projectLatestModels(latest, latestControl, modelRead.choices);
+                        if (projected === undefined) {
+                          outcome = { status: 'reasoning-options-unavailable' };
+                        } else {
+                          models = projected.models;
+                          if (selectedModel === latest.id) {
+                            const selected = projectedModelFor(models, latest, verified.selected);
+                            if (selected === undefined) outcome = { status: 'reasoning-options-unavailable' };
+                            else {
+                              selectedModel = selected.id;
+                              efforts = selected.reasoning.efforts;
+                            }
+                          }
+                        }
+                      }
+                    }
+                  } else if (multipleFamilies(verified.choices)) {
+                    outcome = { status: 'latest-model-unavailable' };
+                  } else if (requestedProjection.kind === 'projected') {
+                    outcome = { status: 'model-selection-unavailable' };
+                  }
+                  if (outcome.status === 'protocol-error') outcome = {
+                    status: 'ok', models, efforts,
+                    ...(selectedModel === undefined ? {} : { selectedModel }),
+                    selectedEffort: verified.selected, observedAt: new Date().toISOString(),
+                  };
+                }
               }
             } else if (outcome.status === 'protocol-error') {
+              const latest = livePicker && liveControl.kind === 'absent' ? latestModel(modelRead.choices) : undefined;
+              if (latest !== undefined && selectedModel !== undefined && selectedModel !== latest.id
+                && request.selection?.effort === undefined) {
+                const inspected = await inspectLatestAndRestore(modelMenu, latest, { model: selectedModel });
+                if (inspected.kind === 'error') {
+                  outcome = { status: inspected.status };
+                } else {
+                  const projected = projectLatestModels(latest, inspected.latestControl, modelRead.choices);
+                  if (projected === undefined) {
+                    outcome = { status: 'reasoning-options-unavailable' };
+                  } else {
+                    outcome = {
+                      status: 'ok', models: projected.models, efforts: [], selectedModel, observedAt: new Date().toISOString(),
+                    };
+                  }
+                }
+              } else {
               if (!await close(modelMenu)) {
                 outcome = { status: 'menu-close-failed' };
               } else {
@@ -547,6 +739,7 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
                     }
                   }
                 }
+              }
               }
             }
           }
@@ -605,8 +798,9 @@ return await browser.evaluate(page, ${JSON.stringify(MODEL_CATALOG_EVALUATOR)}, 
 
 /**
  * Discover the native model controls in the user's authenticated ChatGPT page.
- * Omitting `selection` performs a read-only scan apart from opening and closing
- * its own pickers.
+ * Omitting `selection` never submits a prompt. It can temporarily select the
+ * visible Latest row to inspect its slider, then verifies restoration of the
+ * prior model and reasoning control before returning a catalog.
  * @param ctx - Context exposing the provider-neutral browser service.
  * @param options - browser bounds and optional explicit user-authorized selection.
  * @param signal - cancellation of the owned browser operation; a late browser result after abort is rejected.
@@ -714,6 +908,10 @@ function catalogFromOutput(value: BrowserJsonValue): WebModelCatalog {
       throw new Error('ChatGPT Web opened the model picker but could not read unambiguous visible model choices')
     case 'model-selection-unavailable':
       throw new Error('ChatGPT Web could not verify the explicitly requested model; refresh and choose an exact advertised model')
+    case 'latest-model-unavailable':
+      throw new Error('ChatGPT Web could not identify one visible Latest model row for the observed multiple model families')
+    case 'catalog-restore-unavailable':
+      throw new Error('ChatGPT Web could not restore the selected model and reasoning control after reading the latest choices')
     case 'reasoning-options-unavailable':
       throw new Error('ChatGPT Web opened the reasoning picker but could not read unambiguous visible reasoning choices')
     case 'effort-selection-unavailable':
@@ -727,7 +925,7 @@ function catalogFromOutput(value: BrowserJsonValue): WebModelCatalog {
 
 /** Parse the one accepted browser result and retain only exact observed picker values. */
 function parseCatalog(record: Readonly<Record<string, BrowserJsonValue>>): WebModelCatalog {
-  const models = choicesFrom('models', record.models)
+  const models = choicesFrom('models', record.models, true)
   const efforts = choicesFrom('efforts', record.efforts)
   const selectedModel = selectedFrom('selectedModel', record.selectedModel, models)
   const selectedEffort = selectedFrom('selectedEffort', record.selectedEffort, efforts)
@@ -744,7 +942,7 @@ function parseCatalog(record: Readonly<Record<string, BrowserJsonValue>>): WebMo
 }
 
 /** Validate one picker array without accepting malformed or duplicate choices. */
-function choicesFrom(name: string, value: BrowserJsonValue | undefined): WebModelChoice[] {
+function choicesFrom(name: string, value: BrowserJsonValue | undefined, modelChoices = false): WebModelChoice[] {
   if (!isJsonArray(value) || value.length > MAX_OPTIONS) {
     throw new Error(`ChatGPT Web returned invalid ${name}`)
   }
@@ -755,8 +953,42 @@ function choicesFrom(name: string, value: BrowserJsonValue | undefined): WebMode
     const label = requiredOutputText(`${name}.label`, record.label)
     if (seen.has(id)) throw new Error(`ChatGPT Web returned duplicate ${name} choice "${id}"`)
     seen.add(id)
-    return Object.freeze({ id, label })
+    if (!modelChoices) {
+      if (record.reasoning !== undefined || record.featuredRank !== undefined) {
+        throw new Error(`ChatGPT Web returned invalid ${name} choice metadata`)
+      }
+      return Object.freeze({ id, label })
+    }
+    const reasoning = record.reasoning === undefined ? undefined : reasoningFrom(`${name}.reasoning`, record.reasoning)
+    const featuredRank = record.featuredRank === undefined ? undefined : featuredRankFrom(`${name}.featuredRank`, record.featuredRank)
+    return Object.freeze({
+      id,
+      label,
+      ...reasoning === undefined ? {} : { reasoning },
+      ...featuredRank === undefined ? {} : { featuredRank },
+    })
   })
+}
+
+/** Validate one exact-model reasoning projection returned from the page. */
+function reasoningFrom(name: string, value: BrowserJsonValue): WebModelReasoning {
+  const record = recordOf(value)
+  const efforts = choicesFrom(`${name}.efforts`, record.efforts)
+  const defaultEffort = record.defaultEffort === undefined
+    ? undefined
+    : selectedFrom(`${name}.defaultEffort`, record.defaultEffort, efforts)
+  return Object.freeze({
+    efforts: Object.freeze(efforts),
+    ...defaultEffort === undefined ? {} : { defaultEffort },
+  })
+}
+
+/** Validate an explicit non-negative menu rank returned from the page. */
+function featuredRankFrom(name: string, value: BrowserJsonValue): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`ChatGPT Web returned invalid ${name}`)
+  }
+  return value
 }
 
 /** Require an optional selected id to be one current visible option. */
