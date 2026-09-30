@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
-import { RESIDENT_PROTOCOL_VERSION, RESIDENT_STATE_SCHEMA_VERSION } from '@deepseek-ai/dsh-resident-operator'
+import {
+  ResidentOperatorError,
+  RESIDENT_PROTOCOL_VERSION,
+  RESIDENT_STATE_SCHEMA_VERSION,
+} from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient, waitForDaemonSocketRelease } from '../src/client.ts'
 import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
 
@@ -24,6 +28,8 @@ const REQUIRED_METHODS = [
   'session.reset',
   'event.read',
 ]
+const V5_PROTOCOL_VERSION = 14
+const V5_STATE_SCHEMA_VERSION = 5
 
 function mockHandshake(): Record<string, unknown> {
   return {
@@ -36,16 +42,40 @@ function mockHandshake(): Record<string, unknown> {
   }
 }
 
+function mockV5Handshake(params: Record<string, unknown>, daemonInstanceId: string): Record<string, unknown> {
+  if (params.protocol_version !== V5_PROTOCOL_VERSION
+    || params.state_schema_version !== V5_STATE_SCHEMA_VERSION
+    || params.driver_manifest_sha256 !== residentDriverManifestSha256([])) {
+    throw new ResidentOperatorError('resident daemon protocol 14/schema 5 does not match client', 'PROTOCOL_MISMATCH')
+  }
+  return {
+    ...mockHandshake(),
+    protocolVersion: V5_PROTOCOL_VERSION,
+    stateSchemaVersion: V5_STATE_SCHEMA_VERSION,
+    daemonInstanceId,
+    buildCommit: 'v5-build',
+  }
+}
+
 async function listenMockDaemon(
   socketPath: string,
-  handshake: () => Record<string, unknown>,
+  handshake: (params: Record<string, unknown>) => Record<string, unknown>,
   shutdownOnRequest = false,
   onShutdownComplete?: () => void,
-): Promise<{ readonly server: ReturnType<typeof createServer>; readonly methods: string[][] }> {
+  verifyShutdown?: (params: Record<string, unknown>) => void,
+): Promise<{
+  readonly server: ReturnType<typeof createServer>
+  readonly methods: string[][]
+  readonly handshakeParams: Record<string, unknown>[]
+  readonly shutdownParams: Record<string, unknown>[]
+}> {
   const methods: string[][] = []
+  const handshakeParams: Record<string, unknown>[] = []
+  const shutdownParams: Record<string, unknown>[] = []
   const server = createServer((socket) => {
     const connectionMethods: string[] = []
     let recordedConnection = false
+    let qualified = false
     let buffer = ''
     socket.setEncoding('utf8')
     socket.on('data', (chunk: string) => {
@@ -56,32 +86,66 @@ async function listenMockDaemon(
         const line = buffer.slice(0, newline)
         buffer = buffer.slice(newline + 1)
         if (line.length === 0) continue
-        const frame = JSON.parse(line) as { readonly id: string | number; readonly method: string }
+        const frame = JSON.parse(line) as {
+          readonly id: string | number
+          readonly method: string
+          readonly params?: unknown
+        }
+        const params = frame.params !== null && typeof frame.params === 'object' && !Array.isArray(frame.params)
+          ? frame.params as Record<string, unknown>
+          : {}
         if (!recordedConnection) {
           methods.push(connectionMethods)
           recordedConnection = true
         }
         connectionMethods.push(frame.method)
-        const value = frame.method === 'system.handshake'
-          ? handshake()
-          : frame.method === 'operator.list'
-            ? { providers: [] }
-            : frame.method === 'session.list'
-              ? { sessions: [] }
-              : {}
-        socket.write(`${JSON.stringify({ jsonrpc: '2.0', id: frame.id, result: { ok: true, value } })}\n`)
-        if (frame.method === 'system.shutdown' && shutdownOnRequest) {
-          setTimeout(() => {
-            socket.end()
-            server.close(() => { onShutdownComplete?.() })
-          }, 0)
+        try {
+          let value: Record<string, unknown>
+          if (frame.method === 'system.handshake') {
+            handshakeParams.push(params)
+            value = handshake(params)
+            qualified = true
+          } else if (frame.method === 'operator.list') {
+            value = { providers: [] }
+          } else if (frame.method === 'session.list') {
+            value = { sessions: [] }
+          } else if (frame.method === 'system.shutdown') {
+            if (shutdownOnRequest && !qualified) {
+              throw new ResidentOperatorError('resident client must complete a compatible handshake before shutdown', 'PROTOCOL_MISMATCH')
+            }
+            shutdownParams.push(params)
+            verifyShutdown?.(params)
+            value = {}
+          } else {
+            value = {}
+          }
+          socket.write(`${JSON.stringify({ jsonrpc: '2.0', id: frame.id, result: { ok: true, value } })}\n`)
+          if (frame.method === 'system.shutdown' && shutdownOnRequest) {
+            setTimeout(() => {
+              socket.end()
+              server.close(() => { onShutdownComplete?.() })
+            }, 0)
+          }
+        } catch (error) {
+          const residentError = error instanceof ResidentOperatorError ? error : undefined
+          socket.write(`${JSON.stringify({
+            jsonrpc: '2.0',
+            id: frame.id,
+            result: {
+              ok: false,
+              error: {
+                code: residentError?.code ?? 'RUNTIME_UNAVAILABLE',
+                message: error instanceof Error ? error.message : String(error),
+              },
+            },
+          })}\n`)
         }
       }
     })
   })
   server.listen(socketPath)
   await once(server, 'listening')
-  return { server, methods }
+  return { server, methods, handshakeParams, shutdownParams }
 }
 
 function createMockAuthority(root: string, pid: number, instanceId: string): () => void {
@@ -208,14 +272,22 @@ describe('ResidentDaemonClient request qualification', () => {
     const client = new ResidentDaemonClient({ root, autoStart: true, connectTimeoutMs: 5_000, pollIntervalMs: 10 })
     writeFileSync(join(root, 'daemon.pid'), `${process.pid}\n`)
     let authorityReleased = false
-    const releaseAuthority = createMockAuthority(root, process.pid, 'mock-daemon')
-    const mock = await listenMockDaemon(client.socketPath, () => ({
-      ...mockHandshake(),
-      protocolVersion: RESIDENT_PROTOCOL_VERSION - 1,
-    }), true, () => {
-      releaseAuthority()
-      authorityReleased = true
-    })
+    const releaseAuthority = createMockAuthority(root, process.pid, 'v5-daemon')
+    const mock = await listenMockDaemon(
+      client.socketPath,
+      params => mockV5Handshake(params, 'v5-daemon'),
+      true,
+      () => {
+        releaseAuthority()
+        authorityReleased = true
+      },
+      (params) => {
+        expect(params).toEqual({
+          expected_daemon_pid: process.pid,
+          expected_daemon_instance_id: 'v5-daemon',
+        })
+      },
+    )
     const internals = client as unknown as {
       handshake: () => Promise<void>
       startAndWaitForReady: () => Promise<void>
@@ -231,12 +303,111 @@ describe('ResidentDaemonClient request qualification', () => {
       await expect(client.list()).resolves.toEqual([])
       expect(mock.methods).toEqual([
         ['system.handshake'],
-        ['system.shutdown'],
+        ['system.handshake', 'system.shutdown'],
       ])
+      expect(mock.handshakeParams).toEqual([
+        {
+          protocol_version: RESIDENT_PROTOCOL_VERSION,
+          state_schema_version: RESIDENT_STATE_SCHEMA_VERSION,
+          driver_manifest_sha256: residentDriverManifestSha256([]),
+        },
+        {
+          protocol_version: RESIDENT_PROTOCOL_VERSION,
+          state_schema_version: V5_STATE_SCHEMA_VERSION,
+          driver_manifest_sha256: residentDriverManifestSha256([]),
+        },
+      ])
+      expect(mock.shutdownParams).toEqual([{
+        expected_daemon_pid: process.pid,
+        expected_daemon_instance_id: 'v5-daemon',
+      }])
       expect(replacement?.methods).toEqual([
         ['system.handshake'],
         ['system.handshake', 'session.list'],
       ])
+    } finally {
+      if (replacement?.server.listening) await closeMockDaemon(replacement.server)
+      if (mock.server.listening) await closeMockDaemon(mock.server)
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not retire a v5 daemon whose authority identifies a replacement', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-resident-client-upgrade-'))
+    const client = new ResidentDaemonClient({ root, autoStart: true, connectTimeoutMs: 1_000, pollIntervalMs: 10 })
+    writeFileSync(join(root, 'daemon.pid'), `${process.pid}\n`)
+    const releaseAuthority = createMockAuthority(root, process.pid, 'replacement-daemon')
+    const mock = await listenMockDaemon(client.socketPath, params => mockV5Handshake(params, 'v5-daemon'))
+    try {
+      await expect(client.ready()).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+      expect(mock.methods).toEqual([
+        ['system.handshake'],
+        ['system.handshake'],
+      ])
+    } finally {
+      if (mock.server.listening) await closeMockDaemon(mock.server)
+      releaseAuthority()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('retires a same-schema daemon after an observed build mismatch', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-resident-client-upgrade-'))
+    const client = new ResidentDaemonClient({ root, autoStart: true, connectTimeoutMs: 1_000, pollIntervalMs: 10 })
+    writeFileSync(join(root, 'daemon.pid'), `${process.pid}\n`)
+    let authorityReleased = false
+    const releaseAuthority = createMockAuthority(root, process.pid, 'build-mismatch-daemon')
+    const mock = await listenMockDaemon(
+      client.socketPath,
+      () => ({
+        ...mockHandshake(),
+        daemonInstanceId: 'build-mismatch-daemon',
+        buildCommit: 'previous-build',
+      }),
+      true,
+      () => {
+        releaseAuthority()
+        authorityReleased = true
+      },
+      (params) => {
+        expect(params).toEqual({
+          expected_daemon_pid: process.pid,
+          expected_daemon_instance_id: 'build-mismatch-daemon',
+        })
+      },
+    )
+    const internals = client as unknown as {
+      handshake: () => Promise<void>
+      startAndWaitForReady: () => Promise<void>
+    }
+    let replacement: Awaited<ReturnType<typeof listenMockDaemon>> | undefined
+    internals.startAndWaitForReady = async () => {
+      expect(authorityReleased).toBe(true)
+      replacement = await listenMockDaemon(client.socketPath, mockHandshake)
+      await internals.handshake()
+    }
+    try {
+      await expect(client.ready()).resolves.toBeUndefined()
+      expect(mock.methods).toEqual([
+        ['system.handshake'],
+        ['system.handshake', 'system.shutdown'],
+      ])
+      expect(mock.handshakeParams).toEqual([
+        {
+          protocol_version: RESIDENT_PROTOCOL_VERSION,
+          state_schema_version: RESIDENT_STATE_SCHEMA_VERSION,
+          driver_manifest_sha256: residentDriverManifestSha256([]),
+        },
+        {
+          protocol_version: RESIDENT_PROTOCOL_VERSION,
+          state_schema_version: RESIDENT_STATE_SCHEMA_VERSION,
+          driver_manifest_sha256: residentDriverManifestSha256([]),
+        },
+      ])
+      expect(mock.shutdownParams).toEqual([{
+        expected_daemon_pid: process.pid,
+        expected_daemon_instance_id: 'build-mismatch-daemon',
+      }])
     } finally {
       if (replacement?.server.listening) await closeMockDaemon(replacement.server)
       if (mock.server.listening) await closeMockDaemon(mock.server)
