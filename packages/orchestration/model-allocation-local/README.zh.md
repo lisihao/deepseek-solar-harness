@@ -40,7 +40,20 @@ Provider 只接收规范化 Offer，不导入 Codex、Claude、DeepSeek、Reside
 ```yaml
 model-allocation:
   publicEvidence: apply
+  costAware: shadow
 ```
+
+### 成本感知选择
+
+对不需要最强模型的工作，请求可以携带 `costAwareObjective`（`economy`、`balanced` 或 `speed`）、`alternativeOffers`（`offers` 中已有模型的其他推理强度），以及记录里带有 `avg_cost_usd` 和 `avg_runtime_seconds` 的 `evidence`。Provider 随后在基线所属算子的已测量报价中，选出实测通过率够用的最便宜者：
+
+1. 最好的报价是 95% Wilson 下界最高的那个。
+2. 报价够用的条件是：上界达到最好者的下界，且通过率与最好者相差不超过一个余量——`economy` 为 0.12，`balanced` 和 `speed` 为 0.06。
+3. `economy` 和 `balanced` 取“成本加每分钟运行时间折算 `minuteValueUsd`（默认 0.1）”最低者，所以便宜但要跑半小时的模型会落选；`speed` 取运行时间最短者。并列时取通过率更高者，再按目录 `rank`。
+
+没有任何报价有完整测量，或测量来自不同队列时，选择弃权，基线保持。基线本身可以没有测量，新模型常常如此；已测量的报价仍可以取代它。基线和证据平局排序都看不到 `alternativeOffers`，因为证据只比较强度相同的报价。
+
+插件设置 `costAware`（`off`、默认 `shadow`、`apply`）和 `model-allocation.costAware` 设置决定行为，与 `publicEvidence` 相同。`shadow` 把选择记入计划的 `selection` 回执，但不采用。`minuteValueUsd` 是插件设置。Radar 的成本是一次运行按 API 价格折算的金额，对订阅来说是它占用额度份额的代理。
 
 ## 模型体验
 

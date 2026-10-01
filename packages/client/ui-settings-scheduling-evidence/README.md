@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 Read-only **Scheduling evidence** page in Settings. It asks the authenticated `/scheduling-evidence` RPC channel for one overview on each visit and on **Refresh**, and shows three cards and a table:
 
-- **Your switches:** whether Radar evidence is on, whether personal-use collection is consented, the allocator's evidence mode, the Python interpreter in force, and the cycle interval.
+- **Your switches:** whether Radar evidence is on, whether personal-use collection is consented, the allocator's evidence and cost-aware modes, the Python interpreter in force, and the cycle interval.
 - **Stored data:** the collector's freshness state, when the data was collected and last updated at the source, its age, the generation id, whether the allocator holds that generation, and the row count of each SQLite table.
 - **Last cycle:** when it started, whether the collection was skipped, succeeded, or failed, whether the store was read back, and the first failure's message.
 - **Model results:** every stored model row with pass rate, task count, IQ, average cost, and average time. By default only the Codex rows the allocator can use are listed; a checkbox shows the rest, and a text box filters by provider, model, or effort.

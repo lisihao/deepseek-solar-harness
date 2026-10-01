@@ -40,7 +40,20 @@ With `ctx.settings` mounted, the owner can override the mode in the settings doc
 ```yaml
 model-allocation:
   publicEvidence: apply
+  costAware: shadow
 ```
+
+### Cost-aware selection
+
+For work that does not need the strongest model, a request can carry `costAwareObjective` (`economy`, `balanced`, or `speed`), `alternativeOffers` (other reasoning strengths of models already in `offers`), and `evidence` whose records carry `avg_cost_usd` and `avg_runtime_seconds`. The Provider then picks, among the measured offers of the baseline's operator, the cheapest one whose measured pass rate is good enough:
+
+1. The best offer is the one with the highest 95% Wilson lower bound.
+2. An offer is sufficient when its upper bound reaches the best lower bound and its pass rate is within a margin of the best: 0.12 for `economy`, 0.06 for `balanced` and `speed`.
+3. `economy` and `balanced` pick the lowest cost plus `minuteValueUsd` (default 0.1) per minute of runtime, so a cheap model that takes half an hour loses; `speed` picks the shortest runtime. Ties go to the higher pass rate, then the catalog `rank`.
+
+Without a complete measurement for any offer, or when the measurements come from different cohorts, the selection abstains and the baseline stands. The baseline itself may be unmeasured, as a new model often is; a measured offer can still replace it. The baseline and the evidence tie-break never see `alternativeOffers`, because evidence only compares offers of equal strength.
+
+The plugin setting `costAware` (`off`, `shadow` by default, `apply`) and the `model-allocation.costAware` setting select what happens, like `publicEvidence`. `shadow` records the choice in the plan's `selection` receipt without using it. `minuteValueUsd` is a plugin setting. Radar's cost is the API-price equivalent of a run, which for a subscription is a proxy for the share of the allowance it uses.
 
 ## Model Experience
 

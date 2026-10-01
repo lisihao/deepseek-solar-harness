@@ -70,6 +70,13 @@ function modeLabel(mode: SchedulingEvidencePageV1['publicEvidence'], t: Scheduli
   return t('modeUnknown')
 }
 
+function costModeLabel(mode: SchedulingEvidencePageV1['costAware'], t: SchedulingEvidenceT): string {
+  if (mode === 'off') return t('costModeOff')
+  if (mode === 'shadow') return t('costModeShadow')
+  if (mode === 'apply') return t('costModeApply')
+  return t('modeUnknown')
+}
+
 function stateLabel(state: string, t: SchedulingEvidenceT): string {
   if (state === 'fresh' || state === 'cache') return t('fresh')
   if (state === 'stale' || state === 'stale-cache') return t('stale')
@@ -217,6 +224,7 @@ export function SchedulingEvidenceSection({ connection, t }: SchedulingEvidenceS
             <Fact label={t('radar')}>{page.radar.enabled ? t('on') : t('off')}</Fact>
             <Fact label={t('consent')}>{page.radar.personalUseConsent ? t('consentGiven') : t('consentMissing')}</Fact>
             <Fact label={t('mode')}>{modeLabel(page.publicEvidence, t)}</Fact>
+            <Fact label={t('costMode')}>{costModeLabel(page.costAware, t)}</Fact>
             <Fact label={t('python')}><code>{page.radar.python}</code></Fact>
             <Fact label={t('every')}>{span(page.radar.refreshIntervalMs === null ? null : page.radar.refreshIntervalMs / 1_000, t)}</Fact>
           </dl>

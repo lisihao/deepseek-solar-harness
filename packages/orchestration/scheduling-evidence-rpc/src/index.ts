@@ -22,8 +22,8 @@ type RpcResult = Awaited<ReturnType<ConnectionRpcHandler>>
 
 const ALLOCATION_NAMESPACE = settingsNamespace('model-allocation')
 
-function evidenceMode(settings: SettingsProvider | undefined): PublicEvidenceModeView | null {
-  const mode = (settings?.get(ALLOCATION_NAMESPACE) as { publicEvidence?: unknown } | undefined)?.publicEvidence
+function allocationMode(settings: SettingsProvider | undefined, key: 'publicEvidence' | 'costAware'): PublicEvidenceModeView | null {
+  const mode = (settings?.get(ALLOCATION_NAMESPACE) as Record<string, unknown> | undefined)?.[key]
   return mode === 'off' || mode === 'shadow' || mode === 'apply' ? mode : null
 }
 
@@ -44,7 +44,11 @@ export function createSchedulingEvidenceRpcHandler(
       if (payload !== undefined && (typeof payload !== 'object' || payload === null || Object.keys(payload).length > 0)) {
         throw new TypeError('payload must be empty')
       }
-      const page: SchedulingEvidencePageV1 = { ...await gateway.overview(), publicEvidence: evidenceMode(settings) }
+      const page: SchedulingEvidencePageV1 = {
+        ...await gateway.overview(),
+        publicEvidence: allocationMode(settings, 'publicEvidence'),
+        costAware: allocationMode(settings, 'costAware'),
+      }
       return { ok: true, value: page }
     } catch (error) {
       return {

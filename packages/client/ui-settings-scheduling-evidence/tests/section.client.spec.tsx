@@ -31,6 +31,7 @@ function page(overrides: Partial<SchedulingEvidencePageV1> = {}): SchedulingEvid
     },
     models: MODELS,
     publicEvidence: 'shadow',
+    costAware: 'shadow',
     ...overrides,
   }
 }
@@ -60,6 +61,7 @@ describe('SchedulingEvidenceSection', () => {
     expect(screen.getByText('Radar evidence').nextSibling?.textContent).toBe('On')
     expect(screen.getByText('Personal-use collection').nextSibling?.textContent).toBe('Consented')
     expect(screen.getByText('Allocator mode').nextSibling?.textContent).toBe('Shadow: recorded, not used')
+    expect(screen.getByText('Cost-aware choice').nextSibling?.textContent).toBe('Shadow: recorded, not used')
     expect(screen.getByText('/opt/homebrew/bin/python3.12')).toBeTruthy()
     expect(screen.getByText('Cycle interval').nextSibling?.textContent).toBe('4 h')
     expect(screen.getByText('Freshness').nextSibling?.textContent).toBe('Fresh')
@@ -132,6 +134,19 @@ describe('SchedulingEvidenceSection', () => {
     render(<SchedulingEvidenceSection connection={handle} t={t} />)
 
     await screen.findByText('Nothing stored yet.')
+  })
+
+  it.each([
+    ['off', 'Off'],
+    ['apply', 'Apply: cheapest sufficient'],
+    [null, 'Unknown'],
+  ] as const)('names the %s cost-aware mode', async (mode, label) => {
+    const { handle } = connection([ok(page({ costAware: mode }))])
+
+    render(<SchedulingEvidenceSection connection={handle} t={t} />)
+
+    await screen.findByText('Cost-aware choice')
+    expect(screen.getByText('Cost-aware choice').nextSibling?.textContent).toBe(label)
   })
 
   it.each([
