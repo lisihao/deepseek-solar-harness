@@ -1,10 +1,12 @@
 /** Deterministic subscription-first allocation Provider. @module @deepseek-ai/dsh-model-allocation-local */
 
 import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import ModelAllocationService, {
   ModelAllocationError,
   validateAdaptiveExecutionPreference,
   type AdaptiveExecutionPreferenceV1,
+  type ModelAllocationEvidenceReceipt,
   type ModelAllocationFallbackProvenance,
   type ModelAllocationFallbackReasonCode,
   type ModelAllocationPlan,
@@ -12,8 +14,22 @@ import ModelAllocationService, {
   type ModelExecutionOffer,
   type ModelQuotaWindow,
 } from '@deepseek-ai/dsh-model-allocation'
+import { rankComparablePublicEvidence, type PublicEvidenceCandidate } from './public-evidence.ts'
 
 export const name = 'model-allocation-local'
+
+/** How public evidence takes part in allocation. */
+export type PublicEvidenceMode = 'off' | 'shadow' | 'apply'
+
+/** Provider settings. */
+export interface Config {
+  /**
+   * `off` ignores request evidence; `shadow` records what evidence would pick
+   * without using it; `apply` lets evidence break a tie among offers with the
+   * same top score. Default `shadow`.
+   */
+  readonly publicEvidence?: PublicEvidenceMode
+}
 
 export { canonicalCohortKey, rankComparablePublicEvidence } from './public-evidence.ts'
 export type {
@@ -231,8 +247,72 @@ function fallbackProvenance(
   }
 }
 
+/** The evidence ranking of the offers that tied for the top score. */
+interface EvidenceVerdict {
+  readonly status: 'used' | 'abstained'
+  readonly reason: string
+  readonly tiedOfferIds: readonly string[]
+  /** Tier per tied offer; absent when the ranking could not run. */
+  readonly tiers: ReadonlyMap<string, number>
+}
+
+/** Identity of an offer as public evidence names a candidate. */
+function evidenceCandidate(offer: ModelExecutionOffer, records: readonly unknown[] | undefined): PublicEvidenceCandidate {
+  return {
+    candidateId: offer.offerId,
+    provider: offer.provider,
+    model: offer.model,
+    reasoningEffort: offer.profile?.effort,
+    executionSurface: offer.operatorId,
+    billingIdentity: offer.source,
+    publicEvidence: records,
+  }
+}
+
+/** Rank the offers that tie for the top score; a failure to rank abstains instead of failing the allocation. */
+function rankTiedOffers(tied: readonly ModelExecutionOffer[], evidence: NonNullable<ModelAllocationRequest['evidence']>): EvidenceVerdict {
+  const tiedOfferIds = tied.map(offer => offer.offerId).sort((left, right) => left.localeCompare(right))
+  try {
+    const ranking = rankComparablePublicEvidence(
+      tied.map(offer => evidenceCandidate(offer, evidence.records[offer.offerId])),
+      { taskType: evidence.taskType },
+    )
+    return {
+      status: ranking.status,
+      reason: ranking.reason,
+      tiedOfferIds,
+      tiers: new Map(Object.entries(ranking.preferenceRanks)),
+    }
+  } catch (error) {
+    return {
+      status: 'abstained',
+      // The ranking throws only TypeError, for a candidate without an identity field.
+      reason: `public evidence could not be ranked: ${(error as TypeError).message}`,
+      tiedOfferIds,
+      tiers: new Map(),
+    }
+  }
+}
+
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
+  private readonly evidenceMode: PublicEvidenceMode
+
+  /** Settings accepted from the Loader; every field is optional. */
+  static Config: z<Config> = z.object({
+    publicEvidence: z.union(['off', 'shadow', 'apply']),
+  })
+
+  /**
+   * Register `ctx.modelAllocation`.
+   * @param ctx - owning context.
+   * @param config - evidence mode; omitted means `shadow`.
+   */
+  constructor(ctx: Context, config: Config = {}) {
+    super(ctx)
+    this.evidenceMode = config.publicEvidence ?? 'shadow'
+  }
+
   allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {
     const adaptivePreference = request.adaptiveExecutionPreference === undefined
       ? undefined
@@ -289,13 +369,44 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       : candidates
     const routedCandidates = policyCandidates(qualityCandidates, request, adaptivePreference)
     const nowSeconds = Math.floor(Date.parse(request.now) / 1_000)
-    const [selected] = [...routedCandidates].sort((left, right) => {
+    const order = (left: ModelExecutionOffer, right: ModelExecutionOffer, tiers?: ReadonlyMap<string, number>): number => {
       const difference = score(right, request, nowSeconds) - score(left, request, nowSeconds)
       if (difference !== 0) return difference
+      const leftTier = tiers?.get(left.offerId)
+      const rightTier = tiers?.get(right.offerId)
+      if (leftTier !== undefined && rightTier !== undefined && leftTier !== rightTier) return leftTier - rightTier
       const rank = (left.rank ?? Number.POSITIVE_INFINITY) - (right.rank ?? Number.POSITIVE_INFINITY)
       return Number.isNaN(rank) || rank === 0 ? left.offerId.localeCompare(right.offerId) : rank
-    })
-    if (selected === undefined) throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
+    }
+    const [baseline] = [...routedCandidates].sort((left, right) => order(left, right))
+    if (baseline === undefined) throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
+    const topScore = score(baseline, request, nowSeconds)
+    const tied = routedCandidates.filter(offer => score(offer, request, nowSeconds) === topScore)
+    const verdict = this.evidenceMode === 'off' || request.evidence === undefined || tied.length < 2
+      ? undefined
+      : rankTiedOffers(tied, request.evidence)
+    const evidenceChoice = verdict === undefined
+      ? baseline
+      : [...routedCandidates].sort((left, right) => order(left, right, verdict.tiers))[0] as ModelExecutionOffer
+    const apply = this.evidenceMode === 'apply' && verdict?.status === 'used'
+    const selected = apply ? evidenceChoice : baseline
+    const evidenceReceipt: ModelAllocationEvidenceReceipt | undefined = verdict === undefined || request.evidence === undefined
+      ? undefined
+      : {
+        mode: this.evidenceMode === 'apply' ? 'apply' : 'shadow',
+        status: verdict.status,
+        reason: verdict.reason,
+        snapshots: request.evidence.snapshots,
+        tiedOfferIds: verdict.tiedOfferIds,
+        candidates: verdict.tiedOfferIds.map(offerId => ({
+          offerId,
+          preferenceRank: verdict.tiers.get(offerId) ?? 0,
+          status: verdict.status,
+        })),
+        baselineOfferId: baseline.offerId,
+        evidenceOfferId: evidenceChoice.offerId,
+        applied: apply && evidenceChoice.offerId !== baseline.offerId,
+      }
     const adaptiveTargetModel = adaptiveTarget(request, adaptivePreference)
     const adaptiveTargetAvailable = adaptiveTargetModel !== undefined
       && candidates.some(offer => codexFamily(offer, adaptiveTargetModel))
@@ -339,10 +450,12 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
           ? []
           : [`protected-reserve:${String(selected.quotaGuard.protectedRemainingPercent)}%`],
         ...urgentCapacity === 0 ? [] : ['accelerate-before-quota-reset'],
+        ...evidenceReceipt?.applied === true ? ['public-evidence-tiebreak'] : [],
       ],
+      ...evidenceReceipt === undefined ? {} : { evidence: evidenceReceipt },
     })
   }
 }
 
-export function apply(ctx: Context): void { new SubscriptionFirstModelAllocation(ctx) }
+export function apply(ctx: Context, config?: Config): void { new SubscriptionFirstModelAllocation(ctx, config) }
 export default SubscriptionFirstModelAllocation

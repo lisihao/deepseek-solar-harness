@@ -22,6 +22,12 @@ Planning and verification may explicitly prefer Codex Sol, Claude Opus/Fable, or
 
 Providers should call `validateAdaptiveExecutionPreference` at an untrusted boundary. Unknown fields, wrong versions, non-finite/non-integer failure counts, and invalid risk values fail closed.
 
+## Public evidence
+
+`ModelAllocationRequest` may carry optional `evidence`: a `taskType`, the `snapshots` (source, snapshot id, content digest) the records came from, and `records` keyed by offer id. A Provider that ranks evidence compares only offers it would otherwise rank equally, so evidence never overrides quota, tier, capacity, or a pinned model. A record names its offer by `provider` = `offer.provider`, `canonical_model_id` = `offer.model`, `reasoning_effort` = `offer.profile.effort`, `execution_surface` = `offer.operatorId`, and `billing_identity` = `offer.source`.
+
+When a ranking ran, the plan carries an `evidence` receipt: the mode, the verdict, the snapshots, the tied offers with their tiers, the offer chosen without evidence, the offer chosen with it, and whether evidence changed the choice. Without `evidence` the plan is exactly as before.
+
 ## Model Experience
 
 None, as this seam contributes no model-visible content directly.
