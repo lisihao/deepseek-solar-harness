@@ -807,5 +807,5 @@ status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>
 show(collector: CollectorId, options: { readonly snapshotId?: string; readonly signal?: AbortSignal } = {}): Promise<CollectorResult>
 ```
 
-Source: [`packages/orchestration/scheduling-evidence/src/index.ts:205`](../../packages/orchestration/scheduling-evidence/src/index.ts)
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:240`](../../packages/orchestration/scheduling-evidence/src/index.ts)
 <!-- END GENERATED cordis-surface -->

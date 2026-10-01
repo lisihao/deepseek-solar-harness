@@ -9,6 +9,7 @@
     { "path": "../../llm/llm" },
     { "path": "../model-allocation" },
     { "path": "../model-allocation-local" },
+    { "path": "../../settings/settings" },
     { "path": "../../subprocess/subprocess" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]

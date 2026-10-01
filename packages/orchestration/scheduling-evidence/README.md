@@ -53,27 +53,36 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 ## Radar cycle
 
-With `radar` set, the gateway runs one cycle at start and then every `refreshIntervalMs`. Each cycle runs `consent` (only when the receipt is missing and `personalUseConsent` is true), then `refresh` (only when the receipt exists or was just recorded), then `show`, and keeps the printed generation in memory when it has a `snapshot_id`. Without `authorizationFile` the cycle only reads what is already stored. A failed cycle is logged as a warning and leaves the previous generation in use. Overlapping cycles join the one running. Disposing the service clears the timer.
+With `radar` set or `radarEnabled` on in the settings, the gateway runs one cycle at start and then every `refreshIntervalMs`. Each cycle runs `consent` (only when the receipt is missing and `personalUseConsent` is true), then `refresh` (only when the receipt exists or was just recorded), then `show`, and keeps the printed generation in memory when it has a `snapshot_id`. Without `authorizationFile` the cycle only reads what is already stored; when the owner consents through the settings, the receipt is `radar-authorization.json` in `stateRoot`. A failed cycle is logged as a warning and leaves the previous generation in use. Overlapping cycles join the one running. Disposing the service clears the timer.
 
 ## Enabling
 
-No shipped configuration mounts the gateway. To use Radar evidence, add it to a `cordis.yml` that also mounts `@deepseek-ai/dsh-subprocess-local` and `@deepseek-ai/dsh-model-allocation-local`:
+Desktop mounts the gateway inert: it starts no timer, contacts nothing, and offers no evidence until the owner turns it on in the settings document (Settings → Open configuration file, `~/.dsh/settings.yaml`). The edit applies as soon as the file is saved.
 
 ```yaml
-- name: '@deepseek-ai/dsh-model-allocation-local'
-  config:
-    publicEvidence: shadow # apply lets evidence break ties
+scheduling-evidence:
+  radarEnabled: true # use stored Radar evidence; contacts nothing
+  personalUseConsent: true # also collect Radar data for personal use
+  python: /opt/homebrew/bin/python3.12 # a Python 3.11+ interpreter
+model-allocation:
+  publicEvidence: shadow # apply lets evidence break ties
+```
+
+- `radarEnabled` alone reads an already stored generation and never contacts the network.
+- `personalUseConsent: true` is the owner's statement that Radar data may be collected for personal use. The first cycle records the receipt in the state directory and later cycles refresh; setting it back to `false` stops collection even though the receipt file remains.
+- `python` defaults to `python3` on the scrubbed `PATH`, which may be the system Python 3.9; set a 3.11+ interpreter.
+- Start with `shadow`: the routing reason then reports what evidence would pick while the allocator keeps its own choice.
+
+Other hosts add the plugin to a `cordis.yml` instead; the plugin config below is the base layer that the settings override:
+
+```yaml
 - name: '@deepseek-ai/dsh-scheduling-evidence'
   config:
     python: /opt/homebrew/bin/python3.12
     sourceRoot: /path/to/python/scheduling-evidence/src
     stateRoot: /path/to/private/scheduling-evidence
-    radar:
-      authorizationFile: /path/to/private/radar-authorization.json
-      personalUseConsent: true # only after you decide to consent
+    radar: {}
 ```
-
-Leave `authorizationFile` out to read an already stored generation without ever contacting the network. Start with `shadow`: the routing reason then reports what evidence would pick while the allocator keeps its own choice.
 
 ## Behavior
 
@@ -94,5 +103,5 @@ None; the gateway adds nothing to a request prefix.
 
 - The cycle covers Radar only. AI Frontier is readable through `status` and `show` but has no cycle, and no code feeds it to the allocator yet.
 - Radar rows are matched by provider, model name, and reasoning effort. A model Radar spells differently needs a `modelAliases` entry; a model Radar does not list gets no record and the allocator abstains for it.
-- The shipped composition does not mount the gateway, so no installation collects or uses Radar evidence until the owner adds `radar` settings and an authorization file.
+- Desktop mounts the gateway inert; nothing collects or uses Radar evidence until the owner sets `scheduling-evidence.radarEnabled` in the settings document. There is no settings page row yet, only the configuration file.
 - The interpreter version is checked once per gateway; replacing the interpreter on disk without reloading the plugin is not noticed.

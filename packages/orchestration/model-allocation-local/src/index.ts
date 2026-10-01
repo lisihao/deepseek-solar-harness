@@ -2,6 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings'
 import ModelAllocationService, {
   ModelAllocationError,
   validateAdaptiveExecutionPreference,
@@ -30,6 +31,20 @@ export interface Config {
    */
   readonly publicEvidence?: PublicEvidenceMode
 }
+
+/** Settings namespace the owner edits in the settings document (`~/.dsh/settings.yaml`). */
+export const MODEL_ALLOCATION_SETTINGS_NAMESPACE = settingsNamespace('model-allocation')
+
+/** The owner-editable slice; a change applies to the next allocation. */
+export interface ModelAllocationSettings {
+  /** The evidence mode; the plugin config's choice is the default. */
+  publicEvidence: PublicEvidenceMode
+}
+
+/** Runtime schema for {@link ModelAllocationSettings}. */
+export const ModelAllocationSettingsSchema: z<ModelAllocationSettings> = z.object({
+  publicEvidence: z.union(['off', 'shadow', 'apply']),
+})
 
 export { canonicalCohortKey, rankComparablePublicEvidence } from './public-evidence.ts'
 export type {
@@ -296,7 +311,8 @@ function rankTiedOffers(tied: readonly ModelExecutionOffer[], evidence: NonNulla
 
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
-  private readonly evidenceMode: PublicEvidenceMode
+  private readonly configuredEvidenceMode: PublicEvidenceMode
+  private settings: SettingsScope<ModelAllocationSettings> | undefined
 
   /** Settings accepted from the Loader; every field is optional. */
   static Config: z<Config> = z.object({
@@ -310,7 +326,20 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx)
-    this.evidenceMode = config.publicEvidence ?? 'shadow'
+    this.configuredEvidenceMode = config.publicEvidence ?? 'shadow'
+    ctx.inject(['settings'], (settingsCtx) => {
+      this.settings = settingsCtx.settings.register(
+        MODEL_ALLOCATION_SETTINGS_NAMESPACE,
+        ModelAllocationSettingsSchema,
+        { base: { publicEvidence: this.configuredEvidenceMode } },
+      )
+      settingsCtx.effect(() => () => { this.settings = undefined }, 'model-allocation-local: settings')
+    })
+  }
+
+  /** The evidence mode in force: the owner's setting over the plugin config. */
+  private get evidenceMode(): PublicEvidenceMode {
+    return this.settings?.get().publicEvidence ?? this.configuredEvidenceMode
   }
 
   allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {

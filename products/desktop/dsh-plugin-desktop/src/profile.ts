@@ -45,6 +45,8 @@ import {
 import {
   AGENT_TEAMS_PACKAGE,
   AGENT_TEAMS_ROW_ID,
+  SCHEDULING_EVIDENCE_PACKAGE,
+  SCHEDULING_EVIDENCE_ROW_ID,
   EGO_LITE_BROWSER_PROVIDER_PACKAGE,
   PRODUCT_BUNDLE_PACKAGES,
   PRODUCT_BUNDLE_ROW_IDS,
@@ -264,6 +266,11 @@ function shippedPresetRoot(): string {
 /** Resolve the Desktop-owned preset root from source or the unpacked application. */
 function productPresetRoot(): string {
   return unpackedAsarPath(fileURLToPath(new URL('../vendor/agent-presets', import.meta.url)))
+}
+
+/** Resolve the Python collectors that Desktop ships for scheduling evidence. */
+function schedulingEvidenceSourceRoot(): string {
+  return unpackedAsarPath(fileURLToPath(new URL('../vendor/scheduling-evidence-python', import.meta.url)))
 }
 
 /** Resolve the bundle patch declared by one sealed product package. */
@@ -566,6 +573,22 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
           { path: shippedPresetRoot(), trust: 'system' },
         ],
       },
+    })
+  }
+  // Radar evidence is off until the owner turns it on in the settings document
+  // (`scheduling-evidence.radarEnabled`); the gateway mounts inert and contacts
+  // nothing without the owner's consent. A profile that supplies the row keeps it.
+  if (!rows.has(SCHEDULING_EVIDENCE_ROW_ID)) {
+    patches.push({
+      insert: [{
+        id: SCHEDULING_EVIDENCE_ROW_ID,
+        name: SCHEDULING_EVIDENCE_PACKAGE,
+        config: {
+          python: 'python3',
+          sourceRoot: schedulingEvidenceSourceRoot(),
+          stateRoot: join(home, 'scheduling-evidence'),
+        },
+      }],
     })
   }
   const agentTeams = rows.get(AGENT_TEAMS_ROW_ID)

@@ -35,6 +35,13 @@ Provider 只接收规范化 Offer，不导入 Codex、Claude、DeepSeek、Reside
 
 排序弃权，或因 offer 缺少模型或推理强度而无法运行，都不会改变选择，也不会让分配失败；回执会说明原因。
 
+挂载了 `ctx.settings` 时，所有者可以在设置文档里覆盖该模式，无需重启，下一次分配即生效：
+
+```yaml
+model-allocation:
+  publicEvidence: apply
+```
+
 ## 模型体验
 
 本 Provider 通过应用到每个节点的已封存算子和模型选择间接影响模型。

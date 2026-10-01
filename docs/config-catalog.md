@@ -1721,7 +1721,7 @@ export interface Config {
 export type PublicEvidenceMode = 'off' | 'shadow' | 'apply'
 ```
 
-Source: [`packages/orchestration/model-allocation-local/src/index.ts:25`](../packages/orchestration/model-allocation-local/src/index.ts)
+Source: [`packages/orchestration/model-allocation-local/src/index.ts:26`](../packages/orchestration/model-allocation-local/src/index.ts)
 
 <a id="deepseek-aidsh-model-catalog-local"></a>
 
@@ -2198,7 +2198,7 @@ export interface RadarConfig {
 }
 ```
 
-Source: [`packages/orchestration/scheduling-evidence/src/index.ts:87`](../packages/orchestration/scheduling-evidence/src/index.ts)
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:89`](../packages/orchestration/scheduling-evidence/src/index.ts)
 
 <a id="deepseek-aidsh-sdk-jsonrpc-server"></a>
 

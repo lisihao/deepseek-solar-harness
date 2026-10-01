@@ -35,6 +35,13 @@ When a request carries `evidence`, `allocate()` ranks only the offers that tie f
 
 A ranking that abstains, or cannot run because an offer lacks a model or reasoning effort, never changes the choice and never fails the allocation; the receipt says why.
 
+With `ctx.settings` mounted, the owner can override the mode in the settings document without a restart; the next allocation uses it:
+
+```yaml
+model-allocation:
+  publicEvidence: apply
+```
+
 ## Model Experience
 
 Indirectly, through the sealed operator and model choice applied to each node.

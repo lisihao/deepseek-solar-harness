@@ -225,6 +225,7 @@ describe('published package surface', () => {
       'build/**',
       'lib/**',
       'vendor/agent-presets/**',
+      'vendor/scheduling-evidence-python/**',
       'node_modules/**',
     ])
     expect(manifest.build?.electronFuses).toEqual({ runAsNode: true })
@@ -235,6 +236,7 @@ describe('published package surface', () => {
       'build/tray-icon*.png',
       'docs/**',
       'vendor/agent-presets/**',
+      'vendor/scheduling-evidence-python/**',
       'vendor/dsh-packages/**',
     ]))
     expect(manifest.build?.files).toEqual([
@@ -246,6 +248,7 @@ describe('published package surface', () => {
       'lib/**',
       'package.json',
       'vendor/agent-presets/**',
+      'vendor/scheduling-evidence-python/**',
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.win?.icon).toBe('build/app-icon.png')

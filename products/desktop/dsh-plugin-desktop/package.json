@@ -67,6 +67,7 @@
     "cordis.patch.yml",
     "docs/**",
     "vendor/agent-presets/**",
+    "vendor/scheduling-evidence-python/**",
     "vendor/dsh-packages/**",
     "lib/**/*.js",
     "lib/**/*.map",
@@ -332,6 +333,7 @@
       "build/**",
       "lib/**",
       "vendor/agent-presets/**",
+      "vendor/scheduling-evidence-python/**",
       "node_modules/**"
     ],
     "afterPack": "./scripts/verify-packaged-runtime.ts",
@@ -350,7 +352,8 @@
       "cordis.patch.yml",
       "lib/**",
       "package.json",
-      "vendor/agent-presets/**"
+      "vendor/agent-presets/**",
+      "vendor/scheduling-evidence-python/**"
     ],
     "mac": {
       "target": [

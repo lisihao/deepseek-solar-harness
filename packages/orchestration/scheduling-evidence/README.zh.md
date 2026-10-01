@@ -53,27 +53,36 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 ## Radar 周期
 
-设置了 `radar` 后，网关在启动时运行一次周期，之后每 `refreshIntervalMs` 运行一次。每个周期依次执行 `consent`（仅当凭据文件不存在且 `personalUseConsent` 为 true）、`refresh`（仅当凭据文件存在或刚刚记录）、`show`，并在输出含 `snapshot_id` 时把该版本保留在内存中。没有 `authorizationFile` 时，周期只读取已存储的内容。周期失败会记为警告，并继续使用上一个版本。重叠的周期会合并为正在运行的那个。销毁服务会清除定时器。
+设置了 `radar` 或在设置里打开 `radarEnabled` 后，网关在启动时运行一次周期，之后每 `refreshIntervalMs` 运行一次。每个周期依次执行 `consent`（仅当凭据文件不存在且 `personalUseConsent` 为 true）、`refresh`（仅当凭据文件存在或刚刚记录）、`show`，并在输出含 `snapshot_id` 时把该版本保留在内存中。没有 `authorizationFile` 时，周期只读取已存储的内容；所有者通过设置同意时，凭据是 `stateRoot` 下的 `radar-authorization.json`。周期失败会记为警告，并继续使用上一个版本。重叠的周期会合并为正在运行的那个。销毁服务会清除定时器。
 
 ## 启用
 
-任何随产品发布的配置都不挂载这个网关。要使用 Radar 证据，把它加入同时挂载了 `@deepseek-ai/dsh-subprocess-local` 与 `@deepseek-ai/dsh-model-allocation-local` 的 `cordis.yml`：
+Desktop 以不活动状态挂载这个网关：在所有者于设置文档（设置 → 打开配置文件，`~/.dsh/settings.yaml`）中打开之前，它不启动定时器、不访问任何网络，也不提供证据。保存文件后立即生效。
 
 ```yaml
-- name: '@deepseek-ai/dsh-model-allocation-local'
-  config:
-    publicEvidence: shadow # apply lets evidence break ties
+scheduling-evidence:
+  radarEnabled: true # use stored Radar evidence; contacts nothing
+  personalUseConsent: true # also collect Radar data for personal use
+  python: /opt/homebrew/bin/python3.12 # a Python 3.11+ interpreter
+model-allocation:
+  publicEvidence: shadow # apply lets evidence break ties
+```
+
+- 只设置 `radarEnabled` 时读取已存储的版本，不会访问网络。
+- `personalUseConsent: true` 是所有者声明同意为个人使用采集 Radar 数据。第一个周期会在状态目录记录凭据，之后的周期刷新；改回 `false` 即使凭据文件仍在也会停止采集。
+- `python` 默认是清理过的 `PATH` 中的 `python3`，它可能是系统自带的 Python 3.9；请设置为 3.11+ 的解释器。
+- 先用 `shadow`：此时路由 reason 会报告证据会选哪个，而分配器保留自己的选择。
+
+其他宿主则把插件加入 `cordis.yml`；下面的插件配置是设置所覆盖的基础层：
+
+```yaml
 - name: '@deepseek-ai/dsh-scheduling-evidence'
   config:
     python: /opt/homebrew/bin/python3.12
     sourceRoot: /path/to/python/scheduling-evidence/src
     stateRoot: /path/to/private/scheduling-evidence
-    radar:
-      authorizationFile: /path/to/private/radar-authorization.json
-      personalUseConsent: true # only after you decide to consent
+    radar: {}
 ```
-
-省略 `authorizationFile` 时只读取已存储的版本，不会访问网络。先用 `shadow`：此时路由 reason 会报告证据会选哪个，而分配器保留自己的选择。
 
 ## 行为
 
@@ -94,5 +103,5 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 - 周期只覆盖 Radar。AI Frontier 可通过 `status` 与 `show` 读取，但没有周期，也没有代码把它交给分配器。
 - Radar 的行按 provider、模型名和推理强度匹配。Radar 拼写不同的模型需要 `modelAliases` 条目；Radar 没有列出的模型没有记录，分配器对它弃权。
-- 发布的组合不挂载这个网关，所以在所有者添加 `radar` 设置和授权文件之前，任何安装都不会采集或使用 Radar 证据。
+- Desktop 以不活动状态挂载这个网关；在所有者于设置文档里设置 `scheduling-evidence.radarEnabled` 之前，不会采集或使用 Radar 证据。目前设置页没有对应的行，只能通过配置文件修改。
 - 解释器版本每个网关只检查一次；不重新加载插件就替换磁盘上的解释器，不会被察觉。

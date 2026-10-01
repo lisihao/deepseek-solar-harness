@@ -72,7 +72,8 @@ describe('radarEvidence', () => {
 
   it('lets the allocator pick the higher pass rate among tied offers', async () => {
     const ctx = new Context()
-    const allocator = new SubscriptionFirstModelAllocation(ctx, { publicEvidence: 'apply' })
+    await ctx.plugin(SubscriptionFirstModelAllocation, { publicEvidence: 'apply' })
+    const allocator = ctx.modelAllocation
     const request = (evidence: ModelAllocationRequest['evidence']): ModelAllocationRequest => ({
       runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'implement the repository change',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,

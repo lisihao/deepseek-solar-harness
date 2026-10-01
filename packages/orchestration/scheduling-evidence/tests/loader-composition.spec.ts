@@ -17,6 +17,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import type { ModelAllocationRequest, ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import * as ModelAllocationLocal from '@deepseek-ai/dsh-model-allocation-local'
+import * as FileSettings from '@deepseek-ai/dsh-settings-file'
 import * as LocalSubprocess from '@deepseek-ai/dsh-subprocess-local'
 import * as SchedulingEvidence from '../src/index.ts'
 import { COLLECTOR_SOURCES, findPython, seedRadarStore } from './support.ts'
@@ -42,6 +43,7 @@ async function loadYaml(lines: readonly string[]): Promise<Context> {
   await context.plugin(Loader)
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
+    ['@deepseek-ai/dsh-settings-file', FileSettings],
     ['@deepseek-ai/dsh-subprocess-local', LocalSubprocess],
     ['@deepseek-ai/dsh-model-allocation-local', ModelAllocationLocal],
     ['@deepseek-ai/dsh-scheduling-evidence', SchedulingEvidence],
@@ -102,6 +104,41 @@ describe.skipIf(python === undefined)(`real Loader composition (python: ${python
     expect(withEvidence.offerId).toBe('codex:gpt-5.6-sol')
     expect(withEvidence.rationale).toContain('public-evidence-tiebreak')
     expect(withEvidence.evidence).toMatchObject({ mode: 'apply', status: 'used', applied: true, snapshots: [{ source: 'radar' }] })
+  })
+
+  it('lets the owner turn Radar evidence and its use on from the settings document alone', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-scheduling-evidence-loader-'))
+    await seedRadarStore(python as string, root)
+    const settingsPath = join(root, 'settings.yaml')
+    await writeFile(settingsPath, [
+      'scheduling-evidence:',
+      '  radarEnabled: true',
+      `  python: ${JSON.stringify(python)}`,
+      'model-allocation:',
+      '  publicEvidence: apply',
+      '',
+    ].join('\n'))
+    const loaded = await loadYaml([
+      "- name: '@deepseek-ai/dsh-settings-file'",
+      '  config:',
+      `    path: ${JSON.stringify(settingsPath)}`,
+      "- name: '@deepseek-ai/dsh-subprocess-local'",
+      "- name: '@deepseek-ai/dsh-model-allocation-local'",
+      "- name: '@deepseek-ai/dsh-scheduling-evidence'",
+      '  config:',
+      '    python: definitely-not-a-python-interpreter',
+      `    sourceRoot: ${JSON.stringify(COLLECTOR_SOURCES)}`,
+      `    stateRoot: ${JSON.stringify(root)}`,
+    ])
+    await loaded.schedulingEvidence.runCycle()
+
+    const offers = request(undefined).offers
+    const plan = await loaded.modelAllocation.allocate(request(loaded.schedulingEvidence.evidenceFor(offers, 'coding')))
+
+    expect(plan.offerId).toBe('codex:gpt-5.6-sol')
+    expect(plan.evidence).toMatchObject({ mode: 'apply', applied: true })
+    const descriptors = loaded.settings.describe().map(descriptor => String(descriptor.ns))
+    expect(descriptors).toEqual(expect.arrayContaining(['scheduling-evidence', 'model-allocation']))
   })
 
   it('fails the load loudly for a Radar setting outside its bounds', async () => {
