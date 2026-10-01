@@ -112,7 +112,7 @@ describe.skipIf(python === undefined)('real Radar cycle', () => {
     profile: { model: 'gpt-5.6-luna', effort },
   })
 
-  it('turns a stored generation into evidence only for eligible rows the offers match', async () => {
+  it('turns a stored generation into evidence only for the Codex rows the offers match', async () => {
     await seedRadarStore(python as string, stateRoot)
     const gateway = await mount({ radar: {} })
     await gateway.runCycle()

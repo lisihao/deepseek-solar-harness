@@ -21,7 +21,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 `status` 与 `show` 从不运行 `refresh`、`import`、`consent`：它们会访问网络或写入已存储的版本。只有下文的 Radar 周期会运行 `consent` 与 `refresh`。
 
-`evidenceFor(offers, taskType)` 返回分配器比较用的 `ModelAllocationEvidence`，或 `undefined`。它读取内存中的 Radar 版本，不启动任何进程，所以分配器可以在每次请求时调用。只有同时满足以下条件才产生记录：`taskType` 等于声明的 `taskType`，版本比它自己的 `cache.stale_after_seconds` 新，且某个 offer 的 provider、模型（经 `modelAliases` 映射后）和推理强度与 Radar 的一行相符。
+`evidenceFor(offers, taskType)` 返回分配器比较用的 `ModelAllocationEvidence`，或 `undefined`。它读取内存中的 Radar 版本，不启动任何进程，所以分配器可以在每次请求时调用。只有同时满足以下条件才产生记录：`taskType` 等于声明的 `taskType`，版本比它自己的 `cache.stale_after_seconds` 新，且某个 offer 的 provider、模型（经 `modelAliases` 映射后）和推理强度与 Radar 的一行相符。只有 Codex 的行算数：Radar 还列出了 Claude、DeepSeek 和 Gemini 的模型，它们运行在不同的 harness 里。采集器自己的 `routing_eligible` 标记被忽略，因为它是一份写死的模型名单，把所有 GPT-6 模型都排除在外。
 
 ## 配置
 
@@ -102,6 +102,6 @@ model-allocation:
 ## 已知限制与后续工作
 
 - 周期只覆盖 Radar。AI Frontier 可通过 `status` 与 `show` 读取，但没有周期，也没有代码把它交给分配器。
-- Radar 的行按 provider、模型名和推理强度匹配。Radar 拼写不同的模型需要 `modelAliases` 条目；Radar 没有列出的模型没有记录，分配器对它弃权。
+- Radar 的 GPT-6 行覆盖的任务比旧的 336 题集少（站点把它们标为覆盖不足），而队列条件不编码任务覆盖，所以跨它们的比较只依赖 Wilson 区间。Radar 的行按 provider、模型名和推理强度匹配。Radar 拼写不同的模型需要 `modelAliases` 条目；Radar 没有列出的模型没有记录，分配器对它弃权。
 - Desktop 以不活动状态挂载这个网关；在所有者于设置文档里设置 `scheduling-evidence.radarEnabled` 之前，不会采集或使用 Radar 证据。目前设置页没有对应的行，只能通过配置文件修改。
 - 解释器版本每个网关只检查一次；不重新加载插件就替换磁盘上的解释器，不会被察觉。
