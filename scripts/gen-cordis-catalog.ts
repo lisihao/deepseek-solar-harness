@@ -254,6 +254,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   ContextPacketV1: 'orchestration.md',
   CollectorId: 'orchestration.md',
   CollectorResult: 'orchestration.md',
+  SchedulingEvidenceOverview: 'orchestration.md',
   ContinualHarnessCreateRequest: 'orchestration.md',
   ContinualHarnessDeleteRequest: 'orchestration.md',
   ContinualHarnessEntryV1: 'orchestration.md',

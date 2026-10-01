@@ -56,6 +56,8 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/bundle/resident-operators': { kind: 'indirect', reason: 'The patch carrier mounts dsh-tool-physical-operator, which owns the model-facing schema and results.' },
   'packages/bundle/orchestrations': { kind: 'indirect', reason: 'The patch carrier mounts dsh-tool-orchestration, which owns the model-facing schema, policy, and bounded results.' },
   'packages/orchestration/scheduling-evidence': { kind: 'none', reason: 'The gateway reads collector documents for the scheduler and registers no prompt, tool, or session event.' },
+  'packages/client/ui-settings-scheduling-evidence': { kind: 'none', reason: 'The page visualizes a Host-owned store and registers nothing model-facing.' },
+  'packages/orchestration/scheduling-evidence-rpc': { kind: 'none', reason: 'The read-only channel serves the settings page; its payloads never enter a model request.' },
   'packages/orchestration/intent-compiler': { kind: 'none', reason: 'The abstract compiler seam emits an artifact only; Consumers decide whether it enters a model request.' },
   'packages/orchestration/context-compiler': { kind: 'indirect', reason: 'The compiler seam emits a sealed packet consumed only by the orchestration execution-plan pipeline.' },
   'packages/orchestration/capability-capsule': { kind: 'indirect', reason: 'The resolver emits hashed bindings consumed only by the orchestration execution-plan pipeline.' },
