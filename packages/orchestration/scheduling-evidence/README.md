@@ -21,7 +21,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 `status` and `show` never run `refresh`, `import`, or `consent`: those reach the network or write stored generations. Only the Radar cycle below runs `consent` and `refresh`.
 
-`evidenceFor(offers, taskType)` returns the `ModelAllocationEvidence` the allocator compares, or `undefined`. It reads the Radar generation held in memory and starts no process, so the allocator can call it on every request. A generation yields records only when `taskType` equals the declared `taskType`, the generation is younger than its own `cache.stale_after_seconds`, and an offer's provider, model (after `modelAliases`), and reasoning effort match a Radar row.
+`evidenceFor(offers, taskType)` returns the `ModelAllocationEvidence` the allocator compares, or `undefined`. It reads the Radar generation held in memory and starts no process, so the allocator can call it on every request. A generation yields records only when `taskType` equals the declared `taskType`, the generation is younger than its own `cache.stale_after_seconds`, and an offer's provider, model (after `modelAliases`), and reasoning effort match a Radar row. Only Codex rows count: Radar also lists Claude, DeepSeek, and Gemini models, which ran in a different harness. The collector's own `routing_eligible` flag is ignored because it is a fixed list of model names that excludes every GPT-6 model.
 
 ## Config
 
@@ -102,6 +102,6 @@ None; the gateway adds nothing to a request prefix.
 ## Known Limitations and Deferred Work
 
 - The cycle covers Radar only. AI Frontier is readable through `status` and `show` but has no cycle, and no code feeds it to the allocator yet.
-- Radar rows are matched by provider, model name, and reasoning effort. A model Radar spells differently needs a `modelAliases` entry; a model Radar does not list gets no record and the allocator abstains for it.
+- Radar's GPT-6 rows cover fewer tasks than the older 336-task sets (the site marks them as incompletely covered), and the cohort conditions do not encode task coverage, so a comparison across them rests on the Wilson intervals alone. Radar rows are matched by provider, model name, and reasoning effort. A model Radar spells differently needs a `modelAliases` entry; a model Radar does not list gets no record and the allocator abstains for it.
 - Desktop mounts the gateway inert; nothing collects or uses Radar evidence until the owner sets `scheduling-evidence.radarEnabled` in the settings document. There is no settings page row yet, only the configuration file.
 - The interpreter version is checked once per gateway; replacing the interpreter on disk without reloading the plugin is not noticed.

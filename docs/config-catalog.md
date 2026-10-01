@@ -2183,7 +2183,7 @@ export interface RadarConfig {
   personalUseConsent?: boolean
   /** Time between collections in milliseconds; 30 minutes to 24 hours, default 4 hours. */
   refreshIntervalMs?: number
-  /** Deadline for one collection in milliseconds; default 90000. */
+  /** Deadline for one collection in milliseconds; default 600000 (collection from the Radar site has taken three minutes). */
   refreshTimeoutMs?: number
   /** Seconds before a stored generation stops being used; default 604800 (7 days). */
   staleAfterSeconds?: number

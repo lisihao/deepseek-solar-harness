@@ -3471,7 +3471,7 @@ __metadata:
 
 "@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::hash=2a255a&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::hash=ff09bb&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -3482,7 +3482,7 @@ __metadata:
     "@deepseek-ai/dsh-model-allocation-local": ^0.1.0-rc.5
     "@deepseek-ai/dsh-settings": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
-  checksum: 10c0/cb7f6c2db43575c03141151972f23088f3ac971debac696ed7f952bcab120e6714aa105cb22368128a9a1a82a290e354fe9c958a68adaff433bc778f7b548718
+  checksum: 10c0/84d085f71671b4722556e7f6689bbb12811c3ddc9e6eb05868caa96837f09bed9d41eb3207ea3605d8873de79b1258f6c2badf8cfef4be92b2f613f287dec684
   languageName: node
   linkType: hard
 
