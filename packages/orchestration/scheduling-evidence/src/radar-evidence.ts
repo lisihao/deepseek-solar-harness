@@ -45,6 +45,12 @@ interface RadarRow {
   readonly effort: string
   readonly passRate: number
   readonly sampleCount: number
+  /** What one run costs and takes on average, when the row reports both. */
+  readonly runCost?: { readonly usd: number; readonly seconds: number }
+}
+
+function nonNegative(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
 function radarRows(snapshot: Readonly<Record<string, unknown>>): RadarRow[] {
@@ -62,7 +68,10 @@ function radarRows(snapshot: Readonly<Record<string, unknown>>): RadarRow[] {
     if (typeof passRate !== 'number' || !(passRate >= 0 && passRate <= 1)) continue
     if (typeof sampleCount !== 'number' || !Number.isInteger(sampleCount) || sampleCount <= 0) continue
     if (provider !== RADAR_PROVIDER) continue
-    rows.push({ provider, model, effort, passRate, sampleCount })
+    const usd = nonNegative(row.avg_cost_usd)
+    const seconds = nonNegative(row.avg_runtime_seconds)
+    const runCost = usd === undefined || seconds === undefined ? {} : { runCost: { usd, seconds } }
+    rows.push({ provider, model, effort, passRate, sampleCount, ...runCost })
   }
   return rows
 }
@@ -122,6 +131,7 @@ export function radarEvidence(
         canonical_model_id: offer.model,
         value: row.passRate,
         sample_count: row.sampleCount,
+        ...row.runCost === undefined ? {} : { avg_cost_usd: row.runCost.usd, avg_runtime_seconds: row.runCost.seconds },
         lineage_id: `${snapshotId}:${row.provider}:${row.model}:${row.effort}`,
         correlation_group: `codex-radar:${snapshotId}`,
         comparability: { status: 'comparable' },

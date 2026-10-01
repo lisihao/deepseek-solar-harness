@@ -1455,11 +1455,11 @@ describe('host physical-operator routing', () => {
 
     describe('public evidence', () => {
       const tied = [nativeModel('gpt-6-astra', 'GPT-6-Astra'), nativeModel('gpt-6-sol', 'GPT-6-Sol')]
-      const record = (model: string, value: number): Record<string, unknown> => {
+      const record = (model: string, value: number, effort = 'high'): Record<string, unknown> => {
         const row: Record<string, unknown> = {
           source: 'codex-radar', upstream_dataset: 'dradar', benchmark: 'Codex Radar community tasks', benchmark_version: '2026-10-01',
           metric_kind: 'pass_rate', score_kind: 'resolved_rate', unit: 'proportion', harness: 'codex-radar-community',
-          reasoning_effort: 'high', task_type: 'coding', execution_surface: 'codex', billing_identity: 'native-subscription',
+          reasoning_effort: effort, task_type: 'coding', execution_surface: 'codex', billing_identity: 'native-subscription',
           provider: 'codex', canonical_model_id: model, value, sample_count: 1000, lineage_id: `radar:${model}`,
           correlation_group: 'codex-radar:g1', comparability: { status: 'comparable' }, observed_at: '2026-10-01', freshness_state: 'fresh',
           provenance: 'community_observation',
@@ -1472,7 +1472,7 @@ describe('host physical-operator routing', () => {
           taskType: 'coding',
           snapshots: [{ source: 'radar', snapshotId: 'g1', digest: 'sha256:g1' }],
           records: Object.fromEntries(offers.filter(offer => offer.provider === 'codex').map(offer => [
-            offer.offerId, [record(offer.model, offer.model === favored ? 0.9 : 0.5)],
+            offer.offerId, [record(offer.model, offer.model === favored ? 0.9 : 0.5, offer.profile?.effort)],
           ])),
         }
       }
@@ -1539,6 +1539,75 @@ describe('host physical-operator routing', () => {
         } finally {
           disposeSelection()
         }
+      })
+    })
+
+    describe('cost and time awareness', () => {
+      const ASTRA: Record<string, readonly [number, number, number, number]> = {
+        low: [0.656, 157, 1.69, 600], medium: [0.716, 141, 1.81, 660], high: [0.736, 140, 2.51, 780], xhigh: [0.74, 130, 3.17, 1_020],
+      }
+      const measured: SchedulingEvidenceStub = offers => ({
+        taskType: 'coding',
+        snapshots: [{ source: 'radar', snapshotId: 'g1', digest: 'sha256:g1' }],
+        records: Object.fromEntries(offers.filter(entry => entry.model === 'gpt-6-astra').map((entry) => {
+          const [passRate, samples, usd, seconds] = ASTRA[entry.profile?.effort ?? 'high'] as readonly [number, number, number, number]
+          const base = {
+            source: 'codex-radar', upstream_dataset: 'dradar', benchmark: 'Codex Radar community tasks', benchmark_version: '2026-10-01',
+            metric_kind: 'pass_rate', score_kind: 'resolved_rate', unit: 'proportion', harness: 'codex-radar-community',
+            reasoning_effort: entry.profile?.effort, task_type: 'coding', execution_surface: 'codex', billing_identity: 'native-subscription',
+            provider: 'codex', canonical_model_id: entry.model, value: passRate, sample_count: samples, avg_cost_usd: usd,
+            avg_runtime_seconds: seconds, lineage_id: entry.offerId, correlation_group: 'g', comparability: { status: 'comparable' },
+            observed_at: '2026-10-01', freshness_state: 'fresh', provenance: 'community_observation',
+          }
+          return [entry.offerId, [{ ...base, cohort_key: canonicalCohortKey(base) }]]
+        })),
+      })
+      const EASY = '给这个代码加一行注释'
+      const NORMAL = '给我修复这个 TypeScript 构建 bug 并补齐测试'
+      const HARD = '重构整个支付模块的代码并迁移到新接口'
+
+      const run = async (text: string, mode: 'shadow' | 'apply', messages: readonly string[] = []) => {
+        const fixture = await allocationSetup({ allocatorConfig: { costAware: mode }, schedulingEvidence: measured })
+        try {
+          for (const message of [...messages, text]) {
+            send(fixture.agent, message)
+            await fixture.agent.whenIdle()
+          }
+          return { profile: fixture.codex.requests.at(-1)?.residentProfile, reason: routingReason(fixture.agent) ?? '' }
+        } finally {
+          fixture.disposeSelection()
+        }
+      }
+
+      it('records, without using it, the cheapest sufficient strength for a simple request in shadow mode', async () => {
+        const { profile, reason } = await run(EASY, 'shadow')
+
+        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'high' })
+        expect(reason).toContain('成本感知（shadow，难度简单）：倾向 codex:gpt-6-astra:low（通过率 65.6%，成本 $1.69，耗时 10 分钟），基线是 codex:gpt-6-astra，影子模式未采用')
+      })
+
+      it('uses a cheaper strength for a simple request and a narrower margin for an ordinary one in apply mode', async () => {
+        const easy = await run(EASY, 'apply')
+        const normal = await run(NORMAL, 'apply')
+
+        expect(easy.profile).toEqual({ model: 'gpt-6-astra', effort: 'low' })
+        expect(easy.reason).toContain('成本感知（apply，难度简单）：改选 codex:gpt-6-astra:low')
+        expect(normal.profile).toEqual({ model: 'gpt-6-astra', effort: 'medium' })
+        expect(normal.reason).toContain('成本感知（apply，难度一般）：改选 codex:gpt-6-astra:medium')
+      })
+
+      it('keeps the strongest offer, and says nothing about cost, for a hard request', async () => {
+        const { profile, reason } = await run(HARD, 'apply')
+
+        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'high' })
+        expect(reason).not.toContain('成本感知')
+      })
+
+      it('raises the difficulty of a retry by a step', async () => {
+        const { profile, reason } = await run('还是不行，重试一下这个代码修改', 'apply', [EASY])
+
+        expect(reason).toContain('难度一般')
+        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'medium' })
       })
     })
 

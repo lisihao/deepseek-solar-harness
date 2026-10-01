@@ -21,7 +21,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 `status` and `show` never run `refresh`, `import`, or `consent`: those reach the network or write stored generations. Only the Radar cycle below runs `consent` and `refresh`.
 
-`evidenceFor(offers, taskType)` returns the `ModelAllocationEvidence` the allocator compares, or `undefined`. It reads the Radar generation held in memory and starts no process, so the allocator can call it on every request. A generation yields records only when `taskType` equals the declared `taskType`, the generation is younger than its own `cache.stale_after_seconds`, and an offer's provider, model (after `modelAliases`), and reasoning effort match a Radar row. Only Codex rows count: Radar also lists Claude, DeepSeek, and Gemini models, which ran in a different harness. The collector's own `routing_eligible` flag is ignored because it is a fixed list of model names that excludes every GPT-6 model.
+`evidenceFor(offers, taskType)` returns the `ModelAllocationEvidence` the allocator compares, or `undefined`. It reads the Radar generation held in memory and starts no process, so the allocator can call it on every request. A generation yields records only when `taskType` equals the declared `taskType`, the generation is younger than its own `cache.stale_after_seconds`, and an offer's provider, model (after `modelAliases`), and reasoning effort match a Radar row. Each record also carries the row's `avg_cost_usd` and `avg_runtime_seconds` when it reports both, which the allocator's cost-aware selection reads. Only Codex rows count: Radar also lists Claude, DeepSeek, and Gemini models, which ran in a different harness. The collector's own `routing_eligible` flag is ignored because it is a fixed list of model names that excludes every GPT-6 model.
 
 ## Config
 
@@ -66,6 +66,7 @@ scheduling-evidence:
   python: /opt/homebrew/bin/python3.12 # a Python 3.11+ interpreter
 model-allocation:
   publicEvidence: shadow # apply lets evidence break ties
+  costAware: shadow # apply lets simple work pick a cheaper strength
 ```
 
 - `radarEnabled` alone reads an already stored generation and never contacts the network.

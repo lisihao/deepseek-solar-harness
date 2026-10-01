@@ -42,7 +42,7 @@ describe('scheduling-evidence Host RPC', () => {
   it('returns the store overview with a null evidence mode when no settings service is mounted', async () => {
     const handler = createSchedulingEvidenceRpcHandler({ overview: () => Promise.resolve(OVERVIEW) })
 
-    expect(await handler('overview', {}, signal, requestContext)).toEqual({ ok: true, value: { ...OVERVIEW, publicEvidence: null } })
+    expect(await handler('overview', {}, signal, requestContext)).toEqual({ ok: true, value: { ...OVERVIEW, publicEvidence: null, costAware: null } })
     expect(await handler('overview', undefined, signal, requestContext)).toMatchObject({ ok: true })
   })
 
@@ -54,11 +54,18 @@ describe('scheduling-evidence Host RPC', () => {
     expect(settings.get).toHaveBeenCalledWith('model-allocation')
   })
 
-  it('reports no evidence mode for a settings value it does not recognize', async () => {
-    const settings = { get: () => ({ publicEvidence: 'always' }) }
+  it('adds the cost-aware mode from the settings, separately from the evidence mode', async () => {
+    const settings = { get: () => ({ publicEvidence: 'shadow', costAware: 'apply' }) }
     const handler = createSchedulingEvidenceRpcHandler({ overview: () => Promise.resolve(OVERVIEW) }, settings as never)
 
-    expect(await handler('overview', {}, signal, requestContext)).toMatchObject({ ok: true, value: { publicEvidence: null } })
+    expect(await handler('overview', {}, signal, requestContext)).toMatchObject({ ok: true, value: { publicEvidence: 'shadow', costAware: 'apply' } })
+  })
+
+  it('reports no mode for a settings value it does not recognize', async () => {
+    const settings = { get: () => ({ publicEvidence: 'always', costAware: 3 }) }
+    const handler = createSchedulingEvidenceRpcHandler({ overview: () => Promise.resolve(OVERVIEW) }, settings as never)
+
+    expect(await handler('overview', {}, signal, requestContext)).toMatchObject({ ok: true, value: { publicEvidence: null, costAware: null } })
   })
 
   it('rejects an unknown endpoint, a payload, and a failing gateway as bad requests', async () => {

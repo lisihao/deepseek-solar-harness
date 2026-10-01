@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Authenticated Host RPC read Consumer of `ctx.schedulingEvidence`. The `/scheduling-evidence` channel has one endpoint, `overview`, which takes no payload and changes nothing. It returns the page payload for the scheduling evidence settings section: the owner's Radar switches, the last cycle, the stored generation with its table row counts, every stored model row, and the `model-allocation.publicEvidence` mode in force.
+Authenticated Host RPC read Consumer of `ctx.schedulingEvidence`. The `/scheduling-evidence` channel has one endpoint, `overview`, which takes no payload and changes nothing. It returns the page payload for the scheduling evidence settings section: the owner's Radar switches, the last cycle, the stored generation with its table row counts, every stored model row, and the `model-allocation.publicEvidence` and `model-allocation.costAware` modes in force.
 
 The channel is registered with `trusted-host` authority. The gateway reads the store by running the collector's `status` and `show` commands, so the page shows what is on disk rather than only what the allocator holds in memory.
 

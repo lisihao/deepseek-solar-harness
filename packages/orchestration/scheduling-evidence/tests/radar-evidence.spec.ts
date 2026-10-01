@@ -90,6 +90,23 @@ describe('radarEvidence', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('carries what a run costs and takes only when the row reports both', () => {
+    const evidence = radarEvidence(
+      snapshot([
+        row('gpt-5.6-sol', 0.9, { avg_cost_usd: 2.5, avg_runtime_seconds: 780 }),
+        row('gpt-5.6-terra', 0.6, { avg_cost_usd: 1, avg_runtime_seconds: null }),
+        row('gpt-5.6-luna', 0.5, { avg_cost_usd: -1, avg_runtime_seconds: 3 }),
+      ]),
+      [sol, terra, offer('gpt-5.6-luna')],
+      options,
+    )
+
+    expect(evidence?.records['codex:gpt-5.6-sol']?.[0]).toMatchObject({ avg_cost_usd: 2.5, avg_runtime_seconds: 780 })
+    expect(evidence?.records['codex:gpt-5.6-terra']?.[0]).not.toHaveProperty('avg_cost_usd')
+    expect(evidence?.records['codex:gpt-5.6-terra']?.[0]).not.toHaveProperty('avg_runtime_seconds')
+    expect(evidence?.records['codex:gpt-5.6-luna']?.[0]).not.toHaveProperty('avg_cost_usd')
+  })
+
   it('maps a Radar model name to the offer name', () => {
     const evidence = radarEvidence(
       snapshot([row('gpt-5.6-sol', 0.9)]),

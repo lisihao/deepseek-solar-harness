@@ -8,6 +8,7 @@ import ModelAllocationService, {
   validateAdaptiveExecutionPreference,
   type AdaptiveExecutionPreferenceV1,
   type ModelAllocationEvidenceReceipt,
+  type ModelAllocationSelectionReceipt,
   type ModelAllocationFallbackProvenance,
   type ModelAllocationFallbackReasonCode,
   type ModelAllocationPlan,
@@ -15,12 +16,16 @@ import ModelAllocationService, {
   type ModelExecutionOffer,
   type ModelQuotaWindow,
 } from '@deepseek-ai/dsh-model-allocation'
+import { selectCostAware } from './cost-aware.ts'
 import { rankComparablePublicEvidence, type PublicEvidenceCandidate } from './public-evidence.ts'
 
 export const name = 'model-allocation-local'
 
 /** How public evidence takes part in allocation. */
 export type PublicEvidenceMode = 'off' | 'shadow' | 'apply'
+
+/** How the cost- and time-aware selection takes part; the values mean the same as {@link PublicEvidenceMode}. */
+export type CostAwareMode = PublicEvidenceMode
 
 /** Provider settings. */
 export interface Config {
@@ -30,6 +35,18 @@ export interface Config {
    * same top score. Default `shadow`.
    */
   readonly publicEvidence?: PublicEvidenceMode
+  /**
+   * For the `economy`, `balanced`, and `speed` objectives, `shadow` records the cheapest or fastest
+   * offer whose measured pass rate is good enough without using it; `apply` takes it; `off` ignores
+   * it. Needs request evidence that carries cost and runtime. Default `shadow`.
+   */
+  readonly costAware?: CostAwareMode
+  /**
+   * What one minute of waiting is worth, in the dollars of Radar's measured run cost. The cost-aware
+   * selection minimizes cost plus this value times the runtime for `economy` and `balanced` work, so a
+   * model that is cheap but takes half an hour does not win. Default 0.1; 0 ignores time.
+   */
+  readonly minuteValueUsd?: number
 }
 
 /** Settings namespace the owner edits in the settings document (`~/.dsh/settings.yaml`). */
@@ -39,11 +56,14 @@ export const MODEL_ALLOCATION_SETTINGS_NAMESPACE = settingsNamespace('model-allo
 export interface ModelAllocationSettings {
   /** The evidence mode; the plugin config's choice is the default. */
   publicEvidence: PublicEvidenceMode
+  /** The cost- and time-aware selection mode; the plugin config's choice is the default. */
+  costAware: CostAwareMode
 }
 
 /** Runtime schema for {@link ModelAllocationSettings}. */
 export const ModelAllocationSettingsSchema: z<ModelAllocationSettings> = z.object({
   publicEvidence: z.union(['off', 'shadow', 'apply']),
+  costAware: z.union(['off', 'shadow', 'apply']),
 })
 
 export { canonicalCohortKey, rankComparablePublicEvidence } from './public-evidence.ts'
@@ -312,11 +332,15 @@ function rankTiedOffers(tied: readonly ModelExecutionOffer[], evidence: NonNulla
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
   private readonly configuredEvidenceMode: PublicEvidenceMode
+  private readonly configuredCostAwareMode: CostAwareMode
+  private readonly minuteValueUsd: number
   private settings: SettingsScope<ModelAllocationSettings> | undefined
 
   /** Settings accepted from the Loader; every field is optional. */
   static Config: z<Config> = z.object({
     publicEvidence: z.union(['off', 'shadow', 'apply']),
+    costAware: z.union(['off', 'shadow', 'apply']),
+    minuteValueUsd: z.number().min(0),
   })
 
   /**
@@ -327,14 +351,21 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
   constructor(ctx: Context, config: Config = {}) {
     super(ctx)
     this.configuredEvidenceMode = config.publicEvidence ?? 'shadow'
+    this.configuredCostAwareMode = config.costAware ?? 'shadow'
+    this.minuteValueUsd = config.minuteValueUsd ?? 0.1
     ctx.inject(['settings'], (settingsCtx) => {
       this.settings = settingsCtx.settings.register(
         MODEL_ALLOCATION_SETTINGS_NAMESPACE,
         ModelAllocationSettingsSchema,
-        { base: { publicEvidence: this.configuredEvidenceMode } },
+        { base: { publicEvidence: this.configuredEvidenceMode, costAware: this.configuredCostAwareMode } },
       )
       settingsCtx.effect(() => () => { this.settings = undefined }, 'model-allocation-local: settings')
     })
+  }
+
+  /** The cost-aware mode in force: the owner's setting over the plugin config. */
+  private get costAwareMode(): CostAwareMode {
+    return this.settings?.get().costAware ?? this.configuredCostAwareMode
   }
 
   /** The evidence mode in force: the owner's setting over the plugin config. */
@@ -418,7 +449,25 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       ? baseline
       : [...routedCandidates].sort((left, right) => order(left, right, verdict.tiers))[0] as ModelExecutionOffer
     const apply = this.evidenceMode === 'apply' && verdict?.status === 'used'
-    const selected = apply ? evidenceChoice : baseline
+    const costMode = this.costAwareMode
+    const costAwarePool = [
+      ...routedCandidates,
+      ...(request.alternativeOffers ?? []).filter(alternative => alternative.available
+        && routedCandidates.some(offer => offer.operatorId === alternative.operatorId && offer.model === alternative.model)),
+    ]
+    const selection = costMode === 'off' || request.evidence === undefined || requiresHighTier
+      || request.costAwareObjective === undefined
+      ? undefined
+      : selectCostAware(baseline, costAwarePool, request.costAwareObjective, request.evidence, this.minuteValueUsd)
+    const selectionOffer = selection === undefined
+      ? undefined
+      : costAwarePool.find(offer => offer.offerId === selection.selectedOfferId)
+    const costApplied = costMode === 'apply' && selection?.status === 'used'
+      && selectionOffer !== undefined && selectionOffer.offerId !== baseline.offerId
+    const selected = costApplied ? selectionOffer : apply ? evidenceChoice : baseline
+    const selectionReceipt: ModelAllocationSelectionReceipt | undefined = selection === undefined
+      ? undefined
+      : { ...selection, mode: costMode === 'apply' ? 'apply' : 'shadow', applied: costApplied }
     const evidenceReceipt: ModelAllocationEvidenceReceipt | undefined = verdict === undefined || request.evidence === undefined
       ? undefined
       : {
@@ -434,7 +483,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
         })),
         baselineOfferId: baseline.offerId,
         evidenceOfferId: evidenceChoice.offerId,
-        applied: apply && evidenceChoice.offerId !== baseline.offerId,
+        applied: apply && !costApplied && evidenceChoice.offerId !== baseline.offerId,
       }
     const adaptiveTargetModel = adaptiveTarget(request, adaptivePreference)
     const adaptiveTargetAvailable = adaptiveTargetModel !== undefined
@@ -479,9 +528,10 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
           ? []
           : [`protected-reserve:${String(selected.quotaGuard.protectedRemainingPercent)}%`],
         ...urgentCapacity === 0 ? [] : ['accelerate-before-quota-reset'],
-        ...evidenceReceipt?.applied === true ? ['public-evidence-tiebreak'] : [],
+        ...costApplied ? ['cost-aware-selection'] : evidenceReceipt?.applied === true ? ['public-evidence-tiebreak'] : [],
       ],
       ...evidenceReceipt === undefined ? {} : { evidence: evidenceReceipt },
+      ...selectionReceipt === undefined ? {} : { selection: selectionReceipt },
     })
   }
 }

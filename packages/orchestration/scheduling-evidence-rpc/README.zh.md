@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`ctx.schedulingEvidence` 的已认证 Host RPC 只读 Consumer。`/scheduling-evidence` 通道只有一个端点 `overview`，不接收负载，也不修改任何东西。它返回调度证据设置区所需的页面数据：所有者的 Radar 开关、最近一次周期、已存储版本及其表行数、每一行已存储的模型数据，以及当前生效的 `model-allocation.publicEvidence` 模式。
+`ctx.schedulingEvidence` 的已认证 Host RPC 只读 Consumer。`/scheduling-evidence` 通道只有一个端点 `overview`，不接收负载，也不修改任何东西。它返回调度证据设置区所需的页面数据：所有者的 Radar 开关、最近一次周期、已存储版本及其表行数、每一行已存储的模型数据，以及当前生效的 `model-allocation.publicEvidence` 和 `model-allocation.costAware` 模式。
 
 该通道以 `trusted-host` 权限注册。网关通过运行采集器的 `status` 和 `show` 命令读取存储，所以页面显示的是磁盘上的内容，而不只是分配器在内存里持有的部分。
 
