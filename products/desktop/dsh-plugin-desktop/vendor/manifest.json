@@ -390,7 +390,7 @@
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "bb752f262fff53aa4bab1a1fb34e9b172234d02f49f282d6cbd96d204fc7209e",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "bde64debfa3575338c94e2d05b9efdcf34c25e586f60edf0079dd07b80b3fae8",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "18dd2e23a44c82ba9fa2976d4fe20785ef514e3a5192328c0d21a86edf0366c0",
-    "dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz": "a413d512a25b111efdb1d1c045d04a4913e3ce2281ae8c74d6c52d30c5728a15",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz": "ca7d5cc8f70a309d3856a5d8c906c356f568cffff1d85eb65a93657793120f3e",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "642f87bc92bfb55d39046a3d43cb6186afe904229b28e03047e0ca72e257490f",
     "dsh-packages/deepseek-ai-dsh-physical-operator-subagent-0.1.0-rc.5.tgz": "9f3e0ee1832d50a8dca771dccde0f436e66981301170e8abbeebe77576982a7d",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "993aa261accaba0cac3616a8fee3cf9b0763533295d51849e7254dd5b20f53d8",

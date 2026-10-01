@@ -171,8 +171,8 @@ type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'auth-required' }
   | { readonly status: 'input-unavailable' }
   | { readonly status: 'context-not-isolated' }
-  | { readonly status: 'model-selection-unavailable' }
-  | { readonly status: 'effort-selection-unavailable' }
+  | { readonly status: 'model-selection-unavailable'; readonly stage?: string }
+  | { readonly status: 'effort-selection-unavailable'; readonly stage?: string }
   | { readonly status: 'draft-present'; readonly diagnostic: DraftDiagnostic }
   | { readonly status: 'submission-failed'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
@@ -593,14 +593,14 @@ if (request.model !== undefined || request.effort !== undefined) {
     case 'auth-required': return { status: 'auth-required' };
     case 'effort-selection-unavailable':
     case 'reasoning-options-unavailable':
-      return { status: 'effort-selection-unavailable' };
+      return { status: 'effort-selection-unavailable', stage: selection.status };
     case 'model-picker-unavailable':
     case 'model-options-unavailable':
     case 'model-selection-unavailable':
     case 'menu-close-failed':
     case 'catalog-restore-unavailable':
     case 'latest-model-unavailable':
-      return { status: 'model-selection-unavailable' };
+      return { status: 'model-selection-unavailable', stage: selection.status };
     default: return { status: 'protocol-error' };
   }
 }
@@ -898,9 +898,15 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
             'CHATGPT_WEB_CONTEXT_NOT_ISOLATED',
           )
         case 'model-selection-unavailable':
-          throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested model selection', 'MODEL_SELECTION_UNAVAILABLE')
+          throw new PhysicalOperatorError(
+            `ChatGPT Web could not verify the explicitly requested model selection${stageSuffix(outcome.stage)}`,
+            'MODEL_SELECTION_UNAVAILABLE',
+          )
         case 'effort-selection-unavailable':
-          throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested reasoning effort', 'MODEL_SELECTION_UNAVAILABLE')
+          throw new PhysicalOperatorError(
+            `ChatGPT Web could not verify the explicitly requested reasoning effort${stageSuffix(outcome.stage)}`,
+            'MODEL_SELECTION_UNAVAILABLE',
+          )
         case 'submission-failed':
           throw new PhysicalOperatorError(
             `ChatGPT Web did not accept the filled prompt (${diagnosticText(outcome.diagnostic)})`,
@@ -1047,6 +1053,15 @@ export function resolveWebModelPreferences(
   }
 }
 
+/** The picker step that failed, kept only when it is a short lowercase token the page script produced. */
+function selectionStage(value: BrowserJsonValue | undefined): { readonly stage?: string } {
+  return typeof value === 'string' && /^[a-z]+(?:-[a-z]+){0,5}$/u.test(value) ? { stage: value } : {}
+}
+
+function stageSuffix(stage: string | undefined): string {
+  return stage === undefined ? '' : ` (${stage})`
+}
+
 function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
   if (!isRecord(value) || typeof value.status !== 'string') return { status: 'protocol-error' }
   switch (value.status) {
@@ -1057,8 +1072,8 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
     case 'auth-required': return { status: 'auth-required' }
     case 'input-unavailable': return { status: 'input-unavailable' }
     case 'context-not-isolated': return { status: 'context-not-isolated' }
-    case 'model-selection-unavailable': return { status: 'model-selection-unavailable' }
-    case 'effort-selection-unavailable': return { status: 'effort-selection-unavailable' }
+    case 'model-selection-unavailable': return { status: 'model-selection-unavailable', ...selectionStage(value.stage) }
+    case 'effort-selection-unavailable': return { status: 'effort-selection-unavailable', ...selectionStage(value.stage) }
     case 'draft-present': {
       const diagnostic = programDraftDiagnostic(value.diagnostic)
       return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'draft-present', diagnostic }
