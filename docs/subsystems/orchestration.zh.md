@@ -766,4 +766,32 @@ abstract resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1>
 ```
 
 Source: [`packages/orchestration/rlm-strategy/src/index.ts:60`](../../packages/orchestration/rlm-strategy/src/index.ts)
+
+<a id="ctxschedulingevidence--schedulingevidencegateway"></a>
+
+### `ctx.schedulingEvidence` — `SchedulingEvidenceGateway`
+
+Reads collector documents through bounded child processes.
+
+```ts cordis-catalog
+/**
+ * Read a collector's storage status.
+ * @param collector - which collector to ask.
+ * @param signal - cancels the call and stops its process tree.
+ * @returns the status document; `ok` is false when no valid generation is stored.
+ * @throws {SchedulingEvidenceError} When the interpreter is unusable or the call times out, is cancelled, or prints no document.
+ */
+status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>
+
+/**
+ * Read a stored generation without contacting the network.
+ * @param collector - which collector to ask.
+ * @param options - `snapshotId` selects an older generation; omitted reads the active one.
+ * @returns the generation document, or `ok: false` when none is stored.
+ * @throws {SchedulingEvidenceError} As for {@link status}.
+ */
+show(collector: CollectorId, options: { readonly snapshotId?: string; readonly signal?: AbortSignal } = {}): Promise<CollectorResult>
+```
+
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:126`](../../packages/orchestration/scheduling-evidence/src/index.ts)
 <!-- END GENERATED cordis-surface -->

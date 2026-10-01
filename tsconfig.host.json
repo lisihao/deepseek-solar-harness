@@ -299,6 +299,7 @@
     { "path": "./packages/orchestration/continual-harness-local" },
     { "path": "./packages/orchestration/model-allocation" },
     { "path": "./packages/orchestration/model-allocation-local" },
+    { "path": "./packages/orchestration/scheduling-evidence" },
     { "path": "./packages/orchestration/model-worker" },
     { "path": "./packages/orchestration/model-worker-deepseek" },
     { "path": "./packages/orchestration/rlm-strategy" },
