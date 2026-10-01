@@ -5035,11 +5035,19 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelAllocationPlan',
-    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly fallback?: ModelAllocationFallbackProvenance;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n    readonly evidence?: ModelAllocationEvidenceReceipt;\n}',
+    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly fallback?: ModelAllocationFallbackProvenance;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n    readonly evidence?: ModelAllocationEvidenceReceipt;\n    readonly selection?: ModelAllocationSelectionReceipt;\n}',
   },
   {
     name: 'ModelAllocationRequest',
-    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly evidence?: ModelAllocationEvidence;\n    readonly now: string;\n}',
+    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly evidence?: ModelAllocationEvidence;\n    readonly costAwareObjective?: \'economy\' | \'balanced\' | \'speed\';\n    readonly alternativeOffers?: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
+  },
+  {
+    name: 'ModelAllocationSelectionCandidate',
+    declaration: 'export interface ModelAllocationSelectionCandidate {\n    readonly offerId: string;\n    readonly passRate: number;\n    readonly sampleCount: number;\n    readonly lower: number;\n    readonly upper: number;\n    readonly avgCostUsd: number;\n    readonly avgRuntimeSeconds: number;\n}',
+  },
+  {
+    name: 'ModelAllocationSelectionReceipt',
+    declaration: 'export interface ModelAllocationSelectionReceipt {\n    readonly mode: \'shadow\' | \'apply\';\n    readonly status: \'used\' | \'abstained\';\n    readonly reason: string;\n    readonly objective: \'economy\' | \'balanced\' | \'speed\';\n    readonly metric: \'cost-and-time\' | \'runtime\';\n    readonly baselineOfferId: string;\n    readonly selectedOfferId: string;\n    readonly sufficientOfferIds: readonly string[];\n    readonly considered: readonly ModelAllocationSelectionCandidate[];\n    readonly applied: boolean;\n}',
   },
   {
     name: 'ModelAvailability',

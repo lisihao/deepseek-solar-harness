@@ -1717,13 +1717,28 @@ export interface Config {
    * same top score. Default `shadow`.
    */
   readonly publicEvidence?: PublicEvidenceMode
+  /**
+   * For the `economy`, `balanced`, and `speed` objectives, `shadow` records the cheapest or fastest
+   * offer whose measured pass rate is good enough without using it; `apply` takes it; `off` ignores
+   * it. Needs request evidence that carries cost and runtime. Default `shadow`.
+   */
+  readonly costAware?: CostAwareMode
+  /**
+   * What one minute of waiting is worth, in the dollars of Radar's measured run cost. The cost-aware
+   * selection minimizes cost plus this value times the runtime for `economy` and `balanced` work, so a
+   * model that is cheap but takes half an hour does not win. Default 0.1; 0 ignores time.
+   */
+  readonly minuteValueUsd?: number
 }
 
 /** How public evidence takes part in allocation. */
 export type PublicEvidenceMode = 'off' | 'shadow' | 'apply'
+
+/** How the cost- and time-aware selection takes part; the values mean the same as {@link PublicEvidenceMode}. */
+export type CostAwareMode = PublicEvidenceMode
 ```
 
-Source: [`packages/orchestration/model-allocation-local/src/index.ts:26`](../packages/orchestration/model-allocation-local/src/index.ts)
+Source: [`packages/orchestration/model-allocation-local/src/index.ts:31`](../packages/orchestration/model-allocation-local/src/index.ts)
 
 <a id="deepseek-aidsh-model-catalog-local"></a>
 

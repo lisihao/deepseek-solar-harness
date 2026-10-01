@@ -289,7 +289,13 @@ function normalizeRate(value: number, unit: string): number | null {
   return normalized >= 0 && normalized <= 1 ? normalized : null
 }
 
-function wilsonInterval(rate: number, sampleCount: number): readonly [number, number] {
+/**
+ * The 95% Wilson score interval of a pass rate.
+ * @param rate - observed proportion in [0, 1].
+ * @param sampleCount - number of tasks behind the proportion; positive.
+ * @returns the lower and upper bounds.
+ */
+export function wilsonInterval(rate: number, sampleCount: number): readonly [number, number] {
   const denominator = 1 + WILSON_Z * WILSON_Z / sampleCount
   const center = (rate + WILSON_Z * WILSON_Z / (2 * sampleCount)) / denominator
   const spread = WILSON_Z * Math.sqrt(

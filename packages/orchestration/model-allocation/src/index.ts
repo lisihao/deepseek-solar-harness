@@ -165,6 +165,19 @@ export interface ModelAllocationRequest {
   readonly offers: readonly ModelExecutionOffer[]
   /** Optional public evidence; omission keeps the allocation exactly as without it. */
   readonly evidence?: ModelAllocationEvidence
+  /**
+   * Asks for the cheapest (`economy`, `balanced`) or fastest (`speed`) offer whose measured pass rate is
+   * good enough. It does not change the baseline choice, which still follows `objective`, and needs
+   * `evidence` that carries cost and runtime; without either, nothing changes.
+   */
+  readonly costAwareObjective?: 'economy' | 'balanced' | 'speed'
+  /**
+   * Other offers of models that `offers` already holds, such as the same model at another reasoning
+   * strength. Baseline scoring and the evidence tie-break never see them, because evidence only compares
+   * offers of equal strength; only the cost-aware selection may choose one, and only when a model of the
+   * same operator in `offers` passed the quota, capacity, and pin checks.
+   */
+  readonly alternativeOffers?: readonly ModelExecutionOffer[]
   readonly now: string
 }
 
@@ -209,6 +222,42 @@ export interface ModelAllocationEvidenceReceipt {
   readonly applied: boolean
 }
 
+/** What public evidence said about one offer that a cost-aware selection considered. */
+export interface ModelAllocationSelectionCandidate {
+  readonly offerId: string
+  readonly passRate: number
+  readonly sampleCount: number
+  /** 95% Wilson lower bound of the pass rate. */
+  readonly lower: number
+  /** 95% Wilson upper bound of the pass rate. */
+  readonly upper: number
+  readonly avgCostUsd: number
+  readonly avgRuntimeSeconds: number
+}
+
+/**
+ * Receipt of one cost-aware selection: among offers whose measured pass rate is not worse than the
+ * best by more than a margin, the one with the lowest cost (or runtime for `speed`).
+ */
+export interface ModelAllocationSelectionReceipt {
+  /** `shadow` records the choice without using it; `apply` takes it. */
+  readonly mode: 'shadow' | 'apply'
+  /** `used` when the evidence supported a choice; otherwise `abstained`, and the baseline stands. */
+  readonly status: 'used' | 'abstained'
+  readonly reason: string
+  readonly objective: 'economy' | 'balanced' | 'speed'
+  /** What was minimized among the sufficient offers: cost plus the value of the waiting time, or the runtime alone. */
+  readonly metric: 'cost-and-time' | 'runtime'
+  readonly baselineOfferId: string
+  /** The offer the selection chose; equal to the baseline when it abstained or agrees. */
+  readonly selectedOfferId: string
+  /** Offers judged good enough, in offer id order. */
+  readonly sufficientOfferIds: readonly string[]
+  readonly considered: readonly ModelAllocationSelectionCandidate[]
+  /** True only in `apply` mode when the selection changed the choice. */
+  readonly applied: boolean
+}
+
 /** Sealed model choice and graph-wide concurrency advice. */
 export interface ModelAllocationPlan {
   readonly offerId: string
@@ -224,6 +273,8 @@ export interface ModelAllocationPlan {
   readonly rationale: readonly string[]
   /** Present only when an evidence ranking ran for this allocation. */
   readonly evidence?: ModelAllocationEvidenceReceipt
+  /** Present only when a cost-aware selection ran for this allocation. */
+  readonly selection?: ModelAllocationSelectionReceipt
 }
 
 /** Structured model-capacity or explicit-selection failure. */

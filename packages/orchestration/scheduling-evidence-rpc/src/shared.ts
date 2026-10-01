@@ -14,4 +14,6 @@ export type PublicEvidenceModeView = 'off' | 'shadow' | 'apply'
 export interface SchedulingEvidencePageV1 extends SchedulingEvidenceOverview {
   /** The `model-allocation.publicEvidence` setting in force, or null when no settings service is mounted. */
   readonly publicEvidence: PublicEvidenceModeView | null
+  /** The `model-allocation.costAware` setting in force, or null when no settings service is mounted. */
+  readonly costAware: PublicEvidenceModeView | null
 }

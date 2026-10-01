@@ -72,6 +72,7 @@ import type {
   PhysicalOperatorProfilePreferencesSelect,
 } from './types.ts'
 import { PhysicalOperatorModelToolBridge } from './model-tool-bridge.ts'
+import { judgeDifficulty, type Difficulty } from './difficulty.ts'
 
 export type * from './types.ts'
 
@@ -1183,7 +1184,8 @@ async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, 
   }
   const automatic = automaticOperator(text)
   if (automatic === undefined) return primaryDecision(messageId, 'auto', '未发现需要物理算子或 TaskGraph 的工作')
-  const allocation = await allocateSmartAuto(ctx, agent, messageId, text, automatic)
+  const difficulty = smartAutoDifficulty(agent.session.events, messageId, text)
+  const allocation = await allocateSmartAuto(ctx, agent, messageId, text, automatic, difficulty)
   if (allocation.plan === undefined) {
     return operatorDecision(
       ctx,
@@ -1204,7 +1206,7 @@ async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, 
     messageId,
     'auto',
     operatorId,
-    `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}${evidenceNote(plan)}`,
+    `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}${evidenceNote(plan)}${selectionNote(plan, difficulty)}`,
     operatorId === 'claude-code' ? 'codex' : undefined,
     plan.profile,
   )
@@ -1231,18 +1233,20 @@ async function allocateSmartAuto(
   messageId: string,
   text: string,
   automatic: PhysicalOperatorProfileOwner,
+  difficulty: Difficulty,
 ): Promise<SmartAutoAllocation> {
   const allocator = ctx.get('modelAllocation')
   const catalogs = routerCatalogs.get(ctx)?.live
   if (allocator === undefined || catalogs === undefined) return {}
   let offers: ModelExecutionOffer[]
+  let alternatives: ModelExecutionOffer[]
   try {
-    offers = smartAutoOffers(ctx, await catalogs.current())
+    ({ offers, alternatives } = smartAutoOffers(ctx, await catalogs.current()))
   } catch (error) {
     return { unavailable: `原生目录读取失败：${error instanceof Error ? error.message : String(error)}` }
   }
   try {
-    const evidence = ctx.get('schedulingEvidence')?.evidenceFor(offers, automatic === 'codex' ? 'coding' : 'analysis')
+    const evidence = ctx.get('schedulingEvidence')?.evidenceFor([...offers, ...alternatives], automatic === 'codex' ? 'coding' : 'analysis')
     const plan = await allocator.allocate({
       runId: `session:${String(agent.id)}`,
       nodeId: messageId,
@@ -1254,10 +1258,12 @@ async function allocateSmartAuto(
       rlm: 'disabled',
       graphMaxParallel: 1,
       offers,
+      ...alternatives.length === 0 ? {} : { alternativeOffers: alternatives },
       ...evidence === undefined ? {} : { evidence },
+      ...DIFFICULTY_OBJECTIVE[difficulty] === undefined ? {} : { costAwareObjective: DIFFICULTY_OBJECTIVE[difficulty] },
       now: new Date().toISOString(),
     })
-    const offer = offers.find(candidate => candidate.offerId === plan.offerId)
+    const offer = [...offers, ...alternatives].find(candidate => candidate.offerId === plan.offerId)
     if (offer === undefined || !isPhysicalOperatorRoutingTarget(plan.operatorId)) {
       return { unavailable: `调度器选择了未知报价 ${plan.offerId}` }
     }
@@ -1265,6 +1271,51 @@ async function allocateSmartAuto(
   } catch (error) {
     return { unavailable: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * What each difficulty asks of the allocator beyond its baseline. A hard request asks for nothing, so it
+ * keeps the strongest offer exactly as before.
+ */
+const DIFFICULTY_OBJECTIVE: Readonly<Record<Difficulty, 'economy' | 'balanced' | undefined>> = {
+  easy: 'economy',
+  normal: 'balanced',
+  hard: undefined,
+}
+
+/** Whether the latest delegated run of this session ended in a failure. */
+function lastDispatchFailed(events: readonly SessionEvent[]): boolean {
+  const dispatch = latestDispatch(events)
+  return dispatch !== undefined && events.some(event => event.seq > dispatch.seq
+    && event.type === 'physical-operator/dispatch-terminal'
+    && event.data.commandId === dispatch.commandId)
+}
+
+/** Judge the current Smart Collaboration request together with this session's earlier requests and last delegation. */
+function smartAutoDifficulty(events: readonly SessionEvent[], messageId: string, text: string): Difficulty {
+  const earlierRequests: string[] = []
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'user/message' || String(event.data.id) === messageId) continue
+    earlierRequests.push(textContent(event.data.content))
+  }
+  return judgeDifficulty(text, { earlierRequests, lastDispatchFailed: lastDispatchFailed(events) }).level
+}
+
+const DIFFICULTY_LABEL: Readonly<Record<Difficulty, string>> = { easy: '简单', normal: '一般', hard: '困难' }
+
+/** The routing reason's account of a cost- and time-aware selection; empty when none ran for this allocation. */
+function selectionNote(plan: ModelAllocationPlan, difficulty: Difficulty): string {
+  const receipt = plan.selection
+  if (receipt === undefined) return ''
+  const head = `；成本感知（${receipt.mode}，难度${DIFFICULTY_LABEL[difficulty]}）：`
+  if (receipt.status === 'abstained') return `${head}弃权（${receipt.reason}）`
+  const pick = receipt.considered.find(entry => entry.offerId === receipt.selectedOfferId)
+  const facts = pick === undefined
+    ? ''
+    : `（通过率 ${(pick.passRate * 100).toFixed(1)}%，成本 $${pick.avgCostUsd.toFixed(2)}，耗时 ${Math.round(pick.avgRuntimeSeconds / 60)} 分钟）`
+  if (receipt.selectedOfferId === receipt.baselineOfferId) return `${head}基线 ${receipt.baselineOfferId} 已是够用里最省的${facts}`
+  return `${head}${receipt.applied ? '改选' : '倾向'} ${receipt.selectedOfferId}${facts}，基线是 ${receipt.baselineOfferId}${receipt.applied ? '' : '，影子模式未采用'}`
 }
 
 /** The routing reason's account of a public-evidence ranking; empty when none ran for this allocation. */
@@ -1277,6 +1328,12 @@ function evidenceNote(plan: ModelAllocationPlan): string {
   return `；公开证据（${receipt.mode}）：${verdict}（${receipt.reason}）`
 }
 
+/** The offers one Smart Collaboration allocation considers, and the other reasoning strengths of the same models. */
+interface SmartAutoOffers {
+  readonly offers: ModelExecutionOffer[]
+  readonly alternatives: ModelExecutionOffer[]
+}
+
 /**
  * Subscription offers for Smart Collaboration: each native model of an
  * available Codex or Claude Code catalog that accepts the DSH tool bridge.
@@ -1284,36 +1341,45 @@ function evidenceNote(plan: ModelAllocationPlan): string {
  * and each offer's rank follows the newest-first order of the model menu so
  * an equally scored newer model wins.
  */
-function smartAutoOffers(ctx: Context, catalogs: readonly PhysicalOperatorResidentCatalog[]): ModelExecutionOffer[] {
+function smartAutoOffers(ctx: Context, catalogs: readonly PhysicalOperatorResidentCatalog[]): SmartAutoOffers {
   const statuses = new Map(ctx.physicalOperators.list().map(status => [String(status.id), status] as const))
-  return catalogs.flatMap((catalog) => {
+  const offers: ModelExecutionOffer[] = []
+  const alternatives: ModelExecutionOffer[] = []
+  for (const catalog of catalogs) {
     const operatorId = String(catalog.operatorId)
     const status = statuses.get(operatorId)
-    if (status === undefined || !isPhysicalOperatorProfileOwner(operatorId) || !catalog.supportsModelToolBridge) return []
+    if (status === undefined || !isPhysicalOperatorProfileOwner(operatorId) || !catalog.supportsModelToolBridge) continue
     const qualified = catalog.available && catalog.authentication === 'native-subscription' && status.state !== 'unavailable'
-    return latestNativeModels(catalog.models, catalog.models.length)
-      .map((model, rank): ModelExecutionOffer => {
-        const quotaPool = catalog.quotaPools?.find(pool => pool.models.includes(model.model))
-        return {
-          offerId: `${operatorId}:${model.model}`,
-          operatorId,
-          provider: catalog.product,
-          model: model.model,
-          displayName: `${status.displayName} · ${model.displayName}`,
-          source: 'native-subscription',
-          tier: nativeModelTier(model),
-          available: qualified,
-          maxConcurrency: status.maxConcurrency,
-          activeCount: status.active,
-          tags: status.tags,
-          ...qualified ? {} : { unavailableReasonCode: 'OPERATOR_UNAVAILABLE' as const },
-          ...quotaPool === undefined ? {} : { quotaPool },
-          quotaGuard: { unknownQuota: 'allow', protectedRemainingPercent: 0, stopAdmissionAtRemainingPercent: 0, accelerateBeforeReset: true },
-          profile: { model: model.model, ...model.defaultEffort === undefined ? {} : { effort: model.defaultEffort } },
-          rank,
-        }
+    for (const [rank, model] of latestNativeModels(catalog.models, catalog.models.length).entries()) {
+      const quotaPool = catalog.quotaPools?.find(pool => pool.models.includes(model.model))
+      const offerFor = (offerId: string, effort: PhysicalOperatorReasoningEffort | undefined, offerRank: number): ModelExecutionOffer => ({
+        offerId,
+        operatorId,
+        provider: catalog.product,
+        model: model.model,
+        displayName: `${status.displayName} · ${model.displayName}`,
+        source: 'native-subscription',
+        tier: nativeModelTier(model),
+        available: qualified,
+        maxConcurrency: status.maxConcurrency,
+        activeCount: status.active,
+        tags: status.tags,
+        ...qualified ? {} : { unavailableReasonCode: 'OPERATOR_UNAVAILABLE' as const },
+        ...quotaPool === undefined ? {} : { quotaPool },
+        quotaGuard: { unknownQuota: 'allow', protectedRemainingPercent: 0, stopAdmissionAtRemainingPercent: 0, accelerateBeforeReset: true },
+        profile: { model: model.model, ...effort === undefined ? {} : { effort } },
+        rank: offerRank,
       })
-  })
+      offers.push(offerFor(`${operatorId}:${model.model}`, model.defaultEffort, rank))
+      // The other reasoning strengths of a model are separate offers because one model costs and takes very
+      // differently by strength. Only the cost-aware selection reads them, so the baseline stays the newest model
+      // at its default strength.
+      for (const effort of model.supportedEfforts.filter(candidate => candidate !== model.defaultEffort)) {
+        alternatives.push(offerFor(`${operatorId}:${model.model}:${effort}`, effort, rank))
+      }
+    }
+  }
+  return { offers, alternatives }
 }
 
 /** Native preferences can constrain TaskGraph workers without replacing a selected primary model. */

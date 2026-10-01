@@ -21,7 +21,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 `status` 与 `show` 从不运行 `refresh`、`import`、`consent`：它们会访问网络或写入已存储的版本。只有下文的 Radar 周期会运行 `consent` 与 `refresh`。
 
-`evidenceFor(offers, taskType)` 返回分配器比较用的 `ModelAllocationEvidence`，或 `undefined`。它读取内存中的 Radar 版本，不启动任何进程，所以分配器可以在每次请求时调用。只有同时满足以下条件才产生记录：`taskType` 等于声明的 `taskType`，版本比它自己的 `cache.stale_after_seconds` 新，且某个 offer 的 provider、模型（经 `modelAliases` 映射后）和推理强度与 Radar 的一行相符。只有 Codex 的行算数：Radar 还列出了 Claude、DeepSeek 和 Gemini 的模型，它们运行在不同的 harness 里。采集器自己的 `routing_eligible` 标记被忽略，因为它是一份写死的模型名单，把所有 GPT-6 模型都排除在外。
+`evidenceFor(offers, taskType)` 返回分配器比较用的 `ModelAllocationEvidence`，或 `undefined`。它读取内存中的 Radar 版本，不启动任何进程，所以分配器可以在每次请求时调用。只有同时满足以下条件才产生记录：`taskType` 等于声明的 `taskType`，版本比它自己的 `cache.stale_after_seconds` 新，且某个 offer 的 provider、模型（经 `modelAliases` 映射后）和推理强度与 Radar 的一行相符。当行同时给出平均成本和平均耗时时，每条记录也带上 `avg_cost_usd` 和 `avg_runtime_seconds`，供分配器的成本感知选择读取。只有 Codex 的行算数：Radar 还列出了 Claude、DeepSeek 和 Gemini 的模型，它们运行在不同的 harness 里。采集器自己的 `routing_eligible` 标记被忽略，因为它是一份写死的模型名单，把所有 GPT-6 模型都排除在外。
 
 ## 配置
 
@@ -66,6 +66,7 @@ scheduling-evidence:
   python: /opt/homebrew/bin/python3.12 # a Python 3.11+ interpreter
 model-allocation:
   publicEvidence: shadow # apply lets evidence break ties
+  costAware: shadow # apply lets simple work pick a cheaper strength
 ```
 
 - 只设置 `radarEnabled` 时读取已存储的版本，不会访问网络。
