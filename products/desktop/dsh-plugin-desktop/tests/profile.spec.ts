@@ -372,6 +372,14 @@ describe('desktop profile composition', () => {
       name: '@nanmicoder/dsh-agent-teams',
       config: expect.objectContaining({ memberPersonaPlacement: 'prompt' }),
     }))
+    expect(rows.find(row => row.id === 'scheduling-evidence')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-scheduling-evidence',
+      config: {
+        python: 'python3',
+        sourceRoot: expect.stringMatching(/vendor[\\/]scheduling-evidence-python$/u),
+        stateRoot: expect.stringMatching(/scheduling-evidence$/u),
+      },
+    }))
     expect(rows.find(row => row.id === 'remote-web-ui')).toEqual(expect.objectContaining({
       name: '@linxin666/dsh-remote-web-ui',
     }))
