@@ -90,15 +90,32 @@ describe('radarEvidence', () => {
     await ctx.root.fiber.dispose()
   })
 
-  it('maps a Radar model name to the offer name and Radar claude to claude-code', () => {
-    const claude = offer('opus', { offerId: 'claude-code:opus', operatorId: 'claude-code', provider: 'claude-code' })
+  it('maps a Radar model name to the offer name', () => {
     const evidence = radarEvidence(
-      snapshot([row('gpt-5.6-sol', 0.9), row('claude-opus-5', 0.8, { provider: 'claude' })]),
-      [offer('sol'), claude],
-      { ...options, declaration: { ...declaration, modelAliases: { 'gpt-5.6-sol': 'sol', 'claude-opus-5': 'opus' } } },
+      snapshot([row('gpt-5.6-sol', 0.9)]),
+      [offer('sol')],
+      { ...options, declaration: { ...declaration, modelAliases: { 'gpt-5.6-sol': 'sol' } } },
     )
 
-    expect(Object.keys(evidence?.records ?? {})).toEqual(['codex:sol', 'claude-code:opus'])
+    expect(Object.keys(evidence?.records ?? {})).toEqual(['codex:sol'])
+  })
+
+  it('uses rows the collector flags as not routing-eligible, such as new GPT-6 models', () => {
+    const astra = offer('gpt-6-astra')
+    const evidence = radarEvidence(snapshot([row('gpt-6-astra', 0.736, { routing_eligible: false })]), [astra], options)
+
+    expect(Object.keys(evidence?.records ?? {})).toEqual(['codex:gpt-6-astra'])
+  })
+
+  it('ignores rows for other vendors, which ran in a different harness', () => {
+    const claude = offer('claude-opus-5', { offerId: 'claude-code:claude-opus-5', operatorId: 'claude-code', provider: 'claude-code' })
+    const evidence = radarEvidence(
+      snapshot([row('claude-opus-5', 0.8, { provider: 'claude' }), row('deepseek-v4-flash', 0.6, { provider: 'unknown' })]),
+      [claude, offer('deepseek-v4-flash')],
+      options,
+    )
+
+    expect(evidence).toBeUndefined()
   })
 
   it('gives an offer no record for another effort, provider, or unlisted model', () => {
@@ -118,8 +135,7 @@ describe('radarEvidence', () => {
         row('gpt-5.6-sol', 1.5), row('gpt-5.6-sol', -0.1), row('gpt-5.6-sol', 'high'), row('gpt-5.6-sol', null),
         row('gpt-5.6-sol', 0.9, { sample_count: 0 }), row('gpt-5.6-sol', 0.9, { sample_count: 1.5 }), row('gpt-5.6-sol', 0.9, { sample_count: null }),
         row('gpt-5.6-sol', 0.9, { provider: ' ' }), row('gpt-5.6-sol', 0.9, { model: '' }), row('gpt-5.6-sol', 0.9, { reasoning_effort: undefined }),
-        row('gpt-5.6-sol', 0.9, { routing_eligible: false }),
-        row('gpt-5.6-terra', 0.7, { routing_eligible: true }),
+        row('gpt-5.6-terra', 0.7),
       ]),
       [sol, terra],
       options,
