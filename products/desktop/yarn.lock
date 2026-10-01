@@ -3468,6 +3468,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::hash=289cf6&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    "@deepseek-ai/schemastery": "npm:^3.18.1"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-model-allocation": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-model-allocation-local": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
+  checksum: 10c0/55eb486f5d50454b433d59b7c67a1da9037993bbe5e25e28cb7c8841c76b0b0bac98bef248a4782318079412ee47f507f22730eb8fe6ef12b4ba3f0d161ee5e7
+  languageName: node
+  linkType: hard
+
 "@deepseek-ai/dsh-scope@npm:0.1.0-rc.6":
   version: 0.1.0-rc.6
   resolution: "@deepseek-ai/dsh-scope@npm:0.1.0-rc.6"
@@ -4481,7 +4497,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=cf0d2e&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=b23070&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -4494,6 +4510,7 @@ __metadata:
     "@deepseek-ai/dsh-model-allocation": ^0.1.0-rc.5
     "@deepseek-ai/dsh-model-catalog-local": ^0.1.0-rc.5
     "@deepseek-ai/dsh-physical-operator": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-scheduling-evidence": ^0.1.0-rc.5
     "@deepseek-ai/dsh-sdk-protocol": ^0.1.0-rc.5
     "@deepseek-ai/dsh-session": ^0.1.0-rc.5
     "@deepseek-ai/dsh-session-projection": ^0.1.0-rc.5
@@ -4502,7 +4519,7 @@ __metadata:
     "@deepseek-ai/dsh-task-template-context": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     zod: ^4.4.3
-  checksum: 10c0/c89773ccdab7ba63225cb6f965227aa396a053d076061ffc08ced2ffb356177b5527e0918e478b4616e4611c81f62d67413e01feec0f06b6be25a45291a23fe1
+  checksum: 10c0/d721d0c1683f6ac5f8ac28f157576d4f851efcb93d2ebdf70696baa22c79cbfb4885f872962d756740d1acdb79df510c38497fd82cfb8b837620eb77c32468ec
   languageName: node
   linkType: hard
 
@@ -9361,6 +9378,7 @@ __metadata:
     "@deepseek-ai/dsh-sandbox": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-sandbox-policy": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-sandbox-windows-acl": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-scheduling-evidence": "file:vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-scope": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-sdk-protocol": "file:vendor/dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-session": "npm:0.1.0-rc.6"

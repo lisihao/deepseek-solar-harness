@@ -61,6 +61,7 @@ import {
 } from './native-catalog-sources.ts'
 import { nativeModelTier, type ModelAllocationPlan, type ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from '@deepseek-ai/dsh-scheduling-evidence'
 import type {
   PhysicalOperatorRoutingOption,
   PhysicalOperatorRoutingPolicy,
@@ -1203,7 +1204,7 @@ async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, 
     messageId,
     'auto',
     operatorId,
-    `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}`,
+    `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}${evidenceNote(plan)}`,
     operatorId === 'claude-code' ? 'codex' : undefined,
     plan.profile,
   )
@@ -1220,6 +1221,9 @@ type SmartAutoAllocation =
  * implementation-shaped work favors Codex and analysis-shaped work favors
  * Claude Code while quota, capacity, and tier decide the exact model.
  * Claude Code reports no quota telemetry, so unknown quota is admitted.
+ * When `ctx.schedulingEvidence` is mounted, its public evidence for the offers
+ * goes with the request; the allocator decides whether it only records a
+ * verdict (shadow) or breaks a tie (apply).
  */
 async function allocateSmartAuto(
   ctx: Context,
@@ -1238,6 +1242,7 @@ async function allocateSmartAuto(
     return { unavailable: `原生目录读取失败：${error instanceof Error ? error.message : String(error)}` }
   }
   try {
+    const evidence = ctx.get('schedulingEvidence')?.evidenceFor(offers, automatic === 'codex' ? 'coding' : 'analysis')
     const plan = await allocator.allocate({
       runId: `session:${String(agent.id)}`,
       nodeId: messageId,
@@ -1249,6 +1254,7 @@ async function allocateSmartAuto(
       rlm: 'disabled',
       graphMaxParallel: 1,
       offers,
+      ...evidence === undefined ? {} : { evidence },
       now: new Date().toISOString(),
     })
     const offer = offers.find(candidate => candidate.offerId === plan.offerId)
@@ -1259,6 +1265,16 @@ async function allocateSmartAuto(
   } catch (error) {
     return { unavailable: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/** The routing reason's account of a public-evidence ranking; empty when none ran for this allocation. */
+function evidenceNote(plan: ModelAllocationPlan): string {
+  const receipt = plan.evidence
+  if (receipt === undefined) return ''
+  const verdict = receipt.status === 'used'
+    ? `倾向 ${receipt.evidenceOfferId}${receipt.applied ? '，已采用' : receipt.mode === 'shadow' ? '，影子模式未采用' : '，与基线一致'}`
+    : '弃权'
+  return `；公开证据（${receipt.mode}）：${verdict}（${receipt.reason}）`
 }
 
 /**

@@ -234,6 +234,7 @@
     "@deepseek-ai/dsh-model-worker-deepseek": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-rlm-strategy": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-strategy-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-rlm-strategy-local": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-strategy-local-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-scheduling-evidence": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-rlm-runtime": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-rlm-runtime-local": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-orchestration": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz",

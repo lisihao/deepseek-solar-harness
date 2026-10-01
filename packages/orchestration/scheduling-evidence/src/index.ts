@@ -2,18 +2,23 @@
  * Gateway to the scheduling evidence collectors in `python/scheduling-evidence`.
  * It runs their read-only commands (`status`, `show`) as bounded child
  * processes through `ctx.subprocess` and returns each command's JSON document.
- * It never refreshes or imports: those commands reach the network and write
- * stored generations, and belong to the periodic cycle.
+ * The caller-facing methods never refresh or import: those commands reach the
+ * network and write stored generations. Only the optional Radar cycle runs
+ * `consent` and `refresh`, and only with the owner's authorization file.
  * @module @deepseek-ai/dsh-scheduling-evidence
  */
 
-import { mkdir } from 'node:fs/promises'
+import { access, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
+import type { ModelAllocationEvidence, ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
+import { radarEvidence, type RadarDeclaration } from './radar-evidence.ts'
+
+export type { RadarDeclaration } from './radar-evidence.ts'
 
 /** The collectors this gateway runs. */
 export type CollectorId = 'radar' | 'ai-frontier'
@@ -49,6 +54,35 @@ export class SchedulingEvidenceError extends HarnessError {
   }
 }
 
+/**
+ * Radar evidence for the allocator. Present, even empty, the gateway reads the
+ * Radar generation already stored; collection from the network runs only when
+ * `authorizationFile` names the owner's receipt.
+ */
+export interface RadarConfig {
+  /** The owner's authorization receipt; no network request is made without a valid one. */
+  authorizationFile?: string
+  /**
+   * The owner's statement of personal-use consent. When true and `authorizationFile` is missing,
+   * the gateway records the receipt there once. Never set by a shipped default.
+   */
+  personalUseConsent?: boolean
+  /** Time between collections in milliseconds; 30 minutes to 24 hours, default 4 hours. */
+  refreshIntervalMs?: number
+  /** Deadline for one collection in milliseconds; default 90000. */
+  refreshTimeoutMs?: number
+  /** Seconds before a stored generation stops being used; default 604800 (7 days). */
+  staleAfterSeconds?: number
+  /** Benchmark name the records claim; default `Codex Radar community tasks`. */
+  benchmark?: string
+  /** The test environment the owner states every Radar row shares; default `codex-radar-community`. */
+  harness?: string
+  /** The one task type the dataset speaks to; default `coding`. */
+  taskType?: string
+  /** Radar model names mapped to the names offers use. */
+  modelAliases?: Record<string, string>
+}
+
 /** Where and how the collectors run. */
 export interface Config {
   /** Python 3.11+ interpreter: an absolute path or a bare name looked up on the scrubbed PATH. */
@@ -63,6 +97,8 @@ export interface Config {
   graceMs?: number
   /** Largest stdout or stderr kept per call, in bytes, and a larger stdout fails the call; default 1048576. */
   maxOutputBytes?: number
+  /** Radar evidence for the allocator; omitted, the gateway offers no evidence. */
+  radar?: RadarConfig
 }
 
 /** Loader schema; bounds are checked here and defaults are applied by {@link resolveConfig}. */
@@ -73,10 +109,40 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS),
   graceMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS),
   maxOutputBytes: z.number().step(1).min(1_024).max(16 * 1_024 * 1_024),
+  // Without an explicit undefined default, schemastery fills an absent object from its members' defaults and would switch Radar on.
+  radar: z.object({
+    authorizationFile: z.string(),
+    personalUseConsent: z.boolean(),
+    refreshIntervalMs: z.number().step(1).min(30 * 60_000).max(24 * 60 * 60_000),
+    refreshTimeoutMs: z.number().step(1).min(1_000).max(MAX_TIMER_DELAY_MS),
+    staleAfterSeconds: z.number().step(1).min(60).max(90 * 24 * 60 * 60),
+    benchmark: z.string(),
+    harness: z.string(),
+    taskType: z.string(),
+    modelAliases: z.dict(z.string()),
+  }).default(undefined as never),
 })
 
+/** A {@link RadarConfig} with every setting explicit. */
+export interface ResolvedRadarConfig {
+  readonly authorizationFile: string | undefined
+  readonly personalUseConsent: boolean
+  readonly refreshIntervalMs: number
+  readonly refreshTimeoutMs: number
+  readonly staleAfterSeconds: number
+  readonly declaration: RadarDeclaration
+}
+
 /** A {@link Config} with every limit explicit. */
-export type ResolvedConfig = Required<Config>
+export interface ResolvedConfig {
+  readonly python: string
+  readonly sourceRoot: string
+  readonly stateRoot: string
+  readonly timeoutMs: number
+  readonly graceMs: number
+  readonly maxOutputBytes: number
+  readonly radar: ResolvedRadarConfig | undefined
+}
 
 /**
  * Apply the documented default to each omitted limit.
@@ -91,6 +157,19 @@ export function resolveConfig(config: Config): ResolvedConfig {
     timeoutMs: config.timeoutMs ?? 15_000,
     graceMs: config.graceMs ?? 2_000,
     maxOutputBytes: config.maxOutputBytes ?? 1_048_576,
+    radar: config.radar === undefined ? undefined : {
+      authorizationFile: config.radar.authorizationFile,
+      personalUseConsent: config.radar.personalUseConsent ?? false,
+      refreshIntervalMs: config.radar.refreshIntervalMs ?? 4 * 60 * 60_000,
+      refreshTimeoutMs: config.radar.refreshTimeoutMs ?? 90_000,
+      staleAfterSeconds: config.radar.staleAfterSeconds ?? 7 * 24 * 60 * 60,
+      declaration: {
+        benchmark: config.radar.benchmark ?? 'Codex Radar community tasks',
+        harness: config.radar.harness ?? 'codex-radar-community',
+        taskType: config.radar.taskType ?? 'coding',
+        modelAliases: config.radar.modelAliases ?? {},
+      },
+    },
   }
 }
 
@@ -132,6 +211,9 @@ export class SchedulingEvidenceGateway extends Service {
   private readonly active = new Set<SubprocessHandle>()
   private interpreter: Promise<string> | undefined
   private disposed = false
+  /** The active Radar generation as the collector last printed it. */
+  private radarSnapshot: Readonly<Record<string, unknown>> | undefined
+  private cycleRunning: Promise<void> | undefined
 
   /**
    * Register `ctx.schedulingEvidence`.
@@ -145,6 +227,58 @@ export class SchedulingEvidenceGateway extends Service {
     ctx.effect(function* () {
       yield async () => { await stop() }
     }, 'scheduling-evidence: child processes')
+    const { radar } = this.config
+    if (radar !== undefined) {
+      ctx.effect(() => {
+        const timer = setInterval(() => { void this.runCycle() }, radar.refreshIntervalMs)
+        timer.unref()
+        void this.runCycle()
+        return () => { clearInterval(timer) }
+      }, 'scheduling-evidence: radar cycle')
+    }
+  }
+
+  /**
+   * Evidence for the allocator, from the Radar generation held in memory; it never starts a process.
+   * @param offers - the offers the allocator will compare.
+   * @param taskType - the request's task type; evidence exists only for the dataset's own.
+   * @returns the evidence, or undefined when Radar is not configured, nothing usable is stored, or no offer has a record.
+   */
+  evidenceFor(offers: readonly ModelExecutionOffer[], taskType: string): ModelAllocationEvidence | undefined {
+    const { radar } = this.config
+    if (radar === undefined) return undefined
+    return radarEvidence(this.radarSnapshot, offers, { taskType, declaration: radar.declaration, nowMs: Date.now() })
+  }
+
+  /**
+   * Run one collection and reload cycle now, or join the one already running.
+   * @returns when the cycle ends; a failed cycle is logged and leaves the last stored generation in use.
+   */
+  runCycle(): Promise<void> {
+    this.cycleRunning ??= this.cycle().finally(() => { this.cycleRunning = undefined })
+    return this.cycleRunning
+  }
+
+  private async cycle(): Promise<void> {
+    const radar = this.config.radar as ResolvedRadarConfig
+    try {
+      const receipt = radar.authorizationFile
+      if (receipt !== undefined) {
+        const exists = await access(receipt).then(() => true, () => false)
+        if (!exists && radar.personalUseConsent) {
+          await this.command('radar', ['consent', '--personal-use', '--authorization-file', receipt], undefined)
+        }
+        if (exists || radar.personalUseConsent) {
+          await this.command('radar', [
+            'refresh', '--authorization-file', receipt, '--stale-after-seconds', String(radar.staleAfterSeconds),
+          ], undefined, radar.refreshTimeoutMs)
+        }
+      }
+      const stored = await this.command('radar', ['show'], undefined)
+      this.radarSnapshot = typeof stored.document.snapshot_id === 'string' ? stored.document : undefined
+    } catch (error) {
+      this.ctx.logger.warn(`scheduling-evidence: radar cycle failed: ${(error as Error).message}`)
+    }
   }
 
   /**
@@ -170,12 +304,17 @@ export class SchedulingEvidenceGateway extends Service {
     return this.command(collector, args, options.signal)
   }
 
-  private async command(collector: CollectorId, args: readonly string[], signal: AbortSignal | undefined): Promise<CollectorResult> {
+  private async command(
+    collector: CollectorId,
+    args: readonly string[],
+    signal: AbortSignal | undefined,
+    timeoutMs?: number,
+  ): Promise<CollectorResult> {
     const spec = COLLECTORS[collector]
     const stateDirectory = join(this.config.stateRoot, spec.directory)
     await mkdir(stateDirectory, { recursive: true, mode: 0o700 })
     const python = await this.verifiedInterpreter(signal)
-    const run = await this.execute([python, '-m', spec.module, '--state-root', stateDirectory, ...args], signal)
+    const run = await this.execute([python, '-m', spec.module, '--state-root', stateDirectory, ...args], signal, timeoutMs)
     return this.parseResult(collector, run)
   }
 
@@ -237,9 +376,10 @@ export class SchedulingEvidenceGateway extends Service {
     return path
   }
 
-  private async execute(argv: readonly string[], signal: AbortSignal | undefined): Promise<Execution> {
+  private async execute(argv: readonly string[], signal: AbortSignal | undefined, timeoutMs?: number): Promise<Execution> {
     if (this.disposed) throw new SchedulingEvidenceError('The scheduling evidence gateway was disposed', 'GATEWAY_DISPOSED')
-    const deadline = AbortSignal.timeout(this.config.timeoutMs)
+    const limit = timeoutMs ?? this.config.timeoutMs
+    const deadline = AbortSignal.timeout(limit)
     const handle = this.ctx.subprocess.spawn({
       argv,
       cwd: this.config.stateRoot,
@@ -266,7 +406,7 @@ export class SchedulingEvidenceGateway extends Service {
         throw new SchedulingEvidenceError('The collector process could not be started', 'COLLECTOR_SPAWN_FAILED', { cause })
       }
       if (deadline.aborted) {
-        throw new SchedulingEvidenceError(`The collector call exceeded ${String(this.config.timeoutMs)} ms`, 'COLLECTOR_TIMEOUT')
+        throw new SchedulingEvidenceError(`The collector call exceeded ${String(limit)} ms`, 'COLLECTOR_TIMEOUT')
       }
       if (signal?.aborted === true) {
         throw new SchedulingEvidenceError('The collector call was cancelled', 'COLLECTOR_ABORTED')

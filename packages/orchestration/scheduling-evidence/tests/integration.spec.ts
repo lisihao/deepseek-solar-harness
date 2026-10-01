@@ -7,7 +7,6 @@
  * without a suitable interpreter.
  */
 
-import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -16,18 +15,12 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
+import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import SchedulingEvidenceGateway, { SchedulingEvidenceError } from '../src/index.ts'
+import type { RadarConfig } from '../src/index.ts'
+import { COLLECTOR_SOURCES, findPython, seedRadarStore } from './support.ts'
 
-const COLLECTOR_SOURCES = fileURLToPath(new URL('../../../../python/scheduling-evidence/src', import.meta.url))
 const SLOW_COLLECTOR = fileURLToPath(new URL('./fixtures/slow', import.meta.url))
-
-/** First interpreter on PATH that reports Python 3.11 or newer. */
-function findPython(): string | undefined {
-  return ['python3.14', 'python3.13', 'python3.12', 'python3.11', 'python3', 'python'].find((name) => {
-    const probe = spawnSync(name, ['-c', 'import sys; print(sys.version_info >= (3, 11))'], { encoding: 'utf8' })
-    return probe.status === 0 && probe.stdout.trim() === 'True'
-  })
-}
 
 const python = findPython()
 
@@ -39,6 +32,7 @@ interface MountOptions {
   sourceRoot?: string
   timeoutMs?: number
   graceMs?: number
+  radar?: RadarConfig
 }
 
 async function mount(config: MountOptions): Promise<SchedulingEvidenceGateway> {
@@ -108,5 +102,34 @@ describe.skipIf(python === undefined)(`real collectors (python: ${python ?? 'non
     const error = await gateway.status('radar').then(() => undefined, (cause: unknown) => cause)
 
     expect((error as SchedulingEvidenceError).code).toBe('INTERPRETER_UNAVAILABLE')
+  })
+})
+
+describe.skipIf(python === undefined)('real Radar cycle', () => {
+  const luna = (effort: 'low' | 'max'): ModelExecutionOffer => ({
+    offerId: `codex:gpt-5.6-luna:${effort}`, operatorId: 'codex', provider: 'codex', model: 'gpt-5.6-luna', displayName: 'Luna',
+    source: 'native-subscription', tier: 'low', available: true, maxConcurrency: 4, activeCount: 0, tags: ['coding'],
+    profile: { model: 'gpt-5.6-luna', effort },
+  })
+
+  it('turns a stored generation into evidence only for eligible rows the offers match', async () => {
+    await seedRadarStore(python as string, stateRoot)
+    const gateway = await mount({ radar: {} })
+    await gateway.runCycle()
+    const evidence = gateway.evidenceFor([luna('max'), luna('low')], 'coding')
+
+    expect(Object.keys(evidence?.records ?? {})).toEqual(['codex:gpt-5.6-luna:max'])
+    expect(evidence?.snapshots[0]).toMatchObject({ source: 'radar' })
+    expect(evidence?.records['codex:gpt-5.6-luna:max']?.[0]).toMatchObject({
+      canonical_model_id: 'gpt-5.6-luna', value: 0.6, sample_count: 1000, harness: 'codex-radar-community',
+    })
+    expect(gateway.evidenceFor([luna('max')], 'research')).toBeUndefined()
+  })
+
+  it('offers no evidence from an empty store and does not fail', async () => {
+    const gateway = await mount({ radar: {} })
+    await gateway.runCycle()
+
+    expect(gateway.evidenceFor([luna('max')], 'coding')).toBeUndefined()
   })
 })

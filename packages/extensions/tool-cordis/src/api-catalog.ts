@@ -1850,6 +1850,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Reads collector documents through bounded child processes.',
     methods: [
       {
+        signature: 'evidenceFor(offers: readonly ModelExecutionOffer[], taskType: string): ModelAllocationEvidence | undefined',
+        description: 'Evidence for the allocator, from the Radar generation held in memory; it never starts a process.',
+        parameters: [{ name: 'offers', description: 'the offers the allocator will compare.' }, { name: 'taskType', description: 'the request\'s task type; evidence exists only for the dataset\'s own.' }],
+        returns: 'the evidence, or undefined when Radar is not configured, nothing usable is stored, or no offer has a record.',
+      },
+      {
+        signature: 'runCycle(): Promise<void>',
+        description: 'Run one collection and reload cycle now, or join the one already running.',
+        parameters: [],
+        returns: 'when the cycle ends; a failed cycle is logged and leaves the last stored generation in use.',
+      },
+      {
         signature: 'status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>',
         description: 'Read a collector\'s storage status.',
         parameters: [{ name: 'collector', description: 'which collector to ask.' }, { name: 'signal', description: 'cancels the call and stops its process tree.' }],

@@ -2166,10 +2166,41 @@ export interface Config {
   graceMs?: number
   /** Largest stdout or stderr kept per call, in bytes, and a larger stdout fails the call; default 1048576. */
   maxOutputBytes?: number
+  /** Radar evidence for the allocator; omitted, the gateway offers no evidence. */
+  radar?: RadarConfig
+}
+
+/**
+ * Radar evidence for the allocator. Present, even empty, the gateway reads the
+ * Radar generation already stored; collection from the network runs only when
+ * `authorizationFile` names the owner's receipt.
+ */
+export interface RadarConfig {
+  /** The owner's authorization receipt; no network request is made without a valid one. */
+  authorizationFile?: string
+  /**
+   * The owner's statement of personal-use consent. When true and `authorizationFile` is missing,
+   * the gateway records the receipt there once. Never set by a shipped default.
+   */
+  personalUseConsent?: boolean
+  /** Time between collections in milliseconds; 30 minutes to 24 hours, default 4 hours. */
+  refreshIntervalMs?: number
+  /** Deadline for one collection in milliseconds; default 90000. */
+  refreshTimeoutMs?: number
+  /** Seconds before a stored generation stops being used; default 604800 (7 days). */
+  staleAfterSeconds?: number
+  /** Benchmark name the records claim; default `Codex Radar community tasks`. */
+  benchmark?: string
+  /** The test environment the owner states every Radar row shares; default `codex-radar-community`. */
+  harness?: string
+  /** The one task type the dataset speaks to; default `coding`. */
+  taskType?: string
+  /** Radar model names mapped to the names offers use. */
+  modelAliases?: Record<string, string>
 }
 ```
 
-Source: [`packages/orchestration/scheduling-evidence/src/index.ts:53`](../packages/orchestration/scheduling-evidence/src/index.ts)
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:87`](../packages/orchestration/scheduling-evidence/src/index.ts)
 
 <a id="deepseek-aidsh-sdk-jsonrpc-server"></a>
 

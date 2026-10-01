@@ -281,6 +281,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   DebateStartRequestV1: 'orchestration.md',
   IntentCompileRequest: 'orchestration.md',
   IntentIRV1: 'orchestration.md',
+  ModelAllocationEvidence: 'orchestration.md',
   ModelAllocationPlan: 'orchestration.md',
   ModelAllocationRequest: 'orchestration.md',
   ModelExecutionOffer: 'orchestration.md',
