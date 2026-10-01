@@ -6164,6 +6164,10 @@ importers:
         version: link:../../physical-operator/physical-operator
 
   packages/orchestration/model-allocation-local:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^

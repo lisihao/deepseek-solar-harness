@@ -115,6 +115,34 @@ export interface ModelExecutionOffer {
   readonly rank?: number
 }
 
+/** One stored collector generation that an allocation read, identified by content. */
+export interface ModelAllocationEvidenceSnapshotRef {
+  /** Collector that produced the generation, such as `radar`. */
+  readonly source: string
+  readonly snapshotId: string
+  /** Content digest of the generation; a changed digest is a different input. */
+  readonly digest: string
+}
+
+/**
+ * Public benchmark evidence for the offers of one request. A Provider that
+ * implements evidence ranking compares only offers it would otherwise rank
+ * equally, so evidence never overrides quota, tier, capacity, or a pinned model.
+ */
+export interface ModelAllocationEvidence {
+  /** The exact task type every record must name. */
+  readonly taskType: string
+  /** The generations the records came from, echoed into the receipt. */
+  readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[]
+  /**
+   * Evidence records per offer id, as the collectors emit them. A record
+   * names its candidate by provider = `offer.provider`, model = `offer.model`,
+   * reasoning effort = `offer.profile.effort`, execution surface =
+   * `offer.operatorId`, and billing identity = `offer.source`.
+   */
+  readonly records: Readonly<Record<string, readonly unknown[]>>
+}
+
 /** Complete deterministic allocation input for one ready node. */
 export interface ModelAllocationRequest {
   readonly runId: string
@@ -135,6 +163,8 @@ export interface ModelAllocationRequest {
   readonly rlm: RlmExecutionMode
   readonly graphMaxParallel: number
   readonly offers: readonly ModelExecutionOffer[]
+  /** Optional public evidence; omission keeps the allocation exactly as without it. */
+  readonly evidence?: ModelAllocationEvidence
   readonly now: string
 }
 
@@ -152,6 +182,33 @@ export interface ModelAllocationFallbackProvenance {
   readonly reasonCode: ModelAllocationFallbackReasonCode
 }
 
+/** What the evidence said about one offer that tied for the top score. */
+export interface ModelAllocationEvidenceCandidate {
+  readonly offerId: string
+  /** Evidence tier; 0 is preferred and equal tiers are not ordered. */
+  readonly preferenceRank: number
+  readonly status: 'used' | 'abstained'
+}
+
+/** Receipt of one evidence ranking: its inputs by digest, its verdict, and whether it changed the choice. */
+export interface ModelAllocationEvidenceReceipt {
+  /** `shadow` records the verdict without using it; `apply` lets it break the tie. */
+  readonly mode: 'shadow' | 'apply'
+  /** `used` when same-cohort evidence separated the tied offers; otherwise `abstained`. */
+  readonly status: 'used' | 'abstained'
+  readonly reason: string
+  readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[]
+  /** The offers that tied for the top score, in offer id order. */
+  readonly tiedOfferIds: readonly string[]
+  readonly candidates: readonly ModelAllocationEvidenceCandidate[]
+  /** The offer chosen without evidence. */
+  readonly baselineOfferId: string
+  /** The offer chosen with evidence; equal to the baseline when evidence abstained or agrees. */
+  readonly evidenceOfferId: string
+  /** True only in `apply` mode when evidence changed the choice. */
+  readonly applied: boolean
+}
+
 /** Sealed model choice and graph-wide concurrency advice. */
 export interface ModelAllocationPlan {
   readonly offerId: string
@@ -165,6 +222,8 @@ export interface ModelAllocationPlan {
   readonly fallback?: ModelAllocationFallbackProvenance
   readonly suggestedParallelism: number
   readonly rationale: readonly string[]
+  /** Present only when an evidence ranking ran for this allocation. */
+  readonly evidence?: ModelAllocationEvidenceReceipt
 }
 
 /** Structured model-capacity or explicit-selection failure. */

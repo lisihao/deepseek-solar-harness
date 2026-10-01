@@ -1704,6 +1704,27 @@ export interface Config {
 
 来源：[`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
 
+<a id="deepseek-aidsh-model-allocation-local"></a>
+
+## `@deepseek-ai/dsh-model-allocation-local`
+
+```ts config-catalog
+/** Provider settings. */
+export interface Config {
+  /**
+   * `off` ignores request evidence; `shadow` records what evidence would pick
+   * without using it; `apply` lets evidence break a tie among offers with the
+   * same top score. Default `shadow`.
+   */
+  readonly publicEvidence?: PublicEvidenceMode
+}
+
+/** How public evidence takes part in allocation. */
+export type PublicEvidenceMode = 'off' | 'shadow' | 'apply'
+```
+
+Source: [`packages/orchestration/model-allocation-local/src/index.ts:25`](../packages/orchestration/model-allocation-local/src/index.ts)
+
 <a id="deepseek-aidsh-model-catalog-local"></a>
 
 ## `@deepseek-ai/dsh-model-catalog-local`
@@ -3753,7 +3774,6 @@ export interface Config {
 - `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
 - `@deepseek-ai/dsh-lsp`（[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
-- `@deepseek-ai/dsh-model-allocation-local`（[`packages/orchestration/model-allocation-local/src/index.ts`](../packages/orchestration/model-allocation-local/src/index.ts)）
 - `@deepseek-ai/dsh-model-worker`（[`packages/orchestration/model-worker/src/index.ts`](../packages/orchestration/model-worker/src/index.ts)）
 - `@deepseek-ai/dsh-orchestrations`（[`packages/bundle/orchestrations/src/index.ts`](../packages/bundle/orchestrations/src/index.ts)）
 - `@deepseek-ai/dsh-output-style` — 需要 `systemPrompt`（[`packages/core/output-style/src/index.ts`](../packages/core/output-style/src/index.ts)）

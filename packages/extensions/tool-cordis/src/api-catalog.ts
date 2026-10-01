@@ -4988,6 +4988,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MessageSourceMap {\n    user: {\n        kind: \'user\';\n    };\n    plugin: {\n        kind: \'plugin\';\n        plugin: string;\n    } & ContextFormed;\n    model: ModelMessageSource;\n    tool: ToolMessageSource;\n}',
   },
   {
+    name: 'ModelAllocationEvidence',
+    declaration: 'export interface ModelAllocationEvidence {\n    readonly taskType: string;\n    readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[];\n    readonly records: Readonly<Record<string, readonly unknown[]>>;\n}',
+  },
+  {
+    name: 'ModelAllocationEvidenceCandidate',
+    declaration: 'export interface ModelAllocationEvidenceCandidate {\n    readonly offerId: string;\n    readonly preferenceRank: number;\n    readonly status: \'used\' | \'abstained\';\n}',
+  },
+  {
+    name: 'ModelAllocationEvidenceReceipt',
+    declaration: 'export interface ModelAllocationEvidenceReceipt {\n    readonly mode: \'shadow\' | \'apply\';\n    readonly status: \'used\' | \'abstained\';\n    readonly reason: string;\n    readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[];\n    readonly tiedOfferIds: readonly string[];\n    readonly candidates: readonly ModelAllocationEvidenceCandidate[];\n    readonly baselineOfferId: string;\n    readonly evidenceOfferId: string;\n    readonly applied: boolean;\n}',
+  },
+  {
+    name: 'ModelAllocationEvidenceSnapshotRef',
+    declaration: 'export interface ModelAllocationEvidenceSnapshotRef {\n    readonly source: string;\n    readonly snapshotId: string;\n    readonly digest: string;\n}',
+  },
+  {
     name: 'ModelAllocationFallbackProvenance',
     declaration: 'export interface ModelAllocationFallbackProvenance {\n    readonly fromOperatorId: string;\n    readonly fromModel?: string;\n    readonly reasonCode: ModelAllocationFallbackReasonCode;\n}',
   },
@@ -5001,11 +5017,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelAllocationPlan',
-    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly fallback?: ModelAllocationFallbackProvenance;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n}',
+    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly fallback?: ModelAllocationFallbackProvenance;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n    readonly evidence?: ModelAllocationEvidenceReceipt;\n}',
   },
   {
     name: 'ModelAllocationRequest',
-    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
+    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly evidence?: ModelAllocationEvidence;\n    readonly now: string;\n}',
   },
   {
     name: 'ModelAvailability',
