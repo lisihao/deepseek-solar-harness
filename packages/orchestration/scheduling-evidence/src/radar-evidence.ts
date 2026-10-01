@@ -5,7 +5,7 @@
  * test environment (harness) is therefore a conditions the owner declares, not
  * something the collector reads from Radar. A model that Radar does not list
  * under the offer's name, or an offer whose reasoning effort Radar does not
- * report, or a row the collector marks as not routing-eligible, simply gets no record.
+ * report, or a row for a vendor other than Codex, simply gets no record.
  * @module @deepseek-ai/dsh-scheduling-evidence/radar-evidence
  */
 
@@ -24,8 +24,11 @@ export interface RadarDeclaration {
   readonly modelAliases: Readonly<Record<string, string>>
 }
 
-/** Provider names Radar uses, mapped to the names offers use. */
-const PROVIDER_ALIASES: Readonly<Record<string, string>> = { claude: 'claude-code' }
+/**
+ * Radar measures the Codex CLI. Rows for other vendors (Claude, DeepSeek, Gemini) ran in a different
+ * harness and are not comparable with Codex rows, so only this provider's rows become evidence.
+ */
+const RADAR_PROVIDER = 'codex'
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -47,8 +50,10 @@ interface RadarRow {
 function radarRows(snapshot: Readonly<Record<string, unknown>>): RadarRow[] {
   const rows: RadarRow[] = []
   for (const row of Array.isArray(snapshot.models) ? snapshot.models as readonly unknown[] : []) {
-    // The collector marks a row it does not vouch for as not routing-eligible.
-    if (!isRecord(row) || row.routing_eligible === false) continue
+    // The collector's own `routing_eligible` flag is a fixed list of model names and lags new
+    // releases (it excludes every GPT-6 row), so it is not used; an offer must still name the row's
+    // model exactly to receive a record.
+    if (!isRecord(row)) continue
     const provider = text(row.provider)
     const model = text(row.model)
     const effort = text(row.reasoning_effort)
@@ -56,7 +61,8 @@ function radarRows(snapshot: Readonly<Record<string, unknown>>): RadarRow[] {
     if (provider === null || model === null || effort === null) continue
     if (typeof passRate !== 'number' || !(passRate >= 0 && passRate <= 1)) continue
     if (typeof sampleCount !== 'number' || !Number.isInteger(sampleCount) || sampleCount <= 0) continue
-    rows.push({ provider: PROVIDER_ALIASES[provider] ?? provider, model, effort, passRate, sampleCount })
+    if (provider !== RADAR_PROVIDER) continue
+    rows.push({ provider, model, effort, passRate, sampleCount })
   }
   return rows
 }
