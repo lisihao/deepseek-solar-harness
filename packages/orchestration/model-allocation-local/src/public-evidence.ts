@@ -11,7 +11,7 @@
  *
  * This is a TypeScript port of Codex Workbench's `public_evidence_ranking.py`
  * (the unified-scheduling a3 revision recorded in
- * `distribution/workbench-scheduling-sources.json`). The golden vectors in
+ * `distribution/workbench-scheduling-sources.json`). The expected outputs in
  * `tests/fixtures/public-evidence` come from that Python code. Known
  * differences are listed in the package README.
  * @module @deepseek-ai/dsh-model-allocation-local/public-evidence

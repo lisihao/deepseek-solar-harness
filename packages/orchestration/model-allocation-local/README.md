@@ -21,7 +21,7 @@ When `adaptiveExecutionPreference: { version: 1, ... }` is present on a coding e
 - Candidates are ordered only by unanimous pairwise verdicts. Disagreeing sources, a pair with no shared valid cohort, and a preference cycle each make the whole ranking abstain, so the baseline order stays.
 - The result gives each candidate a tier (0 is preferred) and a receipt of the sources used, in conflict, and set aside. It never returns a source value.
 
-The function is a TypeScript port of Codex Workbench's `public_evidence_ranking.py`. `tests/fixtures/public-evidence/golden.json` holds the Python reference output for 56 scenarios, and `generate_golden.py` rebuilds it from a Workbench source tree (`WORKBENCH_SRC=…/src python3.12 generate_golden.py > golden.json`). The test also checks that the file records the sha256 listed in `distribution/workbench-scheduling-sources.json`. Four differences are deliberate: a numeric string value is rejected, duplicate candidate ids throw, `str.casefold` becomes `toLowerCase`, and `str.strip` becomes `String.trim`.
+The function is a TypeScript port of Codex Workbench's `public_evidence_ranking.py`. `tests/fixtures/public-evidence/expected.json` holds the Python reference output for 56 scenarios, and `generate_expected.py` rebuilds it from a Workbench source tree (`WORKBENCH_SRC=…/src python3.12 generate_expected.py > expected.json`). The test also checks that the file records the sha256 listed in `distribution/workbench-scheduling-sources.json`. Four differences are deliberate: a numeric string value is rejected, duplicate candidate ids throw, `str.casefold` becomes `toLowerCase`, and `str.strip` becomes `String.trim`.
 
 ## Model Experience
 

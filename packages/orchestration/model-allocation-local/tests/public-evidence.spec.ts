@@ -16,13 +16,13 @@ interface Scenario {
   readonly throws?: string
 }
 
-interface Golden {
+interface Expected {
   readonly reference: { readonly module: string; readonly sha256: string }
   readonly scenarios: readonly Scenario[]
 }
 
 const read = (relative: string): string => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), 'utf8')
-const golden = JSON.parse(read('./fixtures/public-evidence/golden.json')) as Golden
+const expected = JSON.parse(read('./fixtures/public-evidence/expected.json')) as Expected
 const manifest = JSON.parse(read('../../../../distribution/workbench-scheduling-sources.json')) as {
   files: { relativePath: string; sha256: Record<string, string | null> }[]
 }
@@ -75,10 +75,10 @@ const rank = (candidates: readonly PublicEvidenceCandidate[]): PublicEvidenceRan
 describe('Python reference', () => {
   it('records the sha256 of the reference module listed in the source manifest', () => {
     const entry = manifest.files.find(file => file.relativePath === 'src/codex_workbench/public_evidence_ranking.py')
-    expect(entry?.sha256.C).toBe(golden.reference.sha256)
+    expect(entry?.sha256.C).toBe(expected.reference.sha256)
   })
 
-  it.each(golden.scenarios.map(scenario => [scenario.name, scenario] as const))('matches the reference: %s', (_name, scenario) => {
+  it.each(expected.scenarios.map(scenario => [scenario.name, scenario] as const))('matches the reference: %s', (_name, scenario) => {
     const run = (): PublicEvidenceRanking => rankComparablePublicEvidence(scenario.candidates, { taskType: scenario.taskType })
     if (scenario.throws === undefined) {
       expect(run()).toEqual(scenario.expected)
@@ -88,7 +88,7 @@ describe('Python reference', () => {
   })
 
   it('covers every ranking outcome', () => {
-    const outcomes = golden.scenarios.flatMap(scenario => scenario.expected === undefined ? ['throws'] : [
+    const outcomes = expected.scenarios.flatMap(scenario => scenario.expected === undefined ? ['throws'] : [
       scenario.expected.status,
       ...scenario.expected.conflicts.length > 0 ? ['conflict'] : [],
       ...scenario.expected.incompleteComparisons.length > 0 ? ['incomplete'] : [],

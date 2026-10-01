@@ -21,7 +21,7 @@ Provider 只接收规范化 Offer，不导入 Codex、Claude、DeepSeek、Reside
 - 候选只按一致的两两结论排序。来源互相矛盾、一对候选没有共同的有效 cohort、以及偏好成环，都会让整个排序弃权，保持基线顺序。
 - 结果给每个候选一个档位（0 为优先）和一份回执，列出用到、冲突和被搁置的来源。它从不返回来源的数值。
 
-该函数是 Codex Workbench `public_evidence_ranking.py` 的 TypeScript 移植。`tests/fixtures/public-evidence/golden.json` 保存了 Python 参考实现在 56 个场景下的输出，`generate_golden.py` 可以从 Workbench 源码树重新生成它（`WORKBENCH_SRC=…/src python3.12 generate_golden.py > golden.json`）。测试还会检查该文件记录的 sha256 与 `distribution/workbench-scheduling-sources.json` 中列出的一致。有四处有意的差异：数值为字符串时被拒绝，候选 id 重复时抛出异常，`str.casefold` 换成 `toLowerCase`，`str.strip` 换成 `String.trim`。
+该函数是 Codex Workbench `public_evidence_ranking.py` 的 TypeScript 移植。`tests/fixtures/public-evidence/expected.json` 保存了 Python 参考实现在 56 个场景下的输出，`generate_expected.py` 可以从 Workbench 源码树重新生成它（`WORKBENCH_SRC=…/src python3.12 generate_expected.py > expected.json`）。测试还会检查该文件记录的 sha256 与 `distribution/workbench-scheduling-sources.json` 中列出的一致。有四处有意的差异：数值为字符串时被拒绝，候选 id 重复时抛出异常，`str.casefold` 换成 `toLowerCase`，`str.strip` 换成 `String.trim`。
 
 ## 模型体验
 

@@ -1,12 +1,12 @@
-"""Generate golden.json: the Python reference output for the public-evidence ranking port.
+"""Generate expected.json: the Python reference output for the public-evidence ranking port.
 
 Usage (needs Python 3.11+ and the Codex Workbench a3 source tree):
 
     WORKBENCH_SRC=/path/to/implement-unified-scheduling-a3/src \
-        python3.12 generate_golden.py > golden.json
+        python3.12 generate_expected.py > expected.json
 
 The module under test is `codex_workbench/public_evidence_ranking.py`. Its sha256 is recorded in
-`distribution/workbench-scheduling-sources.json` (source C) and echoed into golden.json, so a
+`distribution/workbench-scheduling-sources.json` (source C) and echoed into expected.json, so a
 changed reference is visible in review. Inputs are authored in the TypeScript shape; this script
 converts them to the Python shape, runs the reference, and converts the result back.
 """
