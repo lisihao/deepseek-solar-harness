@@ -294,6 +294,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path.',
   },
   {
+    key: 'schedulingEvidence',
+    pkg: 'scheduling-evidence',
+    title: 'Scheduling evidence collector gateway',
+    mode: 'core',
+    note: 'Runs the Radar and AI Frontier collectors read-only commands as bounded child processes and returns their stored JSON documents; refresh and import stay outside this service.',
+  },
+  {
     key: 'rlmStrategy',
     pkg: 'rlm-strategy',
     title: 'Node-local RLM strategy seam',

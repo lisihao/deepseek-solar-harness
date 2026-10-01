@@ -1845,6 +1845,27 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'schedulingEvidence',
+    summary: 'Reads collector documents through bounded child processes.',
+    description: 'Reads collector documents through bounded child processes.',
+    methods: [
+      {
+        signature: 'status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>',
+        description: 'Read a collector\'s storage status.',
+        parameters: [{ name: 'collector', description: 'which collector to ask.' }, { name: 'signal', description: 'cancels the call and stops its process tree.' }],
+        returns: 'the status document; `ok` is false when no valid generation is stored.',
+        throws: ['{SchedulingEvidenceError} When the interpreter is unusable or the call times out, is cancelled, or prints no document.'],
+      },
+      {
+        signature: 'show(collector: CollectorId, options: { readonly snapshotId?: string; readonly signal?: AbortSignal } = {}): Promise<CollectorResult>',
+        description: 'Read a stored generation without contacting the network.',
+        parameters: [{ name: 'collector', description: 'which collector to ask.' }, { name: 'options', description: '`snapshotId` selects an older generation; omitted reads the active one.' }],
+        returns: 'the generation document, or `ok: false` when none is stored.',
+        throws: ['{SchedulingEvidenceError} As for {@link status}.'],
+      },
+    ],
+  },
+  {
     key: 'sessionPersistence',
     summary: 'Durable append-only session storage.',
     description: 'Durable append-only session storage. Implementations preserve contiguous, losslessly JSON-serializable events; append resolves only after durability, and load balances a complete interrupted tail without rewriting committed events.',
@@ -3893,6 +3914,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CollectedOutput',
     declaration: 'export interface CollectedOutput {\n    text: string;\n    truncated: boolean;\n    spillPath?: string;\n}',
+  },
+  {
+    name: 'CollectorId',
+    declaration: 'export type CollectorId = \'radar\' | \'ai-frontier\';',
+  },
+  {
+    name: 'CollectorResult',
+    declaration: 'export interface CollectorResult {\n    readonly ok: boolean;\n    readonly exitCode: number;\n    readonly document: Readonly<Record<string, unknown>>;\n}',
   },
   {
     name: 'CommandDefinition',
