@@ -140,29 +140,10 @@ export interface PublicEvidenceCandidate {
 
 type Dict = Readonly<Record<string, unknown>>
 
-interface ParsedRecord {
-  readonly source: string
-  readonly sourceFamily: string
-  readonly cohortKey: string
-  readonly provider: string
-  readonly model: string
-  readonly reasoningEffort: string
-  readonly executionSurface: string
-  readonly billingIdentity: string
-  readonly benchmark: string | null
-  readonly benchmarkVersion: string | null
-  readonly taskType: string
-  readonly harness: string | null
-  readonly metricKind: string
-  readonly scoreKind: string
-  readonly unit: string
+/** An accepted record: the receipt facts plus the two fields that never leave this module. */
+interface ParsedRecord extends PublicEvidenceMeasurement {
   readonly direction: 'higher' | 'lower'
   readonly value: number
-  readonly sampleCount: number | null
-  readonly lineageId: string
-  readonly observedAt: string | null
-  readonly freshnessState: string | null
-  readonly provenance: string | null
 }
 
 interface CandidateState {
