@@ -7,9 +7,8 @@
  * without a suitable interpreter.
  */
 
-import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,18 +18,9 @@ import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import SchedulingEvidenceGateway, { SchedulingEvidenceError } from '../src/index.ts'
 import type { RadarConfig } from '../src/index.ts'
+import { COLLECTOR_SOURCES, findPython, seedRadarStore } from './support.ts'
 
-const COLLECTOR_SOURCES = fileURLToPath(new URL('../../../../python/scheduling-evidence/src', import.meta.url))
 const SLOW_COLLECTOR = fileURLToPath(new URL('./fixtures/slow', import.meta.url))
-const RADAR_PAYLOADS = fileURLToPath(new URL('./fixtures/radar/payloads.json', import.meta.url))
-
-/** First interpreter on PATH that reports Python 3.11 or newer. */
-function findPython(): string | undefined {
-  return ['python3.14', 'python3.13', 'python3.12', 'python3.11', 'python3', 'python'].find((name) => {
-    const probe = spawnSync(name, ['-c', 'import sys; print(sys.version_info >= (3, 11))'], { encoding: 'utf8' })
-    return probe.status === 0 && probe.stdout.trim() === 'True'
-  })
-}
 
 const python = findPython()
 
@@ -122,23 +112,8 @@ describe.skipIf(python === undefined)('real Radar cycle', () => {
     profile: { model: 'gpt-5.6-luna', effort },
   })
 
-  /** Import the committed payloads into the Radar store through the real CLI, as an owner who holds the receipt would. */
-  async function seed(): Promise<void> {
-    const receipt = join(stateRoot, 'authorization.json')
-    await writeFile(receipt, JSON.stringify({
-      schema: 'codex-radar-provider-authorization', version: 1, provider: 'codex-radar', status: 'authorized',
-      scope: ['model-quality-json'], attribution: '数据来自 Codex 雷达 codexradar.com',
-    }))
-    const imported = spawnSync(python as string, [
-      '-m', 'codex_radar_provider.cli', '--state-root', join(stateRoot, 'radar'), 'import',
-      '--authorization-file', receipt, '--payloads-json', RADAR_PAYLOADS,
-      '--fetched-at', new Date().toISOString().replace(/\.\d+Z$/u, 'Z'),
-    ], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: COLLECTOR_SOURCES } })
-    expect(imported.status).toBe(0)
-  }
-
   it('turns a stored generation into evidence only for eligible rows the offers match', async () => {
-    await seed()
+    await seedRadarStore(python as string, stateRoot)
     const gateway = await mount({ radar: {} })
     await gateway.runCycle()
     const evidence = gateway.evidenceFor([luna('max'), luna('low')], 'coding')
@@ -146,7 +121,7 @@ describe.skipIf(python === undefined)('real Radar cycle', () => {
     expect(Object.keys(evidence?.records ?? {})).toEqual(['codex:gpt-5.6-luna:max'])
     expect(evidence?.snapshots[0]).toMatchObject({ source: 'radar' })
     expect(evidence?.records['codex:gpt-5.6-luna:max']?.[0]).toMatchObject({
-      canonical_model_id: 'gpt-5.6-luna', value: 0.75, sample_count: 12, harness: 'codex-radar-community',
+      canonical_model_id: 'gpt-5.6-luna', value: 0.6, sample_count: 1000, harness: 'codex-radar-community',
     })
     expect(gateway.evidenceFor([luna('max')], 'research')).toBeUndefined()
   })

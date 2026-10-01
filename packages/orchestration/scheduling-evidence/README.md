@@ -55,6 +55,26 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 With `radar` set, the gateway runs one cycle at start and then every `refreshIntervalMs`. Each cycle runs `consent` (only when the receipt is missing and `personalUseConsent` is true), then `refresh` (only when the receipt exists or was just recorded), then `show`, and keeps the printed generation in memory when it has a `snapshot_id`. Without `authorizationFile` the cycle only reads what is already stored. A failed cycle is logged as a warning and leaves the previous generation in use. Overlapping cycles join the one running. Disposing the service clears the timer.
 
+## Enabling
+
+No shipped configuration mounts the gateway. To use Radar evidence, add it to a `cordis.yml` that also mounts `@deepseek-ai/dsh-subprocess-local` and `@deepseek-ai/dsh-model-allocation-local`:
+
+```yaml
+- name: '@deepseek-ai/dsh-model-allocation-local'
+  config:
+    publicEvidence: shadow # apply lets evidence break ties
+- name: '@deepseek-ai/dsh-scheduling-evidence'
+  config:
+    python: /opt/homebrew/bin/python3.12
+    sourceRoot: /path/to/python/scheduling-evidence/src
+    stateRoot: /path/to/private/scheduling-evidence
+    radar:
+      authorizationFile: /path/to/private/radar-authorization.json
+      personalUseConsent: true # only after you decide to consent
+```
+
+Leave `authorizationFile` out to read an already stored generation without ever contacting the network. Start with `shadow`: the routing reason then reports what evidence would pick while the allocator keeps its own choice.
+
 ## Behavior
 
 - The first call resolves the interpreter and asks it for its version once; Python older than 3.11 fails with `INTERPRETER_UNSUPPORTED` instead of an import error from the collector. A failed check is retried on the next call.

@@ -55,6 +55,26 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 设置了 `radar` 后，网关在启动时运行一次周期，之后每 `refreshIntervalMs` 运行一次。每个周期依次执行 `consent`（仅当凭据文件不存在且 `personalUseConsent` 为 true）、`refresh`（仅当凭据文件存在或刚刚记录）、`show`，并在输出含 `snapshot_id` 时把该版本保留在内存中。没有 `authorizationFile` 时，周期只读取已存储的内容。周期失败会记为警告，并继续使用上一个版本。重叠的周期会合并为正在运行的那个。销毁服务会清除定时器。
 
+## 启用
+
+任何随产品发布的配置都不挂载这个网关。要使用 Radar 证据，把它加入同时挂载了 `@deepseek-ai/dsh-subprocess-local` 与 `@deepseek-ai/dsh-model-allocation-local` 的 `cordis.yml`：
+
+```yaml
+- name: '@deepseek-ai/dsh-model-allocation-local'
+  config:
+    publicEvidence: shadow # apply lets evidence break ties
+- name: '@deepseek-ai/dsh-scheduling-evidence'
+  config:
+    python: /opt/homebrew/bin/python3.12
+    sourceRoot: /path/to/python/scheduling-evidence/src
+    stateRoot: /path/to/private/scheduling-evidence
+    radar:
+      authorizationFile: /path/to/private/radar-authorization.json
+      personalUseConsent: true # only after you decide to consent
+```
+
+省略 `authorizationFile` 时只读取已存储的版本，不会访问网络。先用 `shadow`：此时路由 reason 会报告证据会选哪个，而分配器保留自己的选择。
+
 ## 行为
 
 - 第一次调用会解析解释器并只询问一次它的版本；低于 3.11 的 Python 以 `INTERPRETER_UNSUPPORTED` 失败，而不是采集器里的导入错误。检查失败的话，下一次调用会重试。

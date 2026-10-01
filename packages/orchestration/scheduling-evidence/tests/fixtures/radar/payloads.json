@@ -34,8 +34,18 @@
     "model": "gpt-5.6-luna",
     "effort": "max",
     "iq": 101.25,
-    "passed": 9,
-    "valid_tasks": 12,
+    "passed": 600,
+    "valid_tasks": 1000,
+    "average_price_usd": 3.1,
+    "average_minutes": 7.0,
+    "latest_graded_at": "2026-09-04T12:00:00Z"
+   },
+   {
+    "model": "gpt-5.6-sol",
+    "effort": "max",
+    "iq": 110.0,
+    "passed": 800,
+    "valid_tasks": 1000,
     "average_price_usd": 3.1,
     "average_minutes": 7.0,
     "latest_graded_at": "2026-09-04T12:00:00Z"
@@ -61,7 +71,7 @@
   "station_recs": [
    {
     "id": "daily-development",
-    "description": "\u7efc\u5408\u6210\u672c",
+    "description": "综合成本",
     "models": [
      {
       "model": "gpt-5.6-luna",
