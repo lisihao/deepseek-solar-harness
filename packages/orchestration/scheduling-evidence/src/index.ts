@@ -71,7 +71,7 @@ export interface RadarConfig {
   personalUseConsent?: boolean
   /** Time between collections in milliseconds; 30 minutes to 24 hours, default 4 hours. */
   refreshIntervalMs?: number
-  /** Deadline for one collection in milliseconds; default 90000. */
+  /** Deadline for one collection in milliseconds; default 600000 (collection from the Radar site has taken three minutes). */
   refreshTimeoutMs?: number
   /** Seconds before a stored generation stops being used; default 604800 (7 days). */
   staleAfterSeconds?: number
@@ -173,7 +173,7 @@ export function resolveRadar(radar: RadarConfig): ResolvedRadarConfig {
     authorizationFile: radar.authorizationFile,
     personalUseConsent: radar.personalUseConsent ?? false,
     refreshIntervalMs: radar.refreshIntervalMs ?? 4 * 60 * 60_000,
-    refreshTimeoutMs: radar.refreshTimeoutMs ?? 90_000,
+    refreshTimeoutMs: radar.refreshTimeoutMs ?? 600_000,
     staleAfterSeconds: radar.staleAfterSeconds ?? 7 * 24 * 60 * 60,
     declaration: {
       benchmark: radar.benchmark ?? 'Codex Radar community tasks',
@@ -363,9 +363,10 @@ export class SchedulingEvidenceGateway extends Service {
   private async cycle(): Promise<void> {
     const radar = this.radarNow()
     if (radar === undefined) return
-    try {
-      const receipt = radar.authorizationFile
-      if (receipt !== undefined) {
+    const receipt = radar.authorizationFile
+    if (receipt !== undefined) {
+      // A failed collection must not hide what an earlier one already stored.
+      try {
         const exists = await access(receipt).then(() => true, () => false)
         if (!exists && radar.personalUseConsent) {
           await this.command('radar', ['consent', '--personal-use', '--authorization-file', receipt], undefined)
@@ -375,7 +376,11 @@ export class SchedulingEvidenceGateway extends Service {
             'refresh', '--authorization-file', receipt, '--stale-after-seconds', String(radar.staleAfterSeconds),
           ], undefined, radar.refreshTimeoutMs)
         }
+      } catch (error) {
+        this.ctx.logger.warn(`scheduling-evidence: radar collection failed: ${(error as Error).message}`)
       }
+    }
+    try {
       const stored = await this.command('radar', ['show'], undefined)
       this.radarSnapshot = typeof stored.document.snapshot_id === 'string' ? stored.document : undefined
     } catch (error) {

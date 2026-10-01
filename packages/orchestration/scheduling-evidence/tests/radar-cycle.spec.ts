@@ -143,7 +143,7 @@ describe('radar settings', () => {
       authorizationFile: undefined,
       personalUseConsent: false,
       refreshIntervalMs: 4 * HOUR,
-      refreshTimeoutMs: 90_000,
+      refreshTimeoutMs: 600_000,
       staleAfterSeconds: 604_800,
       declaration: { benchmark: 'Codex Radar community tasks', harness: 'codex-radar-community', taskType: 'coding', modelAliases: {} },
     })
@@ -258,6 +258,18 @@ describe('collecting with the owner receipt', () => {
 })
 
 describe('failure and teardown', () => {
+  it('still loads the stored generation when the collection fails or runs past its deadline', async () => {
+    const receipt = join(directory, 'receipt.json')
+    await writeFile(receipt, '{}')
+    const gateway = await mount({ authorizationFile: receipt }, argv => argv.includes('refresh')
+      ? { exitCode: 3 }
+      : { stdout: JSON.stringify(GENERATION) })
+
+    expect(fake.commands().map(words => words[0])).toEqual(['refresh', 'show'])
+    expect(warnings.some(message => message.includes('radar collection failed'))).toBe(true)
+    expect(gateway.evidenceFor([sol], 'coding')).toBeDefined()
+  })
+
   it('logs a failed cycle and keeps the generation it already had', async () => {
     let failing = false
     const gateway = await mount({ refreshIntervalMs: HOUR }, argv => failing
