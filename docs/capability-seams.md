@@ -86,6 +86,8 @@ flowchart LR
   pkg_model_worker["model-worker"]
   svc_modelWorkers["ctx.modelWorkers<br/>One-shot model worker registry"]
   pkg_model_worker_deepseek["model-worker-deepseek"]
+  pkg_scheduling_evidence["scheduling-evidence"]
+  svc_schedulingEvidence["ctx.schedulingEvidence<br/>Scheduling evidence collector gateway"]
   pkg_rlm_strategy["rlm-strategy"]
   svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
   pkg_rlm_strategy_local["rlm-strategy-local"]
@@ -322,6 +324,7 @@ flowchart LR
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
+  pkg_scheduling_evidence --> svc_schedulingEvidence
   pkg_session --> svc_sessions
   pkg_session_persistence --> svc_sessionPersistence
   pkg_session_persistence_jsonl --> svc_sessionPersistence
@@ -538,6 +541,7 @@ flowchart LR
 | `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | Registers trusted TypeScript modules and invokes only an explicitly allowed module/callable pair; generated harness content cannot create executable code at runtime. |
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Selects qualified subscription-first execution offers and recommends parallelism without dispatching work. |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |
+| `ctx.schedulingEvidence` | `core` | [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | - | - | - | Runs the Radar and AI Frontier collectors read-only commands as bounded child processes and returns their stored JSON documents; refresh and import stay outside this service. |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |

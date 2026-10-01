@@ -268,6 +268,7 @@ flowchart TD
     pkg_rlm_runtime_local["rlm-runtime-local"]
     pkg_rlm_strategy["rlm-strategy"]
     pkg_rlm_strategy_local["rlm-strategy-local"]
+    pkg_scheduling_evidence["scheduling-evidence"]
     pkg_tool_debate["tool-debate"]
     pkg_tool_orchestration["tool-orchestration"]
     pkg_ui_debate["ui-debate"]
@@ -514,6 +515,9 @@ flowchart TD
   pkg_intent_compiler --> pkg_brand
   pkg_intent_compiler --> pkg_invariants
   pkg_intent_compiler --> pkg_llm
+  pkg_scheduling_evidence --> pkg_invariants
+  pkg_scheduling_evidence --> pkg_llm
+  pkg_scheduling_evidence --> pkg_subprocess
   pkg_agent --> pkg_invariants
   pkg_agent --> pkg_llm
   pkg_agent --> pkg_scope
@@ -1797,6 +1801,7 @@ flowchart TD
 | [`continual-harness`](../packages/orchestration/continual-harness) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`debate`](../packages/orchestration/debate) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`intent-compiler`](../packages/orchestration/intent-compiler) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`subprocess`](../packages/subprocess/subprocess) |
 | [`agent`](../packages/core/agent) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`typert-protocol`](../packages/typert/protocol) |
 | [`output-style`](../packages/core/output-style) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`system-prompt`](../packages/core/system-prompt) |
 | [`skill-badge`](../packages/skill/skill-badge) | `skill` | [`invariants`](../packages/runtime-diagnostics/invariants), [`skill`](../packages/skill/skill) |

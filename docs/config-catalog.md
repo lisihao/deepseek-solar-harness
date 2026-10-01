@@ -2122,6 +2122,32 @@ Depends on: [`SandboxMode`](subsystems/sandbox.md)
 
 Source: [`packages/sandbox/sandbox-policy/src/index.ts:67`](../packages/sandbox/sandbox-policy/src/index.ts)
 
+<a id="deepseek-aidsh-scheduling-evidence"></a>
+
+## `@deepseek-ai/dsh-scheduling-evidence`
+
+Requires: `subprocess`
+
+```ts config-catalog
+/** Where and how the collectors run. */
+export interface Config {
+  /** Python 3.11+ interpreter: an absolute path or a bare name looked up on the scrubbed PATH. */
+  python: string
+  /** Directory holding `codex_radar_provider` and `ai_frontier_provider` (`python/scheduling-evidence/src`). */
+  sourceRoot: string
+  /** Owner-private directory under which each collector keeps its SQLite generations. */
+  stateRoot: string
+  /** Deadline for one collector call in milliseconds; default 15000. */
+  timeoutMs?: number
+  /** Grace between SIGTERM and SIGKILL when a call is stopped; default 2000. */
+  graceMs?: number
+  /** Largest stdout or stderr kept per call, in bytes, and a larger stdout fails the call; default 1048576. */
+  maxOutputBytes?: number
+}
+```
+
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:53`](../packages/orchestration/scheduling-evidence/src/index.ts)
+
 <a id="deepseek-aidsh-sdk-jsonrpc-server"></a>
 
 ## `@deepseek-ai/dsh-sdk-jsonrpc-server`
