@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -15,6 +15,7 @@ async function fixture(options: {
   built: string
   source?: string
   output?: string
+  typed?: boolean
 }): Promise<string> {
   const source = options.source ?? 'packages/group/example'
   const output = options.output ?? 'lib'
@@ -29,6 +30,12 @@ async function fixture(options: {
   await writeFile(join(sourceRoot, 'package.json'), '{"name":"example"}\n')
   await writeFile(join(sourceRoot, output, 'index.js'), options.built)
   await writeFile(join(archiveRoot, output, 'index.js'), options.archived)
+  if (options.typed === true) {
+    for (const base of [sourceRoot, archiveRoot]) {
+      await mkdir(join(base, output, 'types'), { recursive: true })
+      await writeFile(join(base, output, 'types/index.js'), 'export {}\n')
+    }
+  }
   await writeFile(join(vendorRoot, 'manifest.json'), `${JSON.stringify({
     schemaVersion: 1,
     sourcePackages: {
@@ -72,11 +79,84 @@ describe('Desktop vendor build closure', () => {
     )
   })
 
+  it('explains an archived file that the current build no longer emits', async () => {
+    const root = await fixture({ archived: 'same\n', built: 'same\n' })
+    await rm(join(root, 'packages/group/example/lib/index.js'))
+
+    await expect(verifyDesktopVendorBuild(root)).rejects.toThrow('delete orphan chunks from lib/')
+  })
+
   it('rejects a stale app bundle', async () => {
     const root = await fixture({ archived: 'old\n', built: 'new\n', source: 'apps/web', output: 'dist' })
 
     await expect(verifyDesktopVendorBuild(root)).rejects.toThrow(
       'contains stale dist/index.js relative to apps/web/package.json',
     )
+  })
+
+  describe('build older than source', () => {
+    async function staleBuild(): Promise<string> {
+      const root = await fixture({ archived: 'same\n', built: 'same\n' })
+      await mkdir(join(root, 'packages/group/example/src/nested'), { recursive: true })
+      await writeFile(join(root, 'packages/group/example/src/nested/edited.ts'), 'export {}\n')
+      const built = join(root, 'packages/group/example/lib/index.js')
+      await utimes(built, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z'))
+      return root
+    }
+
+    it('rejects a built file that predates an edit under src even when the archive equals it', async () => {
+      await expect(verifyDesktopVendorBuild(await staleBuild(), { requireBuildNewerThanSource: true }))
+        .rejects.toThrow('built lib/index.js is older than its src/')
+    })
+
+    it('ignores outputs that a rebuild leaves untouched when nothing changed, such as tsc declarations under lib/types', async () => {
+      const root = await fixture({ archived: 'same\n', built: 'same\n', typed: true })
+      await mkdir(join(root, 'packages/group/example/src'), { recursive: true })
+      await writeFile(join(root, 'packages/group/example/src/edited.ts'), 'export {}\n')
+      const old = new Date('2026-01-01T00:00:00Z')
+      await utimes(join(root, 'packages/group/example/lib/types/index.js'), old, old)
+      const future = new Date('2030-01-01T00:00:00Z')
+      await utimes(join(root, 'packages/group/example/lib/index.js'), future, future)
+
+      await expect(verifyDesktopVendorBuild(root, { requireBuildNewerThanSource: true }))
+        .resolves.toEqual({ archives: 1, files: 2 })
+    })
+
+    it('accepts a build newer than every source file', async () => {
+      const root = await staleBuild()
+      const future = new Date('2030-01-01T00:00:00Z')
+      await utimes(join(root, 'packages/group/example/lib/index.js'), future, future)
+
+      await expect(verifyDesktopVendorBuild(root, { requireBuildNewerThanSource: true }))
+        .resolves.toEqual({ archives: 1, files: 1 })
+    })
+
+    it('skips the timestamp comparison when disabled, as in CI', async () => {
+      await expect(verifyDesktopVendorBuild(await staleBuild(), { requireBuildNewerThanSource: false }))
+        .resolves.toEqual({ archives: 1, files: 1 })
+    })
+
+    it('defaults to the timestamp comparison outside CI', async () => {
+      const previous = process.env.CI
+      delete process.env.CI
+      try {
+        await expect(verifyDesktopVendorBuild(await staleBuild())).rejects.toThrow('is older than its src/')
+      }
+      finally {
+        if (previous !== undefined) process.env.CI = previous
+      }
+    })
+
+    it('defaults to off when CI is set', async () => {
+      const previous = process.env.CI
+      process.env.CI = 'true'
+      try {
+        await expect(verifyDesktopVendorBuild(await staleBuild())).resolves.toEqual({ archives: 1, files: 1 })
+      }
+      finally {
+        if (previous === undefined) delete process.env.CI
+        else process.env.CI = previous
+      }
+    })
   })
 })
