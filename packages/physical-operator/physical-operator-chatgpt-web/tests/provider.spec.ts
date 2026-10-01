@@ -468,7 +468,7 @@ describe('ChatGPT Web physical operator', () => {
     expect(responsePoll).toBeGreaterThan(send)
     expect(program.source).toContain("return { status: 'auth-required' }")
     expect(program.source).toContain("return { status: 'context-not-isolated' }")
-    expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
+    expect(program.source).toContain("return { status: 'model-selection-unavailable', stage: selection.status }")
     expect(program.source).toContain("return { status: 'draft-present'")
     expect(program.source).toContain("kind: 'click'")
     expect(program.source).toContain("selector: '[data-dsh-chatgpt-web-send=\"true\"]'")
@@ -1323,6 +1323,24 @@ describe('ChatGPT Web physical operator', () => {
     expect(provider.programs).toHaveLength(1)
     expect(serializedProgramRequest(provider.programs[0]!)).toMatchObject({ model: 'GPT-5' })
 
+    await plugin.dispose()
+    await ctx.fiber.dispose()
+  })
+
+  it.each([
+    ['model-selection-unavailable', 'model-options-unavailable', 'requested model selection (model-options-unavailable)'],
+    ['effort-selection-unavailable', 'reasoning-options-unavailable', 'requested reasoning effort (reasoning-options-unavailable)'],
+    ['model-selection-unavailable', 'Not A Token!', 'requested model selection'],
+    ['effort-selection-unavailable', 42, 'requested reasoning effort'],
+  ] as const)('names the picker step that failed for a %s outcome (%s)', async (status, stage, message) => {
+    const provider = new StubBrowserProvider(async () => resultFor({ status, stage }))
+    const { ctx, plugin } = await setup(provider)
+    const run = await ctx.physicalOperators.start('chatgpt-web', { ...request(), residentProfile: { model: 'GPT-5' } })
+
+    const error = await run.result.then(() => undefined, (cause: unknown) => cause as Error)
+
+    expect(error?.message).toContain(message)
+    expect(error?.message.endsWith(')')).toBe(typeof stage === 'string' && /^[a-z-]+$/u.test(stage))
     await plugin.dispose()
     await ctx.fiber.dispose()
   })

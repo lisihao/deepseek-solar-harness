@@ -556,7 +556,7 @@ describe('ChatGPT Web model catalog', () => {
     })
     const result = await new AsyncFunction('browser', program.source)(browser)
 
-    expect(result).toEqual({ status: 'effort-selection-unavailable' })
+    expect(result).toEqual({ status: 'effort-selection-unavailable', stage: 'effort-selection-unavailable' })
     expect(page.sent()).toBe(0)
     expect(send).toBeTruthy()
     expect(page.draft.textContent).toBe('')
@@ -997,7 +997,7 @@ describe('ChatGPT Web model catalog', () => {
     })
     const result = await new AsyncFunction('browser', program.source)(browser)
 
-    expect(result).toEqual({ status: 'effort-selection-unavailable' })
+    expect(result).toEqual({ status: 'effort-selection-unavailable', stage: 'effort-selection-unavailable' })
     expect(page.selectedEffort()).toBe('gpt-6-pro:')
     expect(page.keyboardEvents()).toEqual([])
     expect(page.draft.textContent).toBe('')
