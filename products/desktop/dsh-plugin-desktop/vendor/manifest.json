@@ -397,7 +397,7 @@
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "6947ab672f81971354d22e4e93e00eaafa6dc6afbe3c04464d0836edb8da22aa",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-0.1.0-rc.5.tgz": "8080796b38428541890146c94f32dcde6c536e7087068aa617245cdcac5b779d",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-local-0.1.0-rc.5.tgz": "b273aae14c7bd77bad383fc86f9d22af82228a0f9b1a9015ea23bbfe92032b2d",
-    "dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz": "4e3bba22f095e299a1756db60b6918409cd7d5429e6649f22ce5ebccb81acee7",
+    "dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz": "4d091db4c56fa9d43e934d7e8a2fc9f31555ff195538cb4f06a3a3abf25fdf49",
     "dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz": "d64df822180910850c027be62c6185bab1478dddccb2c4622088b815bf4c6e61",
     "dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz": "271f91448904075c08a95a47a4584a6ac5ec4d3bd92a7ba4f57620639f392403",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "a87f488362f8d510badc3452e391c78937296bb3f1e89571ad4957d649b59643",

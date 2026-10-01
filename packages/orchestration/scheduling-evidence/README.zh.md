@@ -42,7 +42,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 | `authorizationFile` | 缺省 | 所有者的授权凭据。没有它就不发任何网络请求 |
 | `personalUseConsent` | false | 所有者的个人使用同意声明。为 true 且凭据文件不存在时，周期用 `consent --personal-use` 记录一次。任何随产品发布的默认配置都不设置它 |
 | `refreshIntervalMs` | 14400000 | 周期间隔，30 分钟到 24 小时 |
-| `refreshTimeoutMs` | 90000 | 一次 `refresh` 的期限 |
+| `refreshTimeoutMs` | 600000 | 一次 `refresh` 的期限 |
 | `staleAfterSeconds` | 604800 | 传给 `refresh`；已存储版本超过它自己的期限后不再使用 |
 | `benchmark` | `Codex Radar community tasks` | 记录所声明的基准名称 |
 | `harness` | `codex-radar-community` | 所有者声明 Radar 所有行共用的测试环境 |
@@ -53,7 +53,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 ## Radar 周期
 
-设置了 `radar` 或在设置里打开 `radarEnabled` 后，网关在启动时运行一次周期，之后每 `refreshIntervalMs` 运行一次。每个周期依次执行 `consent`（仅当凭据文件不存在且 `personalUseConsent` 为 true）、`refresh`（仅当凭据文件存在或刚刚记录）、`show`，并在输出含 `snapshot_id` 时把该版本保留在内存中。没有 `authorizationFile` 时，周期只读取已存储的内容；所有者通过设置同意时，凭据是 `stateRoot` 下的 `radar-authorization.json`。周期失败会记为警告，并继续使用上一个版本。重叠的周期会合并为正在运行的那个。销毁服务会清除定时器。
+设置了 `radar` 或在设置里打开 `radarEnabled` 后，网关在启动时运行一次周期，之后每 `refreshIntervalMs` 运行一次。每个周期依次执行 `consent`（仅当凭据文件不存在且 `personalUseConsent` 为 true）、`refresh`（仅当凭据文件存在或刚刚记录）、`show`，并在输出含 `snapshot_id` 时把该版本保留在内存中。没有 `authorizationFile` 时，周期只读取已存储的内容；所有者通过设置同意时，凭据是 `stateRoot` 下的 `radar-authorization.json`。采集或重新读取失败会记为警告；采集失败后仍会读取已存储的内容，读取失败则继续使用上一个版本。重叠的周期会合并为正在运行的那个。销毁服务会清除定时器。
 
 ## 启用
 
