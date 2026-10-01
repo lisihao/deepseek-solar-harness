@@ -79,6 +79,13 @@ describe('Desktop vendor build closure', () => {
     )
   })
 
+  it('explains an archived file that the current build no longer emits', async () => {
+    const root = await fixture({ archived: 'same\n', built: 'same\n' })
+    await rm(join(root, 'packages/group/example/lib/index.js'))
+
+    await expect(verifyDesktopVendorBuild(root)).rejects.toThrow('delete orphan chunks from lib/')
+  })
+
   it('rejects a stale app bundle', async () => {
     const root = await fixture({ archived: 'old\n', built: 'new\n', source: 'apps/web', output: 'dist' })
 
