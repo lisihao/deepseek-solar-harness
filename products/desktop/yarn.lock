@@ -2024,7 +2024,7 @@ __metadata:
 
 "@deepseek-ai/dsh-client-ui-task-template@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-client-ui-task-template@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz::hash=090367&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-client-ui-task-template@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz::hash=872916&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-client-connection": ^0.1.0-rc.5
@@ -2035,7 +2035,7 @@ __metadata:
     "@deepseek-ai/dsh-task-template": ^0.1.0-rc.5
     "@deepseek-ai/dsh-task-template-rpc": ^0.1.0-rc.5
     react: ^18.2.0
-  checksum: 10c0/fb7a5336e8b527481ea3f4d94aa4e13e31111b6a5112b3c118b9238644810137e1d5c1c6309d4ff0880c405b9931747d9dfbb4b3c9b7ea64908589afc523768b
+  checksum: 10c0/6a1147755c8e43c7bc29767c17c1390b10fce07596a4610ef61802ff5b35cd15a06f9e4d6e34e26e9d1dcde634e92da36d64315c076d745b17ba493b72c057a2
   languageName: node
   linkType: hard
 
@@ -4859,7 +4859,7 @@ __metadata:
 
 "@deepseek-ai/dsh-ui-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-ui-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz::hash=c46427&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-ui-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz::hash=da8fbb&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-api-remotes": ^0.1.0-rc.5
@@ -4879,7 +4879,7 @@ __metadata:
     "@deepseek-ai/dsh-tool-physical-operator": ^0.1.0-rc.5
     react: ^18.2.0
     react-dom: ^18.2.0
-  checksum: 10c0/94bea50be930ff629536d0696de50ef16167e4d8721fa00a5c53d54777117a4cfcb3684ef8aede150b50841ede099d7c508c0873fb368f5a3798bb4a043819bf
+  checksum: 10c0/997449a82442d1b8c668304378ff08c6c0f11c8b7050ef806aa0dbc19c39c6b9eabaa80aa61e4a94016ffc24de2c5067a1c5c597b4510b96336ddd0485d2c260
   languageName: node
   linkType: hard
 
