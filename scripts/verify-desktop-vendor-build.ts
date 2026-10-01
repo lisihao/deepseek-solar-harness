@@ -108,7 +108,7 @@ export async function verifyDesktopVendorBuild(
         sourceContents = await readFile(sourceFile)
       }
       catch (cause) {
-        stale.push(`${sourceManifestPath} is missing built ${member}; run pnpm run build first (${String(cause)})`)
+        stale.push(`${sourceManifestPath} is missing built ${member}: build the package (pnpm run build), or, if the build no longer emits it, delete orphan chunks from lib/ (tsdown does not clean it) and repack the archive (${String(cause)})`)
         continue
       }
       if (BUNDLER_ENTRIES.test(member) && (await stat(sourceFile)).mtimeMs < newestSource) {
