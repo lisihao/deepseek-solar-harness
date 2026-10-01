@@ -42,7 +42,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 | `authorizationFile` | absent | The owner's receipt. No network request is made without it |
 | `personalUseConsent` | false | The owner's statement of personal-use consent. When true and the receipt is missing, the cycle records it once with `consent --personal-use`. No shipped default sets it |
 | `refreshIntervalMs` | 14400000 | Time between cycles, 30 minutes to 24 hours |
-| `refreshTimeoutMs` | 90000 | Deadline for one `refresh` |
+| `refreshTimeoutMs` | 600000 | Deadline for one `refresh` |
 | `staleAfterSeconds` | 604800 | Passed to `refresh`; a stored generation older than its own limit is no longer used |
 | `benchmark` | `Codex Radar community tasks` | Benchmark name the records claim |
 | `harness` | `codex-radar-community` | The test environment the owner states every Radar row shares |
@@ -53,7 +53,7 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 ## Radar cycle
 
-With `radar` set or `radarEnabled` on in the settings, the gateway runs one cycle at start and then every `refreshIntervalMs`. Each cycle runs `consent` (only when the receipt is missing and `personalUseConsent` is true), then `refresh` (only when the receipt exists or was just recorded), then `show`, and keeps the printed generation in memory when it has a `snapshot_id`. Without `authorizationFile` the cycle only reads what is already stored; when the owner consents through the settings, the receipt is `radar-authorization.json` in `stateRoot`. A failed cycle is logged as a warning and leaves the previous generation in use. Overlapping cycles join the one running. Disposing the service clears the timer.
+With `radar` set or `radarEnabled` on in the settings, the gateway runs one cycle at start and then every `refreshIntervalMs`. Each cycle runs `consent` (only when the receipt is missing and `personalUseConsent` is true), then `refresh` (only when the receipt exists or was just recorded), then `show`, and keeps the printed generation in memory when it has a `snapshot_id`. Without `authorizationFile` the cycle only reads what is already stored; when the owner consents through the settings, the receipt is `radar-authorization.json` in `stateRoot`. A failed collection or reload is logged as a warning; a failed collection still reloads what is stored, and a failed reload leaves the previous generation in use. Overlapping cycles join the one running. Disposing the service clears the timer.
 
 ## Enabling
 
