@@ -372,3 +372,59 @@ describe('owner settings', () => {
     expect(gateway.evidenceFor([sol], 'coding')).toBeUndefined()
   })
 })
+
+describe('overview', () => {
+  const STATUS = { ok: true, age_seconds: 60, cache_status: 'cache', database: { row_counts: { radar_models: 1 } } }
+  const answer = (argv: readonly string[]): Reply => argv.includes('status')
+    ? { stdout: JSON.stringify(STATUS) }
+    : argv.includes('show') ? { stdout: JSON.stringify(GENERATION) } : { stdout: '{"ok":true}' }
+
+  it('reads the store through the collector and reports the switches and the last cycle', async () => {
+    const gateway = await mount({ refreshIntervalMs: HOUR }, answer)
+
+    const overview = await gateway.overview()
+
+    expect(overview.radar).toEqual({ enabled: true, personalUseConsent: false, python: 'python3', refreshIntervalMs: HOUR })
+    expect(overview.store).toMatchObject({ available: true, snapshotId: 'radar-gen-1', loaded: true, ageSeconds: 60, rowCounts: { radar_models: 1 } })
+    expect(overview.models).toHaveLength(1)
+    expect(overview.lastCycle).toMatchObject({ collection: 'skipped', reload: 'ok' })
+    expect(overview.lastCycle?.message).toBeUndefined()
+  })
+
+  it('reports a disabled gateway with no cycle yet', async () => {
+    const gateway = await mount(undefined, answer)
+
+    const overview = await gateway.overview()
+
+    expect(overview.radar).toEqual({ enabled: false, personalUseConsent: false, python: 'python3', refreshIntervalMs: null })
+    expect(overview.lastCycle).toBeNull()
+    expect(overview.store).toMatchObject({ available: true, loaded: false })
+  })
+
+  it('reports a collector that cannot run instead of throwing', async () => {
+    const gateway = await mount(undefined, () => ({ exitCode: 3 }))
+
+    const overview = await gateway.overview()
+
+    expect(overview.store).toMatchObject({ available: false })
+    expect(overview.models).toEqual([])
+  })
+
+  it('records a failed collection and a failed reload in the last cycle', async () => {
+    const receipt = join(directory, 'receipt.json')
+    await writeFile(receipt, '{}')
+    const gateway = await mount({ authorizationFile: receipt }, () => ({ exitCode: 3 }))
+
+    const { lastCycle } = await gateway.overview()
+    expect(lastCycle).toMatchObject({ collection: 'failed', reload: 'failed' })
+    expect(lastCycle?.message).toContain('exited with status 3')
+  })
+
+  it('records a successful collection', async () => {
+    const receipt = join(directory, 'receipt.json')
+    await writeFile(receipt, '{}')
+    const gateway = await mount({ authorizationFile: receipt }, answer)
+
+    expect((await gateway.overview()).lastCycle).toMatchObject({ collection: 'ok', reload: 'ok' })
+  })
+})

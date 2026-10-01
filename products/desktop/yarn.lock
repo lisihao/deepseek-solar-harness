@@ -1923,6 +1923,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@deepseek-ai/dsh-client-ui-settings-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-settings-scheduling-evidence-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-client-ui-settings-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-settings-scheduling-evidence-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-settings-scheduling-evidence-0.1.0-rc.5.tgz::hash=5cdda0&locator=deepseek-harness-desktop%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-client-connection": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-ui-settings": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-scheduling-evidence-rpc": ^0.1.0-rc.5
+    react: ^18.2.0
+  checksum: 10c0/cf3df7de0da97534785da85e01223dcf02c993d0d27cea8579736adfe3411e1ea2e6e55d16700065e29450d717d483d18a268a932369307efd66d756745de412
+  languageName: node
+  linkType: hard
+
 "@deepseek-ai/dsh-client-ui-settings@npm:0.1.0-rc.6":
   version: 0.1.0-rc.6
   resolution: "@deepseek-ai/dsh-client-ui-settings@npm:0.1.0-rc.6"
@@ -3469,9 +3485,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@deepseek-ai/dsh-scheduling-evidence-rpc@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-rpc-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-scheduling-evidence-rpc@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-rpc-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-rpc-0.1.0-rc.5.tgz::hash=7f9ae1&locator=deepseek-harness-desktop%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-client-connection": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-scheduling-evidence": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-settings": ^0.1.0-rc.5
+  checksum: 10c0/78e24b40a557452d3da7558f9018022cb580f016f1d4df09b9500fcdf0c203ccd27af42cacd63840abf15c6214b9bfe4975edd965b2a23d4d92944be5a713066
+  languageName: node
+  linkType: hard
+
 "@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::hash=ff09bb&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-scheduling-evidence@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz::hash=199a65&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -3482,7 +3511,7 @@ __metadata:
     "@deepseek-ai/dsh-model-allocation-local": ^0.1.0-rc.5
     "@deepseek-ai/dsh-settings": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
-  checksum: 10c0/84d085f71671b4722556e7f6689bbb12811c3ddc9e6eb05868caa96837f09bed9d41eb3207ea3605d8873de79b1258f6c2badf8cfef4be92b2f613f287dec684
+  checksum: 10c0/b181645a77e5da5f85daa8dc807a55e36a2ed01ee802f5ee7409d8c8d466074becc466cb658af6d2941e80c476042264be80c6f95451da519db175f9cb6ac51a
   languageName: node
   linkType: hard
 
@@ -9310,6 +9339,7 @@ __metadata:
     "@deepseek-ai/dsh-client-ui-remote-modules": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-client-ui-settings": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-client-ui-settings-plugins": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-client-ui-settings-scheduling-evidence": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-settings-scheduling-evidence-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-client-ui-sidebar": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-client-ui-slots": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-client-ui-task-template": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz"
@@ -9381,6 +9411,7 @@ __metadata:
     "@deepseek-ai/dsh-sandbox-policy": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-sandbox-windows-acl": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-scheduling-evidence": "file:vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz"
+    "@deepseek-ai/dsh-scheduling-evidence-rpc": "file:vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-rpc-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-scope": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-sdk-protocol": "file:vendor/dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-session": "npm:0.1.0-rc.6"

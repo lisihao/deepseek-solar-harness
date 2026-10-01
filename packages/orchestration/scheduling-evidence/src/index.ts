@@ -19,8 +19,10 @@ import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { radarEvidence, type RadarDeclaration } from './radar-evidence.ts'
+import { projectStore, type RadarCycleReport, type SchedulingEvidenceOverview } from './overview.ts'
 
 export type { RadarDeclaration } from './radar-evidence.ts'
+export type { OverviewModel, OverviewStore, RadarCycleReport, SchedulingEvidenceOverview } from './overview.ts'
 
 /** The collectors this gateway runs. */
 export type CollectorId = 'radar' | 'ai-frontier'
@@ -255,6 +257,7 @@ export class SchedulingEvidenceGateway extends Service {
   /** The active Radar generation as the collector last printed it. */
   private radarSnapshot: Readonly<Record<string, unknown>> | undefined
   private cycleRunning: Promise<void> | undefined
+  private lastCycle: RadarCycleReport | undefined
 
   /**
    * Register `ctx.schedulingEvidence`.
@@ -363,6 +366,9 @@ export class SchedulingEvidenceGateway extends Service {
   private async cycle(): Promise<void> {
     const radar = this.radarNow()
     if (radar === undefined) return
+    const startedAt = new Date().toISOString()
+    let collection: RadarCycleReport['collection'] = 'skipped'
+    let message: string | undefined
     const receipt = radar.authorizationFile
     if (receipt !== undefined) {
       // A failed collection must not hide what an earlier one already stored.
@@ -375,16 +381,54 @@ export class SchedulingEvidenceGateway extends Service {
           await this.command('radar', [
             'refresh', '--authorization-file', receipt, '--stale-after-seconds', String(radar.staleAfterSeconds),
           ], undefined, radar.refreshTimeoutMs)
+          collection = 'ok'
         }
       } catch (error) {
-        this.ctx.logger.warn(`scheduling-evidence: radar collection failed: ${(error as Error).message}`)
+        collection = 'failed'
+        message = (error as Error).message
+        this.ctx.logger.warn(`scheduling-evidence: radar collection failed: ${message}`)
       }
     }
+    let reload: RadarCycleReport['reload'] = 'ok'
     try {
       const stored = await this.command('radar', ['show'], undefined)
       this.radarSnapshot = typeof stored.document.snapshot_id === 'string' ? stored.document : undefined
     } catch (error) {
+      reload = 'failed'
+      message ??= (error as Error).message
       this.ctx.logger.warn(`scheduling-evidence: radar cycle failed: ${(error as Error).message}`)
+    }
+    this.lastCycle = { startedAt, finishedAt: new Date().toISOString(), collection, reload, ...message === undefined ? {} : { message } }
+  }
+
+  /**
+   * Read the Radar store and the owner's switches for the settings page. It asks the
+   * collector for the stored generation, so it shows what is on disk rather than only what
+   * the allocator holds.
+   * @returns the page payload; a store that cannot be read is reported inside it, not thrown.
+   */
+  async overview(): Promise<SchedulingEvidenceOverview> {
+    const radar = this.radarNow()
+    let status: Readonly<Record<string, unknown>> | undefined
+    let shown: Readonly<Record<string, unknown>> | undefined
+    let failure: string | undefined
+    try {
+      status = (await this.status('radar')).document
+      shown = (await this.show('radar')).document
+    } catch (error) {
+      failure = (error as Error).message
+    }
+    const loaded = this.radarSnapshot?.snapshot_id
+    return {
+      version: 1,
+      radar: {
+        enabled: radar !== undefined,
+        personalUseConsent: radar?.personalUseConsent ?? false,
+        python: this.python,
+        refreshIntervalMs: radar?.refreshIntervalMs ?? null,
+      },
+      lastCycle: this.lastCycle ?? null,
+      ...projectStore(status, shown, typeof loaded === 'string' ? loaded : undefined, failure),
     }
   }
 

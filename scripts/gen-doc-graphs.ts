@@ -298,7 +298,8 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'scheduling-evidence',
     title: 'Scheduling evidence collector gateway',
     mode: 'core',
-    note: 'Runs the Radar and AI Frontier collectors read-only commands as bounded child processes and returns their stored JSON documents; refresh and import stay outside this service.',
+    consumers: ['tool-physical-operator', 'scheduling-evidence-rpc'],
+    note: 'Runs the Radar and AI Frontier collectors as bounded child processes, returns their stored JSON documents, and, once the owner turns Radar on, keeps the stored generation current and hands the allocator its evidence.',
   },
   {
     key: 'rlmStrategy',

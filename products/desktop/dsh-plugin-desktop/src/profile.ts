@@ -47,6 +47,10 @@ import {
   AGENT_TEAMS_ROW_ID,
   SCHEDULING_EVIDENCE_PACKAGE,
   SCHEDULING_EVIDENCE_ROW_ID,
+  SCHEDULING_EVIDENCE_RPC_PACKAGE,
+  SCHEDULING_EVIDENCE_RPC_ROW_ID,
+  SCHEDULING_EVIDENCE_SETTINGS_PACKAGE,
+  SCHEDULING_EVIDENCE_SETTINGS_ROW_ID,
   EGO_LITE_BROWSER_PROVIDER_PACKAGE,
   PRODUCT_BUNDLE_PACKAGES,
   PRODUCT_BUNDLE_ROW_IDS,
@@ -577,20 +581,22 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
   }
   // Radar evidence is off until the owner turns it on in the settings document
   // (`scheduling-evidence.radarEnabled`); the gateway mounts inert and contacts
-  // nothing without the owner's consent. A profile that supplies the row keeps it.
-  if (!rows.has(SCHEDULING_EVIDENCE_ROW_ID)) {
-    patches.push({
-      insert: [{
-        id: SCHEDULING_EVIDENCE_ROW_ID,
-        name: SCHEDULING_EVIDENCE_PACKAGE,
-        config: {
-          python: 'python3',
-          sourceRoot: schedulingEvidenceSourceRoot(),
-          stateRoot: join(home, 'scheduling-evidence'),
-        },
-      }],
-    })
-  }
+  // nothing without the owner's consent. The read-only RPC and the Settings page
+  // show what the store holds. A profile that supplies a row keeps it.
+  const evidenceRows = [
+    {
+      id: SCHEDULING_EVIDENCE_ROW_ID,
+      name: SCHEDULING_EVIDENCE_PACKAGE,
+      config: {
+        python: 'python3',
+        sourceRoot: schedulingEvidenceSourceRoot(),
+        stateRoot: join(home, 'scheduling-evidence'),
+      },
+    },
+    { id: SCHEDULING_EVIDENCE_RPC_ROW_ID, name: SCHEDULING_EVIDENCE_RPC_PACKAGE },
+    { id: SCHEDULING_EVIDENCE_SETTINGS_ROW_ID, name: SCHEDULING_EVIDENCE_SETTINGS_PACKAGE },
+  ].filter(row => !rows.has(row.id))
+  if (evidenceRows.length > 0) patches.push({ insert: evidenceRows })
   const agentTeams = rows.get(AGENT_TEAMS_ROW_ID)
   if (agentTeams?.name !== AGENT_TEAMS_PACKAGE) {
     throw new Error(`${BIN_NAME}: product profile must use ${AGENT_TEAMS_PACKAGE} in the ${AGENT_TEAMS_ROW_ID} row`)

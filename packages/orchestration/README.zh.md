@@ -14,6 +14,7 @@
 | [`model-allocation/`](model-allocation/README.md) | 配额感知模型分配 Service Definition | `ctx.modelAllocation` |
 | [`model-allocation-local/`](model-allocation-local/README.md) | 订阅优先的确定性分配 Provider | 提供分配 seam |
 | [`scheduling-evidence/`](scheduling-evidence/README.md) | Radar 与 AI Frontier 证据采集器的网关 | `ctx.schedulingEvidence` |
+| [`scheduling-evidence-rpc/`](scheduling-evidence-rpc/README.md) | 设置页读取 Radar 存储的只读通道 | `/scheduling-evidence` RPC |
 | [`model-worker/`](model-worker/README.md) | 可选的一次性模型 worker 注册 seam | `ctx.modelWorkers` |
 | [`model-worker-deepseek/`](model-worker-deepseek/README.md) | DeepSeek API 末级 worker Provider | 注册计费 worker |
 | [`rlm-strategy/`](rlm-strategy/README.md) | 与 Provider 无关的有界 RLM 策略 seam | `ctx.rlmStrategy` |

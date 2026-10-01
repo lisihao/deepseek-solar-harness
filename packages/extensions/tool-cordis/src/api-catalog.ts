@@ -1862,6 +1862,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'when the cycle ends; a failed cycle is logged and leaves the last stored generation in use.',
       },
       {
+        signature: 'async overview(): Promise<SchedulingEvidenceOverview>',
+        description: 'Read the Radar store and the owner\'s switches for the settings page. It asks the collector for the stored generation, so it shows what is on disk rather than only what the allocator holds.',
+        parameters: [],
+        returns: 'the page payload; a store that cannot be read is reported inside it, not thrown.',
+      },
+      {
         signature: 'status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>',
         description: 'Read a collector\'s storage status.',
         parameters: [{ name: 'collector', description: 'which collector to ask.' }, { name: 'signal', description: 'cancels the call and stops its process tree.' }],
@@ -5272,6 +5278,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OrchestrationStartRequest {\n    readonly commandId: string;\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
   },
   {
+    name: 'OverviewModel',
+    declaration: 'export interface OverviewModel {\n    readonly provider: string;\n    readonly model: string;\n    readonly reasoningEffort: string;\n    readonly passRate: number | null;\n    readonly sampleCount: number | null;\n    readonly iq: number | null;\n    readonly avgCostUsd: number | null;\n    readonly avgRuntimeSeconds: number | null;\n    readonly usedForEvidence: boolean;\n}',
+  },
+  {
+    name: 'OverviewStore',
+    declaration: 'export type OverviewStore = {\n    readonly available: false;\n    readonly reason: string;\n} | {\n    readonly available: true;\n    readonly snapshotId: string;\n    readonly digest: string;\n    readonly state: string;\n    readonly fetchedAt: string | null;\n    readonly sourceUpdatedAt: string | null;\n    readonly ageSeconds: number | null;\n    readonly staleAfterSeconds: number | null;\n    readonly authorization: string | null;\n    readonly rowCounts: Readonly<Record<string, number>>;\n    readonly loaded: boolean;\n};',
+  },
+  {
     name: 'PairingChallenge',
     declaration: 'export interface PairingChallenge {\n    readonly code: string;\n    readonly scope: RemoteDeviceScope;\n    readonly expiresAt: string;\n}',
   },
@@ -5486,6 +5500,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PruneResult',
     declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly charsRemoved: number;\n}',
+  },
+  {
+    name: 'RadarCycleReport',
+    declaration: 'export interface RadarCycleReport {\n    readonly startedAt: string;\n    readonly finishedAt: string;\n    readonly collection: \'skipped\' | \'ok\' | \'failed\';\n    readonly reload: \'ok\' | \'failed\';\n    readonly message?: string;\n}',
   },
   {
     name: 'ReadFileLine',
@@ -6022,6 +6040,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ScheduledToolPreparation',
     declaration: 'export type ScheduledToolPreparation = {\n    kind: \'dispatch\';\n    exec: ToolRunContext;\n} | {\n    kind: \'post-result\';\n    exec: ToolRunContext;\n    result: ToolExecutionResult;\n} | {\n    kind: \'final-result\';\n    exec: ToolRunContext;\n    result: ToolExecutionResult;\n};',
+  },
+  {
+    name: 'SchedulingEvidenceOverview',
+    declaration: 'export interface SchedulingEvidenceOverview {\n    readonly version: 1;\n    readonly radar: {\n        readonly enabled: boolean;\n        readonly personalUseConsent: boolean;\n        readonly python: string;\n        readonly refreshIntervalMs: number | null;\n    };\n    readonly lastCycle: RadarCycleReport | null;\n    readonly store: OverviewStore;\n    readonly models: readonly OverviewModel[];\n}',
   },
   {
     name: 'Scoped',

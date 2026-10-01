@@ -789,6 +789,14 @@ evidenceFor(offers: readonly ModelExecutionOffer[], taskType: string): ModelAllo
 runCycle(): Promise<void>
 
 /**
+ * Read the Radar store and the owner's switches for the settings page. It asks the
+ * collector for the stored generation, so it shows what is on disk rather than only what
+ * the allocator holds.
+ * @returns the page payload; a store that cannot be read is reported inside it, not thrown.
+ */
+async overview(): Promise<SchedulingEvidenceOverview>
+
+/**
  * Read a collector's storage status.
  * @param collector - which collector to ask.
  * @param signal - cancels the call and stops its process tree.
@@ -807,5 +815,5 @@ status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>
 show(collector: CollectorId, options: { readonly snapshotId?: string; readonly signal?: AbortSignal } = {}): Promise<CollectorResult>
 ```
 
-Source: [`packages/orchestration/scheduling-evidence/src/index.ts:240`](../../packages/orchestration/scheduling-evidence/src/index.ts)
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:242`](../../packages/orchestration/scheduling-evidence/src/index.ts)
 <!-- END GENERATED cordis-surface -->
