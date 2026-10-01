@@ -61,6 +61,9 @@
     },
     {
       "path": "../../orchestration/model-allocation"
+    },
+    {
+      "path": "../../orchestration/scheduling-evidence"
     }
   ]
 }

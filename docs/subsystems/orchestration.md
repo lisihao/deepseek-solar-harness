@@ -775,6 +775,20 @@ Reads collector documents through bounded child processes.
 
 ```ts cordis-catalog
 /**
+ * Evidence for the allocator, from the Radar generation held in memory; it never starts a process.
+ * @param offers - the offers the allocator will compare.
+ * @param taskType - the request's task type; evidence exists only for the dataset's own.
+ * @returns the evidence, or undefined when Radar is not configured, nothing usable is stored, or no offer has a record.
+ */
+evidenceFor(offers: readonly ModelExecutionOffer[], taskType: string): ModelAllocationEvidence | undefined
+
+/**
+ * Run one collection and reload cycle now, or join the one already running.
+ * @returns when the cycle ends; a failed cycle is logged and leaves the last stored generation in use.
+ */
+runCycle(): Promise<void>
+
+/**
  * Read a collector's storage status.
  * @param collector - which collector to ask.
  * @param signal - cancels the call and stops its process tree.
@@ -793,5 +807,5 @@ status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>
 show(collector: CollectorId, options: { readonly snapshotId?: string; readonly signal?: AbortSignal } = {}): Promise<CollectorResult>
 ```
 
-Source: [`packages/orchestration/scheduling-evidence/src/index.ts:126`](../../packages/orchestration/scheduling-evidence/src/index.ts)
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:205`](../../packages/orchestration/scheduling-evidence/src/index.ts)
 <!-- END GENERATED cordis-surface -->

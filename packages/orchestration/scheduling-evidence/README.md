@@ -19,7 +19,9 @@ export async function readEvidence(ctx: Context, snapshotId: string, signal: Abo
 
 `status(collector, signal?)` and `show(collector, { snapshotId?, signal? })` return `{ ok, exitCode, document }`. `ok` is the document's own `ok` fact. A collector that has no valid generation, or whose command failed, answers `ok: false` with exit status 1 or 2; that is data, not an error. `collector` is `'radar'` or `'ai-frontier'`.
 
-The gateway never runs `refresh`, `import`, or `consent`: those reach the network or write stored generations, and belong to the periodic cycle that owns the authorization file.
+`status` and `show` never run `refresh`, `import`, or `consent`: those reach the network or write stored generations. Only the Radar cycle below runs `consent` and `refresh`.
+
+`evidenceFor(offers, taskType)` returns the `ModelAllocationEvidence` the allocator compares, or `undefined`. It reads the Radar generation held in memory and starts no process, so the allocator can call it on every request. A generation yields records only when `taskType` equals the declared `taskType`, the generation is younger than its own `cache.stale_after_seconds`, and an offer's provider, model (after `modelAliases`), and reasoning effort match a Radar row.
 
 ## Config
 
@@ -31,6 +33,27 @@ The gateway never runs `refresh`, `import`, or `consent`: those reach the networ
 | `timeoutMs` | 15000 | Deadline for one call |
 | `graceMs` | 2000 | Grace between SIGTERM and SIGKILL |
 | `maxOutputBytes` | 1048576 | Largest stdout or stderr kept per call; a larger stdout fails the call |
+| `radar` | absent | Radar cycle and evidence settings below; absent, the gateway starts no timer and `evidenceFor` returns `undefined` |
+
+`radar` settings:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `authorizationFile` | absent | The owner's receipt. No network request is made without it |
+| `personalUseConsent` | false | The owner's statement of personal-use consent. When true and the receipt is missing, the cycle records it once with `consent --personal-use`. No shipped default sets it |
+| `refreshIntervalMs` | 14400000 | Time between cycles, 30 minutes to 24 hours |
+| `refreshTimeoutMs` | 90000 | Deadline for one `refresh` |
+| `staleAfterSeconds` | 604800 | Passed to `refresh`; a stored generation older than its own limit is no longer used |
+| `benchmark` | `Codex Radar community tasks` | Benchmark name the records claim |
+| `harness` | `codex-radar-community` | The test environment the owner states every Radar row shares |
+| `taskType` | `coding` | The only task type the Radar dataset speaks to |
+| `modelAliases` | `{}` | Radar model names mapped to the names offers use |
+
+`harness` is a declaration, not something Radar reports. Radar pass rates compare only inside one dataset, so the allocator can separate two models only when both rows carry the same declared harness and the other nine cohort conditions match.
+
+## Radar cycle
+
+With `radar` set, the gateway runs one cycle at start and then every `refreshIntervalMs`. Each cycle runs `consent` (only when the receipt is missing and `personalUseConsent` is true), then `refresh` (only when the receipt exists or was just recorded), then `show`, and keeps the printed generation in memory when it has a `snapshot_id`. Without `authorizationFile` the cycle only reads what is already stored. A failed cycle is logged as a warning and leaves the previous generation in use. Overlapping cycles join the one running. Disposing the service clears the timer.
 
 ## Behavior
 
@@ -49,6 +72,7 @@ None; the gateway adds nothing to a request prefix.
 
 ## Known Limitations and Deferred Work
 
-- Nothing consumes the gateway yet. The periodic cycle and the allocator wiring that read these documents are later stages of the [scheduling migration](../../../.agents/notes/proposed/architecture/2026-09-30-workbench-scheduling-migration.md).
-- The collectors accept a Radar or AI Frontier payload only through `refresh` or `import`, which this gateway does not run, so an empty state directory reports `ok: false` until the periodic cycle exists.
+- The cycle covers Radar only. AI Frontier is readable through `status` and `show` but has no cycle, and no code feeds it to the allocator yet.
+- Radar rows are matched by provider, model name, and reasoning effort. A model Radar spells differently needs a `modelAliases` entry; a model Radar does not list gets no record and the allocator abstains for it.
+- The shipped composition does not mount the gateway, so no installation collects or uses Radar evidence until the owner adds `radar` settings and an authorization file.
 - The interpreter version is checked once per gateway; replacing the interpreter on disk without reloading the plugin is not noticed.

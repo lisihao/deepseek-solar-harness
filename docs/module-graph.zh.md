@@ -517,9 +517,6 @@ flowchart TD
   pkg_intent_compiler --> pkg_brand
   pkg_intent_compiler --> pkg_invariants
   pkg_intent_compiler --> pkg_llm
-  pkg_scheduling_evidence --> pkg_invariants
-  pkg_scheduling_evidence --> pkg_llm
-  pkg_scheduling_evidence --> pkg_subprocess
   pkg_agent --> pkg_invariants
   pkg_agent --> pkg_llm
   pkg_agent --> pkg_scope
@@ -1154,6 +1151,11 @@ flowchart TD
   pkg_orchestration --> pkg_task_template
   pkg_rlm_strategy_local --> pkg_invariants
   pkg_rlm_strategy_local --> pkg_rlm_strategy
+  pkg_scheduling_evidence --> pkg_invariants
+  pkg_scheduling_evidence --> pkg_llm
+  pkg_scheduling_evidence --> pkg_model_allocation
+  pkg_scheduling_evidence --> pkg_model_allocation_local
+  pkg_scheduling_evidence --> pkg_subprocess
   pkg_tool_debate --> pkg_agent
   pkg_tool_debate --> pkg_commands
   pkg_tool_debate --> pkg_debate
@@ -1312,6 +1314,7 @@ flowchart TD
   pkg_tool_physical_operator --> pkg_model_allocation
   pkg_tool_physical_operator --> pkg_model_catalog_local
   pkg_tool_physical_operator --> pkg_physical_operator
+  pkg_tool_physical_operator --> pkg_scheduling_evidence
   pkg_tool_physical_operator --> pkg_sdk_protocol
   pkg_tool_physical_operator --> pkg_session
   pkg_tool_physical_operator --> pkg_session_projection
@@ -1803,7 +1806,6 @@ flowchart TD
 | [`continual-harness`](../packages/orchestration/continual-harness) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`debate`](../packages/orchestration/debate) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`intent-compiler`](../packages/orchestration/intent-compiler) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
-| [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`subprocess`](../packages/subprocess/subprocess) |
 | [`agent`](../packages/core/agent) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`typert-protocol`](../packages/typert/protocol) |
 | [`output-style`](../packages/core/output-style) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`system-prompt`](../packages/core/system-prompt) |
 | [`skill-badge`](../packages/skill/skill-badge) | `skill` | [`invariants`](../packages/runtime-diagnostics/invariants), [`skill`](../packages/skill/skill) |
@@ -1930,6 +1932,7 @@ flowchart TD
 | [`model-worker`](../packages/orchestration/model-worker) | `orchestration` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
 | [`orchestration`](../packages/orchestration/orchestration) | `orchestration` | [`brand`](../packages/util/brand), [`capability-capsule`](../packages/orchestration/capability-capsule), [`context-compiler`](../packages/orchestration/context-compiler), [`intent-compiler`](../packages/orchestration/intent-compiler), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`physical-operator`](../packages/physical-operator/physical-operator), [`rlm-strategy`](../packages/orchestration/rlm-strategy), [`task-template`](../packages/prompt/task-template) |
 | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
+| [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`model-allocation-local`](../packages/orchestration/model-allocation-local), [`subprocess`](../packages/subprocess/subprocess) |
 | [`tool-debate`](../packages/orchestration/tool-debate) | `orchestration` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`debate`](../packages/orchestration/debate), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`plan-mode`](../packages/plan/plan-mode), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | `physical-operator` | [`invariants`](../packages/runtime-diagnostics/invariants), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator`](../packages/physical-operator/resident-operator), [`subagent`](../packages/subagent/subagent), [`system-prompt`](../packages/core/system-prompt) |
 | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent) | `physical-operator` | [`invariants`](../packages/runtime-diagnostics/invariants), [`physical-operator`](../packages/physical-operator/physical-operator), [`subagent`](../packages/subagent/subagent), [`system-prompt`](../packages/core/system-prompt) |
@@ -1949,7 +1952,7 @@ flowchart TD
 | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | `orchestration` | [`atomic-write`](../packages/util/atomic-write), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`rlm-runtime`](../packages/orchestration/rlm-runtime), [`sdk-protocol`](../packages/sdk/protocol) |
 | [`tool-orchestration`](../packages/orchestration/tool-orchestration) | `orchestration` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation), [`orchestration`](../packages/orchestration/orchestration), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`physical-operator-chatgpt-web`](../packages/physical-operator/physical-operator-chatgpt-web) | `physical-operator` | [`agent`](../packages/core/agent), [`browser`](../packages/browser/browser), [`home-paths`](../packages/util/home-paths), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation), [`model-catalog-local`](../packages/llm/model-catalog-local), [`model-worker`](../packages/orchestration/model-worker), [`physical-operator`](../packages/physical-operator/physical-operator), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt) |
-| [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | `physical-operator` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`model-catalog-local`](../packages/llm/model-catalog-local), [`physical-operator`](../packages/physical-operator/physical-operator), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`task-template`](../packages/prompt/task-template), [`task-template-context`](../packages/prompt/task-template-context), [`tools`](../packages/core/tools) |
+| [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | `physical-operator` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`model-catalog-local`](../packages/llm/model-catalog-local), [`physical-operator`](../packages/physical-operator/physical-operator), [`scheduling-evidence`](../packages/orchestration/scheduling-evidence), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`task-template`](../packages/prompt/task-template), [`task-template-context`](../packages/prompt/task-template-context), [`tools`](../packages/core/tools) |
 | [`sdk-client`](../packages/sdk/client) | `sdk` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session) |
 | [`sdk-jsonrpc-server`](../packages/sdk/server) | `sdk` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`llm-deepseek`](../packages/llm/llm-deepseek), [`scope`](../packages/core/scope), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent) |
 | [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | `subagent` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-client`](../packages/sdk/client), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subprocess`](../packages/subprocess/subprocess) |

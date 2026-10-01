@@ -4,7 +4,8 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
+import type { ModelAllocationEvidence, ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import AgentRegistry, {
   agentEvents,
   assembleContextFor,
@@ -46,7 +47,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
-import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
+import SubscriptionFirstModelAllocation, { canonicalCohortKey } from '@deepseek-ai/dsh-model-allocation-local'
 import * as tool from '../src/index.ts'
 import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
@@ -272,6 +273,8 @@ async function setup(options: {
   taskTemplate?: TaskTemplateDraft
   toolConfig?: tool.Config
   mountAllocator?: boolean
+  allocatorConfig?: AllocatorConfig
+  schedulingEvidence?: SchedulingEvidenceStub
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
@@ -346,7 +349,14 @@ async function setup(options: {
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
   ctx.physicalOperators.registerOperator(chatgpt)
-  if (options.mountAllocator === true) await ctx.plugin(SubscriptionFirstModelAllocation)
+  if (options.mountAllocator === true) await ctx.plugin(SubscriptionFirstModelAllocation, options.allocatorConfig)
+  if (options.schedulingEvidence !== undefined) {
+    const evidenceFor = options.schedulingEvidence
+    await ctx.plugin(class FakeSchedulingEvidence extends Service {
+      constructor(parent: Context) { super(parent, 'schedulingEvidence') }
+      evidenceFor = evidenceFor
+    })
+  }
   const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool, options.toolConfig)
   const primary = options.primary ?? 'deepseek'
   const agent = ctx.agentLoop.create(SessionId('router-session'), primary === 'deepseek'
@@ -354,6 +364,10 @@ async function setup(options: {
     : { provider: 'dsh-physical-operator', model: primary })
   return { ctx, deepseek, codex, claude, chatgpt, mounted, agent, echoCalls }
 }
+
+type AllocatorConfig = ConstructorParameters<typeof SubscriptionFirstModelAllocation>[1]
+/** Stands in for `ctx.schedulingEvidence.evidenceFor`, whose collectors need Python and the network. */
+type SchedulingEvidenceStub = (offers: readonly ModelExecutionOffer[], taskType: string) => ModelAllocationEvidence | undefined
 
 function send(agent: Agent, text: string): void {
   agent.followup(createUserMessage({
@@ -1380,8 +1394,17 @@ describe('host physical-operator routing', () => {
       readonly codexUsedPercent?: number
       readonly claudeAvailable?: boolean
       readonly catalogMaxAgeMs?: number
+      readonly models?: typeof codexModels
+      readonly allocatorConfig?: AllocatorConfig
+      readonly schedulingEvidence?: SchedulingEvidenceStub
     } = {}) {
-      const fixture = await setup({ mountAllocator: true, toolConfig: { catalogMaxAgeMs: options.catalogMaxAgeMs ?? 600_000 } })
+      const models = options.models ?? codexModels
+      const fixture = await setup({
+        mountAllocator: true,
+        toolConfig: { catalogMaxAgeMs: options.catalogMaxAgeMs ?? 600_000 },
+        ...options.allocatorConfig === undefined ? {} : { allocatorConfig: options.allocatorConfig },
+        ...options.schedulingEvidence === undefined ? {} : { schedulingEvidence: options.schedulingEvidence },
+      })
       const reads = { codex: 0, claude: 0 }
       const codexCatalog = fixture.codex.residentCatalog.bind(fixture.codex)
       const claudeCatalog = fixture.claude.residentCatalog.bind(fixture.claude)
@@ -1391,10 +1414,10 @@ describe('host physical-operator routing', () => {
           ...await codexCatalog(),
           product: 'codex',
           available: options.codexAvailable ?? true,
-          models: codexModels,
+          models,
           ...options.codexUsedPercent === undefined ? {} : {
             quotaPools: [{
-              poolId: 'codex-plan', displayName: 'Codex plan', models: codexModels.map(model => model.model),
+              poolId: 'codex-plan', displayName: 'Codex plan', models: models.map(model => model.model),
               meter: 'native-subscription' as const, primary: { usedPercent: options.codexUsedPercent }, observedAt: '2026-09-26T00:00:00.000Z',
             }],
           },
@@ -1428,6 +1451,95 @@ describe('host physical-operator routing', () => {
       } finally {
         disposeSelection()
       }
+    })
+
+    describe('public evidence', () => {
+      const tied = [nativeModel('gpt-6-astra', 'GPT-6-Astra'), nativeModel('gpt-6-sol', 'GPT-6-Sol')]
+      const record = (model: string, value: number): Record<string, unknown> => {
+        const row: Record<string, unknown> = {
+          source: 'codex-radar', upstream_dataset: 'dradar', benchmark: 'Codex Radar community tasks', benchmark_version: '2026-10-01',
+          metric_kind: 'pass_rate', score_kind: 'resolved_rate', unit: 'proportion', harness: 'codex-radar-community',
+          reasoning_effort: 'high', task_type: 'coding', execution_surface: 'codex', billing_identity: 'native-subscription',
+          provider: 'codex', canonical_model_id: model, value, sample_count: 1000, lineage_id: `radar:${model}`,
+          correlation_group: 'codex-radar:g1', comparability: { status: 'comparable' }, observed_at: '2026-10-01', freshness_state: 'fresh',
+          provenance: 'community_observation',
+        }
+        return { ...row, cohort_key: canonicalCohortKey(row) }
+      }
+      const favoring = (favored: string, taskTypes: string[]): SchedulingEvidenceStub => (offers, taskType) => {
+        taskTypes.push(taskType)
+        return {
+          taskType: 'coding',
+          snapshots: [{ source: 'radar', snapshotId: 'g1', digest: 'sha256:g1' }],
+          records: Object.fromEntries(offers.filter(offer => offer.provider === 'codex').map(offer => [
+            offer.offerId, [record(offer.model, offer.model === favored ? 0.9 : 0.5)],
+          ])),
+        }
+      }
+      const delegate = async (options: Parameters<typeof allocationSetup>[0]) => {
+        const fixture = await allocationSetup({ models: tied, ...options })
+        send(fixture.agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+        await fixture.agent.whenIdle()
+        return fixture
+      }
+
+      it('records the verdict without using it in the default shadow mode', async () => {
+        const taskTypes: string[] = []
+        const baseline = await delegate({})
+        const baselineModel = baseline.codex.requests[0]?.residentProfile?.model
+        baseline.disposeSelection()
+        const other = tied.find(model => model.model !== baselineModel)?.model as string
+        const { agent, codex, disposeSelection } = await delegate({ schedulingEvidence: favoring(other, taskTypes) })
+        try {
+          expect(codex.requests[0]?.residentProfile?.model).toBe(baselineModel)
+          expect(routingReason(agent)).toContain(`；公开证据（shadow）：倾向 codex:${other}，影子模式未采用`)
+          expect(taskTypes).toEqual(['coding'])
+        } finally {
+          disposeSelection()
+        }
+      })
+
+      it('lets same-cohort evidence break the tie in apply mode', async () => {
+        const baseline = await delegate({})
+        const baselineModel = baseline.codex.requests[0]?.residentProfile?.model
+        baseline.disposeSelection()
+        const other = tied.find(model => model.model !== baselineModel)?.model as string
+        const { agent, codex, disposeSelection } = await delegate({
+          allocatorConfig: { publicEvidence: 'apply' },
+          schedulingEvidence: favoring(other, []),
+        })
+        try {
+          expect(codex.requests[0]?.residentProfile?.model).toBe(other)
+          expect(routingReason(agent)).toContain('public-evidence-tiebreak')
+          expect(routingReason(agent)).toContain('，已采用')
+        } finally {
+          disposeSelection()
+        }
+      })
+
+      it('says nothing about evidence when the service offers none', async () => {
+        const { agent, disposeSelection } = await delegate({ schedulingEvidence: () => undefined })
+        try {
+          expect(routingReason(agent)).not.toContain('公开证据')
+        } finally {
+          disposeSelection()
+        }
+      })
+
+      it('reports an abstention', async () => {
+        const { agent, disposeSelection } = await delegate({
+          schedulingEvidence: offers => ({
+            taskType: 'coding',
+            snapshots: [{ source: 'radar', snapshotId: 'g1', digest: 'd' }],
+            records: Object.fromEntries(offers.map(offer => [offer.offerId, []])),
+          }),
+        })
+        try {
+          expect(routingReason(agent)).toContain('；公开证据（shadow）：弃权（')
+        } finally {
+          disposeSelection()
+        }
+      })
     })
 
     it('lets the allocator pick a frontier Claude model for analysis work', async () => {

@@ -7,6 +7,8 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../llm/llm" },
+    { "path": "../model-allocation" },
+    { "path": "../model-allocation-local" },
     { "path": "../../subprocess/subprocess" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
