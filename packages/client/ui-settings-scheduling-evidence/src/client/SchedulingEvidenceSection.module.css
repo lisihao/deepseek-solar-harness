@@ -100,6 +100,8 @@
 .card,
 .models,
 .how {
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
   display: grid;
   align-content: start;
   min-width: 0;
