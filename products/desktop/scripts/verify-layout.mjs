@@ -84,6 +84,8 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-rlm-strategy',
   '@deepseek-ai/dsh-rlm-strategy-local',
   '@deepseek-ai/dsh-scheduling-evidence',
+  '@deepseek-ai/dsh-scheduling-evidence-rpc',
+  '@deepseek-ai/dsh-client-ui-settings-scheduling-evidence',
   '@deepseek-ai/dsh-sdk-protocol',
   '@deepseek-ai/dsh-orchestration',
   '@deepseek-ai/dsh-orchestration-local',

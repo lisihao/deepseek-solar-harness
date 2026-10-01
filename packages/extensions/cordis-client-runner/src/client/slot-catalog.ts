@@ -1408,6 +1408,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-settings-general GeneralSection id \'general\'',
       'client-ui-settings-models ModelsSection id \'models\'',
       'client-ui-settings-plugins PluginsSettingsSection id \'plugins\'',
+      'client-ui-settings-scheduling-evidence SchedulingEvidenceSection id \'scheduling-evidence\'',
       'client-ui-task-template TaskTemplateSection id \'task-templates\'',
     ],
     replaceRisk: 'none',

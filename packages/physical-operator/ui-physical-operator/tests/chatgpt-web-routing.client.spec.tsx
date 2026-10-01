@@ -299,6 +299,20 @@ describe('physical primary routing control', () => {
     })
   })
 
+  it('keeps the refresh and close controls together in one actions group beside the title', async () => {
+    const fixture = createFixture({ current: apiPrimary(), policy: 'direct' })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+
+    const refresh = screen.getByRole('button', { name: '刷新模型与算子' })
+    const close = screen.getByRole('button', { name: '关闭协作方式' })
+    expect(refresh.parentElement).toBe(close.parentElement)
+    expect(refresh.parentElement?.className).toBe('dshDesktopOperatorStrategyActions')
+    expect(close.className).toBe('dshDesktopOperatorStrategyClose')
+    expect(refresh.parentElement?.previousElementSibling?.className).toBe('dshDesktopOperatorStrategyTitle')
+  })
+
   it('refreshes the centralized catalog once, then reads cached Resident status without changing an API primary', async () => {
     const requestCalls: Array<{ url: string; method: string | undefined }> = []
     const requestMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
