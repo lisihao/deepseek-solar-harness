@@ -1,10 +1,15 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { ModelAllocationEvidence, ModelAllocationRequest, ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import ModelAllocationService from '@deepseek-ai/dsh-model-allocation'
+import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
 import SubscriptionFirstModelAllocation, {
   apply,
   canonicalCohortKey,
+  MODEL_ALLOCATION_SETTINGS_NAMESPACE,
   type PublicEvidenceMode,
 } from '../src/index.ts'
 
@@ -13,10 +18,16 @@ afterEach(async () => {
   for (const ctx of contexts.splice(0)) await ctx.root.fiber.dispose()
 })
 
-function allocator(mode?: PublicEvidenceMode): SubscriptionFirstModelAllocation {
-  const ctx = new Context()
-  contexts.push(ctx)
-  return new SubscriptionFirstModelAllocation(ctx, mode === undefined ? undefined : { publicEvidence: mode })
+/** An allocator mounted as a plugin on its own context for each call. */
+function allocator(mode?: PublicEvidenceMode): { allocate: (input: ModelAllocationRequest) => ReturnType<SubscriptionFirstModelAllocation['allocate']> } {
+  return {
+    async allocate(input) {
+      const ctx = new Context()
+      contexts.push(ctx)
+      await ctx.plugin(SubscriptionFirstModelAllocation, mode === undefined ? {} : { publicEvidence: mode })
+      return await ctx.modelAllocation.allocate(input)
+    },
+  }
 }
 
 function offer(model: string, overrides: Partial<ModelExecutionOffer> = {}): ModelExecutionOffer {
@@ -241,7 +252,7 @@ describe('Provider config', () => {
   it('registers ctx.modelAllocation with the configured mode through apply()', async () => {
     const ctx = new Context()
     contexts.push(ctx)
-    apply(ctx, { publicEvidence: 'apply' })
+    await ctx.plugin({ apply, name: 'model-allocation-local' }, { publicEvidence: 'apply' })
 
     expect(ctx.get('modelAllocation')).toBeInstanceOf(ModelAllocationService)
     const plan = await ctx.modelAllocation.allocate(request([astra, sol], { evidence: solWins }))
@@ -251,10 +262,46 @@ describe('Provider config', () => {
   it('defaults to shadow when apply() gets no config', async () => {
     const ctx = new Context()
     contexts.push(ctx)
-    apply(ctx)
+    await ctx.plugin({ apply, name: 'model-allocation-local' })
 
     const plan = await ctx.modelAllocation.allocate(request([astra, sol], { evidence: solWins }))
     expect(plan.offerId).toBe('codex:astra')
     expect(plan.evidence?.mode).toBe('shadow')
+  })
+})
+
+describe('owner settings', () => {
+  let directory: string | undefined
+  afterEach(async () => {
+    if (directory !== undefined) await rm(directory, { recursive: true, force: true })
+    directory = undefined
+  })
+
+  async function withSettings(document: string, mode?: PublicEvidenceMode): Promise<{ service: Context['modelAllocation']; ctx: Context }> {
+    directory = await mkdtemp(join(tmpdir(), 'dsh-allocation-settings-'))
+    const path = join(directory, 'settings.yaml')
+    await writeFile(path, document)
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(FileSettingsProvider, { path, watch: false })
+    await ctx.plugin(SubscriptionFirstModelAllocation, mode === undefined ? {} : { publicEvidence: mode })
+    return { service: ctx.modelAllocation, ctx }
+  }
+
+  it('lets the owner choose the evidence mode over the plugin config, applying to the next allocation', async () => {
+    const { service, ctx } = await withSettings('model-allocation:\n  publicEvidence: apply\n', 'shadow')
+    expect((await service.allocate(request([astra, sol], { evidence: solWins }))).offerId).toBe('codex:sol')
+
+    await ctx.settings.update(MODEL_ALLOCATION_SETTINGS_NAMESPACE, { publicEvidence: 'off' })
+
+    const plan = await service.allocate(request([astra, sol], { evidence: solWins }))
+    expect(plan.offerId).toBe('codex:astra')
+    expect(plan).not.toHaveProperty('evidence')
+  })
+
+  it('inherits the plugin config until the owner writes a value', async () => {
+    const { service } = await withSettings('', 'apply')
+
+    expect((await service.allocate(request([astra, sol], { evidence: solWins }))).offerId).toBe('codex:sol')
   })
 })

@@ -12,7 +12,13 @@ import { Context } from '@deepseek-ai/cordis'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
-import SchedulingEvidenceGateway, { resolveConfig, type Config, type RadarConfig } from '../src/index.ts'
+import FileSettingsProvider from '@deepseek-ai/dsh-settings-file'
+import SchedulingEvidenceGateway, {
+  resolveConfig,
+  SCHEDULING_EVIDENCE_SETTINGS_NAMESPACE,
+  type Config,
+  type RadarConfig,
+} from '../src/index.ts'
 
 interface Reply {
   readonly exitCode?: number
@@ -76,8 +82,13 @@ let ctx: Context | undefined
 let fake: FakeSubprocess
 let warnings: string[]
 let fiber: Awaited<ReturnType<Context['plugin']>>
+let settingsFiber: Awaited<ReturnType<Context['plugin']>> | undefined
 
-async function mount(radar: RadarConfig | undefined, reply?: FakeSubprocess['respond']): Promise<SchedulingEvidenceGateway> {
+async function mount(
+  radar: RadarConfig | undefined,
+  reply?: FakeSubprocess['respond'],
+  userSettings?: string,
+): Promise<SchedulingEvidenceGateway> {
   const app = new Context()
   ctx = app
   warnings = []
@@ -85,12 +96,23 @@ async function mount(radar: RadarConfig | undefined, reply?: FakeSubprocess['res
   await app.plugin(FakeSubprocess)
   fake = app.subprocess as FakeSubprocess
   fake.respond = reply ?? (argv => argv.includes('show') ? { stdout: JSON.stringify(GENERATION) } : { stdout: '{"ok":true}' })
+  if (userSettings !== undefined) {
+    const path = join(directory, 'settings.yaml')
+    await writeFile(path, userSettings)
+    settingsFiber = await app.plugin(FileSettingsProvider, { path, watch: false })
+  }
   const config: Config = { python: 'python3', sourceRoot: '/src', stateRoot: directory, ...radar === undefined ? {} : { radar } }
   fiber = await app.plugin(SchedulingEvidenceGateway, config)
   const gateway = app.schedulingEvidence
   // The start-up cycle does file and pipe I/O that fake timers do not drive.
   await gateway.runCycle()
   return gateway
+}
+
+/** Wait, in real time, until a settings change has restarted the Radar timer. */
+async function until(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 400 && !condition(); attempt += 1) await new Promise(resolve => setTimeout(resolve, 5))
+  expect(condition()).toBe(true)
 }
 
 /** Move the clock by `ms` and wait for the cycle the tick started. */
@@ -107,6 +129,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await ctx?.fiber.dispose()
   ctx = undefined
+  settingsFiber = undefined
   vi.useRealTimers()
   await rm(directory, { recursive: true, force: true })
 })
@@ -256,5 +279,84 @@ describe('failure and teardown', () => {
     vi.advanceTimersByTime(48 * HOUR)
 
     expect(fake.spawns).toHaveLength(before)
+  })
+})
+
+describe('owner settings', () => {
+  const NAMESPACE = SCHEDULING_EVIDENCE_SETTINGS_NAMESPACE
+  const receipt = (): string => join(directory, 'radar-authorization.json')
+
+  it('keeps Radar off until the owner turns it on, then reads stored evidence without the network', async () => {
+    const gateway = await mount(undefined, undefined, '')
+    expect(fake.spawns).toHaveLength(0)
+    expect(gateway.evidenceFor([sol], 'coding')).toBeUndefined()
+
+    await ctx?.settings.update(NAMESPACE, { radarEnabled: true })
+    await until(() => fake.commands().length === 1)
+
+    expect(fake.commands()).toEqual([['show']])
+    await gateway.runCycle()
+    expect(gateway.evidenceFor([sol], 'coding')).toBeDefined()
+  })
+
+  it('records the owner consent once and collects only after the owner states it', async () => {
+    const gateway = await mount(undefined, undefined, 'scheduling-evidence:\n  radarEnabled: true\n')
+    expect(fake.commands()).toEqual([['show']])
+
+    await ctx?.settings.update(NAMESPACE, { personalUseConsent: true })
+    await until(() => fake.commands().length === 4)
+    await gateway.runCycle()
+
+    expect(fake.commands().slice(1, 4)).toEqual([
+      ['consent', '--personal-use', '--authorization-file', receipt()],
+      ['refresh', '--authorization-file', receipt(), '--stale-after-seconds', '604800'],
+      ['show'],
+    ])
+  })
+
+  it('stops collecting when the owner withdraws consent, even though the receipt file remains', async () => {
+    await writeFile(receipt(), '{}')
+    const gateway = await mount(undefined, undefined, 'scheduling-evidence:\n  radarEnabled: true\n  personalUseConsent: true\n')
+    expect(fake.commands().map(words => words[0])).toEqual(['refresh', 'show'])
+
+    await ctx?.settings.update(NAMESPACE, { personalUseConsent: false })
+    await until(() => fake.commands().length === 3)
+    await gateway.runCycle()
+    await gateway.runCycle()
+
+    expect(fake.commands().map(words => words[0])).toEqual(['refresh', 'show', 'show', 'show', 'show'])
+  })
+
+  it('drops its evidence and stops the timer when the owner turns Radar off', async () => {
+    const gateway = await mount(undefined, undefined, 'scheduling-evidence:\n  radarEnabled: true\n')
+    expect(gateway.evidenceFor([sol], 'coding')).toBeDefined()
+    const before = fake.spawns.length
+
+    await ctx?.settings.update(NAMESPACE, { radarEnabled: false })
+    await until(() => gateway.evidenceFor([sol], 'coding') === undefined)
+    vi.advanceTimersByTime(48 * HOUR)
+
+    expect(fake.spawns).toHaveLength(before)
+  })
+
+  it('uses the interpreter the owner names', async () => {
+    await mount(undefined, undefined, 'scheduling-evidence:\n  radarEnabled: true\n  python: /opt/python3.12\n')
+
+    expect(fake.spawns[0]?.argv[0]).toBe('/usr/bin//opt/python3.12')
+  })
+
+  it('lets the settings override the plugin config in either direction', async () => {
+    await mount({}, undefined, 'scheduling-evidence:\n  radarEnabled: false\n')
+
+    expect(fake.spawns).toHaveLength(0)
+  })
+
+  it('stops following the settings when the settings service goes away', async () => {
+    const gateway = await mount(undefined, undefined, 'scheduling-evidence:\n  radarEnabled: true\n')
+    expect(gateway.evidenceFor([sol], 'coding')).toBeDefined()
+
+    await settingsFiber?.dispose()
+
+    expect(gateway.evidenceFor([sol], 'coding')).toBeUndefined()
   })
 })

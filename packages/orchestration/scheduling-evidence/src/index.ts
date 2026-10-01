@@ -15,6 +15,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { ModelAllocationEvidence, ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import { radarEvidence, type RadarDeclaration } from './radar-evidence.ts'
 
@@ -157,21 +159,54 @@ export function resolveConfig(config: Config): ResolvedConfig {
     timeoutMs: config.timeoutMs ?? 15_000,
     graceMs: config.graceMs ?? 2_000,
     maxOutputBytes: config.maxOutputBytes ?? 1_048_576,
-    radar: config.radar === undefined ? undefined : {
-      authorizationFile: config.radar.authorizationFile,
-      personalUseConsent: config.radar.personalUseConsent ?? false,
-      refreshIntervalMs: config.radar.refreshIntervalMs ?? 4 * 60 * 60_000,
-      refreshTimeoutMs: config.radar.refreshTimeoutMs ?? 90_000,
-      staleAfterSeconds: config.radar.staleAfterSeconds ?? 7 * 24 * 60 * 60,
-      declaration: {
-        benchmark: config.radar.benchmark ?? 'Codex Radar community tasks',
-        harness: config.radar.harness ?? 'codex-radar-community',
-        taskType: config.radar.taskType ?? 'coding',
-        modelAliases: config.radar.modelAliases ?? {},
-      },
+    radar: config.radar === undefined ? undefined : resolveRadar(config.radar),
+  }
+}
+
+/**
+ * Apply the documented default to each omitted Radar setting.
+ * @param radar - validated Radar settings, possibly empty.
+ * @returns the settings with every value explicit.
+ */
+export function resolveRadar(radar: RadarConfig): ResolvedRadarConfig {
+  return {
+    authorizationFile: radar.authorizationFile,
+    personalUseConsent: radar.personalUseConsent ?? false,
+    refreshIntervalMs: radar.refreshIntervalMs ?? 4 * 60 * 60_000,
+    refreshTimeoutMs: radar.refreshTimeoutMs ?? 90_000,
+    staleAfterSeconds: radar.staleAfterSeconds ?? 7 * 24 * 60 * 60,
+    declaration: {
+      benchmark: radar.benchmark ?? 'Codex Radar community tasks',
+      harness: radar.harness ?? 'codex-radar-community',
+      taskType: radar.taskType ?? 'coding',
+      modelAliases: radar.modelAliases ?? {},
     },
   }
 }
+
+/** Settings namespace a user edits in the settings document (`~/.dsh/settings.yaml`). */
+export const SCHEDULING_EVIDENCE_SETTINGS_NAMESPACE = settingsNamespace('scheduling-evidence')
+
+/**
+ * The owner-editable slice. Changes apply on the next save without a restart.
+ * Nothing contacts the network unless `personalUseConsent` is true or the plugin
+ * config names an authorization file.
+ */
+export interface SchedulingEvidenceSettings {
+  /** Use stored Radar evidence in model allocation; the settings default is the plugin config's choice. */
+  radarEnabled: boolean
+  /** The owner's statement that Radar data may be collected for personal use; default false. */
+  personalUseConsent: boolean
+  /** Python 3.11+ interpreter, an absolute path or a name on the scrubbed `PATH`. */
+  python: string
+}
+
+/** Runtime schema for {@link SchedulingEvidenceSettings}. */
+export const SchedulingEvidenceSettingsSchema: z<SchedulingEvidenceSettings> = z.object({
+  radarEnabled: z.boolean(),
+  personalUseConsent: z.boolean(),
+  python: z.string(),
+})
 
 /** One collector command's outcome. */
 export interface CollectorResult {
@@ -210,7 +245,13 @@ export class SchedulingEvidenceGateway extends Service {
   private readonly config: ResolvedConfig
   private readonly active = new Set<SubprocessHandle>()
   private interpreter: Promise<string> | undefined
+  /** The interpreter name `interpreter` was resolved for. */
+  private interpreterName: string | undefined
   private disposed = false
+  private settings: SettingsScope<SchedulingEvidenceSettings> | undefined
+  private cycleTimer: ReturnType<typeof setInterval> | undefined
+  /** The Radar settings the running timer was started for. */
+  private scheduledFor: string | undefined
   /** The active Radar generation as the collector last printed it. */
   private radarSnapshot: Readonly<Record<string, unknown>> | undefined
   private cycleRunning: Promise<void> | undefined
@@ -227,15 +268,75 @@ export class SchedulingEvidenceGateway extends Service {
     ctx.effect(function* () {
       yield async () => { await stop() }
     }, 'scheduling-evidence: child processes')
-    const { radar } = this.config
-    if (radar !== undefined) {
-      ctx.effect(() => {
-        const timer = setInterval(() => { void this.runCycle() }, radar.refreshIntervalMs)
-        timer.unref()
-        void this.runCycle()
-        return () => { clearInterval(timer) }
-      }, 'scheduling-evidence: radar cycle')
+    ctx.effect(() => () => { this.stopTimer() }, 'scheduling-evidence: radar cycle')
+    ctx.inject(['settings'], (settingsCtx) => {
+      const scope = settingsCtx.settings.register(
+        SCHEDULING_EVIDENCE_SETTINGS_NAMESPACE,
+        SchedulingEvidenceSettingsSchema,
+        {
+          base: {
+            radarEnabled: this.config.radar !== undefined,
+            personalUseConsent: this.config.radar?.personalUseConsent ?? false,
+            python: this.config.python,
+          },
+        },
+      )
+      this.settings = scope
+      const unwatch = scope.watch(() => { this.schedule() })
+      this.schedule()
+      settingsCtx.effect(() => () => {
+        unwatch()
+        this.settings = undefined
+        this.schedule()
+      }, 'scheduling-evidence: settings')
+    })
+    // With a settings service the callback above schedules once the user's layer is known.
+    if (ctx.get('settings') === undefined) this.schedule()
+  }
+
+  /** The Python interpreter in force: the user's setting over the plugin config. */
+  private get python(): string {
+    return this.settings?.get().python ?? this.config.python
+  }
+
+  /**
+   * The Radar settings in force, or undefined while Radar is off. The user's
+   * settings layer over the plugin config; the default receipt path exists only
+   * when the owner has consented, so withdrawing consent stops collection.
+   */
+  private radarNow(): ResolvedRadarConfig | undefined {
+    const user = this.settings?.get()
+    const base = this.config.radar
+    if (!(user?.radarEnabled ?? base !== undefined)) return undefined
+    const consent = user?.personalUseConsent ?? base?.personalUseConsent ?? false
+    const resolved = base ?? resolveRadar({})
+    return {
+      ...resolved,
+      personalUseConsent: consent,
+      authorizationFile: resolved.authorizationFile ?? (consent ? join(this.config.stateRoot, 'radar-authorization.json') : undefined),
     }
+  }
+
+  private stopTimer(): void {
+    if (this.cycleTimer !== undefined) clearInterval(this.cycleTimer)
+    this.cycleTimer = undefined
+    this.scheduledFor = undefined
+  }
+
+  /** Start, restart, or stop the Radar timer so it matches the settings in force. */
+  private schedule(): void {
+    const radar = this.radarNow()
+    const key = radar === undefined ? undefined : JSON.stringify(radar)
+    if (this.disposed || key === this.scheduledFor) return
+    this.stopTimer()
+    if (radar === undefined) {
+      this.radarSnapshot = undefined
+      return
+    }
+    this.scheduledFor = key
+    this.cycleTimer = setInterval(() => { void this.runCycle() }, radar.refreshIntervalMs)
+    this.cycleTimer.unref()
+    void this.runCycle()
   }
 
   /**
@@ -245,7 +346,7 @@ export class SchedulingEvidenceGateway extends Service {
    * @returns the evidence, or undefined when Radar is not configured, nothing usable is stored, or no offer has a record.
    */
   evidenceFor(offers: readonly ModelExecutionOffer[], taskType: string): ModelAllocationEvidence | undefined {
-    const { radar } = this.config
+    const radar = this.radarNow()
     if (radar === undefined) return undefined
     return radarEvidence(this.radarSnapshot, offers, { taskType, declaration: radar.declaration, nowMs: Date.now() })
   }
@@ -260,7 +361,8 @@ export class SchedulingEvidenceGateway extends Service {
   }
 
   private async cycle(): Promise<void> {
-    const radar = this.config.radar as ResolvedRadarConfig
+    const radar = this.radarNow()
+    if (radar === undefined) return
     try {
       const receipt = radar.authorizationFile
       if (receipt !== undefined) {
@@ -347,6 +449,8 @@ export class SchedulingEvidenceGateway extends Service {
 
   /** Resolve the interpreter once and require Python 3.11 or newer. */
   private verifiedInterpreter(signal: AbortSignal | undefined): Promise<string> {
+    if (this.interpreterName !== this.python) this.interpreter = undefined
+    this.interpreterName = this.python
     this.interpreter ??= this.resolveInterpreter(signal).catch((error: unknown) => {
       this.interpreter = undefined
       throw error
@@ -355,11 +459,12 @@ export class SchedulingEvidenceGateway extends Service {
   }
 
   private async resolveInterpreter(signal: AbortSignal | undefined): Promise<string> {
+    const name = this.python
     let path: string
     try {
-      path = await this.ctx.subprocess.resolveExecutable(this.config.python, undefined, signal)
+      path = await this.ctx.subprocess.resolveExecutable(name, undefined, signal)
     } catch (cause) {
-      throw new SchedulingEvidenceError(`Python interpreter "${this.config.python}" was not found`, 'INTERPRETER_UNAVAILABLE', { cause })
+      throw new SchedulingEvidenceError(`Python interpreter "${name}" was not found`, 'INTERPRETER_UNAVAILABLE', { cause })
     }
     const run = await this.execute([path, '-c', 'import sys; sys.stdout.write("%d.%d" % sys.version_info[:2])'], signal)
     const match = /^(\d+)\.(\d+)$/u.exec(run.stdout)
@@ -427,6 +532,7 @@ export class SchedulingEvidenceGateway extends Service {
   /** Stop every call still running and wait for its process tree to exit. */
   private async stopAll(): Promise<void> {
     this.disposed = true
+    this.stopTimer()
     const handles = [...this.active]
     for (const handle of handles) handle.terminate()
     await Promise.all(handles.map(handle => handle.waitForExit()))

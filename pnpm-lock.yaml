@@ -6178,6 +6178,12 @@ importers:
       '@deepseek-ai/dsh-model-allocation':
         specifier: workspace:^
         version: link:../model-allocation
+      '@deepseek-ai/dsh-settings':
+        specifier: workspace:^
+        version: link:../../settings/settings
+      '@deepseek-ai/dsh-settings-file':
+        specifier: workspace:^
+        version: link:../../settings/settings-file
 
   packages/orchestration/model-worker:
     devDependencies:
@@ -6463,6 +6469,12 @@ importers:
       '@deepseek-ai/dsh-model-allocation-local':
         specifier: workspace:^
         version: link:../model-allocation-local
+      '@deepseek-ai/dsh-settings':
+        specifier: workspace:^
+        version: link:../../settings/settings
+      '@deepseek-ai/dsh-settings-file':
+        specifier: workspace:^
+        version: link:../../settings/settings-file
       '@deepseek-ai/dsh-subprocess':
         specifier: workspace:^
         version: link:../../subprocess/subprocess

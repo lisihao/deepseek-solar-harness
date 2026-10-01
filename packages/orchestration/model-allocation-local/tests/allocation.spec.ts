@@ -50,7 +50,8 @@ describe('subscription-first model allocation', () => {
 
   it.each(adaptiveCases)('uses $expectedModel for $name', async ({ preference, expectedModel, rationale }) => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'implement the repository change',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,
@@ -68,7 +69,8 @@ describe('subscription-first model allocation', () => {
 
   it('falls back to the existing scorer when an adaptive target model is absent', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'implement the repository change',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,
@@ -83,7 +85,8 @@ describe('subscription-first model allocation', () => {
 
   it('keeps an explicit Codex Sol planning gate ahead of adaptive execution hints', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'planning', role: 'architect', task: 'plan the implementation',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,
@@ -115,7 +118,8 @@ describe('subscription-first model allocation', () => {
 
   it('uses high-tier subscription planning and low-tier parallel workers', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const offers = [
       offer({ offerId: 'codex:luna', model: 'luna', tier: 'low', profile: { model: 'luna' } }),
       offer({ offerId: 'codex:sol', model: 'sol', tier: 'high', profile: { model: 'sol' } }),
@@ -129,7 +133,8 @@ describe('subscription-first model allocation', () => {
 
   it('makes Codex Sol gates and Luna workers explicit switchable preferences', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const offers = [
       offer({ offerId: 'codex:sol', model: 'gpt-5.6-sol', tier: 'high' }),
       offer({
@@ -167,7 +172,8 @@ describe('subscription-first model allocation', () => {
 
   it('offers Claude frontier planning and Sonnet execution as first-class switchable preferences', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const offers = [
       offer({ offerId: 'codex:sol', model: 'gpt-5.6-sol', tier: 'high' }),
       offer({ offerId: 'codex:terra', model: 'gpt-5.6-terra', tier: 'medium' }),
@@ -204,7 +210,8 @@ describe('subscription-first model allocation', () => {
 
   it('honors the requested model on an explicitly preferred operator', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
       preferredOperatorIds: ['codex'], preferredModel: 'gpt-5.6-sol', objective: 'quality',
@@ -221,7 +228,8 @@ describe('subscription-first model allocation', () => {
 
   it('fails loudly instead of selecting a sibling model when an explicit model is unavailable', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     expect(() => service.allocate({
       runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
       preferredOperatorIds: ['codex'], preferredModel: 'gpt-5.6-sol', objective: 'quality',
@@ -234,7 +242,8 @@ describe('subscription-first model allocation', () => {
 
   it('does not apply the preferred model pin to an admitted fallback operator', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
       preferredOperatorIds: ['claude-code'], fallbackOperatorIds: ['codex'], preferredModel: 'opus',
@@ -256,7 +265,8 @@ describe('subscription-first model allocation', () => {
 
   it('keeps product affinity when a remote Server namespaces the operator id', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'execution', role: 'implementation', task: 'implement the code change',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 2,
@@ -278,7 +288,8 @@ describe('subscription-first model allocation', () => {
 
   it('treats Spark as an independent pool and accelerates unused quota before reset', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const observedAt = '2026-08-21T00:00:00.000Z'
     const offers = [
       offer({ offerId: 'codex:terra', model: 'terra', quotaPool: { poolId: 'codex', displayName: 'Codex', models: ['terra'], meter: 'native-subscription', primary: { usedPercent: 60, resetsAt: 1_777_000_000 }, observedAt } }),
@@ -292,7 +303,8 @@ describe('subscription-first model allocation', () => {
 
   it('does not probe Spark when any simultaneous quota window is exhausted', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const observedAt = '2026-08-23T00:00:00.000Z'
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'write fixture',
@@ -316,7 +328,8 @@ describe('subscription-first model allocation', () => {
 
   it('protects Claude reserve when quota is unknown or reaches the admission stop line', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const claudeGuard = {
       unknownQuota: 'block' as const,
       protectedRemainingPercent: 20,
@@ -350,7 +363,8 @@ describe('subscription-first model allocation', () => {
 
   it('admits Claude above the stop line without spending its protected reserve near reset', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const now = 1_777_000_000
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'planning', role: 'architect', task: 'review architecture',
@@ -416,7 +430,8 @@ describe('subscription-first model allocation', () => {
     },
   ])('uses an admitted fallback for $name and records structured provenance', async ({ primary, reasonCode }) => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
       preferredOperatorIds: ['claude-code'], fallbackOperatorIds: ['codex'], preferredModel: 'claude-opus-5',
@@ -440,7 +455,8 @@ describe('subscription-first model allocation', () => {
 
   it('keeps a qualified but busy preferred operator pinned instead of using a fallback', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     expect(() => service.allocate({
       runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
       preferredOperatorIds: ['claude-code'], fallbackOperatorIds: ['codex'], preferredModel: 'opus',
@@ -459,7 +475,8 @@ describe('subscription-first model allocation', () => {
 
   it('uses a high-tier metered model only when no qualified high-tier subscription is available', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'plan', phase: 'planning', role: 'architect', task: 'plan the change',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,
@@ -475,7 +492,8 @@ describe('subscription-first model allocation', () => {
 
   it('reports temporary saturation instead of spending API capacity for a balanced run', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     expect(() => service.allocate({
       runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'write fixture',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 8,
@@ -490,7 +508,8 @@ describe('subscription-first model allocation', () => {
 
   it('recommends only currently free subscription slots rather than nominal provider capacity', async () => {
     const ctx = new Context()
-    const service = new SubscriptionFirstModelAllocation(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation)
+    const service = ctx.modelAllocation
     const result = await service.allocate({
       runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'write fixture',
       preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 8,
