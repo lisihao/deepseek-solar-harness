@@ -1,7 +1,7 @@
 /** Verify that Desktop's sealed core archives contain the current root build outputs (`lib/` and bundled `dist/`). */
 
 import { execFileSync } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,14 +23,38 @@ function assertInside(parent: string, child: string, label: string): void {
   }
 }
 
+/** Entry files the bundler rewrites on every build; `tsc -b` and content-hashed chunks are left untouched when unchanged. */
+const BUNDLER_ENTRIES = /^lib\/(?:index|client|invariant)\.js$/u
+
+/** Newest modification time under `directory`, or 0 when it does not exist. */
+async function newestModification(directory: string): Promise<number> {
+  let entries
+  try {
+    entries = await readdir(directory, { withFileTypes: true, recursive: true })
+  }
+  catch {
+    return 0
+  }
+  const times = await Promise.all(entries
+    .filter(entry => entry.isFile())
+    .map(async entry => (await stat(join(entry.parentPath, entry.name))).mtimeMs))
+  return Math.max(0, ...times)
+}
+
 /**
  * Compare every root-workspace Desktop archive with the current built package.
  * @param repositoryRoot - repository whose build output and Desktop inputs are checked.
+ * @param options - `requireBuildNewerThanSource` also rejects a built file that is older than the newest
+ *   file under the package's `src/`, which catches packing a `lib/` that was never rebuilt after an edit
+ *   (the archive then equals the stale `lib/`, so the content comparison passes). It defaults to off in
+ *   CI, where every build starts from a fresh checkout and restored build caches can keep old timestamps.
  * @returns counts of checked archives and generated files.
  */
 export async function verifyDesktopVendorBuild(
   repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..'),
+  options: { requireBuildNewerThanSource?: boolean } = {},
 ): Promise<{ archives: number; files: number }> {
+  const requireBuildNewerThanSource = options.requireBuildNewerThanSource ?? process.env.CI === undefined
   const vendorRoot = join(repositoryRoot, 'products/desktop/dsh-plugin-desktop/vendor')
   const manifest: unknown = JSON.parse(
     await readFile(join(vendorRoot, 'manifest.json'), 'utf8'),
@@ -72,6 +96,7 @@ export async function verifyDesktopVendorBuild(
       throw new Error(`verify-desktop-vendor-build: ${archivePath} contains no generated lib or dist files`)
     }
 
+    const newestSource = requireBuildNewerThanSource ? await newestModification(join(sourceRoot, 'src')) : 0
     for (const member of archiveMembers) {
       const sourceFile = resolve(sourceRoot, member)
       assertInside(sourceRoot, sourceFile, `archive member ${member}`)
@@ -84,6 +109,10 @@ export async function verifyDesktopVendorBuild(
       }
       catch (cause) {
         stale.push(`${sourceManifestPath} is missing built ${member}; run pnpm run build first (${String(cause)})`)
+        continue
+      }
+      if (BUNDLER_ENTRIES.test(member) && (await stat(sourceFile)).mtimeMs < newestSource) {
+        stale.push(`${sourceManifestPath} built ${member} is older than its src/; rebuild the package (pnpm run build, and pnpm run bundle in a client package) before packing`)
         continue
       }
       if (!sourceContents.equals(archivedContents)) {
