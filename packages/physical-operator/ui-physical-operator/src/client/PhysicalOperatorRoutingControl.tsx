@@ -616,8 +616,8 @@ export function PhysicalOperatorRoutingControl({
             onMouseDown={(event) => { event.stopPropagation() }}
           >
             <header>
-              <div><strong>协作方式</strong><small>先选择谁参与当前会话；需要时再调整 TaskGraph 高级调度。</small></div>
-              <div>
+              <div className="dshDesktopOperatorStrategyTitle"><strong>协作方式</strong><small>先选择谁参与当前会话；需要时再调整 TaskGraph 高级调度。</small></div>
+              <div className="dshDesktopOperatorStrategyActions">
                 <button
                   type="button"
                   aria-label="刷新模型与算子"
@@ -626,7 +626,7 @@ export function PhysicalOperatorRoutingControl({
                 >
                   {refreshing ? '刷新中…' : '刷新模型与算子'}
                 </button>
-                <button type="button" aria-label="关闭协作方式" disabled={locked || refreshing} onClick={() => { if (!locked && !refreshing) setOpen(false) }}>×</button>
+                <button type="button" className="dshDesktopOperatorStrategyClose" aria-label="关闭协作方式" disabled={locked || refreshing} onClick={() => { if (!locked && !refreshing) setOpen(false) }}>×</button>
               </div>
             </header>
             {refreshMessage !== undefined && <p role="status">{refreshMessage}</p>}
