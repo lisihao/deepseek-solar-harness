@@ -15,6 +15,18 @@ import ModelAllocationService, {
 
 export const name = 'model-allocation-local'
 
+export { canonicalCohortKey, rankComparablePublicEvidence } from './public-evidence.ts'
+export type {
+  PublicEvidenceAbstention,
+  PublicEvidenceCandidate,
+  PublicEvidenceCandidateSummary,
+  PublicEvidenceConflict,
+  PublicEvidenceIncompleteComparison,
+  PublicEvidenceMeasurement,
+  PublicEvidenceRanking,
+  PublicEvidenceReference,
+} from './public-evidence.ts'
+
 const RESET_ACCELERATION_SECONDS = 6 * 60 * 60
 
 function remaining(window: ModelQuotaWindow | undefined): number {

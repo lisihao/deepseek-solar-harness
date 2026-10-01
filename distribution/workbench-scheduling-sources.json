@@ -427,11 +427,17 @@
       },
       "baseline": "C",
       "action": "rewrite",
-      "destination": "packages/orchestration/scheduling-evidence/src (TypeScript)",
+      "destination": "packages/orchestration/model-allocation-local/src/public-evidence.ts",
       "license": "owner-authored (lisihao/Codex-Workbench), no LICENSE file in the repository",
-      "tests": [],
+      "tests": [
+        "tests/test_public_evidence_ranking.py",
+        "packages/orchestration/model-allocation-local/tests/public-evidence.spec.ts"
+      ],
       "knownGaps": [
-        "C differs from A and B; a3 was cut from 6c040a5e, older than B."
+        "C differs from A and B; a3 was cut from 6c040a5e, older than B.",
+        "Ported to TypeScript and checked against golden vectors generated from this file (tests/fixtures/public-evidence/golden.json records its sha256).",
+        "Deliberate differences: numeric-string values are rejected, duplicate candidate ids throw, str.casefold becomes toLowerCase, and str.strip becomes String.trim.",
+        "Not yet called by the allocator."
       ]
     },
     {
