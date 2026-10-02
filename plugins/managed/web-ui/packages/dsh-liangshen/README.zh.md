@@ -27,6 +27,8 @@ preset 在参考机制之上内置了额外保护，全部在 `agent.cordis.yml`
 
 已支持 plan mode：phase 1 会把 prompt sections 过滤为仅剩一行 `deployment:persona`，晋升后恢复全部 sections 并在 persona 末尾追加所选工作区路径，因此 Agent 明确自己的工作目录，plan-mode 的 `plan:policy` 也在晋升后的每一步都生效。
 
+被委派的子 Agent（`origin: subagent`）保留其父级过滤后的工具面。该工具面缺少 bootstrap shell 或某个通用工具时（例如只有结果工具的维护 worker），子 Agent 不受 phase 1 的工具隔离、prompt section 裁剪、消息过滤、输出预算封顶和 Code Mode 切换约束。顶层会话处于同样状态时仍会直接报错。
+
 ## 安装
 
 ```sh

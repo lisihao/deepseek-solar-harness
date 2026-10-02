@@ -1211,6 +1211,7 @@ function taskGraphDirective(preferredOperatorId: string | undefined): UserMessag
  * one bounded physical operator, and everything else stays on the current model.
  */
 async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, text: string): Promise<HostRoutingDecision> {
+  if (isMemoryRequest(text)) return primaryDecision(messageId, 'auto', '记忆写入由主模型通过 DSH 记忆工具完成，不委派给外部算子')
   if (isParallelCandidate(text)) {
     return {
       policy: 'auto',
@@ -1647,6 +1648,22 @@ function isDelegable(text: string): boolean {
   return value.length >= 12 || automaticOperator(value) !== undefined
 }
 
+/** How much of a request can carry the instruction; text after it is pasted material, not a command. */
+const MEMORY_INSTRUCTION_CHARS = 120
+
+/**
+ * Detect a request to save something into DSH memory. The memory tools exist only in this session, so an
+ * external operator cannot carry the request out; the pasted material that follows the instruction (a profile
+ * full of 研究/报告 words) must not decide the route.
+ * @param text - current user-request text.
+ * @returns whether the opening of the request asks to write to memory.
+ */
+export function isMemoryRequest(text: string): boolean {
+  const opening = text.trim().slice(0, MEMORY_INSTRUCTION_CHARS)
+  return /(?:写|存|保存|记|插入|加入|更新|添加)(?:到|入|进|为)?[^。！？\n]{0,12}(?:记忆|memory|mnemon)/iu.test(opening)
+    || /记住|remember (?:this|that|the following)/iu.test(opening)
+}
+
 /**
  * Detect work whose independent branches should remain visible to the durable Scheduler.
  * Length alone is not a signal: a long pasted document is one task.
@@ -1655,7 +1672,11 @@ function isDelegable(text: string): boolean {
  */
 export function isParallelCandidate(text: string): boolean {
   const value = text.trim()
-  return /(?:并行|多个(?:任务|方向|模块|子任务)|分别(?:分析|研究|实现|验证)|多(?:角色|智能体|代理))/u.test(value)
+  // 并行 alone is a topic word ("单请求序列内并行生成" in a pasted note); it only requests parallel work
+  // when it directs an action or names a work unit.
+  return /并行(?:地)?(?:安排|研究|分析|处理|执行|运行|推进|调研|实现|验证|开发|审查|评审|派发|开展|进行|完成|拆分|调用|跑)/u.test(value)
+    || /并行(?:的)?(?:任务|分支|子任务|工作流)/u.test(value)
+    || /(?:多个(?:任务|方向|模块|子任务)|分别(?:分析|研究|实现|验证)|多(?:角色|智能体|代理))/u.test(value)
     || /(?:跨(?:学科|模块|仓库)|全面(?:分析|研究|调研)|系统性(?:分析|研究))/u.test(value)
     || /(?:parallel|multi[- ](?:agent|stage|module)|independent branches)/iu.test(value)
 }

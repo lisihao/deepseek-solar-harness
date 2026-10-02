@@ -27,6 +27,8 @@ The preset ships with extra safeguards on top of the reference mechanism, all co
 
 Plan mode is supported: phase 1 filters the assembled prompt sections down to the one-line `deployment:persona`, and promotion restores all sections and appends the session's working directory to the persona, so the agent knows its workspace and the plan-mode `plan:policy` section takes effect for every step after promotion.
 
+A delegated child (`origin: subagent`) keeps the tool surface its parent filtered for it. When that surface lacks the bootstrap shell or a common tool, as with a result-tool-only maintenance worker, the child is exempt from the phase-1 quarantine, the prompt-section strip, the message filter, the output-budget cap, and the Code Mode switch. A top-level session in the same state still fails loudly.
+
 ## Install
 
 ```sh
