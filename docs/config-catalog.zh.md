@@ -1735,6 +1735,11 @@ export interface Config {
    * model that is cheap but takes half an hour does not win. Default 0.1; 0 ignores time.
    */
   readonly minuteValueUsd?: number
+  /**
+   * Fewest tasks a public measurement may rest on to take part in the cost-aware selection. A row with
+   * fewer is ignored, because a small sample cannot tell a cheap model from a good one. Default 30.
+   */
+  readonly costAwareMinSamples?: number
 }
 
 /** How public evidence takes part in allocation. */

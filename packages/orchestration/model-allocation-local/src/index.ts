@@ -47,6 +47,11 @@ export interface Config {
    * model that is cheap but takes half an hour does not win. Default 0.1; 0 ignores time.
    */
   readonly minuteValueUsd?: number
+  /**
+   * Fewest tasks a public measurement may rest on to take part in the cost-aware selection. A row with
+   * fewer is ignored, because a small sample cannot tell a cheap model from a good one. Default 30.
+   */
+  readonly costAwareMinSamples?: number
 }
 
 /** Settings namespace the owner edits in the settings document (`~/.dsh/settings.yaml`). */
@@ -334,6 +339,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
   private readonly configuredEvidenceMode: PublicEvidenceMode
   private readonly configuredCostAwareMode: CostAwareMode
   private readonly minuteValueUsd: number
+  private readonly costAwareMinSamples: number
   private settings: SettingsScope<ModelAllocationSettings> | undefined
 
   /** Settings accepted from the Loader; every field is optional. */
@@ -341,6 +347,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
     publicEvidence: z.union(['off', 'shadow', 'apply']),
     costAware: z.union(['off', 'shadow', 'apply']),
     minuteValueUsd: z.number().min(0),
+    costAwareMinSamples: z.number().step(1).min(1),
   })
 
   /**
@@ -353,6 +360,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
     this.configuredEvidenceMode = config.publicEvidence ?? 'shadow'
     this.configuredCostAwareMode = config.costAware ?? 'shadow'
     this.minuteValueUsd = config.minuteValueUsd ?? 0.1
+    this.costAwareMinSamples = config.costAwareMinSamples ?? 30
     ctx.inject(['settings'], (settingsCtx) => {
       this.settings = settingsCtx.settings.register(
         MODEL_ALLOCATION_SETTINGS_NAMESPACE,
@@ -458,7 +466,9 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
     const selection = costMode === 'off' || request.evidence === undefined || requiresHighTier
       || request.costAwareObjective === undefined
       ? undefined
-      : selectCostAware(baseline, costAwarePool, request.costAwareObjective, request.evidence, this.minuteValueUsd)
+      : selectCostAware(
+        baseline, costAwarePool, request.costAwareObjective, request.evidence, this.minuteValueUsd, this.costAwareMinSamples,
+      )
     const selectionOffer = selection === undefined
       ? undefined
       : costAwarePool.find(offer => offer.offerId === selection.selectedOfferId)
