@@ -346,7 +346,7 @@
     "dsh-packages/aegis-2.8.5-solar.1.tgz": "09376c24ef76ccdc927286187d09bb314161636e3aceb64d02dade8e233fad73",
     "dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz": "d23f6040772a38683fd01b9374e1283b9ac81a9cc95f8ac3c1826ea1e8ef2c0b",
     "dsh-packages/deepseek-ai-dsh-agent-0.1.0-rc.5.tgz": "a57cb4a5551f1cbf33df9e7f759d83c85bce2eb922108ea1f1b2211eb07b8b69",
-    "dsh-packages/deepseek-ai-dsh-subagent-0.1.0-rc.5.tgz": "012f4c8a27c2f6d5c6cb71db36eaf11ec38a4a7fc9a5771f94d4fbb5a0621cc8",
+    "dsh-packages/deepseek-ai-dsh-subagent-0.1.0-rc.5.tgz": "037adb30cbb0d177222c3fd3200f80564998a6e59a8bc72e975bf0d677511da9",
     "dsh-packages/deepseek-ai-dsh-subagent-in-process-driver-0.1.0-rc.5.tgz": "94c4d53cd039accd8def4d60a18b8a16b9d6745dd8b31c1f63d8902bc057faf1",
     "dsh-packages/deepseek-ai-dsh-api-remotes-0.1.0-rc.5.tgz": "7dc5876ae1df5fb1a2d5c286dfd4bd3c58e4dc9cf7b6ac47e85915778b347cff",
     "dsh-packages/deepseek-ai-dsh-app-boot-0.1.0-rc.5.tgz": "dd11f149c19baea42e4be8efdd419dc32627878edb9312a6e75659bc4ff20931",
