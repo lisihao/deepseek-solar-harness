@@ -4,7 +4,7 @@
 export type RemoteModulesSettingsKey =
   | 'tab' | 'title' | 'intro' | 'restartNotice' | 'loading' | 'unavailable' | 'readOnly'
   | 'add' | 'module' | 'delete' | 'id' | 'label' | 'url' | 'relayPort' | 'order'
-  | 'idHint' | 'urlHint' | 'relayPortHint' | 'orderHint'
+  | 'idHint' | 'urlHint' | 'relayPortHint' | 'orderHint' | 'direct' | 'directHint'
   | 'save' | 'saving' | 'discard' | 'reset' | 'saved' | 'saveFailed' | 'conflict'
   | 'required' | 'invalidId' | 'duplicateId' | 'invalidUrl'
   | 'invalidPort' | 'duplicatePort' | 'invalidOrder'
@@ -30,6 +30,8 @@ export const en: Record<RemoteModulesSettingsKey, string> = {
   urlHint: 'Full HTTP(S) page address, including an optional path.',
   relayPortHint: '0 chooses a temporary port. Use a stable unique port to preserve target login state.',
   orderHint: 'Smaller numbers appear first in the vertical sidebar list.',
+  direct: 'Open directly in the system browser',
+  directHint: 'No relay or embedded page. Use this for sites such as X that cannot sign in through the relay.',
   save: 'Save configuration',
   saving: 'Saving…',
   discard: 'Discard changes',
@@ -67,6 +69,8 @@ export const zh: Record<RemoteModulesSettingsKey, string> = {
   urlHint: '完整 HTTP(S) 网页地址，可包含页面路径。',
   relayPortHint: '填 0 使用临时端口；稳定且唯一的端口可保留目标应用登录状态。',
   orderHint: '数字越小，在纵向侧栏中越靠前。',
+  direct: '直接用系统浏览器打开',
+  directHint: '不使用中继，也不内嵌页面。适用于 X 这类无法通过中继登录的网站。',
   save: '保存配置',
   saving: '保存中…',
   discard: '放弃修改',

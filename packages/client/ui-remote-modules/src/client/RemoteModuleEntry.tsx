@@ -106,6 +106,22 @@ function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelP
 export function WebpageEntry({ wide, ...instance }: WebpageEntryProps) {
   const [open, setOpen] = useState(false)
   const close = useCallback(() => { setOpen(false) }, [])
+  if (instance.direct === true) {
+    return (
+      <Tooltip label={`${instance.label}（系统浏览器）`} delayMs={500} disabled={wide}>
+        <a
+          className={clsx(css.trigger, !wide && css.rail)}
+          aria-label={instance.label}
+          href={instance.targetUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <IconShareOutline16 size={wide ? 16 : 18} />
+          {wide && <span className={css.triggerLabel}>{instance.label}</span>}
+        </a>
+      </Tooltip>
+    )
+  }
   return (
     <>
       <Tooltip label={instance.label} delayMs={500} disabled={wide}>

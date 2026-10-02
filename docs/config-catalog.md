@@ -500,6 +500,11 @@ export interface WebpageInstanceConfig {
   relayPort: number
   /** Ascending order inside the vertical sidebar container. */
   order: number
+  /**
+   * When `true` no relay starts and the sidebar entry opens `url` directly in the system browser,
+   * for sites such as X whose login cannot work from the relay's origin. Absent means `false`.
+   */
+  direct?: boolean
 }
 ```
 

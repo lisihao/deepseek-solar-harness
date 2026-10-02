@@ -55,7 +55,7 @@ export function RemoteModulesSettings({ scope, t }: RemoteModulesSettingsProps) 
   const validation = validateRemoteModuleDrafts(rows)
   const conflict = dirty && sourceRevision !== undefined && snapshot.revision !== undefined
     && sourceRevision !== snapshot.revision && !saving
-  const mutate = (rowKey: string, field: RemoteModuleDraftField, value: string): void => {
+  const mutate = (rowKey: string, field: RemoteModuleDraftField | 'direct', value: string | boolean): void => {
     setRows(current => current.map(row => row.key === rowKey ? { ...row, [field]: value } : row))
     setDirty(true)
     setSaved(false)
@@ -119,7 +119,7 @@ export function RemoteModulesSettings({ scope, t }: RemoteModulesSettingsProps) 
             const number = rows.length + 1
             setRows(current => [...current, {
               key: key(), id: `web-page-${String(number)}`, label: `Web page ${String(number)}`,
-              url: 'http://127.0.0.1:3000/', relayPort: '0', order: String(number * 100),
+              url: 'http://127.0.0.1:3000/', relayPort: '0', order: String(number * 100), direct: false,
             }])
             setDirty(true)
             setSaved(false)
@@ -150,7 +150,7 @@ export function RemoteModulesSettings({ scope, t }: RemoteModulesSettingsProps) 
                   value={row[name]}
                   inputMode={numeric ? 'numeric' : undefined}
                   spellCheck={false}
-                  disabled={!snapshot.writable || saving || conflict}
+                  disabled={!snapshot.writable || saving || conflict || (name === 'relayPort' && row.direct)}
                   aria-describedby={hintId}
                   aria-invalid={error === undefined ? undefined : true}
                   onChange={(event) => { mutate(row.key, name, event.target.value) }}
@@ -182,6 +182,16 @@ export function RemoteModulesSettings({ scope, t }: RemoteModulesSettingsProps) 
                 {field('relayPort', 'relayPort', 'relayPortHint', true)}
                 {field('order', 'order', 'orderHint', true)}
               </div>
+              <label className={css.direct}>
+                <input
+                  type="checkbox"
+                  checked={row.direct}
+                  disabled={!snapshot.writable || saving || conflict}
+                  onChange={(event) => { mutate(row.key, 'direct', event.target.checked) }}
+                />
+                <span>{t('direct')}</span>
+                <small className={css.hint}>{t('directHint')}</small>
+              </label>
             </section>
           )
         })}
