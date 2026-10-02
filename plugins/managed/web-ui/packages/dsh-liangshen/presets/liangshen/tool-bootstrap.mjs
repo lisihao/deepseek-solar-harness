@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 /**
  * Keep the first model request on a minimal-shaped input surface, then expose
  * the full preset catalog once the session is safely anchored.
@@ -153,6 +155,7 @@ function stateFor(session) {
       deferredSteps: 0,
       presentationApplied: false,
       exempt: false,
+      autoContinued: false,
     }
     promotionBySession.set(session, state)
   }
@@ -264,6 +267,34 @@ function withWorkspaceLine(assembly, agent) {
   }
 }
 
+/**
+ * Text of the follow-up sent when the capped first turn is cut off. `undefined` disables the follow-up.
+ */
+function autoContinueText(value) {
+  if (value === undefined || value === false) return undefined
+  if (value === true) return 'continue'
+  if (typeof value === 'string' && value.length > 0) return value
+  throw new TypeError(`${name}: autoContinueOnMaxTokens must be a boolean or a non-empty string`)
+}
+
+/** Queue the follow-up user message as the next turn. */
+function sendContinuation(agent, text) {
+  agent.followup({
+    id: randomUUID(),
+    role: 'user',
+    content: [{ type: 'text', text }],
+    source: { kind: 'user' },
+  })
+}
+
+/**
+ * Whether the event ends a turn at the output-token ceiling. Phase 1 caps the output budget, so a long first
+ * request can spend all of it on reasoning and end the turn with no answer.
+ */
+function endedAtMaxTokens(event) {
+  return event.type === 'turn/end' && event.data?.reason?.kind === 'max-tokens'
+}
+
 /** Register the per-session bootstrap quarantine and promotion policy. */
 export function apply(ctx, config) {
   const commonTools = stringList(config.commonTools, 'commonTools')
@@ -282,6 +313,7 @@ export function apply(ctx, config) {
     promoteAfterFirstResponse: config.promoteAfterFirstResponse === true,
     maxBootstrapSteps: integerAtLeast(config.maxBootstrapSteps ?? 4, 'maxBootstrapSteps', 1),
     deferredGraceSteps: integerAtLeast(config.deferredGraceSteps ?? 0, 'deferredGraceSteps', 0),
+    autoContinueText: autoContinueText(config.autoContinueOnMaxTokens),
     promotedPresentation: presentation,
     bootstrapMaxTokens,
   }
@@ -301,14 +333,21 @@ export function apply(ctx, config) {
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'step/end' && event.type !== 'turn/end') return
     const state = stateFor(session)
+    const capped = !state.promoted && !state.exempt
     if (!state.promoted) {
       scanEvents(state, session)
       if (decidePromotion(state, policy)) state.promoted = true
     }
-    if (state.promoted && !state.exempt) {
-      const agent = agentBySession.get(session)
-      if (agent !== undefined) applyPresentation(agent, state, policy)
+    const agent = agentBySession.get(session)
+    // The cut-off first turn never answered. Release the cap and ask once more, so the user does not have to.
+    if (agent !== undefined && capped && policy.autoContinueText !== undefined && policy.bootstrapMaxTokens !== undefined
+      && !state.autoContinued && !isSubagentSession(agent) && endedAtMaxTokens(event)) {
+      state.autoContinued = true
+      state.promoted = true
+      // After the listener returns: the session is still appending this very event.
+      setTimeout(() => sendContinuation(agent, policy.autoContinueText), 0)
     }
+    if (state.promoted && !state.exempt && agent !== undefined) applyPresentation(agent, state, policy)
   })
 
   // `prepend: true` puts both filters at the outermost position of their
