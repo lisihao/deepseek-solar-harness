@@ -157,4 +157,19 @@ describe('Web page instance UI', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog', { name: 'Research Workspace' })).toBeNull()
   })
+
+  it('renders a direct instance as a system-browser link without a dialog', () => {
+    const direct: WebpageInstanceView = {
+      id: 'x', label: 'X', targetUrl: 'https://x.com/', embedUrl: 'https://x.com/', order: 50, direct: true,
+    }
+    const { rerender } = render(<WebpageEntry useSessions={vi.fn()} useWorkspaces={vi.fn()} wide {...direct} />)
+    const link = screen.getByRole('link', { name: 'X' })
+    expect(link.getAttribute('href')).toBe('https://x.com/')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.textContent).toBe('X')
+    fireEvent.click(link)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    rerender(<WebpageEntry useSessions={vi.fn()} useWorkspaces={vi.fn()} wide={false} {...direct} />)
+    expect(screen.getByRole('link', { name: 'X' }).textContent).toBe('')
+  })
 })

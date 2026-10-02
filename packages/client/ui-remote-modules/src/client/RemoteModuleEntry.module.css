@@ -32,6 +32,7 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
+  text-decoration: none;
 }
 .trigger:hover,
 .configError:hover { background: var(--dsw-alias-interactive-bg-hover); }

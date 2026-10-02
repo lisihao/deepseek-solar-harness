@@ -39,6 +39,7 @@ After the plugin starts, open **Settings → Plugins → Remote Modules** to add
 | `instances[].url` | Full HTTP(S) target page. Paths, queries, and fragments are supported; embedded credentials and active URL schemes are rejected. |
 | `instances[].relayPort` | Loopback relay port. `0` selects an ephemeral port; use a stable non-zero port when the target stores login state by origin. |
 | `instances[].order` | Integer vertical order; defaults to `100`. |
+| `instances[].direct` | `true` starts no relay and makes the sidebar entry open `url` directly in the system browser, for sites such as X that cannot sign in from the relay's origin. Defaults to `false`; a direct instance's `relayPort` is ignored and may repeat another instance's port. |
 
 ## Runtime boundary
 

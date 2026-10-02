@@ -237,3 +237,35 @@ describe('fixed-target Web page relay', () => {
     ])
   })
 })
+
+describe('direct instances', () => {
+  it('publishes a direct instance without starting a relay or contacting the target, and lets it share a port', async () => {
+    let hits = 0
+    const origin = await target((_req, res) => { hits += 1; res.end('target') })
+    const app = await harness({ instances: [
+      { id: 'x', label: 'X', url: 'https://x.com/', relayPort: 39191, order: 10, direct: true },
+      { id: 'workspace', label: 'Workspace', url: origin, relayPort: 39191, order: 20, direct: false },
+    ] })
+    const roster = await (await fetch(`${app.base}/remote-webpages/v1/instances`)).json() as {
+      instances: Array<{ id: string; targetUrl: string; embedUrl: string; direct?: boolean }>
+    }
+    expect(roster.instances[0]).toEqual({ id: 'x', label: 'X', targetUrl: 'https://x.com/', embedUrl: 'https://x.com/', order: 10, direct: true })
+    expect(roster.instances[1]!.direct).toBeUndefined()
+    expect(roster.instances[1]!.embedUrl).toMatch(/^http:\/\/localhost:39191\//)
+    expect(hits).toBe(0)
+  })
+
+  it('validates the flag at the settings and roster wire', () => {
+    const valid = { id: 'x', label: 'X', url: 'https://x.com/', relayPort: 0, order: 1 }
+    expect(parseRemoteModulesConfig({ instances: [{ ...valid, direct: true }] })?.instances[0]).toEqual({ ...valid, direct: true })
+    expect(parseRemoteModulesConfig({ instances: [{ ...valid, direct: false }] })?.instances[0]).toEqual(valid)
+    expect(parseRemoteModulesConfig({ instances: [{ ...valid, direct: 'yes' }] })).toBeUndefined()
+    expect(parseRemoteModulesConfig({ instances: [
+      { ...valid, relayPort: 39192, direct: true }, { ...valid, id: 'y', relayPort: 39192 },
+    ] })?.instances).toHaveLength(2)
+    const view = { id: 'x', label: 'X', targetUrl: 'https://x.com/', embedUrl: 'https://x.com/', order: 1 }
+    expect(parseWebpageInstances({ instances: [{ ...view, direct: true }] })[0]!.direct).toBe(true)
+    expect(parseWebpageInstances({ instances: [{ ...view, direct: false }] })[0]!.direct).toBeUndefined()
+    expect(() => parseWebpageInstances({ instances: [{ ...view, direct: 1 }] })).toThrow(/invalid instance/)
+  })
+})

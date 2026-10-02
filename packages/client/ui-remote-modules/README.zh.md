@@ -39,6 +39,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 | `instances[].url` | 完整 HTTP(S) 目标网页；支持路径、查询和片段，拒绝内嵌凭据及主动 URL scheme。 |
 | `instances[].relayPort` | 回环中继端口；`0` 使用临时端口。如果目标按 Origin 保存登录状态，应配置稳定的非零端口。 |
 | `instances[].order` | 纵向整数顺序，默认 `100`。 |
+| `instances[].direct` | `true` 时不启动中继，侧栏条目直接用系统浏览器打开 `url`，适用于 X 这类无法从中继 origin 登录的站点。默认 `false`；直接实例的 `relayPort` 会被忽略，也可以与其他实例的端口重复。 |
 
 ## 运行边界
 
