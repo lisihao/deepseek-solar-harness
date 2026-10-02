@@ -62,6 +62,6 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 - **受信任配置**——目标 URL 是部署者控制的配置。如果移除某个不可信站点的反嵌入策略会违背其安全意图，就不要把实例指向该站点。
 - **仅限本机显示**——中继地址绑定 `127.0.0.1`，浏览器必须与 Harness 运行在同一台 Mac 上。远程浏览器发布需要另行设计带认证的权限边界。
 - **兼容性归目标应用所有**——硬编码绝对 API origin、Service Worker、OAuth 重定向白名单和第三方 Cookie 策略仍是被嵌入应用的属性，可能需要目标侧部署配置；X 这类大型单页应用即使页面已由中继送达，也可能在 iframe 中显示空白，或因 CORS 使 API 请求失败。这类站点请标记 `direct: true`：Desktop 会在应用内的独立页面中打开它，站点在自己的 origin 下使用自己保存的登录（见下）。对话框里的“用系统浏览器打开原网址”是备选。
-- **直连页面是访客，不是 DSH 页面**——`direct` 实例是放在以模块命名的持久分区里的 Electron `<webview>`，其 Cookie 在重启后保留，且不与 DSH 或其他模块共享。Desktop 窗口只允许不含凭据的 `http(s)` 页面、并且在这类分区中使用 `<webview>`，会去掉任何 preload、Node.js 集成，以及对沙箱和 web security 的覆盖。网页弹窗（用 Google 或 Apple 登录）以无特权窗口在同一分区中打开；邮件链接交给系统处理。
+- **直连页面是访客，不是 DSH 页面**——`direct` 实例是放在以模块命名的持久分区里的 Electron `<webview>`，其 Cookie 在重启后保留，且不与 DSH 或其他模块共享。Desktop 窗口只允许不含凭据的 `http(s)` 页面、并且在这类分区中使用 `<webview>`，会去掉任何 preload、Node.js 集成，以及对沙箱和 web security 的覆盖。网页弹窗（用 Google 或 Apple 登录）以无特权窗口在同一分区中打开；邮件链接交给系统处理。该分区的 user agent 会去掉 `Electron/…` 和 `DSHDesktop/…` 标记，因为 X 这类登录页会把 Electron 的 user agent 当作嵌入或自动化浏览器而卡住。
 - **SSH 生命周期归部署所有**——本包不会创建、认证或重连 SSH 隧道。
 - **配置重启后生效**——设置编辑器会立即保存，但目标网页和中继监听端口只在 Harness 重启后切换。

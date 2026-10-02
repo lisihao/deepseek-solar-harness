@@ -1,14 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents, WebPreferences } from 'electron'
 
-const electron = vi.hoisted(() => ({ openExternal: vi.fn(() => Promise.resolve()) }))
-vi.mock('electron', () => ({ shell: { openExternal: electron.openExternal } }))
+const electron = vi.hoisted(() => {
+  const guestSession = {
+    getUserAgent: vi.fn(() => 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 DSHDesktop/3.33.0 Chrome/150.0.0.0 Electron/43.4.0 Safari/537.36'),
+    setUserAgent: vi.fn(),
+  }
+  return {
+    openExternal: vi.fn(() => Promise.resolve()),
+    guestSession,
+    fromPartition: vi.fn(() => guestSession),
+  }
+})
+vi.mock('electron', () => ({
+  shell: { openExternal: electron.openExternal },
+  session: { fromPartition: electron.fromPartition },
+}))
 
 const {
-  EMBEDDED_WEBVIEW_PARTITION_PREFIX, authorizeEmbeddedWebview, guestPopupDecision, installEmbeddedWebviewGuard,
+  EMBEDDED_WEBVIEW_PARTITION_PREFIX, authorizeEmbeddedWebview, browserUserAgent, guestPopupDecision,
+  installEmbeddedWebviewGuard,
 } = await import('../src/embedded-webview.ts')
 
-beforeEach(() => { electron.openExternal.mockClear() })
+beforeEach(() => {
+  electron.openExternal.mockClear()
+  electron.fromPartition.mockClear()
+  electron.guestSession.setUserAgent.mockClear()
+})
+
+describe('browserUserAgent', () => {
+  it('drops the Electron and product tokens and keeps the Chromium ones', () => {
+    expect(browserUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) DSHDesktop/3.33.0 Chrome/150.0.7871.224 Electron/43.4.0 Safari/537.36'))
+      .toBe('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.224 Safari/537.36')
+    expect(browserUserAgent('Mozilla/5.0 Chrome/150 Safari/537.36')).toBe('Mozilla/5.0 Chrome/150 Safari/537.36')
+  })
+})
 
 describe('authorizeEmbeddedWebview', () => {
   const partition = `${EMBEDDED_WEBVIEW_PARTITION_PREFIX}x`
@@ -74,9 +100,14 @@ describe('installEmbeddedWebviewGuard', () => {
     attach(refusedNoSrc, {}, {} as { src: string })
     expect(refusedNoSrc.preventDefault).toHaveBeenCalledOnce()
     expect(refusedNoPartition.preventDefault).toHaveBeenCalledOnce()
+    expect(electron.fromPartition).not.toHaveBeenCalled()
     const allowed = { preventDefault: vi.fn() }
     attach(allowed, {}, { src: 'https://x.com/', partition: `${EMBEDDED_WEBVIEW_PARTITION_PREFIX}x` })
     expect(allowed.preventDefault).not.toHaveBeenCalled()
+    expect(electron.fromPartition).toHaveBeenCalledWith(`${EMBEDDED_WEBVIEW_PARTITION_PREFIX}x`)
+    expect(electron.guestSession.setUserAgent).toHaveBeenCalledWith(
+      'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36',
+    )
   })
 
   it('applies the popup policy to the attached guest', async () => {
