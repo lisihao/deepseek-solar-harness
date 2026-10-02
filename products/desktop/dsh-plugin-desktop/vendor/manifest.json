@@ -432,7 +432,7 @@
     "dsh-packages/dsh-better-sidebar-0.15.0-solar.1.tgz": "e5ef31ca74a46a4d7e023fdc5f2dafd37aa458622f0db4824ad0393819e256fc",
     "dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz": "3e8676c05e214c4f42600efb47fa304f2b6cf58f62ae00788984bc8904d27265",
     "dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz": "ef0859804a4df7b0d7e765d57604874ec4b4747a0681eb721785c194c3fe32c1",
-    "dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz": "098087f403803b3e1edc4ac8ef0c2c0fa65776c1a3a5e2e218208448d08773f8",
+    "dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz": "a969a7819a5a1aada88a9cc3f55a8b069cd016b3f5a04d04459f2919b709b58f",
     "dsh-packages/dsh-synapse-0.4.3.tgz": "3422bc42735db87f9adf486c47a73ae907aba191a862a8984182bf71a05c4a28",
     "dsh-packages/dsh-web-billing-1.1.7.tgz": "df8547a7e2c55fc0f1aa44cb5061dce137513c6b1b8d52a6886e0b1405b9f7fe",
     "dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz": "cd7da2553f46c787b79dbc0db2f3b9cadd80a48d2651fac81da504040ee4f602",
@@ -442,7 +442,7 @@
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5-solar.1.tgz": "b777b8d0cd76851dac5ef71679d3e9b2ef5eaecc517d8cd49f092b0ac7a6e389",
     "dsh-packages/omdsh-dev-dsh-genui-0.9.1-solar.2.tgz": "abd88cb6c749ffecc3748406392bb86c8194aac379c99cc5c8475f06b2eb634e",
     "dsh-packages/omdsh-dev-dsh-plugin-check-0.1.0.tgz": "420df51c216c2ebba42384ad65228e45f4d0961876759790355cfad5624a06e9",
-    "dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz": "80755b4dd17400ca4e63d69abde591fcea016c62e39b127a48ef962926bbf940",
+    "dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz": "52ae8e97702669c96fbd6335ef510c45b23e1706223d9f320ddaeee19313b657",
     "dsh-packages/deepseek-ai-dsh-client-ui-model-selection-0.1.0-rc.5.tgz": "5f30f57fb62b986947d5a2214d6b2571149a797880c6e720779ee710481d3150",
     "dsh-packages/deepseek-ai-dsh-model-catalog-local-0.1.0-rc.5.tgz": "3f5efb4db31e48411c0e379b126fe19b4394d925c54ff94beae40ea74db124d2"
   }

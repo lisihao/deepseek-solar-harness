@@ -59,7 +59,7 @@ Beyond the panel, the Node half registers 4 agent tools (`defineTool`, writing t
 | `plugin_search` | `query?`, `source?`, `refresh?` | Search the source set (cached enumeration); default is the hub catalog (configured `index.json`); passing a new index JSON file/URL via `source` probes it lazily and remembers it |
 | `plugin_install` | `source` | npm package name / GitHub project (`https://github.com/o/r`, `github.com/o/r`, `github:o/r`; URLs normalized automatically): declares `dsh.bundle` → `pnpm add` + layer stack (takes effect on restart); plain cordis package → `pnpm add` + insert row (**mounts live**); a failed install reports the error explicitly, never fakes success |
 | `plugin_uninstall` | `id` | Deletes the insert row (live) or the bundle dependency (takes effect on restart); the manifest entry is kept so it can be reinstalled |
-| `plugin_status` | `id?` | Without args, lists installed plugins; with an id, queries that one (including the TOFU-resolved ref) |
+| `plugin_status` | `id?` | Without args, lists installed plugins; with an id, queries that one (including the TOFU-resolved ref); plugins built into the application, such as Mnemon, are not listed |
 
 Discovery-layer storage (protocol in [plugin-discovery-design](../../../docs/plugin-discovery-design.md)):
 
