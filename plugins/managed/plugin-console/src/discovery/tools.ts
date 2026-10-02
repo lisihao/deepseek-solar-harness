@@ -267,7 +267,8 @@ export function createPluginTools(deps: PluginToolDeps): ToolDefinition[] {
       name: 'plugin_status',
       description: 'Show installed DSH plugins. Lists every installed plugin: insert rows (from the profile '
         + 'cordis.patch.yml, live-mounted non-bundle plugins) plus profile bundle layers (from the web '
-        + 'profile manifest dsh.profile.bundles), each with its TOFU-resolved ref from lock.yml.',
+        + 'profile manifest dsh.profile.bundles), each with its TOFU-resolved ref from lock.yml. Plugins built '
+        + 'into the application (for example Mnemon, whose mnemon_* tools are always present) are not listed.',
       parameters: {
         id: { type: 'string', description: 'Plugin id or package name to inspect.' },
       },
@@ -325,7 +326,7 @@ export function createPluginTools(deps: PluginToolDeps): ToolDefinition[] {
         }
         if (args.id !== undefined && args.id !== '') {
           const hit = rows.filter((p) => matchesId(p.canonical, args.id))
-          if (hit.length === 0) throw new Error(`plugin_status: "${args.id}" is not installed`)
+          if (hit.length === 0) throw new Error(`plugin_status: "${args.id}" is not installed in this profile (plugins built into the application are not listed here)`)
           return { plugins: hit }
         }
         return { plugins: rows }

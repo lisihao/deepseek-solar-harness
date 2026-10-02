@@ -7606,14 +7606,14 @@ __metadata:
 
 "@vlln/plugin-console@file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
   version: 0.1.1-solar.1
-  resolution: "@vlln/plugin-console@file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz#vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz::hash=36d842&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
+  resolution: "@vlln/plugin-console@file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz#vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz::hash=93a785&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
   dependencies:
     yaml: "npm:^2.4.0"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     react: ^18.2.0
-  checksum: 10c0/73e7744fc57f9ebeb96a7ec842a018e094f049c7e5cf27ab3c8d52af08ba3dc8608f77fec98812372f84cd62d4544d01dcec7893ba801c459c15448a4ef56f1b
+  checksum: 10c0/57a775725951cda73f4d0b0f853fdb34e675bd43fd7567592ff033dcb39da6d00aabb3edfdfb37385d3be64aef33b6ea6ffa42a954d666f0dccba3432476847d
   languageName: node
   linkType: hard
 
@@ -9281,7 +9281,7 @@ __metadata:
 
 "dsh-mnemon@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.2.15-solar.1
-  resolution: "dsh-mnemon@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz::hash=d2c26d&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "dsh-mnemon@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz::hash=7bc8d1&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     fflate: "npm:^0.8.3"
     markdown-to-jsx: "npm:^7.7.17"
@@ -9290,7 +9290,7 @@ __metadata:
     "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.6 || ^0.1.1-rc.1
     react: ^18.2.0
     react-dom: ^18.2.0
-  checksum: 10c0/bac1ebceb89eea50ac80d4df2dc0cecf74dc811ba0839528957c4c76279eb0d2196b52ea611e6e4532f2934cdc958ab84425538ef024f6877aa37926a545d989
+  checksum: 10c0/66d7c844adf7e3b90c1e17c9616ea702ea13d235c04b78da22ffc4a58994300b28ec8922523b5f7821776df4e824335dfb21f389d8c0fb2b5d96dbb316325f73
   languageName: node
   linkType: hard
 
