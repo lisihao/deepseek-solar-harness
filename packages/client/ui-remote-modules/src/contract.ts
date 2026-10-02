@@ -19,8 +19,9 @@ export interface WebpageInstanceConfig {
   /** Ascending order inside the vertical sidebar container. */
   order: number
   /**
-   * When `true` no relay starts and the sidebar entry opens `url` directly in the system browser,
-   * for sites such as X whose login cannot work from the relay's origin. Absent means `false`.
+   * When `true` no relay starts and `url` is loaded directly: in Desktop as an in-app `<webview>` pane
+   * with its own saved login, elsewhere in the system browser. For sites such as X whose login cannot
+   * work from the relay's origin. Absent means `false`.
    */
   direct?: boolean
 }
@@ -43,7 +44,7 @@ export interface WebpageInstanceView {
   embedUrl: string
   /** Ascending order inside the plugin's vertical sidebar container. */
   order: number
-  /** `true` when the entry opens `targetUrl` in the system browser and no relay exists. */
+  /** `true` when no relay exists and the entry loads `targetUrl` directly (Desktop pane or system browser). */
   direct?: boolean
 }
 

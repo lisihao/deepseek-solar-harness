@@ -10,7 +10,9 @@ import { SettingsScopeBinder } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply, inject, SETTINGS_LOCALE_NAMESPACE } from '../src/client/index.ts'
-import { alignLoopbackEmbedUrl, WebpageEntry, WebpageModulesSidebar } from '../src/client/RemoteModuleEntry.tsx'
+import {
+  alignLoopbackEmbedUrl, supportsEmbeddedWebview, WebpageEntry, WebpageModulesSidebar,
+} from '../src/client/RemoteModuleEntry.tsx'
 import { createWebpageModulesStore } from '../src/client/store.ts'
 import type { WebpageInstanceView } from '../src/contract.ts'
 
@@ -171,5 +173,46 @@ describe('Web page instance UI', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     rerender(<WebpageEntry useSessions={vi.fn()} useWorkspaces={vi.fn()} wide={false} {...direct} />)
     expect(screen.getByRole('link', { name: 'X' }).textContent).toBe('')
+  })
+
+  describe('embedded webview pane', () => {
+    const direct: WebpageInstanceView = {
+      id: 'x', label: 'X', targetUrl: 'https://x.com/', embedUrl: 'https://x.com/', order: 50, direct: true,
+    }
+    const reload = vi.fn()
+
+    function desktopWebview(): void {
+      Object.defineProperty(HTMLUnknownElement.prototype, 'reload', { configurable: true, value: reload })
+    }
+
+    afterEach(() => {
+      Reflect.deleteProperty(HTMLUnknownElement.prototype, 'reload')
+      reload.mockClear()
+    })
+
+    it('detects Electron webview support by its reload method', () => {
+      expect(supportsEmbeddedWebview()).toBe(false)
+      desktopWebview()
+      expect(supportsEmbeddedWebview()).toBe(true)
+    })
+
+    it('opens a direct module in an in-app webview pane with its own persistent partition and no relay', () => {
+      desktopWebview()
+      render(<WebpageEntry useSessions={vi.fn()} useWorkspaces={vi.fn()} wide {...direct} />)
+      expect(screen.queryByRole('link', { name: 'X' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'X' }))
+      const pane = screen.getByTestId('remote-webpage-webview-x')
+      expect(pane.tagName).toBe('WEBVIEW')
+      expect(pane.getAttribute('src')).toBe('https://x.com/')
+      expect(pane.getAttribute('partition')).toBe('persist:dsh-remote-x')
+      expect(pane.getAttribute('allowpopups')).toBe('true')
+      expect(screen.queryByTestId('remote-webpage-frame-x')).toBeNull()
+      expect(screen.queryByRole('link', { name: '在新窗口打开 X' })).toBeNull()
+      expect(screen.getByRole('link', { name: '用系统浏览器打开 X 的原网址' }).getAttribute('href')).toBe('https://x.com/')
+      fireEvent.click(screen.getByRole('button', { name: '重新加载 X' }))
+      expect(reload).toHaveBeenCalledOnce()
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(screen.queryByRole('dialog', { name: 'X' })).toBeNull()
+    })
   })
 })

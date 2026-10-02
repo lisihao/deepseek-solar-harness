@@ -39,7 +39,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 | `instances[].url` | 完整 HTTP(S) 目标网页；支持路径、查询和片段，拒绝内嵌凭据及主动 URL scheme。 |
 | `instances[].relayPort` | 回环中继端口；`0` 使用临时端口。如果目标按 Origin 保存登录状态，应配置稳定的非零端口。 |
 | `instances[].order` | 纵向整数顺序，默认 `100`。 |
-| `instances[].direct` | `true` 时不启动中继，侧栏条目直接用系统浏览器打开 `url`，适用于 X 这类无法从中继 origin 登录的站点。默认 `false`；直接实例的 `relayPort` 会被忽略，也可以与其他实例的端口重复。 |
+| `instances[].direct` | `true` 时不启动中继，直接加载 `url`，适用于 X 这类无法从中继 origin 登录的站点。Desktop 在应用内的独立页面（Electron `<webview>`）中打开，并保存该站点自己的登录；网页版则用系统浏览器打开。默认 `false`；直接实例的 `relayPort` 会被忽略，也可以与其他实例的端口重复。 |
 
 ## 运行边界
 
@@ -61,6 +61,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 
 - **受信任配置**——目标 URL 是部署者控制的配置。如果移除某个不可信站点的反嵌入策略会违背其安全意图，就不要把实例指向该站点。
 - **仅限本机显示**——中继地址绑定 `127.0.0.1`，浏览器必须与 Harness 运行在同一台 Mac 上。远程浏览器发布需要另行设计带认证的权限边界。
-- **兼容性归目标应用所有**——硬编码绝对 API origin、Service Worker、OAuth 重定向白名单和第三方 Cookie 策略仍是被嵌入应用的属性，可能需要目标侧部署配置；X 这类大型单页应用即使页面已由中继送达，也可能在 iframe 中显示空白，或因 CORS 使 API 请求失败。这类站点请使用对话框里的“用系统浏览器打开原网址”：它直接打开配置的 `url`，不经过中继，站点在自己的 origin 下使用自己的登录。
+- **兼容性归目标应用所有**——硬编码绝对 API origin、Service Worker、OAuth 重定向白名单和第三方 Cookie 策略仍是被嵌入应用的属性，可能需要目标侧部署配置；X 这类大型单页应用即使页面已由中继送达，也可能在 iframe 中显示空白，或因 CORS 使 API 请求失败。这类站点请标记 `direct: true`：Desktop 会在应用内的独立页面中打开它，站点在自己的 origin 下使用自己保存的登录（见下）。对话框里的“用系统浏览器打开原网址”是备选。
+- **直连页面是访客，不是 DSH 页面**——`direct` 实例是放在以模块命名的持久分区里的 Electron `<webview>`，其 Cookie 在重启后保留，且不与 DSH 或其他模块共享。Desktop 窗口只允许不含凭据的 `http(s)` 页面、并且在这类分区中使用 `<webview>`，会去掉任何 preload、Node.js 集成，以及对沙箱和 web security 的覆盖。网页弹窗（用 Google 或 Apple 登录）以无特权窗口在同一分区中打开；邮件链接交给系统处理。
 - **SSH 生命周期归部署所有**——本包不会创建、认证或重连 SSH 隧道。
 - **配置重启后生效**——设置编辑器会立即保存，但目标网页和中继监听端口只在 Harness 重启后切换。
