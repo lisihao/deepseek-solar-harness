@@ -11,7 +11,7 @@ export type Difficulty = 'easy' | 'normal' | 'hard'
 const LADDER: readonly Difficulty[] = ['easy', 'normal', 'hard']
 
 const HARD = new RegExp([
-  '架构|重构|跨(?:模块|仓库|服务|学科)|迁移|并发|竞态|死锁|内存泄漏|性能(?:优化|瓶颈|回退)|安全(?:漏洞|审计|加固)',
+  '架构|重构|跨(?:模块|仓库|服务|学科)|迁移|并发(?!布)|竞态|死锁|内存泄漏|性能(?:优化|瓶颈|回退)|安全(?:漏洞|审计|加固)',
   '设计(?:方案|文档)|从零|整个(?:项目|仓库|代码库)|端到端|全面|系统性',
   'refactor|architecture|migrat(?:e|ion)|concurren|race condition|deadlock|memory leak|security (?:audit|hole|vulnerab)',
   'performance (?:regression|bottleneck)|end-to-end|from scratch|entire (?:repo|codebase|project)|system(?:-|\\s)wide',

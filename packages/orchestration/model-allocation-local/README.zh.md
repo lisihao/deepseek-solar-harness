@@ -53,7 +53,7 @@ model-allocation:
 
 没有任何报价有完整测量，或测量来自不同队列时，选择弃权，基线保持。基线本身可以没有测量，新模型常常如此；已测量的报价仍可以取代它。基线和证据平局排序都看不到 `alternativeOffers`，因为证据只比较强度相同的报价。
 
-插件设置 `costAware`（`off`、默认 `shadow`、`apply`）和 `model-allocation.costAware` 设置决定行为，与 `publicEvidence` 相同。`shadow` 把选择记入计划的 `selection` 回执，但不采用。`minuteValueUsd` 是插件设置。Radar 的成本是一次运行按 API 价格折算的金额，对订阅来说是它占用额度份额的代理。
+插件设置 `costAware`（`off`、默认 `shadow`、`apply`）和 `model-allocation.costAware` 设置决定行为，与 `publicEvidence` 相同。`shadow` 把选择记入计划的 `selection` 回执，但不采用。`minuteValueUsd` 和 `costAwareMinSamples` 是插件设置。公开数据行只有在可比、未过期且至少基于 `costAwareMinSamples` 个任务（默认 30）时才参与；更少的行视为缺失，因为只有寥寥几个任务时区间很宽，便宜的模型会显得和最好的一样好。Radar 的成本是一次运行按 API 价格折算的金额，对订阅来说是它占用额度份额的代理。
 
 ## 模型体验
 

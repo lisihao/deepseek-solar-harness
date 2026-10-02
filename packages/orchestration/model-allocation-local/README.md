@@ -53,7 +53,7 @@ For work that does not need the strongest model, a request can carry `costAwareO
 
 Without a complete measurement for any offer, or when the measurements come from different cohorts, the selection abstains and the baseline stands. The baseline itself may be unmeasured, as a new model often is; a measured offer can still replace it. The baseline and the evidence tie-break never see `alternativeOffers`, because evidence only compares offers of equal strength.
 
-The plugin setting `costAware` (`off`, `shadow` by default, `apply`) and the `model-allocation.costAware` setting select what happens, like `publicEvidence`. `shadow` records the choice in the plan's `selection` receipt without using it. `minuteValueUsd` is a plugin setting. Radar's cost is the API-price equivalent of a run, which for a subscription is a proxy for the share of the allowance it uses.
+The plugin setting `costAware` (`off`, `shadow` by default, `apply`) and the `model-allocation.costAware` setting select what happens, like `publicEvidence`. `shadow` records the choice in the plan's `selection` receipt without using it. `minuteValueUsd` and `costAwareMinSamples` are plugin settings. A public row takes part only when it is comparable, not stale, and rests on at least `costAwareMinSamples` tasks (default 30); a thinner row is treated as missing, because a handful of tasks gives an interval so wide that a cheap model looks as good as the best. Radar's cost is the API-price equivalent of a run, which for a subscription is a proxy for the share of the allowance it uses.
 
 ## Model Experience
 

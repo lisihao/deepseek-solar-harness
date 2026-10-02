@@ -5,6 +5,8 @@
  * work that does not need the strongest model, the cheapest (or fastest) offer whose pass rate is
  * not statistically worse than the best is the better choice. The function abstains, and the
  * allocator keeps its baseline, whenever no offer has complete evidence or the evidence mixes cohorts.
+ * A row counts only when it is comparable, not stale, and rests on at least the configured number of tasks:
+ * a handful of tasks has an interval so wide that every offer looks as good as the best.
  * A baseline without a measurement may still be replaced by a measured offer: the newest model is
  * often the one Radar has not measured yet.
  * @module @deepseek-ai/dsh-model-allocation-local/cost-aware
@@ -47,10 +49,13 @@ function nonNegative(value: unknown): number | undefined {
 function measurement(
   records: readonly unknown[] | undefined,
   taskType: string,
+  minSamples: number,
 ): (ModelAllocationSelectionCandidate & { readonly cohort: string }) | undefined {
   const valid = (records ?? []).flatMap((raw) => {
     const row = dict(raw)
     if (row === undefined || row.task_type !== taskType) return []
+    if (dict(row.comparability)?.status !== 'comparable') return []
+    if (row.freshness_state !== undefined && row.freshness_state !== 'fresh') return []
     const full = canonicalCohortKey(row)
     // The reasoning effort is what this selection chooses, so rows that differ only by effort are comparable.
     const cohort = canonicalCohortKey({ ...row, reasoning_effort: 'any' })
@@ -59,7 +64,7 @@ function measurement(
     const avgCostUsd = nonNegative(row.avg_cost_usd)
     const avgRuntimeSeconds = nonNegative(row.avg_runtime_seconds)
     if (cohort === null || full !== row.cohort_key || passRate === undefined || passRate > 1) return []
-    if (typeof sampleCount !== 'number' || !Number.isInteger(sampleCount) || sampleCount <= 0) return []
+    if (typeof sampleCount !== 'number' || !Number.isInteger(sampleCount) || sampleCount < minSamples) return []
     if (avgCostUsd === undefined || avgRuntimeSeconds === undefined) return []
     const [lower, upper] = wilsonInterval(passRate, sampleCount)
     return [{ cohort, offerId: '', passRate, sampleCount, lower, upper, avgCostUsd, avgRuntimeSeconds }]
@@ -78,6 +83,7 @@ function measurement(
  * @param objective - `economy` and `balanced` minimize cost plus the value of the waiting time; `speed` minimizes runtime.
  * @param evidence - the request's public evidence.
  * @param minuteValueUsd - what one minute of waiting is worth, in the units of the measured cost; zero ignores time.
+ * @param minSamples - fewest tasks a row may rest on; rows with fewer are treated as missing. At least 1.
  * @returns the verdict; `selectedOfferId` equals the baseline when the selection abstains or agrees.
  */
 export function selectCostAware(
@@ -86,6 +92,7 @@ export function selectCostAware(
   objective: CostAwareObjective,
   evidence: ModelAllocationEvidence,
   minuteValueUsd: number,
+  minSamples: number,
 ): CostAwareVerdict {
   const metric = objective === 'speed' ? 'runtime' : 'cost-and-time'
   const abstain = (reason: string, considered: readonly ModelAllocationSelectionCandidate[] = []): CostAwareVerdict => ({
@@ -96,7 +103,7 @@ export function selectCostAware(
   const measured = candidates
     .filter(offer => offer.operatorId === baseline.operatorId)
     .flatMap((offer) => {
-      const found = measurement(evidence.records[offer.offerId], evidence.taskType)
+      const found = measurement(evidence.records[offer.offerId], evidence.taskType, minSamples)
       return found === undefined ? [] : [{ offer, ...found, offerId: offer.offerId }]
     })
     .sort((left, right) => left.offerId.localeCompare(right.offerId))

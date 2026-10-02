@@ -15,7 +15,8 @@ const choose = (
   objective: 'economy' | 'balanced' | 'speed',
   proof: ModelAllocationEvidence,
   minuteValueUsd = 0,
-) => selectCostAware(baseline, candidates, objective, proof, minuteValueUsd)
+  minSamples = 1,
+) => selectCostAware(baseline, candidates, objective, proof, minuteValueUsd, minSamples)
 
 function offer(model: string, effort: string, rank: number, overrides: Partial<ModelExecutionOffer> = {}): ModelExecutionOffer {
   return {
@@ -187,10 +188,34 @@ describe('selectCostAware', () => {
       ['a fractional sample count', { sample_count: 1.5 }],
       ['a zero sample count', { sample_count: 0 }],
       ['another task type', { task_type: 'research' }],
+      ['stale freshness', { freshness_state: 'stale' }],
+      ['an unknown freshness state', { freshness_state: 'unknown' }],
+      ['reference-only comparability', { comparability: { status: 'reference_only' } }],
+      ['no comparability', { comparability: undefined }],
     ] as const)('when every row has %s', (_name, overrides) => {
       const verdict = choose(astraHigh, OFFERS, 'economy', evidence(ROWS, overrides))
 
       abstained(verdict, /no offer has a complete/u)
+    })
+
+    it('treats rows below the sample floor as missing and keeps rows at the floor', () => {
+      const small = evidence(ROWS.map(([target, row]) => [target, { ...row, n: 29 }] as const))
+      abstained(choose(astraHigh, OFFERS, 'economy', small, 0, 30), /no offer has a complete/u)
+      const atFloor = evidence(ROWS.map(([target, row]) => [target, { ...row, n: 30 }] as const))
+      expect(choose(astraHigh, OFFERS, 'economy', atFloor, 0, 30).status).toBe('used')
+    })
+
+    it('ignores only the thin rows, so one tiny sample cannot win on price', () => {
+      const cheapAndTiny = offer('gpt-6-nano', 'high', 5)
+      const withTiny: ReadonlyArray<readonly [ModelExecutionOffer, Row]> = [
+        ...ROWS, [cheapAndTiny, { passRate: 1, n: 3, usd: 0.01, seconds: 30 }],
+      ]
+      const verdict = choose(astraHigh, [...OFFERS, cheapAndTiny], 'economy', evidence(withTiny), 0, 30)
+
+      expect(verdict.selectedOfferId).toBe('codex:gpt-6-sol:high')
+      expect(verdict.considered.map(entry => entry.offerId)).not.toContain(cheapAndTiny.offerId)
+      expect(choose(astraHigh, [...OFFERS, cheapAndTiny], 'economy', evidence(withTiny), 0, 1).selectedOfferId)
+        .toBe(cheapAndTiny.offerId)
     })
 
     it('when the only offer carries a cohort key that does not match its conditions, a non-record, or two different measurements', () => {
@@ -324,5 +349,23 @@ describe('cost-aware selection in the allocator', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+
+  it('ignores rows thinner than the configured sample floor, 30 by default', async () => {
+    const thin = evidence(ROWS.map(([target, row]) => [target, { ...row, n: 29 }] as const))
+    const byDefault = await allocate('apply', { evidence: thin })
+    expect(byDefault.offerId).toBe('codex:gpt-6-astra:high')
+    expect(byDefault.selection).toMatchObject({ status: 'abstained', applied: false })
+
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SubscriptionFirstModelAllocation, { costAware: 'apply', costAwareMinSamples: 200 })
+    const strict = await ctx.modelAllocation.allocate({
+      runId: 'r', nodeId: 'n', phase: 'execution', role: 'implementation', task: 'fix the build', preferredOperatorIds: [],
+      objective: 'quality', rlm: 'disabled', graphMaxParallel: 1, offers: OFFERS, now: '2026-10-01T12:00:00.000Z',
+      evidence: evidence(ROWS), costAwareObjective: 'balanced',
+    })
+    expect(strict.offerId).toBe('codex:gpt-6-astra:high')
+    expect(strict.selection).toMatchObject({ status: 'abstained' })
   })
 })
