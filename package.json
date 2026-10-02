@@ -87,6 +87,7 @@
     "verify-translation-pairing": "tsx scripts/verify-translation-pairing.ts",
     "resolve-translation-pairing-conflicts": "tsx scripts/merge-translation-pairing.ts --resolve",
     "gen-translation-brief": "tsx scripts/gen-translation-brief.ts",
+    "radar-shadow-report": "tsx scripts/radar-shadow-report.ts",
     "verify-doc-budgets": "tsx scripts/verify-doc-budgets.ts",
     "docs:dev": "pnpm --filter @deepseek-ai/website run dev",
     "docs:build": "pnpm --filter @deepseek-ai/website run build && pnpm run verify-doc-site-fragments",

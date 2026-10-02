@@ -786,7 +786,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:128`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:130`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -810,7 +810,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:128`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:100`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:102`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -824,7 +824,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:100`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:123`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:125`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -870,7 +870,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:87`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:140`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:142`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -884,6 +884,8 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:140`](.
   requestedByMessageId: string
   reason: string
   operatorId?: string
+  /** Present when the allocator chose the model: the facts behind `reason`, for counting without parsing prose. */
+  allocation?: RoutingAllocationSummary
 }
 ```
 
@@ -908,7 +910,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:92`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:156`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:158`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -925,7 +927,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:156`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:115`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:117`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -944,7 +946,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:115`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:184`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:186`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -969,7 +971,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:184`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:168`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:170`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -985,7 +987,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:168`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:149`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:151`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

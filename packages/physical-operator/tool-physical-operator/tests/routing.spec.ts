@@ -1573,7 +1573,12 @@ describe('host physical-operator routing', () => {
             send(fixture.agent, message)
             await fixture.agent.whenIdle()
           }
-          return { profile: fixture.codex.requests.at(-1)?.residentProfile, reason: routingReason(fixture.agent) ?? '' }
+          const decision = fixture.agent.session.events.findLast(event => event.type === 'physical-operator/routing-decision')
+          return {
+            profile: fixture.codex.requests.at(-1)?.residentProfile,
+            reason: routingReason(fixture.agent) ?? '',
+            allocation: decision?.type === 'physical-operator/routing-decision' ? decision.data.allocation : undefined,
+          }
         } finally {
           fixture.disposeSelection()
         }
@@ -1594,6 +1599,26 @@ describe('host physical-operator routing', () => {
         expect(easy.reason).toContain('成本感知（apply，难度简单）：改选 codex:gpt-6-astra:low')
         expect(normal.profile).toEqual({ model: 'gpt-6-astra', effort: 'medium' })
         expect(normal.reason).toContain('成本感知（apply，难度一般）：改选 codex:gpt-6-astra:medium')
+      })
+
+      it('records the facts behind the choice on the routing-decision event, so a report can count them without reading prose', async () => {
+        const shadow = await run(EASY, 'shadow')
+        expect(shadow.allocation).toMatchObject({
+          difficulty: 'easy',
+          chosenOfferId: 'codex:gpt-6-astra',
+          selection: {
+            mode: 'shadow', status: 'used', objective: 'economy', applied: false,
+            baselineOfferId: 'codex:gpt-6-astra', selectedOfferId: 'codex:gpt-6-astra:low',
+            selected: { passRate: 0.656, avgCostUsd: 1.69, avgRuntimeSeconds: 600, sampleCount: 157 },
+            baseline: { passRate: 0.736, avgCostUsd: 2.51, avgRuntimeSeconds: 780, sampleCount: 140 },
+          },
+        })
+        expect(shadow.allocation?.evidence).toMatchObject({ mode: 'shadow' })
+        const applied = await run(NORMAL, 'apply')
+        expect(applied.allocation).toMatchObject({
+          difficulty: 'normal', chosenOfferId: 'codex:gpt-6-astra:medium',
+          selection: { mode: 'apply', applied: true, selectedOfferId: 'codex:gpt-6-astra:medium' },
+        })
       })
 
       it('keeps the strongest offer, and says nothing about cost, for a hard request', async () => {
