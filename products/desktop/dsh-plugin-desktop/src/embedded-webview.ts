@@ -1,6 +1,6 @@
 /** Hardening for the `<webview>` panes that Remote Modules open for `direct` instances. */
 
-import { shell } from 'electron'
+import { session, shell } from 'electron'
 import type { WebContents, WebPreferences } from 'electron'
 
 /**
@@ -48,6 +48,17 @@ export function authorizeEmbeddedWebview(params: EmbeddedWebviewParams, webPrefe
 }
 
 /**
+ * Remove the Electron and product tokens from a user agent string, leaving the Chromium one that a
+ * regular browser sends. Sign-in pages such as X and Google treat an Electron user agent as an
+ * embedded or automated browser and stall or refuse the sign-in.
+ * @param userAgent - the session's default user agent.
+ * @returns the same string without the `Electron/…` and `DSHDesktop/…` tokens.
+ */
+export function browserUserAgent(userAgent: string): string {
+  return userAgent.replace(/\s(?:DSHDesktop|Electron)\/\S+/gu, '')
+}
+
+/**
  * Decide what a guest page's `window.open` does. Sign-in flows such as Google or Apple open a popup that
  * reports back to its opener, so web popups open as unprivileged windows in the guest's partition;
  * mail links go to the system handler; everything else is denied.
@@ -74,10 +85,13 @@ export function installEmbeddedWebviewGuard(contents: WebContents): void {
   contents.on('will-attach-webview', (event, webPreferences, params) => {
     // Electron types the attach parameters as a string record; an absent `src` becomes '' and is refused.
     const partition = params['partition']
-    if (!authorizeEmbeddedWebview(
-      { src: params['src'] ?? '', ...(partition === undefined ? {} : { partition }) },
-      webPreferences,
-    )) event.preventDefault()
+    if (partition === undefined || !authorizeEmbeddedWebview({ src: params['src'] ?? '', partition }, webPreferences)) {
+      event.preventDefault()
+      return
+    }
+    // The guest and the popups it opens share this session.
+    const guestSession = session.fromPartition(partition)
+    guestSession.setUserAgent(browserUserAgent(guestSession.getUserAgent()))
   })
   contents.on('did-attach-webview', (_event, guest) => {
     guest.setWindowOpenHandler(({ url }) => {
