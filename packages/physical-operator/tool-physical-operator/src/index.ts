@@ -95,6 +95,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       requestedByMessageId: string
       reason: string
       operatorId?: string
+      /** Present when the allocator chose the model: the facts behind `reason`, for counting without parsing prose. */
+      allocation?: RoutingAllocationSummary
     }
     /** Durable host decision that binds one DSH message to one physical-operator command. */
     'physical-operator/dispatch': {
@@ -290,12 +292,46 @@ interface HostRouteMessage {
   readonly source: { readonly kind: string; readonly plugin?: string }
 }
 
+/** What public evidence says one offer achieves. */
+export interface OfferMeasurement {
+  passRate: number
+  avgCostUsd: number
+  avgRuntimeSeconds: number
+  sampleCount: number
+}
+
+/**
+ * What the allocator did for one Smart Collaboration request. The measured fields come from public
+ * evidence and are absent for an offer without a complete measurement.
+ */
+export interface RoutingAllocationSummary {
+  /** How hard the request text looked; it picks the cost-aware objective. */
+  difficulty: Difficulty
+  /** The offer the allocator sealed, including any change the cost-aware selection or evidence tie-break applied. */
+  chosenOfferId: string
+  /** The cost-aware selection, present when one ran. */
+  selection?: {
+    mode: 'shadow' | 'apply'
+    status: 'used' | 'abstained'
+    objective: 'economy' | 'balanced' | 'speed'
+    applied: boolean
+    baselineOfferId: string
+    /** The offer the selection preferred; equals `baselineOfferId` when it abstained or agrees. */
+    selectedOfferId: string
+    selected?: OfferMeasurement
+    baseline?: OfferMeasurement
+  }
+  /** The public-evidence tie-break, present when one ran. */
+  evidence?: { mode: 'shadow' | 'apply'; status: 'used' | 'abstained'; applied: boolean }
+}
+
 interface HostRoutingDecision {
   readonly policy: PhysicalOperatorRoutingPolicy
   readonly route: 'primary-model' | 'ephemeral' | 'resident' | 'taskgraph-candidate'
   readonly requestedByMessageId: string
   readonly reason: string
   readonly operatorId?: string
+  readonly allocation?: RoutingAllocationSummary
   readonly hostRoute?: PendingHostRoute
 }
 
@@ -438,6 +474,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         requestedByMessageId: decision.requestedByMessageId,
         reason: decision.reason,
         ...decision.operatorId === undefined ? {} : { operatorId: decision.operatorId },
+        ...decision.allocation === undefined ? {} : { allocation: decision.allocation },
       }, { ignorable: true })
     }
     if (route !== undefined) {
@@ -1200,16 +1237,47 @@ async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, 
   const { plan } = allocation
   const operatorId = plan.operatorId as PhysicalOperatorRoutingTarget
   const effort = plan.profile?.effort
-  return operatorDecision(
-    ctx,
-    agent,
-    messageId,
-    'auto',
-    operatorId,
-    `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}${evidenceNote(plan)}${selectionNote(plan, difficulty)}`,
-    operatorId === 'claude-code' ? 'codex' : undefined,
-    plan.profile,
-  )
+  return {
+    ...operatorDecision(
+      ctx,
+      agent,
+      messageId,
+      'auto',
+      operatorId,
+      `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}${evidenceNote(plan)}${selectionNote(plan, difficulty)}`,
+      operatorId === 'claude-code' ? 'codex' : undefined,
+      plan.profile,
+    ),
+    allocation: allocationSummary(plan, difficulty),
+  }
+}
+
+/** The structured account of a plan that the routing-decision event records beside the prose reason. */
+function allocationSummary(plan: ModelAllocationPlan, difficulty: Difficulty): RoutingAllocationSummary {
+  const receipt = plan.selection
+  const measured = (offerId: string): OfferMeasurement | undefined => {
+    const found = receipt?.considered.find(entry => entry.offerId === offerId)
+    if (found === undefined) return undefined
+    const { passRate, avgCostUsd, avgRuntimeSeconds, sampleCount } = found
+    return { passRate, avgCostUsd, avgRuntimeSeconds, sampleCount }
+  }
+  const selected = receipt === undefined ? undefined : measured(receipt.selectedOfferId)
+  const baseline = receipt === undefined ? undefined : measured(receipt.baselineOfferId)
+  return {
+    difficulty,
+    chosenOfferId: plan.offerId,
+    ...receipt === undefined ? {} : {
+      selection: {
+        mode: receipt.mode, status: receipt.status, objective: receipt.objective, applied: receipt.applied,
+        baselineOfferId: receipt.baselineOfferId, selectedOfferId: receipt.selectedOfferId,
+        ...selected === undefined ? {} : { selected },
+        ...baseline === undefined ? {} : { baseline },
+      },
+    },
+    ...plan.evidence === undefined ? {} : {
+      evidence: { mode: plan.evidence.mode, status: plan.evidence.status, applied: plan.evidence.applied },
+    },
+  }
 }
 
 /** Outcome of one Smart Collaboration allocation; without a plan the classifier's operator is used. */
