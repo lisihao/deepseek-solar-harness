@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  IconBrowseOutline16, IconCloseOutline16, IconLinkOutline16, IconRefreshOutline16, Tooltip,
+  IconBrowseOutline16, IconCloseOutline16, IconLinkOutline16, IconRefreshOutline16, IconShareOutline16, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -68,6 +68,11 @@ function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelP
             <Tooltip label="在新窗口打开">
               <a className={css.iconButton} aria-label={`在新窗口打开 ${label}`} href={browserEmbedUrl} target="_blank" rel="noreferrer">
                 <IconLinkOutline16 size={16} />
+              </a>
+            </Tooltip>
+            <Tooltip label="用系统浏览器打开原网址">
+              <a className={css.iconButton} aria-label={`用系统浏览器打开 ${label} 的原网址`} href={targetUrl} target="_blank" rel="noreferrer">
+                <IconShareOutline16 size={16} />
               </a>
             </Tooltip>
             <Tooltip label="重新加载网页">

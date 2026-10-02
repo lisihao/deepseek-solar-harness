@@ -42,7 +42,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 
 ## 运行边界
 
-每个实例都会启动一个仅监听本机、目标固定的中继。所有路径始终落在唯一配置的 origin 上，因此它不是开放代理。中继保留目标 HTML、JavaScript、CSS、Cookie、重定向、方法、流式响应与 WebSocket upgrade；它只移除 `X-Frame-Options` 和 CSP 的 `frame-ancestors` 指令，因为这两项会阻止部署者授权的应用显示在 Harness 中，其余 CSP 指令保持不变。目标站点把入口 URL 重定向到另一个公网域名时（例如 `http://www.x.com` → `https://twitter.com/` → `https://x.com/`），中继把固定目标移到该 origin（最多八次），并把重定向改写成自己的地址，所以 iframe 不会离开中继；到回环、私有或 IP 字面量主机的重定向不会被跟随，从这些主机发出的也一样。自身没有 `Cache-Control` 的重定向响应以 `no-store` 发出，因为被缓存的永久重定向若指向中继自己的 URL 会形成循环。Host 只在 `/remote-webpages/v1/instances` 发布实例清单；React 随后直接在 iframe 中加载各中继地址。
+每个实例都会启动一个仅监听本机、目标固定的中继。所有路径始终落在唯一配置的 origin 上，因此它不是开放代理。中继保留目标 HTML、JavaScript、CSS、Cookie、重定向、方法、流式响应与 WebSocket upgrade；它只移除 `X-Frame-Options` 和 CSP 的 `frame-ancestors` 指令，因为这两项会阻止部署者授权的应用显示在 Harness 中，其余 CSP 指令保持不变。目标站点把入口 URL 重定向到另一个公网域名时（例如 `http://www.x.com` → `https://twitter.com/` → `https://x.com/`），中继把固定目标移到该 origin（最多八次），并把重定向改写成自己的地址，所以 iframe 不会离开中继；到回环、私有或 IP 字面量主机的重定向不会被跟随，从这些主机发出的也一样。自身没有 `Cache-Control` 的重定向响应以 `no-store` 发出，因为被缓存的永久重定向若指向中继自己的 URL 会形成循环。Host 只在 `/remote-webpages/v1/instances` 发布实例清单；React 随后直接在 iframe 中加载各中继地址。对话框标题栏提供四个操作：在新窗口打开中继地址、用系统浏览器打开原网址、重新加载和关闭。
 
 对于转发到回环地址的远程服务，SSH 仍由部署负责。每个 `url` 应指向相应的本机转发地址，SSH 监听端口与中继端口都应只绑定 MacBook 回环地址。私人主机名、地址与凭据只属于用户 profile 设置，绝不作为产品默认值发布。
 
@@ -60,6 +60,6 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 
 - **受信任配置**——目标 URL 是部署者控制的配置。如果移除某个不可信站点的反嵌入策略会违背其安全意图，就不要把实例指向该站点。
 - **仅限本机显示**——中继地址绑定 `127.0.0.1`，浏览器必须与 Harness 运行在同一台 Mac 上。远程浏览器发布需要另行设计带认证的权限边界。
-- **兼容性归目标应用所有**——硬编码绝对 API origin、Service Worker、OAuth 重定向白名单和第三方 Cookie 策略仍是被嵌入应用的属性，可能需要目标侧部署配置；X 这类大型单页应用即使页面已由中继送达，也可能在 iframe 中显示空白，或因 CORS 使 API 请求失败。这类站点请使用对话框里的“在新窗口打开”。
+- **兼容性归目标应用所有**——硬编码绝对 API origin、Service Worker、OAuth 重定向白名单和第三方 Cookie 策略仍是被嵌入应用的属性，可能需要目标侧部署配置；X 这类大型单页应用即使页面已由中继送达，也可能在 iframe 中显示空白，或因 CORS 使 API 请求失败。这类站点请使用对话框里的“用系统浏览器打开原网址”：它直接打开配置的 `url`，不经过中继，站点在自己的 origin 下使用自己的登录。
 - **SSH 生命周期归部署所有**——本包不会创建、认证或重连 SSH 隧道。
 - **配置重启后生效**——设置编辑器会立即保存，但目标网页和中继监听端口只在 Harness 重启后切换。
