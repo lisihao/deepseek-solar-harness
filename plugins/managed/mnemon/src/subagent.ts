@@ -632,6 +632,29 @@ export function isSubagent(agent: HostAgent | undefined): boolean {
   return agent?.session.header?.origin === 'subagent'
 }
 
+/** Provider id of the physical-operator router; its ephemeral routes cannot call DSH tools or a result tool. */
+const PHYSICAL_OPERATOR_PROVIDER = 'dsh-physical-operator'
+
+/**
+ * The API model the parent last ran on. A child that inherits the parent's creation options can land on a
+ * physical-operator route (a browser operator with no Mnemon tools), so each child is pinned to the parent's
+ * most recent logged API route instead. A parent that has made no API request leaves the inherited route.
+ * @param parent - the delegating parent.
+ * @returns the parent's latest non-operator provider and model, when it has logged one.
+ */
+function apiRoute(parent: HostAgent): { provider: string; model: string } | undefined {
+  const { events } = parent.session
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'request/header') continue
+    const header = event.data.header as { config?: { provider?: unknown; model?: unknown } } | undefined
+    const provider = header?.config?.provider
+    const model = header?.config?.model
+    if (typeof provider === 'string' && typeof model === 'string' && provider !== PHYSICAL_OPERATOR_PROVIDER) return { provider, model }
+  }
+  return undefined
+}
+
 /** Delegates memory judgment and execution to a fresh, tool-scoped DSH child. */
 export class MnemonSubagentCoordinator {
   private readonly counters: SubagentCounters = { recalls: 0, writes: 0, answers: 0, reviews: 0, placements: 0, migrations: 0, compactions: 0, documentArchives: 0, metadataMaintenances: 0, failures: 0 }
@@ -1104,7 +1127,7 @@ Completion protocol: call \`${resultToolName}\` exactly once with the final resu
         : operation === 'compaction' || operation === 'document-archive' ? 8_192
         : operation === 'metadata-maintenance' ? 4_096
         : undefined
-      const fixed = this.taskAgentModelResolver?.()
+      const fixed = this.taskAgentModelResolver?.() ?? apiRoute(parent)
       const baseAgentOptions = perOpMaxTokens === undefined ? undefined : { maxTokens: perOpMaxTokens }
       const resolvedAgentOptions = fixed === undefined ? baseAgentOptions : { ...(baseAgentOptions ?? {}), provider: fixed.provider, model: fixed.model }
       run = await this.subagents.start(provider, {

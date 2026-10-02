@@ -19,7 +19,7 @@ const SOURCES_FILE = "sources.yml";
 const LOCK_FILE = "lock.yml";
 const CACHE_DIR = "cache";
 const ENTRIES_FILE = "entries.json";
-const TRUST_LEVELS = /* @__PURE__ */ new Set([
+const TRUST_LEVELS = new Set([
 	"official",
 	"community",
 	"untrusted"
@@ -78,13 +78,12 @@ function normalizeSource$1(raw, index) {
 }
 /** 写 sources.yml（原子：重建整个文件；失败抛错）。 */
 function writeSources(dshHome, sources) {
-	const root = { sources: sources.map((s) => ({
+	const text = stringify({ sources: sources.map((s) => ({
 		id: s.id,
 		kind: s.kind,
 		locator: s.locator,
 		...s.trust !== "community" ? { trust: s.trust } : {}
-	})) };
-	const text = stringify(root);
+	})) });
 	ensureDir(discoveryRoot(dshHome));
 	writeFileSync(sourcesPath(dshHome), text);
 }
@@ -160,7 +159,7 @@ function snapshotFresh(snapshot, ttlMs, now = Date.now()) {
 	if (Number.isNaN(fetched)) return false;
 	return now - fetched < ttlMs;
 }
-const FACES = /* @__PURE__ */ new Set([
+const FACES = new Set([
 	"tool",
 	"skill",
 	"mcp",
@@ -579,7 +578,7 @@ function createPluginTools(deps) {
 		}),
 		defineTool({
 			name: "plugin_status",
-			description: "Show installed DSH plugins. Lists every installed plugin: insert rows (from the profile cordis.patch.yml, live-mounted non-bundle plugins) plus profile bundle layers (from the web profile manifest dsh.profile.bundles), each with its TOFU-resolved ref from lock.yml.",
+			description: "Show installed DSH plugins. Lists every installed plugin: insert rows (from the profile cordis.patch.yml, live-mounted non-bundle plugins) plus profile bundle layers (from the web profile manifest dsh.profile.bundles), each with its TOFU-resolved ref from lock.yml. Plugins built into the application (for example Mnemon, whose mnemon_* tools are always present) are not listed.",
 			parameters: { id: {
 				type: "string",
 				description: "Plugin id or package name to inspect."
@@ -644,7 +643,7 @@ function createPluginTools(deps) {
 				}
 				if (args.id !== void 0 && args.id !== "") {
 					const hit = rows.filter((p) => matchesId(p.canonical, args.id));
-					if (hit.length === 0) throw new Error(`plugin_status: "${args.id}" is not installed`);
+					if (hit.length === 0) throw new Error(`plugin_status: "${args.id}" is not installed in this profile (plugins built into the application are not listed here)`);
 					return { plugins: hit };
 				}
 				return { plugins: rows };
@@ -858,8 +857,7 @@ function removeInsertRow(id) {
 		}
 		out.push(line);
 	}
-	const text = out.some((l) => /^- id:/.test(l.trim()) || /^- insert:/.test(l.trim()) || /^insert:/.test(l.trim())) ? `${out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n` : "# Your patch layer for this dsh profile, applied after every bundle layer:\n# a top-level YAML array of loader patch entries (id-targeted config\n# overrides, disables, and insert lists; `!!js` expressions allowed).\n[]\n";
-	writeFileSync(file, text);
+	writeFileSync(file, out.some((l) => /^- id:/.test(l.trim()) || /^- insert:/.test(l.trim()) || /^insert:/.test(l.trim())) ? `${out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd()}\n` : "# Your patch layer for this dsh profile, applied after every bundle layer:\n# a top-level YAML array of loader patch entries (id-targeted config\n# overrides, disables, and insert lists; `!!js` expressions allowed).\n[]\n");
 	console.log(`[plugin-console] removed insert row ${id} from ${file}`);
 	return removed;
 }
@@ -1084,7 +1082,7 @@ async function collectLoaderEntries(ctx) {
 }
 /** 版本检查缓存：name -> { latest, error, checkedAt }（进程内存）。 */
 const versionCache = /* @__PURE__ */ new Map();
-const VERSION_REFRESH_MIN_MS = 3e4;
+const VERSION_REFRESH_MIN_MS = 30 * 1e3;
 let lastVersionRefreshAt = 0;
 /** 用户插件名列表（排除官方命名空间）。 */
 async function userPluginNames(ctx) {
