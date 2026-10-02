@@ -34,6 +34,6 @@ export async function seedRadarStore(python: string, stateRoot: string): Promise
     '-m', 'codex_radar_provider.cli', '--state-root', join(stateRoot, 'radar'), 'import',
     '--authorization-file', receipt, '--payloads-json', RADAR_PAYLOADS,
     '--fetched-at', new Date().toISOString().replace(/\.\d+Z$/u, 'Z'),
-  ], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: COLLECTOR_SOURCES } })
+  ], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: COLLECTOR_SOURCES, PYTHONUTF8: '1' } })
   if (imported.status !== 0) throw new Error(`Radar import failed: ${imported.stdout}${imported.stderr}`)
 }
