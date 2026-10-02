@@ -6,6 +6,15 @@ const stats = (passRate: number, usd: number, seconds: number) => ({
   passRate, avgCostUsd: usd, avgRuntimeSeconds: seconds, sampleCount: 100,
 })
 
+/** A shadow selection that prefers `codex:b` over `codex:a` with both offers measured. */
+const cheaperChoice = (): AllocationFacts => ({
+  difficulty: 'easy', chosenOfferId: 'codex:a',
+  selection: {
+    mode: 'shadow', status: 'used', objective: 'economy', applied: false, baselineOfferId: 'codex:a', selectedOfferId: 'codex:b',
+    selected: stats(0.65, 0.76, 660), baseline: stats(0.74, 2.5, 780),
+  },
+})
+
 function decision(id: string, time: number, allocation?: AllocationFacts, route = 'resident'): ReportEvent[] {
   return [{
     type: 'physical-operator/routing-decision', time,
@@ -18,14 +27,7 @@ describe('summarize', () => {
     const events: ReportEvent[] = [
       ...decision('old', DAY - 5 * 86_400_000, { difficulty: 'easy', chosenOfferId: 'codex:a' }),
       ...decision('m1', DAY, undefined, 'primary-model'),
-      ...decision('m2', DAY + 1, {
-        difficulty: 'easy', chosenOfferId: 'codex:a',
-        selection: {
-          mode: 'shadow', status: 'used', objective: 'economy', applied: false, baselineOfferId: 'codex:a', selectedOfferId: 'codex:b',
-          selected: stats(0.65, 0.76, 660), baseline: stats(0.74, 2.5, 780),
-        },
-        evidence: { mode: 'shadow', status: 'used', applied: false },
-      }),
+      ...decision('m2', DAY + 1, { ...cheaperChoice(), evidence: { mode: 'shadow', status: 'used', applied: false } }),
       ...decision('m3', DAY + 2, {
         difficulty: 'normal', chosenOfferId: 'codex:c',
         selection: {
@@ -86,13 +88,7 @@ describe('renderReport', () => {
   })
 
   it('prints the cost, time, and pass-rate difference with its caveat', () => {
-    const text = renderReport(summarize(decision('a', DAY, {
-      difficulty: 'easy', chosenOfferId: 'codex:a',
-      selection: {
-        mode: 'shadow', status: 'used', objective: 'economy', applied: false, baselineOfferId: 'codex:a', selectedOfferId: 'codex:b',
-        selected: stats(0.65, 0.76, 660), baseline: stats(0.74, 2.5, 780),
-      },
-    }), DAY), '2026-10-02')
+    const text = renderReport(summarize(decision('a', DAY, cheaperChoice()), DAY), '2026-10-02')
 
     expect(text).toContain('cost -1.74 USD, runtime -2.00 min, pass rate -9.00 points per task')
     expect(text).toContain('not your bill')
