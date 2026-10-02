@@ -441,6 +441,18 @@
     "packages/util/home-paths/src/index.ts": {
       "kind": "migration-debt",
       "note": "fix(desktop): shorten local daemon socket paths; fix(runtime): make local IPC portable"
+    },
+    "packages/subagent/subagent/src/child-agent.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
+    "packages/subagent/subagent/src/continuation.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
+    "packages/subagent/subagent-in-process-driver/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
     }
   }
 }
