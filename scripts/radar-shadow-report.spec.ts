@@ -1,5 +1,6 @@
+import { zstdCompressSync } from 'node:zlib'
 import { describe, expect, it } from 'vitest'
-import { renderReport, summarize, type AllocationFacts, type ReportEvent } from './radar-shadow-report.ts'
+import { decodeLog, renderReport, summarize, type AllocationFacts, type ReportEvent } from './radar-shadow-report.ts'
 
 const DAY = Date.UTC(2026, 9, 2)
 const stats = (passRate: number, usd: number, seconds: number) => ({
@@ -93,5 +94,22 @@ describe('renderReport', () => {
     expect(text).toContain('cost -1.74 USD, runtime -2.00 min, pass rate -9.00 points per task')
     expect(text).toContain('not your bill')
     expect(text).toContain('does not measure whether finished work was correct')
+  })
+})
+
+describe('decodeLog', () => {
+  const lines = ['{"type":"session"}\n', '{"type":"a"}\n', '{"type":"b"}\n']
+
+  it('decodes every appended zstd frame, not only the first', () => {
+    const log = Buffer.concat(lines.map(line => zstdCompressSync(line)))
+
+    expect(decodeLog(log, true)).toBe(lines.join(''))
+  })
+
+  it('skips an incomplete final frame and reads an uncompressed log as is', () => {
+    const torn = zstdCompressSync(lines[2]!).subarray(0, 6)
+
+    expect(decodeLog(Buffer.concat([zstdCompressSync(lines[0]!), torn]), true)).toBe(lines[0])
+    expect(decodeLog(Buffer.from(lines.join('')), false)).toBe(lines.join(''))
   })
 })

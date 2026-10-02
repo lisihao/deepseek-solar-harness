@@ -561,4 +561,43 @@ describe('anchored-tool-bootstrap', () => {
     )
     expect(result.maxTokens).toBe(384000)
   })
+  describe('delegated child with a parent-filtered tool surface', () => {
+    const childAgent = (events: unknown[] = []) => ({
+      session: { events, header: { cwd: '/workspace', origin: 'subagent' } },
+    })
+    const resultOnly = [{ name: 'mnemon_subagent_result_x' }]
+
+    test('keeps its filtered tools, contexts, sections, and output budget instead of failing', async () => {
+      const listeners = register({ bootstrapMaxTokens: 1024 })
+      const contexts = [{ name: 'sandbox:policy', text: 'Current DSH file policy: workspace-write.' }]
+      const agent = childAgent()
+      const assembled = await listener(listeners, 'system-prompt/assemble')(
+        undefined,
+        { agent },
+        async () => ({ system: 'persona', tools: resultOnly, contexts, sections: SECTIONS }),
+      )
+      expect(assembled.tools).toEqual(resultOnly)
+      expect(assembled.contexts).toEqual(contexts)
+      expect(assembled.sections).toEqual(SECTIONS)
+
+      const requested = await listener(listeners, 'agent/request')(
+        { agent, turn: 1, step: 1, signal: {} },
+        async () => ({ provider: 'p', model: 'm', maxTokens: 8192 }),
+      )
+      expect(requested.maxTokens).toBe(8192)
+
+      const messages = [message('user', 'u'), message('plugin', 'p')]
+      const decision = await listener(listeners, 'agent/pre-step')(
+        { agent, messages, turn: 1, step: 1, signal: {} },
+        async () => ({ kind: 'enter', messages }),
+      )
+      expect(decision.messages).toHaveLength(2)
+    })
+
+    test('still fails closed for a top-level session that lacks the bootstrap tools', async () => {
+      await expect(assemble(listener(register(), 'system-prompt/assemble'), [], resultOnly)).rejects.toThrow(
+        /expected exactly one bootstrap shell/,
+      )
+    })
+  })
 })

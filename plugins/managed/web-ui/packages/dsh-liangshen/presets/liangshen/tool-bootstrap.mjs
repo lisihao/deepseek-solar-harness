@@ -152,6 +152,7 @@ function stateFor(session) {
       steps: 0,
       deferredSteps: 0,
       presentationApplied: false,
+      exempt: false,
     }
     promotionBySession.set(session, state)
   }
@@ -226,8 +227,18 @@ function refresh(agent, policy) {
     scanEvents(state, session)
     if (decidePromotion(state, policy)) state.promoted = true
   }
-  if (state.promoted) applyPresentation(agent, state, policy)
+  if (state.promoted && !state.exempt) applyPresentation(agent, state, policy)
   return state
+}
+
+/**
+ * Whether the session belongs to a delegated child. A child's tool surface is
+ * fixed by its parent's `toolFilter` (for example a result-tool-only
+ * maintenance worker), so it cannot satisfy the shell and common-tool bootstrap
+ * contract.
+ */
+function isSubagentSession(agent) {
+  return agent?.session?.header?.origin === 'subagent'
 }
 
 /**
@@ -294,7 +305,7 @@ export function apply(ctx, config) {
       scanEvents(state, session)
       if (decidePromotion(state, policy)) state.promoted = true
     }
-    if (state.promoted) {
+    if (state.promoted && !state.exempt) {
       const agent = agentBySession.get(session)
       if (agent !== undefined) applyPresentation(agent, state, policy)
     }
@@ -315,6 +326,13 @@ export function apply(ctx, config) {
     const selectedShells = shellTools.filter(toolName => available.has(toolName))
     const missingCommon = commonTools.filter(toolName => !available.has(toolName))
     if (selectedShells.length !== 1 || missingCommon.length > 0) {
+      // A delegated child keeps the tool surface its parent filtered for it;
+      // quarantining that surface (or capping its output budget) would break
+      // the child instead of anchoring it.
+      if (isSubagentSession(agent)) {
+        state.exempt = true
+        return assembled
+      }
       throw new Error(
         `${name}: expected exactly one bootstrap shell and every common tool; `
         + `shells=${JSON.stringify(selectedShells)}, missing=${JSON.stringify(missingCommon)}`,
@@ -339,6 +357,7 @@ export function apply(ctx, config) {
     if (agent === undefined || decision.kind !== 'enter') return decision
     if (state === undefined) return decision
 
+    if (state.exempt) return decision
     if (!state.promoted) {
       return {
         ...decision,
@@ -368,7 +387,7 @@ export function apply(ctx, config) {
     // switch to `run_code` only after that request has already started.
     const state = agent === undefined ? undefined : refresh(agent, policy)
     const resolved = await next()
-    if (state === undefined || policy.bootstrapMaxTokens === undefined) return resolved
+    if (state === undefined || state.exempt || policy.bootstrapMaxTokens === undefined) return resolved
     if (state.promoted) {
       if (resolved.maxTokens !== policy.bootstrapMaxTokens) return resolved
       const rest = { ...resolved }
