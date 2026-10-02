@@ -10,6 +10,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
+import { scanZstdFrames } from '../packages/session/session-persistence-jsonl/src/zstd.ts'
 
 /** The measured facts of one offer, as the routing-decision event records them. */
 export interface OfferMeasurement {
@@ -201,6 +202,18 @@ export function renderReport(report: ShadowReport, sinceIso: string): string {
   return `${out.join('\n')}\n`
 }
 
+/**
+ * Decode a session log. A `.zstd` log is one frame per appended batch, and `zstdDecompressSync` stops
+ * after the first frame, so every complete frame is decoded in turn; an incomplete final frame is skipped.
+ * @param bytes - file contents.
+ * @param compressed - whether the file is a concatenated-frame `.zstd` log.
+ * @returns the log text.
+ */
+export function decodeLog(bytes: Buffer, compressed: boolean): string {
+  if (!compressed) return bytes.toString('utf8')
+  return scanZstdFrames(bytes).frames.map(({ start, end }) => zstdDecompressSync(bytes.subarray(start, end)).toString('utf8')).join('')
+}
+
 function readEvents(root: string, sinceMs: number): ReportEvent[] {
   const events: ReportEvent[] = []
   const walk = (directory: string): void => {
@@ -208,8 +221,7 @@ function readEvents(root: string, sinceMs: number): ReportEvent[] {
       const path = join(directory, entry.name)
       if (entry.isDirectory()) { walk(path); continue }
       if (!/session\.jsonl(?:\.zstd)?$/u.test(entry.name) || statSync(path).mtimeMs < sinceMs) continue
-      const bytes = readFileSync(path)
-      const text = (entry.name.endsWith('.zstd') ? zstdDecompressSync(bytes) : bytes).toString('utf8')
+      const text = decodeLog(readFileSync(path), entry.name.endsWith('.zstd'))
       for (const line of text.split('\n')) {
         if (!line.includes('"physical-operator/')) continue
         events.push(JSON.parse(line) as ReportEvent)

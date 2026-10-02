@@ -1453,6 +1453,20 @@ describe('host physical-operator routing', () => {
       }
     })
 
+    it('keeps a request to write a pasted profile into memory on the main model', async () => {
+      const { agent, codex, claude, deepseek, disposeSelection } = await allocationSetup()
+      try {
+        send(agent, '后面文字是GPT上的记忆，你分析后，写到记忆中，要精准：你主要围绕 AI 产业、系统架构开展研究，输出研究报告和技术方案；关注单请求序列内并行生成。')
+        await agent.whenIdle()
+        expect(codex.requests).toHaveLength(0)
+        expect(claude.requests).toHaveLength(0)
+        expect(deepseek.requests).toHaveLength(1)
+        expect(routingReason(agent)).toBe('记忆写入由主模型通过 DSH 记忆工具完成，不委派给外部算子')
+      } finally {
+        disposeSelection()
+      }
+    })
+
     describe('public evidence', () => {
       const tied = [nativeModel('gpt-6-astra', 'GPT-6-Astra'), nativeModel('gpt-6-sol', 'GPT-6-Sol')]
       const record = (model: string, value: number, effort = 'high'): Record<string, unknown> => {
