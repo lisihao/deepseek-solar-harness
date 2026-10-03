@@ -35,6 +35,8 @@ export interface GouziHostRecord {
 export interface GouziMemberView extends GouziRecord {
   readonly connection: GouziConnection
   readonly activity: GouziActivity
+  /** How long after issue an execution grant may start work. */
+  readonly grantDeadlineMs: number
 }
 
 /** Fields a user may change on a member. */
@@ -59,6 +61,9 @@ const MEMBERSHIP_FLOW: Readonly<Record<GouziMembership, readonly GouziMembership
 }
 
 const NAME_LIMIT = 40
+/** Bounds for a member's grant lifetime: long enough for one task, short enough that a lost grant expires. */
+const GRANT_DEADLINE_MIN_MS = 60_000
+const GRANT_DEADLINE_MAX_MS = 24 * 60 * 60_000
 
 interface MemberRow {
   gouzi_id: string
@@ -73,6 +78,7 @@ interface MemberRow {
   membership: string
   connection: string
   activity: string
+  grant_deadline_ms: number
   created_at: string
   updated_at: string
 }
@@ -101,6 +107,16 @@ function checkAvatar(avatarId: string): GouziAvatarId {
   return avatarId as GouziAvatarId
 }
 
+function checkGrantDeadline(milliseconds: number): number {
+  if (!Number.isSafeInteger(milliseconds) || milliseconds < GRANT_DEADLINE_MIN_MS || milliseconds > GRANT_DEADLINE_MAX_MS) {
+    throw new OrchestrationError(
+      `gouzi grant deadline must be ${String(GRANT_DEADLINE_MIN_MS)} to ${String(GRANT_DEADLINE_MAX_MS)} milliseconds`,
+      'GOUZI_STATE_CONFLICT',
+    )
+  }
+  return milliseconds
+}
+
 function checkRole(role: string): GouziRole {
   if (!(GOUZI_ROLES as readonly string[]).includes(role)) {
     throw new OrchestrationError(`unknown gouzi role ${role}`, 'GOUZI_STATE_CONFLICT')
@@ -122,6 +138,7 @@ function memberView(row: MemberRow): GouziMemberView {
     membership: row.membership as GouziMembership,
     connection: row.connection as GouziConnection,
     activity: row.activity as GouziActivity,
+    grantDeadlineMs: row.grant_deadline_ms,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -185,7 +202,7 @@ export class GouziRegistry {
    * @param input - identity and presentation of the new member.
    * @returns the stored member.
    * @throws OrchestrationError - `GOUZI_LIMIT_REACHED` when {@link GOUZI_MEMBER_LIMIT} non-archived members exist;
-   *   `GOUZI_STATE_CONFLICT` for an unknown host, an id already in use, or an invalid name, avatar, or role.
+   *   `GOUZI_STATE_CONFLICT` for an unknown host, an id already in use, or an invalid name, avatar, role, or grant deadline.
    */
   create(input: {
     gouziId: GouziId
@@ -194,8 +211,10 @@ export class GouziRegistry {
     name: string
     avatarId: GouziAvatarId
     role: GouziRole
+    grantDeadlineMs: number
   }): GouziMemberView {
     const name = checkName(input.name)
+    const grantDeadlineMs = checkGrantDeadline(input.grantDeadlineMs)
     const avatarId = checkAvatar(input.avatarId)
     const role = checkRole(input.role)
     return this.transaction(() => {
@@ -216,9 +235,11 @@ export class GouziRegistry {
       this.db.prepare(`
         INSERT INTO gouzi_members
           (gouzi_id, owner_id, host_id, generation, name, avatar_id, role, role_version, policy_version,
-           membership, connection, activity, created_at, updated_at)
-        VALUES (?, ?, ?, 1, ?, ?, ?, 1, 1, 'provisioning', 'unreachable', 'resting', ?, ?)
-      `).run(String(input.gouziId), String(input.ownerId), String(input.hostId), name, avatarId, role, now, now)
+           membership, connection, activity, grant_deadline_ms, created_at, updated_at)
+        VALUES (?, ?, ?, 1, ?, ?, ?, 1, 1, 'provisioning', 'unreachable', 'resting', ?, ?, ?)
+      `).run(
+        String(input.gouziId), String(input.ownerId), String(input.hostId), name, avatarId, role, grantDeadlineMs, now, now,
+      )
       return this.require(input.gouziId)
     })
   }

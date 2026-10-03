@@ -49,7 +49,7 @@ async function registered(): Promise<OrchestrationStore> {
   })
   store.gouzi.create({
     gouziId: GOUZI, ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
-    name: 'Mochi', avatarId: 'shiba', role: 'development',
+    name: 'Mochi', avatarId: 'shiba', role: 'development', grantDeadlineMs: 60_000,
   })
   store.gouzi.setMembership(GOUZI, 'enabled')
   const plan = {
@@ -76,7 +76,7 @@ const NOW = Date.parse('2026-10-03T12:00:00.000Z')
 describe('gouziOperatorServer', () => {
   it('projects the member as a server and seals the attempt in the grant', async () => {
     const store = await registered()
-    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 'token', grantDeadlineMs: 60_000, now: () => NOW })
+    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 'token', now: () => NOW })
     expect(server).toMatchObject({ label: 'Mochi', endpoint: 'http://127.0.0.1:4100/', accessToken: 'token' })
     const start = {} as PhysicalOperatorProviderStartRequest
     expect(server.gouzi!.issue(PLAN, start)).toEqual({
@@ -90,9 +90,9 @@ describe('gouziOperatorServer', () => {
 
   it('refuses a member that is missing, not enabled, or asked to run something that is not a TaskGraph attempt', async () => {
     const store = await registered()
-    expect(() => gouziOperatorServer({ store, gouziId: GouziId('nobody'), accessToken: 't', grantDeadlineMs: 1 }))
+    expect(() => gouziOperatorServer({ store, gouziId: GouziId('nobody'), accessToken: 't' }))
       .toThrow('is not registered')
-    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 't', grantDeadlineMs: 1 })
+    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 't' })
     const start = {} as PhysicalOperatorProviderStartRequest
     expect(() => server.gouzi!.issue({ ...PLAN, commandId: 'orch:run-1:node-1:1:rlm:child' }, start))
       .toThrow('TaskGraph attempts only')
@@ -103,7 +103,7 @@ describe('gouziOperatorServer', () => {
 
   it('reads the generation and epoch again for every attempt', async () => {
     const store = await registered()
-    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 't', grantDeadlineMs: 60_000, now: () => NOW })
+    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 't', now: () => NOW })
     store.db.prepare('UPDATE gouzi_members SET generation = 2 WHERE gouzi_id = ?').run(String(GOUZI))
     store.db.prepare("UPDATE gouzi_hosts SET authority_epoch = 'epoch-8' WHERE host_id = 'host-1'").run()
     expect(server.gouzi!.issue(PLAN, {} as PhysicalOperatorProviderStartRequest))
@@ -126,7 +126,7 @@ describe('RemotePhysicalOperator for a gouzi member', () => {
       void input
       return Promise.resolve(new Response(JSON.stringify({ type: 'server-response', rpcId: body.rpcId, result: { ok: true, value } })))
     }
-    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 'token', grantDeadlineMs: 60_000, now: () => NOW })
+    const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 'token', now: () => NOW })
     const operator = new RemotePhysicalOperator(server, {
       operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator', tags: ['code'],
       maxConcurrency: 1, injectionBoundaries: [], available: true, authentication: 'native-subscription',

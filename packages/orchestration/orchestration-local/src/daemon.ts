@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime from '@deepseek-ai/dsh-browser'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
@@ -66,6 +67,7 @@ import LocalRlmRuntime from '@deepseek-ai/dsh-rlm-runtime-local'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
+  GouziId,
   OrchestrationArtifactRef,
   OrchestrationError,
   OrchestrationRunId,
@@ -146,6 +148,7 @@ import {
   createRemotePhysicalOperators,
   type RemotePhysicalOperatorServer,
 } from './remote-physical-operator.ts'
+import { gouziOperatorServer } from './gouzi-operator.ts'
 import { readRemoteOperatorCatalog } from './remote-operators.ts'
 import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,
@@ -1768,7 +1771,10 @@ export class OrchestrationDaemon {
   private async refreshRemoteOperators(initial: boolean): Promise<void> {
     let servers: readonly RemotePhysicalOperatorServer[]
     try {
-      servers = this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root)
+      servers = [
+        ...this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root),
+        ...await this.gouziServers(),
+      ]
     } catch (error) {
       if (initial) throw error
       this.ctx.logger.warn(`remote operator catalog rejected: ${error instanceof Error ? error.message : String(error)}`)
@@ -1793,13 +1799,58 @@ export class OrchestrationDaemon {
         }
         const dispose = operators.map(operator => this.ctx.physicalOperators.registerOperator(operator))
         this.remoteOperatorRegistrations.set(server.id, { signature, dispose })
+        this.observeGouzi(server, 'online')
       } catch (error) {
         this.ctx.logger.warn(
           `remote operator Server "${server.label}" unavailable: ${error instanceof Error ? error.message : String(error)}`,
         )
+        this.observeGouzi(server, 'unreachable')
       }
     }
+    this.syncGouziActivity()
     this.remoteOperatorRefreshAt = Date.now() + 5_000
+  }
+
+  /** Enabled Gouzi members as remote Servers; a member whose credential cannot be read is skipped with a warning. */
+  private async gouziServers(): Promise<RemotePhysicalOperatorServer[]> {
+    const servers: RemotePhysicalOperatorServer[] = []
+    for (const member of this.store.gouzi.list()) {
+      if (member.membership !== 'enabled') continue
+      const host = this.store.gouzi.getHost(member.hostId)
+      if (host === undefined) continue
+      try {
+        const resolved = await this.ctx.get('credentials')?.resolve(credentialRef(host.credentialRef))
+        servers.push(gouziOperatorServer({
+          store: this.store,
+          gouziId: member.gouziId,
+          ...resolved === undefined ? {} : { accessToken: resolved.value },
+        }))
+      } catch (error) {
+        this.ctx.logger.warn(`gouzi "${member.name}" skipped: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    return servers
+  }
+
+  private observeGouzi(server: RemotePhysicalOperatorServer, connection: 'online' | 'unreachable'): void {
+    if (server.gouzi === undefined) return
+    const gouziId = GouziId(server.gouzi.gouziId)
+    if (this.store.gouzi.read(gouziId)?.connection !== connection) this.store.gouzi.observe(gouziId, { connection })
+  }
+
+  /** Mark a member `working` while one of its attempts is accepted or running, otherwise `resting`. */
+  private syncGouziActivity(): void {
+    const busy = new Set<string>()
+    for (const attempt of this.store.attempts(['accepted', 'running'])) {
+      const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+      const match = /^gouzi\.(.+?)\./u.exec(plan.operatorPlan.operatorId)
+      if (match?.[1] !== undefined) busy.add(match[1])
+    }
+    for (const member of this.store.gouzi.list()) {
+      if (member.membership === 'archived') continue
+      const activity = busy.has(String(member.gouziId)) ? 'working' : 'resting'
+      if (member.activity !== activity) this.store.gouzi.observe(member.gouziId, { activity })
+    }
   }
 
   private tick(): Promise<void> {

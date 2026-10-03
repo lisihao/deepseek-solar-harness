@@ -19,10 +19,8 @@ export type GouziGrantStore = Pick<OrchestrationStore, 'attemptByExecutionId' | 
 export interface GouziOperatorOptions {
   readonly store: GouziGrantStore
   readonly gouziId: GouziId
-  /** Device credential of the member host, read by the caller from its credential entry. */
-  readonly accessToken: string
-  /** How long after issue a grant may start work. */
-  readonly grantDeadlineMs: number
+  /** Device credential of the member host; absent for a loopback or tunnel endpoint that needs none. */
+  readonly accessToken?: string
   /** Settlement polling interval of the remote operator. */
   readonly pollIntervalMs?: number
   /** Clock in epoch milliseconds, injected for deterministic deadlines. */
@@ -41,7 +39,7 @@ function effectScopes(effects: NodeExecutionPlanV1['effectiveEffects']): string[
 /**
  * Describe a paired member as a remote Server that signs every attempt with an execution grant. The member and
  * host rows are read when a grant is issued, so a changed generation or epoch applies to the next attempt.
- * @param options - store, member identity, credential, and grant lifetime.
+ * @param options - store, member identity, and credential.
  * @returns the Server description to pass to `createRemotePhysicalOperators`.
  * @throws PhysicalOperatorError - when the member or its host is not registered.
  */
@@ -57,7 +55,7 @@ export function gouziOperatorServer(options: GouziOperatorOptions): RemotePhysic
     id: `gouzi-${String(gouziId)}`,
     label: member.name,
     endpoint: host.endpoint,
-    accessToken: options.accessToken,
+    ...options.accessToken === undefined ? {} : { accessToken: options.accessToken },
     ...options.pollIntervalMs === undefined ? {} : { pollIntervalMs: options.pollIntervalMs },
     gouzi: {
       gouziId: String(gouziId),
@@ -75,7 +73,7 @@ export function gouziOperatorServer(options: GouziOperatorOptions): RemotePhysic
           )
         }
         const nodePlan = store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
-        const deadline = new Date(now() + options.grantDeadlineMs).toISOString()
+        const deadline = new Date(now() + current.grantDeadlineMs).toISOString()
         return {
           runId: OrchestrationRunId(attempt.runId),
           nodeId: attempt.nodeId,

@@ -6363,6 +6363,9 @@ importers:
       '@deepseek-ai/dsh-continual-harness-local':
         specifier: workspace:^
         version: link:../continual-harness-local
+      '@deepseek-ai/dsh-credentials':
+        specifier: workspace:^
+        version: link:../../credentials/credentials
       '@deepseek-ai/dsh-credentials-local':
         specifier: workspace:^
         version: link:../../credentials/credentials-local

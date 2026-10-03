@@ -28,7 +28,8 @@ const HOST = {
 function member(index: number, patch: Record<string, unknown> = {}) {
   return {
     gouziId: GouziId(`gouzi-${String(index)}`), ownerId: GouziOwnerId('owner-1'), hostId: HOST.hostId,
-    name: `Dog ${String(index)}`, avatarId: 'shiba' as const, role: 'research' as const, ...patch,
+    name: `Dog ${String(index)}`, avatarId: 'shiba' as const, role: 'research' as const,
+    grantDeadlineMs: 3_600_000, ...patch,
   }
 }
 
@@ -52,7 +53,7 @@ describe('GouziRegistry members', () => {
     const created = first.store.gouzi.create(member(1, { name: '  Mochi  ' }))
     expect(created).toMatchObject({
       gouziId: 'gouzi-1', name: 'Mochi', generation: 1, membership: 'provisioning',
-      connection: 'unreachable', activity: 'resting', roleVersion: 1, policyVersion: 1,
+      connection: 'unreachable', activity: 'resting', roleVersion: 1, policyVersion: 1, grantDeadlineMs: 3_600_000,
     })
     first.store.close()
 
@@ -72,6 +73,9 @@ describe('GouziRegistry members', () => {
     expect(() => store.gouzi.create(member(2, { name: 'x'.repeat(41) }))).toThrow('1 to 40 characters')
     expect(() => store.gouzi.create(member(2, { avatarId: 'cat' }))).toThrow('unknown gouzi avatar')
     expect(() => store.gouzi.create(member(2, { role: 'boss' }))).toThrow('unknown gouzi role')
+    expect(() => store.gouzi.create(member(2, { grantDeadlineMs: 59_999 }))).toThrow('grant deadline')
+    expect(() => store.gouzi.create(member(2, { grantDeadlineMs: 24 * 3_600_000 + 1 }))).toThrow('grant deadline')
+    expect(() => store.gouzi.create(member(2, { grantDeadlineMs: 1.5 }))).toThrow('grant deadline')
     expect(store.gouzi.list()).toHaveLength(1)
     store.close()
   })

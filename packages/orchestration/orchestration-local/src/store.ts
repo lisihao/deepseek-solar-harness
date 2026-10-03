@@ -131,6 +131,7 @@ const GOUZI_TABLES = `
     membership TEXT NOT NULL,
     connection TEXT NOT NULL,
     activity TEXT NOT NULL,
+    grant_deadline_ms INTEGER NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (host_id) REFERENCES gouzi_hosts(host_id)
