@@ -10,6 +10,8 @@ Admission may carry one validated runtime-context snapshot from its source Sessi
 
 An RLM node may opt into Prime-compatible Autonomous Mode. The Graph or run admission selects `disabled | auto | enabled`; the resolved continuation, token, elapsed-time, and host quality-gate policy is content addressed and sealed into that attempt's `NodeExecutionPlanV1`. Autonomous Mode is a host continuation policy inside one node, not a Goal and not another Scheduler. It remains disabled by default.
 
+The `gouzi` module defines the records that tie a long-lived execution member to this single authority: the member record and its three independent state dimensions, the ten-member limit (only an archived member leaves the count), the sealed execution grant, the idempotent execution receipt, the capability snapshot, and the handoff and experience-proposal shapes. It holds types and the limit only; it starts no process and schedules nothing. The design is the [Gouzi Agent Note](../../../.agents/notes/proposed/architecture/2026-10-03-dsh-gouzi-execution-members.md).
+
 ## Model Experience
 
 Indirectly, through the model-facing orchestration Consumer. This Service Definition does not register tools or prompt text.

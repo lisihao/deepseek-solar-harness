@@ -758,4 +758,5 @@ export abstract class OrchestrationService extends Service {
 }
 
 export type { CapabilityBindingPlanV1, ContextPacketV1 }
+export * from './gouzi.ts'
 export default OrchestrationService

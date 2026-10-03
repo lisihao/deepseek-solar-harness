@@ -389,7 +389,7 @@
     "dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz": "b30244725775c3d88085b2abfc479f454c6d8f63c958ccb5161acf2e732102e1",
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "6159d2b78d57268cc5aaf84dff2d33e68f257a44943556554566f22996f00e01",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "975ac7de645f3d5db54cd43ac0cc3b951f8c04cefd9985425e47f9f20e68d27d",
-    "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "38c8bfdf5330d377dd79706f723166d93d9357fc3a41ee0095f7133c63cfeb80",
+    "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "28ad8f89d2c9a48fbce9e882f4d182279058ef9ce2aa68ee46295373cb6ec01e",
     "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "3dd7e51979dca16580073a278148f7a4d6a5766c1fe28eeeb0ae863a6cf77199",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "bb752f262fff53aa4bab1a1fb34e9b172234d02f49f282d6cbd96d204fc7209e",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "bde64debfa3575338c94e2d05b9efdcf34c25e586f60edf0079dd07b80b3fae8",
