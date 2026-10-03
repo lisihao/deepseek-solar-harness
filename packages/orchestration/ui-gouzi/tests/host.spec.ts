@@ -10,7 +10,7 @@ import {
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
   apply, Config, GOUZI_AVATARS, GOUZI_CONTROL_HEADER, GOUZI_DASHBOARD_PATH, GOUZI_ROLE_IDS, gouziPrimaryState,
-  GouziHostService, type GouziProvisionInput,
+  GouziHostService, type GouziHostProjection, type GouziProvisionInput, type GouziSshTarget,
 } from '../src/index.ts'
 
 /** In-memory registry with the semantics the Host depends on: the ten-slot limit and the membership flow. */
@@ -75,29 +75,59 @@ class FakeControl implements GouziControl {
 class FakeHost extends GouziHostService {
   readonly ownerId = 'owner-test'
   provisioned: GouziProvisionInput[] = []
-  started: string[] = []
+  started: Array<[string, string]> = []
   stopped: Array<[string, boolean]> = []
+  resolved: Array<[string, string]> = []
+  sshHosts: GouziHostProjection[] = []
+  added: Array<Parameters<GouziHostService['addHost']>[0]> = []
+  removed: string[] = []
   failStart: string | undefined
+  failAdd: string | undefined
   treeStopped = true
   order: string[] = []
 
-  resolveRepository(path: string) {
+  hosts() { return Promise.resolve(this.sshHosts) }
+  inspectHost(target: GouziSshTarget) {
+    if (target.address === 'unreachable.example') return Promise.reject(new Error('连不上这台机器'))
+    return Promise.resolve({ keyType: 'ssh-ed25519', fingerprint: 'SHA256:abc123' })
+  }
+  addHost(input: Parameters<GouziHostService['addHost']>[0]) {
+    this.added.push(input)
+    if (this.failAdd !== undefined) return Promise.reject(new Error(this.failAdd))
+    const host: GouziHostProjection = {
+      hostId: 'ssh-1',
+      label: input.label ?? input.address,
+      kind: 'ssh',
+      address: `${input.user}@${input.address}:${String(input.port)}`,
+    }
+    this.sshHosts = [...this.sshHosts, host]
+    return Promise.resolve(host)
+  }
+  removeHost(hostId: string) {
+    this.removed.push(hostId)
+    this.sshHosts = this.sshHosts.filter(host => host.hostId !== hostId)
+    return Promise.resolve()
+  }
+  browse(hostId: string, path?: string) {
+    return Promise.resolve({ path: path ?? `/home/${hostId}`, entries: [{ name: 'PetGoGo', path: `${path ?? '/home'}/PetGoGo`, git: true }] })
+  }
+  resolveRepository(hostId: string, path: string) {
+    this.resolved.push([hostId, path])
     if (path.includes('missing')) return Promise.reject(new Error(`${path} is not inside a Git repository`))
     return Promise.resolve({ repository: `github.com/lisihao/${path.split('/').pop()!}`, source: path })
   }
   provision(input: GouziProvisionInput) { this.order.push('provision'); this.provisioned.push(input); return Promise.resolve() }
-  async start(gouziId: string) {
+  async start(hostId: string, gouziId: string) {
     this.order.push('start')
     if (this.failStart !== undefined) throw new Error(this.failStart)
-    this.started.push(gouziId)
+    this.started.push([hostId, gouziId])
     await Promise.resolve()
-    return { endpoint: 'http://127.0.0.1:4100/', pid: 1234, incarnation: 1 }
+    return { endpoint: hostId === 'local' ? 'http://127.0.0.1:4100/' : 'http://127.0.0.1:4200/', pid: 1234, incarnation: 1 }
   }
-  stop(gouziId: string, options?: { reclaimResident?: boolean }) {
+  stop(_hostId: string, gouziId: string, options?: { reclaimResident?: boolean }) {
     this.stopped.push([gouziId, options?.reclaimResident === true])
     return Promise.resolve({ processTreeStopped: this.treeStopped })
   }
-  isRunning() { return true }
 }
 
 interface Body {
@@ -298,6 +328,105 @@ describe('Gouzi Host route', () => {
     const refused = await send('POST', { ...ADOPT, name: 'Eleventh' }, CONTROL)
     expect(refused).toMatchObject({ status: 409, body: { error: 'GOUZI_LIMIT_REACHED' } })
     expect(control.members).toHaveLength(GOUZI_MEMBER_LIMIT)
+  })
+
+  it('lists the local host first and every SSH host after it', async () => {
+    const { host, send } = await mount()
+    expect((await send('GET')).body).toMatchObject({ hosts: [{ hostId: 'local', kind: 'local' }] })
+    host!.sshHosts = [{ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh', address: 'lisihao@mini.local:22' }]
+    expect((await send('GET')).body).toMatchObject({ hosts: [{ hostId: 'local' }, { hostId: 'ssh-1', label: 'Mac mini', address: 'lisihao@mini.local:22' }] })
+    const reader = await send('GET', undefined, { authorization: 'Bearer pocket-token' }, true)
+    expect(reader.body).toMatchObject({ hosts: [{ hostId: 'local' }, { hostId: 'ssh-1', label: 'Mac mini' }] })
+    expect(JSON.stringify(reader.body)).not.toContain('mini.local')
+  })
+
+  it('inspects an SSH machine, then adds it with the confirmed fingerprint and never echoes the password', async () => {
+    const { host, send } = await mount()
+    const target = { address: 'mini.local', port: 22, user: 'lisihao' }
+    expect(await send('POST', { action: 'host-inspect', ...target }, CONTROL)).toMatchObject({ status: 200, body: { fingerprint: 'SHA256:abc123' } })
+    expect(await send('POST', { action: 'host-inspect', ...target, address: 'unreachable.example' }, CONTROL)).toMatchObject({ status: 502 })
+    const added = await send('POST', { action: 'host-add', ...target, password: 'secret-pw', fingerprint: 'SHA256:abc123', label: 'Mac mini' }, CONTROL)
+    expect(added).toMatchObject({ status: 200, body: { hostId: 'ssh-1', label: 'Mac mini', address: 'lisihao@mini.local:22' } })
+    expect(JSON.stringify(added.body)).not.toContain('secret-pw')
+    expect(host!.added).toEqual([{ ...target, password: 'secret-pw', fingerprint: 'SHA256:abc123', label: 'Mac mini' }])
+    host!.failAdd = '用户名或密码不对'
+    expect(await send('POST', { action: 'host-add', ...target, password: 'wrong', fingerprint: 'SHA256:abc123' }, CONTROL))
+      .toMatchObject({ status: 502, body: { message: '用户名或密码不对' } })
+  })
+
+  it.each([
+    ['an address that looks like an option', { address: '-oProxyCommand=evil' }],
+    ['an address with a space', { address: 'a b' }],
+    ['a login with a slash', { user: 'a/b' }],
+    ['port zero', { port: 0 }],
+    ['a fractional port', { port: 22.5 }],
+    ['a port over 65535', { port: 70_000 }],
+    ['a fingerprint that is not SHA256', { fingerprint: 'MD5:aa' }],
+    ['a password over 256 characters', { password: 'x'.repeat(257) }],
+    ['no password', { password: undefined }],
+  ])('refuses to add a host with %s before touching the host service', async (_label, patch) => {
+    const { host, send } = await mount()
+    const reply = await send('POST', {
+      action: 'host-add', address: 'mini.local', port: 22, user: 'lisihao', password: 'pw', fingerprint: 'SHA256:abc123', ...patch,
+    }, CONTROL)
+    expect(reply).toMatchObject({ status: 400, body: { error: 'GOUZI_INVALID' } })
+    expect(host!.added).toEqual([])
+  })
+
+  it('lets only a manager add, inspect, browse, or remove hosts', async () => {
+    const { send } = await mount()
+    const headers = { ...CONTROL, authorization: 'Bearer pocket-token' }
+    for (const body of [
+      { action: 'host-inspect', address: 'mini.local', port: 22, user: 'lisihao' },
+      { action: 'host-remove', hostId: 'ssh-1' },
+      { action: 'browse', hostId: 'ssh-1' },
+    ]) {
+      expect(await send('POST', body, headers, true), body.action).toMatchObject({ status: 403, body: { error: 'REMOTE_SCOPE_FORBIDDEN' } })
+    }
+  })
+
+  it('adopts onto an SSH host: resolves the projects there, pairs that host, and starts the member through it', async () => {
+    const { control, host, send } = await mount()
+    host!.sshHosts = [{ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh', address: 'lisihao@mini.local:22' }]
+    const reply = await send('POST', { ...ADOPT, hostId: 'ssh-1', projects: ['/Users/lisihao/project/PetGoGo'] }, CONTROL)
+    expect(reply.status).toBe(200)
+    expect(host!.resolved).toEqual([['ssh-1', '/Users/lisihao/project/PetGoGo']])
+    expect(control.hosts).toMatchObject([{ hostId: 'ssh-1', label: 'Mac mini', credentialRef: 'GOUZI_HOST_SSH_1' }])
+    expect(host!.provisioned[0]).toMatchObject({ hostId: 'ssh-1', repositories: [{ source: '/Users/lisihao/project/PetGoGo' }] })
+    expect(host!.started).toEqual([['ssh-1', reply.body.gouziId]])
+    expect(control.members[0]).toMatchObject({ hostId: 'ssh-1', endpoint: 'http://127.0.0.1:4200/' })
+  })
+
+  it('refuses to adopt onto a host that was never added, and creates nothing', async () => {
+    const { control, send } = await mount()
+    expect(await send('POST', { ...ADOPT, hostId: 'ssh-ghost' }, CONTROL)).toMatchObject({ status: 400, body: { error: 'GOUZI_INVALID' } })
+    expect(control.calls).toEqual([])
+  })
+
+  it('wakes, rests, and retires a member through the host it lives on', async () => {
+    const { host, send } = await mount()
+    host!.sshHosts = [{ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh' }]
+    const id = (await send('POST', { ...ADOPT, hostId: 'ssh-1' }, CONTROL)).body.gouziId
+    host!.started.length = 0
+    await send('POST', { action: 'wake', gouziId: id }, CONTROL)
+    expect(host!.started).toEqual([['ssh-1', id]])
+    await send('POST', { action: 'retire', gouziId: id }, CONTROL)
+    expect(host!.stopped).toEqual([[id, true]])
+  })
+
+  it('browses a host and removes one only when no live member lives there', async () => {
+    const { host, send } = await mount()
+    host!.sshHosts = [{ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh' }]
+    expect(await send('POST', { action: 'browse', hostId: 'ssh-1', path: '/Users/lisihao/project' }, CONTROL))
+      .toMatchObject({ status: 200, body: { path: '/Users/lisihao/project', entries: [{ name: 'PetGoGo', git: true }] } })
+    expect(await send('POST', { action: 'browse', hostId: 'ssh-1', path: 'relative' }, CONTROL)).toMatchObject({ status: 400 })
+    const id = (await send('POST', { ...ADOPT, hostId: 'ssh-1' }, CONTROL)).body.gouziId
+    expect(await send('POST', { action: 'host-remove', hostId: 'ssh-1' }, CONTROL)).toMatchObject({ status: 409, body: { error: 'GOUZI_STATE_CONFLICT' } })
+    expect(host!.removed).toEqual([])
+    await send('POST', { action: 'retire', gouziId: id }, CONTROL)
+    expect(await send('POST', { action: 'host-remove', hostId: 'ssh-1' }, CONTROL)).toMatchObject({ status: 200, body: { removed: true } })
+    expect(host!.removed).toEqual(['ssh-1'])
+    expect(await send('POST', { action: 'host-remove', hostId: 'local' }, CONTROL)).toMatchObject({ status: 400 })
   })
 
   it('serializes concurrent adoptions so their steps never interleave', async () => {

@@ -10,7 +10,9 @@
     "src/client/api.ts",
     "src/client/avatars.tsx",
     "src/client/GouziPanel.tsx",
+    "src/client/HostStep.tsx",
     "src/client/index.ts",
+    "src/client/RemoteFolderPicker.tsx",
     "src/contracts.ts",
     "src/css-modules.d.ts"
   ],

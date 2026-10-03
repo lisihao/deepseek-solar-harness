@@ -1,21 +1,26 @@
-/** Provider of `ctx.gouziHost` for the product Server: Gouzi members run as processes on this machine. */
+/**
+ * Provider of `ctx.gouziHost` for the product Server: Gouzi members run as processes on this machine, or on
+ * SSH hosts the user added.
+ */
 
-import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { resolveRepositorySource } from '@deepseek-ai/dsh-orchestration-local'
 import {
+  GOUZI_LOCAL_HOST_ID,
   GouziHostService,
   type GouziProcessInfo,
   type GouziProvisionInput,
+  type GouziSshTarget,
 } from '@deepseek-ai/dsh-ui-gouzi'
-import { GouziSupervisor, residentDaemonPid } from './gouzi-supervisor.ts'
+import { LocalGouziOperations } from './gouzi-local.ts'
+import { RemoteGouziHosts } from './gouzi-remote.ts'
+import { SYSTEM_SSH, type SshBinaries } from './gouzi-ssh.ts'
 
 export const name = 'gouzi-host'
 
-/** Local member host configuration. */
+/** Member host configuration. */
 export interface Config {
-  /** Directory that holds one home per member. */
+  /** Directory that holds one home per local member. */
   readonly membersRoot: string
   /** Stable identity of this main instance. */
   readonly ownerId: string
@@ -31,6 +36,12 @@ export interface Config {
   readonly workerScript?: string
   /** Node options placed before the launcher script, for example a TypeScript loader when running from source. */
   readonly nodeArgs: string[]
+  /** Directory for the SSH hosts: their catalog, dedicated keys, and pinned host keys. */
+  readonly hostsRoot: string
+  /** OpenSSH client binaries; the defaults are the ones on `PATH`. */
+  readonly ssh: SshBinaries
+  /** Where DSH Desktop is installed on SSH hosts. */
+  readonly remoteApp?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -42,57 +53,77 @@ export const Config: z<Config> = z.object({
   gitTimeoutMs: z.number().step(1).min(1_000).max(120_000).default(10_000),
   workerScript: z.string(),
   nodeArgs: z.array(z.string()).default([]),
+  hostsRoot: z.string().required(),
+  ssh: z.object({
+    ssh: z.string().default(SYSTEM_SSH.ssh),
+    sshKeygen: z.string().default(SYSTEM_SSH.sshKeygen),
+    sshKeyscan: z.string().default(SYSTEM_SSH.sshKeyscan),
+  }),
+  remoteApp: z.string(),
 })
 
-/** Runs members as detached processes of this machine; exported so a test can wrap it. */
+/** Runs members as detached processes of this machine or of an SSH host; exported so a test can wrap it. */
 export class LocalGouziHost extends GouziHostService {
   readonly ownerId: string
-  private readonly supervisor: GouziSupervisor
+  private readonly local: LocalGouziOperations
+  private readonly remote: RemoteGouziHosts
 
-  constructor(ctx: Context, private readonly config: Config) {
+  constructor(ctx: Context, config: Config) {
     super(ctx)
     this.ownerId = config.ownerId
-    const script = config.workerScript ?? fileURLToPath(new URL('./gouzi-worker-bin.js', import.meta.url))
-    this.supervisor = new GouziSupervisor({
-      membersRoot: config.membersRoot,
-      workerCommand: () => ({
-        command: process.execPath,
-        args: [...config.nodeArgs, script, '--host', '127.0.0.1', '--port', '0'],
-        // Inside Electron the executable is the app; this makes it behave as plain Node for the member.
-        ...process.versions.electron === undefined ? {} : { env: { ELECTRON_RUN_AS_NODE: '1' } },
-      }),
-      activeLimit: config.activeLimit,
-      readyTimeoutMs: config.readyTimeoutMs,
-      stopTimeoutMs: config.stopTimeoutMs,
+    this.local = new LocalGouziOperations(config)
+    this.remote = new RemoteGouziHosts({
+      root: config.hostsRoot,
+      binaries: config.ssh,
+      ...config.remoteApp === undefined ? {} : { remoteApp: config.remoteApp },
     })
+    // Forwards of members that were running when the previous main instance ended come back with this one.
+    this.remote.restore()
+    ctx.effect(() => () => { this.remote.dispose() }, 'gouzi-host: close SSH forwards')
   }
 
-  resolveRepository(path: string) {
-    return resolveRepositorySource(path, this.config.gitTimeoutMs)
+  hosts() {
+    return Promise.resolve(this.remote.list())
+  }
+
+  inspectHost(target: GouziSshTarget) {
+    return this.remote.inspect(target)
+  }
+
+  addHost(input: GouziSshTarget & { readonly password: string; readonly fingerprint: string; readonly label?: string }) {
+    return this.remote.add(input)
+  }
+
+  removeHost(hostId: string): Promise<void> {
+    return this.remote.remove(hostId)
+  }
+
+  browse(hostId: string, path?: string) {
+    return hostId === GOUZI_LOCAL_HOST_ID ? Promise.resolve(this.local.browse(path)) : this.remote.browse(hostId, path)
+  }
+
+  resolveRepository(hostId: string, path: string) {
+    return hostId === GOUZI_LOCAL_HOST_ID ? this.local.resolveRepository(path) : this.remote.resolveRepository(hostId, path)
   }
 
   async provision(input: GouziProvisionInput): Promise<void> {
-    await this.supervisor.provision(input)
+    if (input.hostId === GOUZI_LOCAL_HOST_ID) await this.local.provision(input)
+    else await this.remote.provision(input)
   }
 
-  async start(gouziId: string): Promise<GouziProcessInfo> {
-    const ready = await this.supervisor.start(gouziId)
-    return { endpoint: `http://127.0.0.1:${String(ready.port)}/`, pid: ready.pid, incarnation: ready.incarnation }
+  async start(hostId: string, gouziId: string): Promise<GouziProcessInfo> {
+    if (hostId !== GOUZI_LOCAL_HOST_ID) return this.remote.start(hostId, gouziId)
+    const started = await this.local.start(gouziId)
+    return { endpoint: `http://127.0.0.1:${String(started.port)}/`, pid: started.pid, incarnation: started.incarnation }
   }
 
-  async stop(gouziId: string, options: { readonly reclaimResident?: boolean } = {}): Promise<{ readonly processTreeStopped: boolean }> {
-    await this.supervisor.stop(gouziId, options)
-    const resident = options.reclaimResident === true ? residentDaemonPid(this.supervisor.homeOf(gouziId)) : undefined
-    return { processTreeStopped: this.supervisor.running(gouziId) === undefined && resident === undefined }
-  }
-
-  isRunning(gouziId: string): boolean {
-    return this.supervisor.running(gouziId) !== undefined
+  stop(hostId: string, gouziId: string, options: { readonly reclaimResident?: boolean } = {}): Promise<{ readonly processTreeStopped: boolean }> {
+    return hostId === GOUZI_LOCAL_HOST_ID ? this.local.stop(gouziId, options) : this.remote.stop(hostId, gouziId, options)
   }
 }
 
 /**
- * Register the local member host.
+ * Register the member host.
  * @param ctx - plugin context.
  * @param config - resolved configuration.
  */

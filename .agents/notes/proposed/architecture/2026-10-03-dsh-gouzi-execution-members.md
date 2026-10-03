@@ -66,6 +66,19 @@ Decisions the implementation settled:
 - **The Resident daemon outlives its member.** Stopping a worker leaves its detached Resident daemon running so durable turns survive a restart; retiring stops both and archives only when no process remains.
 - **A member runs no scheduler.** The worker profile disables every orchestration row and mounts only the remote-host entry; its home gets no orchestration state.
 
+### Remote hosts over SSH
+
+A member can live on another machine, such as a Mac mini, that the user adds from the adoption wizard.
+
+- **System OpenSSH, no new dependency.** The Desktop `gouzi-host` Provider runs the system `ssh`, `ssh-keygen`, and `ssh-keyscan`. A library would add a dependency that the existing platform trust store, agent, and `known_hosts` handling already cover.
+- **The user confirms the machine before any login.** `host-inspect` reads the host key and shows its fingerprint. `host-add` carries the confirmed fingerprint and is refused if the machine presents another key. The key is then pinned in a per-host `known_hosts` and every later connection uses `StrictHostKeyChecking=yes`.
+- **The password is used once.** `host-add` logs in with the password through a temporary `SSH_ASKPASS` script that reads it from the child's environment, installs a dedicated ed25519 key, and discards the password. It is not stored, logged, or returned. If the machine is then found unusable, or the host is removed, the key is taken back out of the remote `authorized_keys` when the machine answers.
+- **Nothing is uploaded.** The remote machine runs its own installed DSH Desktop through `ELECTRON_RUN_AS_NODE`. The `dsh-gouzi-agent` command performs one operation per call (`probe`, `resolve`, `browse`, `provision`, `start`, `stop`) and prints one `DSH-GOUZI-AGENT` result line. A protocol number and a minimum version (3.36.0) are checked when the host is added, so a machine with an older application is refused with a request to upgrade.
+- **The endpoint is a local port forward.** The member listens on the remote loopback. The main instance opens `ssh -N -L` to it, keeps the local port in the host catalog so the stored endpoint stays valid across restarts, reopens a dropped forward with the same port, and falls back to a new port only if another process took the old one. A remote member still needs an execution grant for every call; the forward gives it no extra permission.
+- **No schema change.** The orchestration store keeps the host row (label, authority epoch, credential reference). The SSH address, user, dedicated key, and pinned host key live in the Desktop catalog `gouzi/hosts`, so schema 5 stays.
+
+Limits: a task takes its workspace identity from a clean Git checkout on the main instance, so a repository that exists only on the remote machine cannot receive tasks yet; that needs a remote-resident workspace identity and is the next piece. The user-facing local/remote Server picker stays until remote members cover that case, and is then retired with a migration of saved Server entries.
+
 ### Phases
 
 P0 is this note and the contract types, with no behavior change. P1 is one member end to end: create it from the entry UI, pair a pilot host, run one authorized task in an isolated worktree, persist the receipt and artifacts, and let the main instance confirm. P2 adds atomic resource admission, process-tree reclamation, bounded offline execution, and cancel and reconnect handling. P3 adds roles, automatic division of work, bounded messages, and independent verification. P4 adds experience proposals, versioned release and rollback, and migration. Computer use is out of scope.

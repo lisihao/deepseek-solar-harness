@@ -20,18 +20,22 @@ import {
   GOUZI_AVATARS,
   GOUZI_CONTROL_HEADER,
   GOUZI_DASHBOARD_PATH,
+  GOUZI_LOCAL_HOST_ID,
   GOUZI_ROLE_IDS,
   gouziPrimaryState,
   type GouziAvatar,
   type GouziControlRequest,
   type GouziDashboardV1,
   type GouziErrorV1,
+  type GouziFolderListing,
+  type GouziHostInspection,
+  type GouziHostProjection,
   type GouziMemberProjection,
 } from './contracts.ts'
 import './host-service.ts'
 
 export * from './contracts.ts'
-export { GouziHostService, type GouziProcessInfo, type GouziProvisionInput } from './host-service.ts'
+export { GouziHostService, type GouziProcessInfo, type GouziProvisionInput, type GouziSshTarget } from './host-service.ts'
 
 export const name = 'ui-gouzi'
 export const inject = ['orchestrations', 'webServer']
@@ -46,10 +50,12 @@ export const Config: z<Config> = z.object({
   grantDeadlineMs: z.number().step(1).min(60_000).max(24 * 60 * 60_000).default(2 * 60 * 60_000),
 })
 
-/** The one execution host of the first version: the machine that runs this Server. */
-const PILOT_HOST_ID = 'local'
-const PILOT_HOST_LABEL = '这台 Mac'
-const PILOT_HOST_CREDENTIAL_REF = 'GOUZI_HOST_LOCAL'
+/** Label of the machine that runs this Server. */
+const LOCAL_HOST_LABEL = '这台 Mac'
+const HOST_ADDRESS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
+const HOST_USER_PATTERN = /^[A-Za-z_][A-Za-z0-9_.-]*$/u
+const FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]+={0,2}$/u
+const PASSWORD_LIMIT = 256
 const MAX_BODY_BYTES = 16 * 1024
 const NAME_LIMIT = 40
 
@@ -114,6 +120,16 @@ function role(value: string): (typeof GOUZI_ROLE_IDS)[number] {
   return value as (typeof GOUZI_ROLE_IDS)[number]
 }
 
+function sshTarget(body: Record<string, unknown>): { address: string; port: number; user: string } {
+  const address = text(body, 'address').trim()
+  if (!HOST_ADDRESS_PATTERN.test(address) || address.length > 253) throw new GouziInputError('address must be a host name or IP address')
+  const user = text(body, 'user').trim()
+  if (!HOST_USER_PATTERN.test(user) || user.length > 64) throw new GouziInputError('user must be a login name')
+  const port = body.port
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65_535) throw new GouziInputError('port must be 1 to 65535')
+  return { address, port, user }
+}
+
 /**
  * Validate an untrusted control body.
  * @param body - parsed JSON object.
@@ -133,8 +149,30 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
         name: memberName(text(body, 'name')),
         avatarId: avatar(text(body, 'avatarId')),
         role: role(text(body, 'role')),
+        ...optionalText(body, 'hostId') === undefined ? {} : { hostId: text(body, 'hostId') },
         projects: projects as string[],
       }
+    }
+    case 'host-inspect': return { action, ...sshTarget(body) }
+    case 'host-add': {
+      const password = text(body, 'password')
+      if (password.length > PASSWORD_LIMIT) throw new GouziInputError(`password must be at most ${String(PASSWORD_LIMIT)} characters`)
+      const fingerprint = text(body, 'fingerprint')
+      if (!FINGERPRINT_PATTERN.test(fingerprint)) throw new GouziInputError('fingerprint must look like SHA256:...')
+      const label = optionalText(body, 'label')?.trim()
+      return {
+        action,
+        ...sshTarget(body),
+        password,
+        fingerprint,
+        ...label === undefined || label.length === 0 ? {} : { label: label.slice(0, NAME_LIMIT) },
+      }
+    }
+    case 'host-remove': return { action, hostId: text(body, 'hostId') }
+    case 'browse': {
+      const path = optionalText(body, 'path')
+      if (path !== undefined && !isAbsolute(path)) throw new GouziInputError('path must be absolute')
+      return { action, hostId: text(body, 'hostId'), ...path === undefined ? {} : { path } }
     }
     case 'edit': {
       const name = optionalText(body, 'name')
@@ -160,12 +198,14 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
   }
 }
 
-function project(member: GouziMemberView): GouziMemberProjection {
+function project(member: GouziMemberView, hostLabel: string): GouziMemberProjection {
   return {
     gouziId: String(member.gouziId),
     name: member.name,
     avatarId: member.avatarId,
     role: member.role,
+    hostId: String(member.hostId),
+    hostLabel,
     membership: member.membership,
     connection: member.connection,
     activity: member.activity,
@@ -174,12 +214,25 @@ function project(member: GouziMemberView): GouziMemberProjection {
   }
 }
 
+/** The member as the panel shows it, with the name of the machine it lives on. */
+async function view(control: GouziControl, member: GouziMemberView): Promise<GouziMemberProjection> {
+  const host = (await control.list()).hosts.find(value => String(value.hostId) === String(member.hostId))
+  return project(member, host?.label ?? String(member.hostId))
+}
+
 function canManage(authority: RemoteRequestAuthority): boolean {
   return authority.scope === 'admin' || authority.scope === 'cockpit'
 }
 
+async function projectHosts(ctx: Context): Promise<readonly GouziHostProjection[]> {
+  const host = ctx.get('gouziHost')
+  const local: GouziHostProjection = { hostId: GOUZI_LOCAL_HOST_ID, label: LOCAL_HOST_LABEL, kind: 'local' }
+  return host === undefined ? [local] : [local, ...await host.hosts()]
+}
+
 async function dashboard(ctx: Context, control: GouziControl, authority: RemoteRequestAuthority): Promise<GouziDashboardV1> {
-  const { members } = await control.list()
+  const { members, hosts } = await control.list()
+  const labels = new Map(hosts.map(value => [String(value.hostId), value.label]))
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
@@ -187,7 +240,11 @@ async function dashboard(ctx: Context, control: GouziControl, authority: RemoteR
     used: members.filter(member => countsTowardGouziLimit(member.membership)).length,
     canManage: canManage(authority),
     hostAvailable: ctx.get('gouziHost') !== undefined,
-    members: members.filter(member => member.membership !== 'archived').map(project),
+    // A read-only device learns which machines exist, not how to log in to them.
+    hosts: (await projectHosts(ctx)).map(host => canManage(authority) ? host : { hostId: host.hostId, label: host.label, kind: host.kind }),
+    members: members
+      .filter(member => member.membership !== 'archived')
+      .map(member => project(member, labels.get(String(member.hostId)) ?? String(member.hostId))),
   }
 }
 
@@ -208,15 +265,18 @@ async function adopt(ctx: Context, control: GouziControl, request: Extract<Gouzi
   const host = ctx.get('gouziHost')
   if (host === undefined) throw new GouziRefusal('GOUZI_HOST_UNAVAILABLE', '这台机器上还不能启动狗子')
   // Resolve every project before anything is created, so a bad path leaves no half-made member behind.
-  const resolved = await Promise.all(request.projects.map(path => host.resolveRepository(path)))
+  const hostId = request.hostId ?? GOUZI_LOCAL_HOST_ID
+  const known = (await projectHosts(ctx)).find(value => value.hostId === hostId)
+  if (known === undefined) throw new GouziInputError(`unknown host ${hostId}`)
+  const resolved = await Promise.all(request.projects.map(path => host.resolveRepository(hostId, path)))
   const repositories = [...new Map(resolved.map(value => [value.repository, value])).values()]
   const listing = await control.list()
-  const pilot = listing.hosts.find(value => String(value.hostId) === PILOT_HOST_ID)
+  const pilot = listing.hosts.find(value => String(value.hostId) === hostId)
     ?? await control.pairHost({
-      hostId: GouziHostId(PILOT_HOST_ID),
-      label: PILOT_HOST_LABEL,
+      hostId: GouziHostId(hostId),
+      label: known.label,
       authorityEpoch: GouziAuthorityEpoch(randomUUID()),
-      credentialRef: PILOT_HOST_CREDENTIAL_REF,
+      credentialRef: `GOUZI_HOST_${hostId.toUpperCase().replaceAll(/[^A-Z0-9]/gu, '_')}`,
     })
   const gouziId = GouziId(`gouzi-${randomUUID()}`)
   const created = await control.create({
@@ -237,9 +297,9 @@ async function adopt(ctx: Context, control: GouziControl, request: Extract<Gouzi
       authorityEpoch: String(pilot.authorityEpoch),
       repositories,
     })
-    const process = await host.start(String(gouziId))
+    const process = await host.start(String(pilot.hostId), String(gouziId))
     await control.setEndpoint(gouziId, process.endpoint)
-    return project(await control.setMembership(gouziId, 'enabled'))
+    return await view(control, await control.setMembership(gouziId, 'enabled'))
   } catch (error) {
     // The member exists and keeps its slot in `provisioning`; waking it retries the start.
     throw new GouziRefusal('GOUZI_START_FAILED', `${request.name} 已创建，但还没能启动：${error instanceof Error ? error.message : String(error)}`)
@@ -253,9 +313,9 @@ async function wake(ctx: Context, control: GouziControl, gouziId: string) {
   if (member.membership !== 'provisioning' && member.membership !== 'enabled') {
     throw new GouziRefusal('GOUZI_STATE_CONFLICT', `${member.name} 已经${member.membership === 'retiring' ? '在退役' : '退役'}，不能再唤醒`)
   }
-  const process = await host.start(gouziId)
+  const process = await host.start(String(member.hostId), gouziId)
   await control.setEndpoint(member.gouziId, process.endpoint)
-  return project(member.membership === 'provisioning' ? await control.setMembership(member.gouziId, 'enabled') : await requireMember(control, gouziId))
+  return view(control, member.membership === 'provisioning' ? await control.setMembership(member.gouziId, 'enabled') : await requireMember(control, gouziId))
 }
 
 async function rest(ctx: Context, control: GouziControl, gouziId: string) {
@@ -263,8 +323,8 @@ async function rest(ctx: Context, control: GouziControl, gouziId: string) {
   if (host === undefined) throw new GouziRefusal('GOUZI_HOST_UNAVAILABLE', '这台机器上还不能启动狗子')
   const member = await requireMember(control, gouziId)
   if (member.activity === 'working') throw new GouziRefusal('GOUZI_STATE_CONFLICT', `${member.name} 正在工作，等它做完再让它休息`)
-  await host.stop(gouziId)
-  return project(await requireMember(control, gouziId))
+  await host.stop(String(member.hostId), gouziId)
+  return view(control, await requireMember(control, gouziId))
 }
 
 async function retire(ctx: Context, control: GouziControl, gouziId: string) {
@@ -274,19 +334,55 @@ async function retire(ctx: Context, control: GouziControl, gouziId: string) {
   if (member.activity === 'working') throw new GouziRefusal('GOUZI_STATE_CONFLICT', `${member.name} 正在工作，等它做完再让它退役`)
   if (member.membership === 'archived') throw new GouziRefusal('GOUZI_STATE_CONFLICT', `${member.name} 已经退役`)
   if (member.membership !== 'retiring') await control.setMembership(member.gouziId, 'retiring')
-  const stopped = await host.stop(gouziId, { reclaimResident: true })
+  const stopped = await host.stop(String(member.hostId), gouziId, { reclaimResident: true })
   if (!stopped.processTreeStopped) {
     throw new GouziRefusal('GOUZI_STATE_CONFLICT', `${member.name} 的进程还没有完全停下，暂时保留名额`)
   }
   // A loopback member never held a device credential, so there is nothing left to revoke.
-  return project(await control.archive(member.gouziId, { credentialsRevoked: true, workSettled: true, processTreeStopped: true }))
+  return view(control, await control.archive(member.gouziId, { credentialsRevoked: true, workSettled: true, processTreeStopped: true }))
 }
 
-async function execute(ctx: Context, control: GouziControl, request: GouziControlRequest, grantDeadlineMs: number) {
+function requireHost(ctx: Context) {
+  const host = ctx.get('gouziHost')
+  if (host === undefined) throw new GouziRefusal('GOUZI_HOST_UNAVAILABLE', '这台机器上还不能启动狗子')
+  return host
+}
+
+async function removeHost(ctx: Context, control: GouziControl, hostId: string): Promise<{ readonly removed: true }> {
+  const host = requireHost(ctx)
+  if (hostId === GOUZI_LOCAL_HOST_ID) throw new GouziInputError('the local host cannot be removed')
+  const holding = (await control.list()).members.filter(member => String(member.hostId) === hostId && member.membership !== 'archived')
+  if (holding.length > 0) {
+    throw new GouziRefusal('GOUZI_STATE_CONFLICT', `${holding.map(member => member.name).join('、')} 还住在这台机器上，先让它们退役`)
+  }
+  await host.removeHost(hostId)
+  return { removed: true }
+}
+
+type ExecuteResult =
+  | GouziMemberProjection
+  | GouziHostInspection
+  | GouziHostProjection
+  | GouziFolderListing
+  | { readonly removed: true }
+
+async function execute(ctx: Context, control: GouziControl, request: GouziControlRequest, grantDeadlineMs: number): Promise<ExecuteResult> {
   switch (request.action) {
+    case 'host-inspect': return requireHost(ctx).inspectHost({ address: request.address, port: request.port, user: request.user })
+    case 'host-add':
+      return requireHost(ctx).addHost({
+        address: request.address,
+        port: request.port,
+        user: request.user,
+        password: request.password,
+        fingerprint: request.fingerprint,
+        ...request.label === undefined ? {} : { label: request.label },
+      })
+    case 'host-remove': return removeHost(ctx, control, request.hostId)
+    case 'browse': return requireHost(ctx).browse(request.hostId, request.path)
     case 'adopt': return adopt(ctx, control, request, grantDeadlineMs)
     case 'edit':
-      return project(await control.edit(GouziId(request.gouziId), {
+      return view(control, await control.edit(GouziId(request.gouziId), {
         ...request.name === undefined ? {} : { name: request.name },
         ...request.avatarId === undefined ? {} : { avatarId: request.avatarId },
         ...request.role === undefined ? {} : { role: request.role },

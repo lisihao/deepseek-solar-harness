@@ -707,6 +707,10 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   GouziProvisionInput: 'member provisioning input is owned by packages/orchestration/ui-gouzi/src/host-service.ts',
+  GouziSshTarget: 'SSH machine address is owned by packages/orchestration/ui-gouzi/src/host-service.ts',
+  GouziHostProjection: 'host projection is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
+  GouziHostInspection: 'host key inspection is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
+  GouziFolderListing: 'folder listing is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
   GouziProcessInfo: 'member process facts are owned by packages/orchestration/ui-gouzi/src/host-service.ts',
   ModelCatalogSource: 'discovery source registration is owned by packages/llm/model-catalog-local/README.md',
   ModelCatalogSnapshot: 'durable catalog inventory is owned by packages/llm/model-catalog-local/README.md',

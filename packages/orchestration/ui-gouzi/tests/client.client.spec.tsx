@@ -9,9 +9,12 @@ import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziM
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
+const LOCAL_HOST = { hostId: 'local', label: '这台 Mac', kind: 'local' } as const
+const MINI_HOST = { hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh', address: 'lisihao@mini.local:22', appVersion: '3.36.0' } as const
+
 function member(patch: Partial<GouziMemberProjection> = {}): GouziMemberProjection {
   return {
-    gouziId: 'g1', name: 'Mochi', avatarId: 'shiba', role: 'development', membership: 'enabled',
+    gouziId: 'g1', name: 'Mochi', avatarId: 'shiba', role: 'development', hostId: 'local', hostLabel: '这台 Mac', membership: 'enabled',
     connection: 'online', activity: 'resting', state: 'resting', createdAt: '2026-10-03T12:00:00.000Z', ...patch,
   }
 }
@@ -19,21 +22,19 @@ function member(patch: Partial<GouziMemberProjection> = {}): GouziMemberProjecti
 function dashboard(members: GouziMemberProjection[], patch: Partial<GouziDashboardV1> = {}): GouziDashboardV1 {
   return {
     version: 1, generatedAt: '2026-10-03T12:00:00.000Z', limit: 10, used: members.length,
-    canManage: true, hostAvailable: true, members, ...patch,
+    canManage: true, hostAvailable: true, hosts: [LOCAL_HOST], members, ...patch,
   }
 }
 
 /** A fetch whose GET returns the current roster and whose POST records the body and applies `reply`. */
-function fakeRequest(state: { roster: GouziDashboardV1; reply?: () => Response }) {
+function fakeRequest(state: { roster: GouziDashboardV1; reply?: (body: Record<string, unknown>) => Response }) {
   const posts: Array<{ body: Record<string, unknown>; header: string | null }> = []
   const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     void input
     if (init?.method === 'POST') {
-      posts.push({
-        body: JSON.parse(init.body as string) as Record<string, unknown>,
-        header: new Headers(init.headers).get(GOUZI_CONTROL_HEADER),
-      })
-      return state.reply?.() ?? Response.json(member())
+      const body = JSON.parse(init.body as string) as Record<string, unknown>
+      posts.push({ body, header: new Headers(init.headers).get(GOUZI_CONTROL_HEADER) })
+      return state.reply?.(body) ?? Response.json(member())
     }
     return Response.json(state.roster)
   })
@@ -67,6 +68,7 @@ async function openProjectStep(harness: ReturnType<typeof fakeRequest>, folders:
   fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
   fireEvent.click(screen.getByRole('button', { name: '下一步' }))
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }))
   fireEvent.click(screen.getByRole('button', { name: '下一步' }))
 }
 
@@ -119,6 +121,9 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Pixel  ' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
 
+    expect(screen.getByRole('radio', { name: /这台 Mac/ })).toHaveProperty('ariaChecked', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+
     fireEvent.click(screen.getByRole('radio', { name: /测试/ }))
     expect(screen.queryByRole('textbox')).toBeNull()
     expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true)
@@ -133,7 +138,7 @@ describe('Gouzi sidebar entry and roster', () => {
     await waitFor(() => { expect(harness.posts).toHaveLength(1) })
     expect(harness.posts[0]).toEqual({
       header: '1',
-      body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', projects: ['/work/beta', '/work/alpha'] },
+      body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', hostId: 'local', projects: ['/work/beta', '/work/alpha'] },
     })
     await waitFor(() => { expect(screen.queryByLabelText('领养一只狗子')).toBeNull() })
   })
@@ -186,6 +191,7 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Mochi' } })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
@@ -282,6 +288,131 @@ describe('Gouzi sidebar entry and roster', () => {
   it('wraps a malformed failure body in a generic explanation', async () => {
     const request = vi.fn(async () => new Response('<html>', { status: 500 }))
     await expect(loadGouzi(request as never)).rejects.toMatchObject({ code: 'GOUZI_FAILED', status: 500 })
+  })
+})
+
+describe('Gouzi remote hosts in the adoption wizard', () => {
+  const FINGERPRINT = 'SHA256:abc123'
+
+  function remoteReply(posts: { added?: boolean } = {}) {
+    return (body: Record<string, unknown>): Response => {
+      switch (body.action) {
+        case 'host-inspect': return Response.json({ keyType: 'ssh-ed25519', fingerprint: FINGERPRINT })
+        case 'host-add': posts.added = true; return Response.json(MINI_HOST)
+        case 'browse': {
+          const base = typeof body.path === 'string' ? body.path : undefined
+          if (base === undefined) {
+            return Response.json({ path: '/Users/lisihao', parent: '/Users', entries: [{ name: 'project', path: '/Users/lisihao/project', git: false }] })
+          }
+          return Response.json({
+            path: base,
+            parent: '/Users/lisihao',
+            entries: [{ name: 'PetGoGo', path: `${base}/PetGoGo`, git: true }, { name: 'notes', path: `${base}/notes`, git: false }],
+          })
+        }
+        default: return Response.json(member({ hostId: 'ssh-1', hostLabel: 'Mac mini' }))
+      }
+    }
+  }
+
+  it('adds a machine: shows its fingerprint first, then logs in once with the password and selects it', async () => {
+    const state = { added: false }
+    const harness = fakeRequest({ roster: dashboard([]), reply: remoteReply(state) })
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
+    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /添加另一台机器/ }))
+    const check = screen.getByRole('button', { name: '检查这台机器' })
+    expect(check).toHaveProperty('disabled', true)
+    fireEvent.change(screen.getByPlaceholderText(/mini.local/), { target: { value: ' mini.local ' } })
+    fireEvent.change(screen.getByLabelText(/用户名/), { target: { value: 'lisihao' } })
+    fireEvent.change(screen.getByLabelText(/登录密码/), { target: { value: 'secret-pw' } })
+    expect(screen.getByLabelText(/登录密码/)).toHaveProperty('type', 'password')
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '0' } })
+    expect(check).toHaveProperty('disabled', true)
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '22' } })
+    fireEvent.click(check)
+
+    expect((await screen.findByRole('status')).textContent).toContain(FINGERPRINT)
+    expect(harness.posts.map(post => post.body.action)).toEqual(['host-inspect'])
+    expect(harness.posts[0]!.body).toEqual({ action: 'host-inspect', address: 'mini.local', port: 22, user: 'lisihao' })
+    fireEvent.click(screen.getByRole('button', { name: '指纹对，连接并安装' }))
+    await waitFor(() => { expect(state.added).toBe(true) })
+    expect(harness.posts[1]!.body).toEqual({
+      action: 'host-add', address: 'mini.local', port: 22, user: 'lisihao', password: 'secret-pw', fingerprint: FINGERPRINT,
+    })
+    await waitFor(() => { expect(screen.queryByLabelText(/登录密码/)).toBeNull() })
+  })
+
+  it('shows why a machine could not be reached and keeps the form', async () => {
+    const harness = fakeRequest({
+      roster: dashboard([]),
+      reply: () => Response.json({ error: 'GOUZI_FAILED', message: '连不上 mini.local:22' }, { status: 502 }),
+    })
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
+    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('button', { name: /添加另一台机器/ }))
+    fireEvent.change(screen.getByPlaceholderText(/mini.local/), { target: { value: 'mini.local' } })
+    fireEvent.change(screen.getByLabelText(/用户名/), { target: { value: 'lisihao' } })
+    fireEvent.change(screen.getByLabelText(/登录密码/), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByRole('button', { name: '检查这台机器' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('连不上 mini.local:22')
+    expect(screen.getByLabelText(/登录密码/)).toHaveProperty('value', 'pw')
+  })
+
+  it('browses the remote machine, only offers Git folders, and adopts onto it with the remote paths', async () => {
+    const harness = fakeRequest({ roster: dashboard([], { hosts: [LOCAL_HOST, MINI_HOST] }), reply: remoteReply() })
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
+    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('radio', { name: /Mac mini/ }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+
+    expect(screen.queryByRole('checkbox', { name: /alpha/ })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: 'project' }))
+    expect(await screen.findByRole('checkbox', { name: '选择 PetGoGo' })).toBeTruthy()
+    expect(screen.queryByRole('checkbox', { name: '选择 notes' })).toBeNull()
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 PetGoGo' }))
+    expect(screen.getByLabelText('已选择的项目').textContent).toContain('/Users/lisihao/project/PetGoGo')
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByText('Mac mini')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '领养' }))
+    await waitFor(() => { expect(harness.posts.at(-1)!.body.action).toBe('adopt') })
+    expect(harness.posts.at(-1)!.body).toEqual({
+      action: 'adopt', name: 'Pixel', avatarId: 'shiba', role: 'development', hostId: 'ssh-1', projects: ['/Users/lisihao/project/PetGoGo'],
+    })
+  })
+
+  it('clears the chosen projects when the machine changes, and names the machine on each roster card', async () => {
+    const harness = fakeRequest({
+      roster: dashboard([member({ hostId: 'ssh-1', hostLabel: 'Mac mini' })], { hosts: [LOCAL_HOST, MINI_HOST] }),
+      reply: remoteReply(),
+    })
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
+    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    expect((await screen.findByText(/住在 Mac mini/)).textContent).toContain('开发')
+    fireEvent.click(screen.getByRole('button', { name: '领养狗子' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true)
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    fireEvent.click(screen.getByRole('radio', { name: /Mac mini/ }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
   })
 })
 

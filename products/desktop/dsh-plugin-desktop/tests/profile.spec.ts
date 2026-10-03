@@ -196,7 +196,7 @@ describe('desktop profile composition', () => {
       expect(rows).toHaveLength(1)
       expect(rows[0]).toEqual(expect.objectContaining({
         name: 'dsh-plugin-desktop/gouzi-host',
-        config: { membersRoot: join(home, 'gouzi', 'members'), ownerId: expect.stringMatching(/^main-[0-9a-f]{12}$/u) },
+        config: { membersRoot: join(home, 'gouzi', 'members'), hostsRoot: join(home, 'gouzi', 'hosts'), ownerId: expect.stringMatching(/^main-[0-9a-f]{12}$/u) },
       }))
     }
     const ids = (prepareProductServerProfile(undefined, home, 'darwin').patches)
