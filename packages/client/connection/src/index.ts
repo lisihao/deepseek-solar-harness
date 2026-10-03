@@ -228,6 +228,19 @@ const REMOTE_COCKPIT_COMMAND_METHODS = new Set([
 
 /** Pocket is an observation/approval face, not a general execution client. */
 const REMOTE_POCKET_COMMAND_METHODS = new Set(['respond'])
+/**
+ * Remote Sync endpoints a `gouzi` credential may call: capability description and the operator execution
+ * methods. Every other endpoint (snapshot, replica, cluster, anything added later) is refused for that scope.
+ */
+const GOUZI_SYNC_ENDPOINTS: ReadonlySet<string> = new Set([
+  'describe',
+  'operator.providers',
+  'operator.execute',
+  'operator.inspect',
+  'operator.events',
+  'operator.artifact.read',
+  'operator.interrupt',
+])
 
 /**
  * Mounts the API gateway under the browser transport prefix. Every request on
@@ -341,6 +354,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         const method = pathname.startsWith(`${API_PATH}/`)
           ? pathname.slice(API_PATH.length + 1)
           : undefined
+        if (access.scope === 'gouzi') {
+          res.writeHead(403)
+          res.end('forbidden')
+          return
+        }
         if (access.scope === 'pocket'
           && (method === undefined
             || (!REMOTE_READ_METHODS.has(method) && !REMOTE_POCKET_COMMAND_METHODS.has(method)))) {
@@ -410,8 +428,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           const access = requireRemoteAccess(
             authCtx.remoteAuth,
             requestContext,
-            ['cockpit', 'pocket', 'admin'],
+            ['cockpit', 'pocket', 'admin', 'gouzi'],
           )
+          if (access.scope === 'gouzi' && !GOUZI_SYNC_ENDPOINTS.has(endpoint)) {
+            throw new ConnectionRpcHttpError(403, 'forbidden')
+          }
           if (endpoint === 'describe') {
             return { ok: true, value: await hub.describe(signal, access.scope, requestedRemoteSyncProtocol(payload)) }
           }
@@ -854,6 +875,6 @@ function remoteWorkspaceIdentity(value: unknown): RemoteWorkspaceIdentityV1 {
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
-  if (value === 'cockpit' || value === 'pocket' || value === 'admin') return value
-  throw new ConnectionRpcHttpError(400, 'scope must be cockpit, pocket, or admin')
+  if (value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi') return value
+  throw new ConnectionRpcHttpError(400, 'scope must be cockpit, pocket, admin, or gouzi')
 }

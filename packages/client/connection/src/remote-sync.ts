@@ -816,7 +816,7 @@ function isoInstant(value: unknown, label: string): string {
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
-  if (value === 'cockpit' || value === 'pocket' || value === 'admin') return value
+  if (value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi') return value
   throw new Error(`remote sync scope is invalid: ${String(value)}`)
 }
 

@@ -14,7 +14,7 @@ import { RpcId, type ClientRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
   API_PATH, apply, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH,
-  HostConnectionService, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL,
+  HostConnectionService, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
   type HostConnectionHandle,
 } from '../src/index.ts'
 
@@ -133,6 +133,7 @@ async function mounted(
         if (token === 'access') return { deviceId: 'device-1', deviceName: 'MacBook', scope: 'cockpit' }
         if (token === 'pocket-access') return { deviceId: 'device-2', deviceName: 'Phone', scope: 'pocket' }
         if (token === 'admin-access') return { deviceId: 'device-3', deviceName: 'Admin', scope: 'admin' }
+        if (token === 'gouzi-access') return { deviceId: 'device-4', deviceName: 'Gouzi', scope: 'gouzi' }
         return undefined
       },
       listDevices: () => [],
@@ -375,6 +376,73 @@ describe('connection node half', () => {
       authorization: 'Bearer admin-access',
     })).toMatchObject({ status: 404, body: 'remote device not found' })
 
+    await dispose()
+  })
+
+  it('confines a gouzi credential to describe and the operator execution methods', async () => {
+    const { routes, upgrades, dispose } = await mounted({
+      trustedHosts: ['harness.example'], remoteSync: true, remoteSyncJournalCapacity: 8,
+    }, remoteSyncApi())
+    const gouzi = { host: 'harness.example', authorization: 'Bearer gouzi-access' }
+    const syncRoute = routes.find(route => route.path === REMOTE_SYNC_RPC_CHANNEL)!
+    const syncCall = async (method: string, payload: Record<string, unknown> = {}): Promise<{ status?: number; body?: unknown }> => {
+      const result = fakeResponse()
+      await syncRoute.handler(fakePost(
+        gouzi, `${REMOTE_SYNC_RPC_CHANNEL}/${method}`,
+        { type: 'client-request', rpcId: `rpc-${method}`, method, payload },
+      ), result.response)
+      return result.state
+    }
+
+    // Everything outside describe and operator.* is refused before the handler runs.
+    for (const method of [
+      'snapshot', 'replica.list', 'replica.read', 'replica.apply',
+      'cluster.status', 'cluster.vote', 'cluster.heartbeat', 'cluster.export', 'cluster.install',
+      'gouzi.create', 'no.such.method',
+    ]) {
+      expect(await syncCall(method), method).toMatchObject({ status: 403, body: 'forbidden' })
+    }
+
+    const described = await syncCall('describe', { protocol: REMOTE_SYNC_PROTOCOL })
+    expect(described.status).toBe(200)
+    const envelope = JSON.parse(described.body as string) as {
+      result: { ok: true; value: { scope: string; capabilities: string[] } }
+    }
+    expect(envelope.result.value.scope).toBe('gouzi')
+    // No Resident host is mounted here, so the operator list is empty; no session or cluster capability may appear.
+    expect(envelope.result.value.capabilities).toEqual([])
+
+    // The operator methods pass the scope gate; without a Resident host they fail for another reason, not 403.
+    for (const method of ['operator.providers', 'operator.inspect', 'operator.events', 'operator.interrupt']) {
+      expect((await syncCall(method)).status, method).not.toBe(403)
+    }
+
+    // The API bridge, member management, and both event sockets stay closed to the scope.
+    const apiRoute = routes.find(route => route.path === API_PATH)!
+    for (const method of ['session.list', 'settings.describe', 'session.cancel']) {
+      const denied = fakeResponse()
+      await apiRoute.handler(fakePost(
+        gouzi, `${API_PATH}/${method}`,
+        { type: 'client-request', rpcId: `rpc-${method}`, method, payload: {} },
+      ), denied.response)
+      expect(denied.state, method).toMatchObject({ status: 403, body: 'forbidden' })
+    }
+    const authRoute = routes.find(route => route.path === '/remote-auth')!
+    const devices = fakeResponse()
+    await authRoute.handler(fakePost(
+      gouzi, '/remote-auth/device.list',
+      { type: 'client-request', rpcId: 'rpc-devices', method: 'device.list', payload: {} },
+    ), devices.response)
+    expect(devices.state).toMatchObject({ status: 403, body: 'forbidden' })
+    for (const path of [MUX_EVENTS_PATH, HOST_EVENTS_PATH, REMOTE_SYNC_EVENTS_PATH]) {
+      const socket = new PassThrough()
+      const chunks: Buffer[] = []
+      socket.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+      const ended = once(socket, 'end')
+      await upgrades.find(route => route.path === path)!.handler(fakeRequest(gouzi, path), socket, Buffer.alloc(0))
+      await ended
+      expect(Buffer.concat(chunks).toString(), path).toContain('HTTP/1.1 403 Forbidden')
+    }
     await dispose()
   })
 
