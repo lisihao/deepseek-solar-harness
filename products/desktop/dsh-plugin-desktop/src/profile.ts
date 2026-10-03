@@ -677,6 +677,7 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
         name: GOUZI_HOST_PACKAGE,
         config: {
           membersRoot: join(home, 'gouzi', 'members'),
+          hostsRoot: join(home, 'gouzi', 'hosts'),
           // Stable per installation and distinct between machines; it is an identity, not a secret.
           ownerId: `main-${createHash('sha256').update(home).digest('hex').slice(0, 12)}`,
         },

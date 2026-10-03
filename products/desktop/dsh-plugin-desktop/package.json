@@ -13,6 +13,7 @@
   "types": "lib/types/index.d.ts",
   "bin": {
     "dsh-desktop": "lib/bin.js",
+    "dsh-gouzi-agent": "lib/gouzi-agent-bin.js",
     "dsh-gouzi-worker": "lib/gouzi-worker-bin.js",
     "dsh-plugin-desktop": "lib/bin.js",
     "dsh-product-server": "lib/product-server-bin.js"

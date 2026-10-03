@@ -85,6 +85,21 @@ export default defineConfig([
     },
   },
   {
+    name: `${PACKAGE_NAME}/gouzi-agent-bin`,
+    entry: { 'gouzi-agent-bin': 'src/gouzi-agent-bin.ts' },
+    outDir: 'lib',
+    format: 'esm',
+    platform: 'node',
+    target: 'es2024',
+    fixedExtension: false,
+    dts: false,
+    clean: false,
+    sourcemap: true,
+    outputOptions: {
+      banner: '#!/usr/bin/env node',
+    },
+  },
+  {
     name: `${PACKAGE_NAME}/frontend-setup-preload`,
     entry: { 'frontend-setup-preload': 'src/frontend-setup-preload.ts' },
     outDir: 'lib',
