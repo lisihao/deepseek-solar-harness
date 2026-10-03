@@ -13,6 +13,7 @@ import {
 import { DESKTOP_SETTINGS_NAMESPACE } from '../lib/index.js'
 import { installDesktopPnpmRuntime } from '../lib/desktop-runtime-environment.js'
 import { installProfilePackageResolver } from '../lib/module-resolution.js'
+import { stopProductServerDaemons } from './product-server-processes.mjs'
 import { prepareDesktopProfile } from '../lib/profile.js'
 import { DesktopProfileService } from '../lib/profile-service.js'
 
@@ -266,6 +267,8 @@ try {
   await ctx?.fiber.dispose()
   releasePackageResolver?.()
   pnpmRuntime?.dispose()
+  // The booted profile starts detached Resident and orchestration daemons; they outlive the context and the home.
+  await stopProductServerDaemons(home)
   rmSync(home, { recursive: true, force: true })
   if (previousDshHome === undefined) delete process.env.DSH_HOME
   else process.env.DSH_HOME = previousDshHome

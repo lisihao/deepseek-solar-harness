@@ -31,7 +31,7 @@ Plan mode is supported: phase 1 filters the assembled prompt sections down to th
 
 A delegated child (`origin: subagent`) keeps the tool surface its parent filtered for it. When that surface lacks the bootstrap shell or a common tool, as with a result-tool-only maintenance worker, the child is exempt from the phase-1 quarantine, the prompt-section strip, the message filter, the output-budget cap, and the Code Mode switch. A top-level session in the same state still fails loudly.
 
-## Install
+The preset files are copied into `~/.dsh/.agent-presets/liangshen` when the plugin starts. Inside an Electron application the package sits in `app.asar`, whose archive path cannot be copied from, so the sync reads the `app.asar.unpacked` copy; reading the archive path made every start fail with `ENOENT` and left an old preset in place.
 
 ```sh
 # Option 1: family bundle (recommended)
