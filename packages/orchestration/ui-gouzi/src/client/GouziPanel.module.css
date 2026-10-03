@@ -182,6 +182,20 @@
   font-size: 13px;
   resize: vertical;
 }
+.hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.projectList { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.projectChoice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.projectChoice strong { color: var(--dsw-alias-label-primary); font-size: 13px; }
+.projectChoice span { grid-column: 2; color: var(--dsw-alias-label-tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .summary { margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .summary div { display: flex; gap: 12px; }
 .summary dt { width: 48px; color: var(--dsw-alias-label-tertiary); font-size: 12px; }

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply, GouziAvatarImage, GouziEntry, inject, loadGouzi } from '../src/client/index.ts'
+import type { GouziFolders } from '../src/client/index.ts'
 import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection } from '../src/contracts.ts'
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -39,6 +40,36 @@ function fakeRequest(state: { roster: GouziDashboardV1; reply?: () => Response }
   return { request: request as never, posts, calls: request }
 }
 
+interface FakeWorkspace { workspaceId: string; path: string; title: string; updatedAt: string }
+
+/** The workspace slice the wizard reads: a fixed list, a recency pointer, and a scripted native picker. */
+function fakeFolders(
+  items: FakeWorkspace[] = [],
+  pick: () => Promise<string | null> = async () => null,
+  recentWorkspaceId: string | null = null,
+) {
+  const state = { items, recentWorkspaceId }
+  const pickDirectory = vi.fn(pick)
+  const folders = {
+    list: { getSnapshot: () => state, subscribe: () => () => undefined },
+    pickDirectory,
+  } as unknown as GouziFolders
+  return { folders, pickDirectory }
+}
+
+const ALPHA: FakeWorkspace = { workspaceId: 'w1', path: '/work/alpha', title: 'alpha', updatedAt: '2026-10-01T00:00:00.000Z' }
+const BETA: FakeWorkspace = { workspaceId: 'w2', path: '/work/beta', title: 'beta', updatedAt: '2026-10-02T00:00:00.000Z' }
+
+/** Walk the wizard to the project step with the avatar and name filled in. */
+async function openProjectStep(harness: ReturnType<typeof fakeRequest>, folders: GouziFolders): Promise<void> {
+  render(<GouziEntry wide request={harness.request} folders={folders} />)
+  fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+  fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
+  fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+}
+
 describe('Gouzi avatars', () => {
   it('draws six distinct, named avatars at the sizes the sidebar and roster use', () => {
     const markup = new Set<string>()
@@ -63,7 +94,7 @@ describe('Gouzi avatars', () => {
 describe('Gouzi sidebar entry and roster', () => {
   it('shows the member count, opens the roster, and describes each member in one primary state', async () => {
     const { request } = fakeRequest({ roster: dashboard([member(), member({ gouziId: 'g2', name: 'Pixel', state: 'working', activity: 'working' })]) })
-    render(<GouziEntry wide request={request} />)
+    render(<GouziEntry wide request={request} folders={fakeFolders().folders} />)
     await screen.findByText('2/10')
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     const dialog = await screen.findByRole('dialog', { name: '狗子' })
@@ -75,9 +106,10 @@ describe('Gouzi sidebar entry and roster', () => {
     await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
   })
 
-  it('walks the four adoption steps and posts one adopt request with the control header', async () => {
+  it('walks the four adoption steps, suggesting the recent project, and posts one adopt request with the control header', async () => {
     const harness = fakeRequest({ roster: dashboard([]) })
-    render(<GouziEntry wide request={harness.request} />)
+    const { folders } = fakeFolders([ALPHA, BETA], async () => null, 'w1')
+    render(<GouziEntry wide request={harness.request} folders={folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
 
@@ -88,11 +120,12 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
 
     fireEvent.click(screen.getByRole('radio', { name: /测试/ }))
-    const projects = screen.getByPlaceholderText('/Users/你/Projects/某个仓库')
-    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
-    fireEvent.change(projects, { target: { value: 'relative/path' } })
-    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
-    fireEvent.change(projects, { target: { value: '/work/alpha\n/work/beta' } })
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true)
+    expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', false)
+    fireEvent.click(screen.getByRole('checkbox', { name: /beta/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /alpha/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /alpha/ }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
 
     expect(screen.getByText('领养后 1 / 10')).toBeTruthy()
@@ -100,9 +133,47 @@ describe('Gouzi sidebar entry and roster', () => {
     await waitFor(() => { expect(harness.posts).toHaveLength(1) })
     expect(harness.posts[0]).toEqual({
       header: '1',
-      body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', projects: ['/work/alpha', '/work/beta'] },
+      body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', projects: ['/work/beta', '/work/alpha'] },
     })
     await waitFor(() => { expect(screen.queryByLabelText('领养一只狗子')).toBeNull() })
+  })
+
+  it('preselects the newest project when no recent workspace is known and blocks next when none is selected', async () => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    await openProjectStep(harness, fakeFolders([ALPHA, BETA]).folders)
+    expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', true)
+    fireEvent.click(screen.getByRole('checkbox', { name: /beta/ }))
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+  })
+
+  it('lets the user add a project with the folder picker and ignores a cancelled pick', async () => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    const picks: Array<string | null> = [null, '/work/picked', '/work/picked']
+    const { folders, pickDirectory } = fakeFolders([], async () => picks.shift() ?? null)
+    await openProjectStep(harness, folders)
+    expect(screen.getByText(/还没有打开过项目/u)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    await waitFor(() => { expect(pickDirectory).toHaveBeenCalledTimes(1) })
+    expect(screen.queryByRole('checkbox')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    expect(await screen.findByRole('checkbox', { name: /picked/ })).toHaveProperty('checked', true)
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    await waitFor(() => { expect(pickDirectory).toHaveBeenCalledTimes(3) })
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '领养' }))
+    await waitFor(() => { expect(harness.posts[0]!.body.projects).toEqual(['/work/picked']) })
+  })
+
+  it('shows why the folder picker failed without losing the wizard', async () => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    const { folders } = fakeFolders([], async () => { throw new Error('picker unavailable') })
+    await openProjectStep(harness, folders)
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('picker unavailable')
   })
 
   it('keeps the wizard open and shows the Host explanation when adoption fails', async () => {
@@ -110,13 +181,12 @@ describe('Gouzi sidebar entry and roster', () => {
       roster: dashboard([]),
       reply: () => Response.json({ error: 'GOUZI_START_FAILED', message: 'Mochi 已创建，但还没能启动：端口被占用' }, { status: 502 }),
     })
-    render(<GouziEntry wide request={harness.request} />)
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Mochi' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
-    fireEvent.change(screen.getByPlaceholderText('/Users/你/Projects/某个仓库'), { target: { value: '/work/alpha' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
     expect((await screen.findByRole('alert')).textContent).toContain('端口被占用')
@@ -125,13 +195,13 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('disables adoption when the roster is full or the Host cannot start members', async () => {
     const full = fakeRequest({ roster: dashboard(Array.from({ length: 10 }, (_, index) => member({ gouziId: `g${String(index)}` }))) })
-    const { unmount } = render(<GouziEntry wide request={full.request} />)
+    const { unmount } = render(<GouziEntry wide request={full.request} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     expect(await screen.findByRole('button', { name: '领养狗子' })).toHaveProperty('disabled', true)
     unmount()
 
     const noHost = fakeRequest({ roster: dashboard([], { hostAvailable: false }) })
-    render(<GouziEntry wide request={noHost.request} />)
+    render(<GouziEntry wide request={noHost.request} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     expect(await screen.findByRole('button', { name: '领养狗子' })).toHaveProperty('disabled', true)
     expect(await screen.findByText('这台机器还不能启动狗子，只能查看。')).toBeTruthy()
@@ -144,7 +214,7 @@ describe('Gouzi sidebar entry and roster', () => {
         member({ gouziId: 'busy', name: 'Busy', state: 'working', activity: 'working' }),
       ]),
     })
-    render(<GouziEntry wide request={harness.request} />)
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     const dialog = await screen.findByRole('dialog')
     const cards = await within(dialog).findAllByRole('listitem')
@@ -159,7 +229,7 @@ describe('Gouzi sidebar entry and roster', () => {
     const harness = fakeRequest({ roster: dashboard([member()]) })
     const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true)
     vi.stubGlobal('confirm', confirm)
-    render(<GouziEntry wide request={harness.request} />)
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     const retire = await screen.findByRole('button', { name: '退役' })
     fireEvent.click(retire)
@@ -170,7 +240,7 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('edits the name, avatar, and role of a member', async () => {
     const harness = fakeRequest({ roster: dashboard([member()]) })
-    render(<GouziEntry wide request={harness.request} />)
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     fireEvent.click(await screen.findByRole('button', { name: '修改' }))
     fireEvent.change(screen.getByDisplayValue('Mochi'), { target: { value: 'Pixel' } })
@@ -183,7 +253,7 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('hides every control from a read-only device and says so', async () => {
     const harness = fakeRequest({ roster: dashboard([member()], { canManage: false }) })
-    render(<GouziEntry wide request={harness.request} />)
+    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     expect(await screen.findByText('这个设备只能查看狗子。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '领养狗子' })).toBeNull()
@@ -192,20 +262,20 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('shows an empty roster invitation and a load failure', async () => {
     const empty = fakeRequest({ roster: dashboard([]) })
-    const { unmount } = render(<GouziEntry wide request={empty.request} />)
+    const { unmount } = render(<GouziEntry wide request={empty.request} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     expect(await screen.findByText(/还没有狗子/u)).toBeTruthy()
     unmount()
 
     const failing = vi.fn(async () => Response.json({ error: 'GOUZI_UNAVAILABLE', message: '当前编排服务不管理狗子' }, { status: 503 }))
-    render(<GouziEntry wide request={failing as never} />)
+    render(<GouziEntry wide request={failing as never} folders={fakeFolders().folders} />)
     fireEvent.click(screen.getByRole('button', { name: '狗子' }))
     expect((await screen.findByRole('alert')).textContent).toContain('当前编排服务不管理狗子')
   })
 
   it('renders the rail form without a label when the sidebar is collapsed', async () => {
     const harness = fakeRequest({ roster: dashboard([member()]) })
-    render(<GouziEntry wide={false} request={harness.request} />)
+    render(<GouziEntry wide={false} request={harness.request} folders={fakeFolders().folders} />)
     expect(screen.getByRole('button', { name: '狗子' }).textContent).toBe('')
   })
 
@@ -217,18 +287,22 @@ describe('Gouzi sidebar entry and roster', () => {
 
 describe('Gouzi client registration', () => {
   it('registers one sidebar footer action that hands the connection fetch to the entry', async () => {
-    expect(inject).toEqual(['slots', 'connection'])
+    expect(inject).toEqual(['slots', 'connection', 'workspaces'])
     const ctx = new Context()
     await ctx.plugin(SlotRegistry).await()
     const slots = ctx.get('slots') as SlotRegistry
     slots.register({ name: 'root', children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' } } } as never, () => null)
     const fetchStub = vi.fn()
+    const workspaces = fakeFolders().folders
     ctx.provide('connection', { request: fetchStub } as never)
+    ctx.provide('workspaces', workspaces as never)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     const entries = slots.entries('sidebar.footer.action')
     expect(entries.map(entry => [entry.options.id, entry.options.order])).toEqual([['gouzi', 90]])
-    expect((entries[0]!.inject as () => { request: unknown })().request).toBe(fetchStub)
+    const injected = (entries[0]!.inject as () => { request: unknown; folders: unknown })()
+    expect(injected.request).toBe(fetchStub)
+    expect(injected.folders).toBe(workspaces)
     await fiber.dispose()
     expect(slots.entries('sidebar.footer.action')).toEqual([])
   })
