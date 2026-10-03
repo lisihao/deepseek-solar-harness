@@ -79,6 +79,8 @@ class DurableOperator implements PhysicalOperator {
   readonly requests: PhysicalOperatorProviderStartRequest[] = []
   readonly receipts = new Map<string, Receipt>()
   productStarts = 0
+  /** When set, a freshly started run fails with this message after the product has started. */
+  resultFailureMessage?: string | undefined
 
   constructor(
     readonly id: 'codex' | 'claude-code' | 'chatgpt-web',
@@ -140,7 +142,9 @@ class DurableOperator implements PhysicalOperator {
     const bridged = this.bridgeToolName === undefined
       ? undefined
       : await callBridgeTool(request, this.bridgeToolName, { value: 'hello' })
-    if (created && this.immediate) receipt.result.resolve(this.resultValue(bridged))
+    if (created && this.resultFailureMessage !== undefined) {
+      receipt.result.reject(new PhysicalOperatorError(`Claude Code returned an error result: ${this.resultFailureMessage}`, 'INVALID_RESULT'))
+    } else if (created && this.immediate) receipt.result.resolve(this.resultValue(bridged))
     const activeReceipt = receipt
     let settled = false
     void activeReceipt.result.promise.then(() => { settled = true }, () => { settled = true })
@@ -1271,6 +1275,25 @@ describe('host physical-operator routing', () => {
     expect(agent.session.events.filter(event => event.type === 'physical-operator/routing-decision')).toHaveLength(2)
   })
 
+  it('falls back to Codex when the started Claude model needs usage credits the subscription lacks', async () => {
+    const { agent, deepseek, codex, claude } = await setup({})
+    claude.resultFailureMessage = 'Fable 5.1 requires usage credits. Switch to another model.'
+
+    send(agent, '你觉得 DSH 应该怎么优化架构更好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.productStarts).toBe(1)
+    expect(codex.productStarts).toBe(1)
+    expect(lastAssistantMessage(agent).source).toMatchObject({ provider: 'dsh-physical-operator', model: 'codex' })
+    const dispatches = agent.session.events.filter(event => event.type === 'physical-operator/dispatch')
+    if (dispatches[0]?.type !== 'physical-operator/dispatch') throw new Error('expected a first dispatch')
+    expect(agent.session.events).toContainEqual(expect.objectContaining({
+      type: 'physical-operator/dispatch-terminal',
+      data: { commandId: dispatches[0].data.commandId, code: 'MODEL_REQUIRES_CREDITS' },
+    }))
+  })
+
   it('falls back only after Smart Auto cannot admit its selected Claude runtime', async () => {
     const { agent, deepseek, codex, claude } = await setup({
       claudeStartErrorCode: 'RUNTIME_UNAVAILABLE',
@@ -1658,6 +1681,27 @@ describe('host physical-operator routing', () => {
         expect(codex.requests).toHaveLength(0)
         expect(claude.requests[0]?.residentProfile).toEqual({ model: 'claude-opus-5', effort: 'high' })
         expect(routingReason(agent)).toContain('Claude Code · Claude Opus 5')
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    it('stops offering a Claude model that needs usage credits for the rest of the session', async () => {
+      const { agent, codex, claude, disposeSelection } = await allocationSetup()
+      try {
+        claude.resultFailureMessage = 'Claude Opus 5 requires usage credits.'
+        send(agent, '请深度分析这个系统的架构并给出评审意见')
+        await agent.whenIdle()
+        expect(claude.requests[0]?.residentProfile?.model).toBe('claude-opus-5')
+        expect(codex.requests).toHaveLength(1)
+
+        claude.resultFailureMessage = undefined
+        send(agent, '请再深度分析这个系统的存储架构并给出评审意见')
+        await agent.whenIdle()
+        const dispatches = agent.session.events.filter(event => event.type === 'physical-operator/dispatch')
+        const last = dispatches.at(-1)
+        if (last?.type !== 'physical-operator/dispatch') throw new Error('expected a dispatch for the second request')
+        expect(`${last.data.operatorId}:${last.data.residentProfile?.model}`).not.toBe('claude-code:claude-opus-5')
       } finally {
         disposeSelection()
       }
