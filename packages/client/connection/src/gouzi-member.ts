@@ -91,12 +91,12 @@ function canonical(value: unknown): string {
 
 /**
  * Hash everything an execution request asks the member to do. `commandId` is excluded because the grant names the
- * execution id separately; the hash therefore also serves as the grant's sealed plan hash.
+ * execution id separately, and `gouziGrant` because the hash is what the grant seals as its `planHash`.
  * @param request - the Resident execution request as sent over Remote Sync.
  * @returns lowercase SHA-256 hexadecimal.
  */
 export function gouziRequestHash(request: RemoteResidentExecuteRequest): string {
-  const { commandId: _commandId, ...plan } = request
+  const { commandId: _commandId, gouziGrant: _gouziGrant, ...plan } = request
   return createHash('sha256').update(canonical(plan)).digest('hex')
 }
 

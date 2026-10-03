@@ -544,9 +544,10 @@ describe('connection node half', () => {
     })).toSatisfy((state: { status?: number; body?: unknown }) => state.status === 409 && String(state.body).includes('GOUZI_EXECUTION_CONFLICT'))
     expect(execute).toHaveBeenCalledTimes(1)
 
-    // A cockpit credential keeps its existing path and needs no grant.
+    // A member host needs a grant from every caller, whatever its credential scope.
     expect((await call(route, 'operator.execute', { ...request('exec-cockpit'), protocol: REMOTE_SYNC_PROTOCOL }, 'access')).status)
-      .toBe(200)
+      .toBe(400)
+    expect((await call(route, 'operator.execute', body('exec-cockpit'), 'access')).status).toBe(200)
     await hosted.dispose()
 
     // Without a mounted member gate the scope can neither execute nor say hello.
@@ -554,6 +555,9 @@ describe('connection node half', () => {
     const bareRoute = bare.routes.find(candidate => candidate.path === REMOTE_SYNC_RPC_CHANNEL)!
     expect(await call(bareRoute, 'operator.execute', body('exec-2'))).toMatchObject({ status: 403, body: 'forbidden' })
     expect(await call(bareRoute, 'gouzi.hello', {})).toMatchObject({ status: 403, body: 'forbidden' })
+    // A host without the gate keeps the ordinary remote-execution path for cockpit callers.
+    expect((await call(bareRoute, 'operator.execute', { ...request('exec-3'), protocol: REMOTE_SYNC_PROTOCOL }, 'access')).status)
+      .toBe(200)
     await bare.dispose()
   })
 

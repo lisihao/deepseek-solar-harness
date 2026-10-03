@@ -512,8 +512,12 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
                 ? {}
                 : { nativeToolPolicy: residentNativeToolPolicy(body.nativeToolPolicy) },
             }
-            if (access.scope !== 'gouzi') return { ok: true, value: await hub.operatorExecute(request) }
+            // A host that mounts the member gate is a member host: every caller, including a loopback owner or a
+            // tunnel endpoint, needs a grant. Without the gate the `gouzi` scope cannot execute at all.
             const member = authCtx.get('gouziMember')
+            if (member === undefined && access.scope !== 'gouzi') {
+              return { ok: true, value: await hub.operatorExecute(request) }
+            }
             if (member === undefined) throw new ConnectionRpcHttpError(403, 'forbidden')
             let grant: ReturnType<typeof parseGouziGrant>
             try {

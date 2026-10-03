@@ -150,6 +150,21 @@ function optionalDatabaseString(value: unknown, column: string): string | undefi
   return value
 }
 
+function attemptFromRow(row: Record<string, unknown>): AttemptRecord {
+  const turnId = optionalDatabaseString(row.turn_id, 'turn_id')
+  const errorCode = optionalDatabaseString(row.error_code, 'error_code')
+  const errorMessage = optionalDatabaseString(row.error_message, 'error_message')
+  return {
+    runId: String(row.run_id), nodeId: String(row.node_id), attempt: Number(row.attempt),
+    generation: Number(row.generation), executionId: String(row.execution_id),
+    state: String(row.state) as AttemptRecord['state'], executionPlanRef: String(row.execution_plan_ref),
+    ...turnId === undefined ? {} : { turnId },
+    ...errorCode === undefined ? {} : { errorCode },
+    ...errorMessage === undefined ? {} : { errorMessage },
+    createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+  }
+}
+
 /** Local orchestration state and artifacts, written only by the daemon. */
 export class OrchestrationStore implements OrchestrationClusterElectionStore {
   /** Sole-writer SQLite connection. */
@@ -423,6 +438,16 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
   }
 
   /**
+   * Find the physical attempt that owns one execution id.
+   * @param executionId - physical execution identity, unique across attempts.
+   * @returns the attempt receipt, or undefined when no attempt carries that id.
+   */
+  attemptByExecutionId(executionId: string): AttemptRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM attempts WHERE execution_id = ?').get(executionId)
+    return row === undefined ? undefined : attemptFromRow(row)
+  }
+
+  /**
    * List physical attempt receipts.
    * @param states - optional lifecycle filter.
    * @returns matching attempt receipts in creation order.
@@ -431,20 +456,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
     const rows = states === undefined || states.length === 0
       ? this.db.prepare('SELECT * FROM attempts ORDER BY created_at').all()
       : this.db.prepare(`SELECT * FROM attempts WHERE state IN (${states.map(() => '?').join(',')}) ORDER BY created_at`).all(...states)
-    return (rows as Record<string, unknown>[]).map((row) => {
-      const turnId = optionalDatabaseString(row.turn_id, 'turn_id')
-      const errorCode = optionalDatabaseString(row.error_code, 'error_code')
-      const errorMessage = optionalDatabaseString(row.error_message, 'error_message')
-      return {
-        runId: String(row.run_id), nodeId: String(row.node_id), attempt: Number(row.attempt),
-        generation: Number(row.generation), executionId: String(row.execution_id),
-        state: String(row.state) as AttemptRecord['state'], executionPlanRef: String(row.execution_plan_ref),
-        ...turnId === undefined ? {} : { turnId },
-        ...errorCode === undefined ? {} : { errorCode },
-        ...errorMessage === undefined ? {} : { errorMessage },
-        createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-      }
-    })
+    return (rows as Record<string, unknown>[]).map(attemptFromRow)
   }
 
   /**

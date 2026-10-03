@@ -32,6 +32,8 @@ Attempt 运行时，daemon 会将有界 Resident 进度阶段复制到编排事�
 
 Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStore.gouzi`（`GouziRegistry`）写入。host 记录保存端点、它接受的权威纪元和凭据条目名称；凭据本身从不存入 SQLite。成员从 `provisioning` 开始，经过 `enabled` 与 `retiring`，只有 `archive` 才会离开十只的计数，而 `archive` 需要凭据已撤销、在途工作已结算和进程树已停止。`connection` 与 `activity` 和 `membership` 并列保存，各自独立变化。创建是一个立即事务，会统计所有未归档成员，所以第十一次创建以 `GOUZI_LIMIT_REACHED` 失败。这两张表不属于集群副本；被提升的 follower 需要重新配对宿主。Schema 5 是单向迁移：旧程序会拒绝打开该数据库。
 
+`gouziOperatorServer` 把已注册且已启用的成员投影为远端 Server，其算子地址为 `gouzi.<gouziId>.<operatorId>`。对每一次 attempt，它读取成员、其宿主以及该 attempt 封存的节点执行计划，并签发 `GouziExecutionGrant`：run、node、attempt、执行 ID、generation、权威纪元、来自计划的读、写与 effect 范围、截止时间，以及等于随后所发请求的 `gouziRequestHash` 的 `planHash`。它拒绝未 `enabled` 的成员，也拒绝不是顶层 TaskGraph attempt 的执行 ID，所以成员不会运行 RLM 子任务或 Auto-Refine 阶段。第一版不支持在主实例不可达时运行，所以 `offlineUntil` 等于 `deadline`。
+
 ## Model Experience
 
 间接产生影响：由 `@deepseek-ai/dsh-tool-orchestration` 呈现。daemon 保存 Compiler 产物并返回有界投影，但自身不增加提示词段落。

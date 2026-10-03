@@ -142,7 +142,10 @@ export interface GouziExecutionGrant {
   readonly gouziId: GouziId
   readonly generation: number
   readonly authorityEpoch: GouziAuthorityEpoch
-  /** SHA-256 of the sealed node execution plan, as lowercase hexadecimal. */
+  /**
+   * SHA-256, as lowercase hexadecimal, of the exact execution request derived from the sealed node plan. The member
+   * recomputes it from the request it received and refuses the execution when the two differ.
+   */
   readonly planHash: string
   readonly scopes: GouziGrantScopes
   /** References to credentials the host keeps; the grant never carries a secret. */
