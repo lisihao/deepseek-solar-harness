@@ -30,6 +30,8 @@ An automatic retry creates a new attempt only when the node policy names the ret
 
 While an attempt runs, the daemon copies bounded Resident progress phases into the orchestration event stream. Settlement keeps the complete operator result in its Evidence artifact and adds a bounded user-facing output preview to the terminal event. Protocol version 4 includes digest-verified `artifact.read`, schema-v3 durable Autonomous state, and the term-fenced cluster control methods, so an authenticated projection can load a retained Evidence result on demand without copying prompts, private reasoning, terminal screens, or product-local transcripts into the event stream.
 
+Schema 5 adds `gouzi_hosts` and `gouzi_members`, written only through `OrchestrationStore.gouzi` (`GouziRegistry`). A host row holds its endpoint, the authority epoch it accepts, and the name of the credential entry; the credential itself is never stored in SQLite. A member starts in `provisioning`, moves through `enabled` and `retiring`, and leaves the count of ten only by `archive`, which needs revoked credentials, settled work, and a stopped process tree. `connection` and `activity` are stored beside `membership` and change independently. Creation is one immediate transaction that counts every non-archived member, so the eleventh create fails with `GOUZI_LIMIT_REACHED`. The two tables are not part of the cluster replica; a promoted follower pairs its hosts again. Schema 5 is a one-way migration: an older program refuses the database.
+
 ## Model Experience
 
 Indirectly, through `@deepseek-ai/dsh-tool-orchestration`. The daemon stores compiler artifacts and returns bounded projections but adds no prompt section itself.

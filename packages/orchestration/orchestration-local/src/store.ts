@@ -28,13 +28,14 @@ import {
 import type { IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
 import { canonicalJson, canonicalSha256 } from './canonical.ts'
 import type { AutonomousRuntimeStateV1 } from './autonomous.ts'
+import { GouziRegistry } from './gouzi-registry.ts'
 import type {
   OrchestrationClusterElectionState,
   OrchestrationClusterElectionStore,
 } from './cluster.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 4
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 5
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
@@ -107,6 +108,35 @@ const REPLICA_TABLES = Object.freeze({
 
 type ReplicaTable = keyof typeof REPLICA_TABLES
 
+/** Schema 5: Gouzi hosts and members. The device credential is referenced by name and never stored here. */
+const GOUZI_TABLES = `
+  CREATE TABLE gouzi_hosts (
+    host_id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    authority_epoch TEXT NOT NULL,
+    credential_ref TEXT NOT NULL,
+    paired_at TEXT NOT NULL
+  );
+  CREATE TABLE gouzi_members (
+    gouzi_id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    host_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    avatar_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    role_version INTEGER NOT NULL,
+    policy_version INTEGER NOT NULL,
+    membership TEXT NOT NULL,
+    connection TEXT NOT NULL,
+    activity TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (host_id) REFERENCES gouzi_hosts(host_id)
+  );
+`
+
 function makePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
   chmodSync(path, 0o700)
@@ -126,6 +156,11 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
   readonly db: DatabaseSync
   /** Owner-private content-addressed artifact directory. */
   readonly artifactRoot: string
+  /**
+   * Gouzi hosts and members. Not part of the cluster replica: members are bound to this main instance's
+   * authority epoch, so a promoted follower pairs its hosts again.
+   */
+  readonly gouzi: GouziRegistry
   private clusterTracking = false
 
   constructor(readonly root: string) {
@@ -148,10 +183,16 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       this.migrateSchema1To2()
       this.migrateSchema2To3()
       this.migrateSchema3To4()
+      this.migrateSchema4To5()
     } else if (version === 2) {
       this.migrateSchema2To3()
       this.migrateSchema3To4()
-    } else if (version === 3) this.migrateSchema3To4()
+      this.migrateSchema4To5()
+    } else if (version === 3) {
+      this.migrateSchema3To4()
+      this.migrateSchema4To5()
+    } else if (version === 4) this.migrateSchema4To5()
+    this.gouzi = new GouziRegistry(this.db)
     this.clusterTracking = true
   }
 
@@ -810,6 +851,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       INSERT INTO cluster_election
         (singleton, current_term, role, lease_until, commit_index)
       VALUES (1, 0, 'follower', 0, 0);
+      ${GOUZI_TABLES}
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
   }
@@ -866,6 +908,15 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
           (singleton, current_term, role, lease_until, commit_index)
         VALUES (1, 0, 'follower', 0, 0);
         PRAGMA user_version = 4;
+      `)
+    })
+  }
+
+  private migrateSchema4To5(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        ${GOUZI_TABLES}
+        PRAGMA user_version = 5;
       `)
     })
   }
