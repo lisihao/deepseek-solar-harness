@@ -96,6 +96,7 @@
     "@deepseek-ai/dsh-host-directory-picker-auto": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-directory-picker-native": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-frontend-static": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-frontend-static-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-host-gouzi-member": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-gouzi-member-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-host-plugin-inventory": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-webserver": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-webserver-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-invariants": "0.1.0-rc.6",

@@ -34,6 +34,8 @@ Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStor
 
 `gouziOperatorServer` 把已注册且已启用的成员投影为远端 Server，其算子地址为 `gouzi.<gouziId>.<operatorId>`。对每一次 attempt，它读取成员、其宿主以及该 attempt 封存的节点执行计划，并签发 `GouziExecutionGrant`：run、node、attempt、执行 ID、generation、权威纪元、来自计划的读、写与 effect 范围、截止时间，以及等于随后所发请求的 `gouziRequestHash` 的 `planHash`。它拒绝未 `enabled` 的成员，也拒绝不是顶层 TaskGraph attempt 的执行 ID，所以成员不会运行 RLM 子任务或 Auto-Refine 阶段。第一版不支持在主实例不可达时运行，所以 `offlineUntil` 等于 `deadline`；截止时间是成员自己的 `grantDeadlineMs`（60 秒到 24 小时，创建时设定）。每次远端刷新时，daemon 会注册每个 `enabled` 成员，并按宿主的 `credentialRef` 从 `ctx.credentials` 读取宿主凭据（回环或隧道端点不需要凭据），把 `connection` 记为 `online` 或 `unreachable`，并在该成员有 attempt 处于 accepted 或 running 时把 `activity` 记为 `working`。
 
+`./remote-host` 入口只挂载远端执行宿主服务，所以狗子成员无需 TaskGraph daemon、调度器或集群选举，也能物化精确提交的工作区。
+
 ## Model Experience
 
 间接产生影响：由 `@deepseek-ai/dsh-tool-orchestration` 呈现。daemon 保存 Compiler 产物并返回有界投影，但自身不增加提示词段落。

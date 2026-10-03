@@ -45,6 +45,7 @@ describe('published package surface', () => {
       'dsh-plugin-desktop': 'lib/bin.js',
       'dsh-desktop': 'lib/bin.js',
       'dsh-product-server': 'lib/product-server-bin.js',
+      'dsh-gouzi-worker': 'lib/gouzi-worker-bin.js',
     })
   })
 
@@ -182,6 +183,8 @@ describe('published package surface', () => {
     expect(config).toContain("'profile-service': 'src/profile-service.ts'")
     expect(config).toContain("'product-server': 'src/product-server.ts'")
     expect(config).toContain("entry: { 'product-server-bin': 'src/product-server-bin.ts' }")
+    expect(config).toContain("'gouzi-worker': 'src/gouzi-worker.ts'")
+    expect(config).toContain("entry: { 'gouzi-worker-bin': 'src/gouzi-worker-bin.ts' }")
     expect(config).toContain("pnpm: 'src/pnpm.ts'")
     expect(config).toContain("profiles: 'src/profiles.ts'")
     expect(config).toContain("terminal: 'src/terminal.ts'")

@@ -22,6 +22,8 @@ import {
   ensureDesktopProfile,
   ensureProductServerProfile,
   prepareDesktopProfile,
+  prepareGouziWorkerProfile,
+  GOUZI_WORKER_DISABLED_ROW_IDS,
   prepareProductServerProfile,
   readDesktopShellMode,
 } from '../src/profile.ts'
@@ -155,6 +157,33 @@ describe('desktop profile composition', () => {
       'desktop-profiles',
       'desktop-updates',
     ]) expect(rowIds).not.toContain(desktopRow)
+  })
+
+  it('composes a Gouzi member without any scheduler row and gates its connection on the member service', () => {
+    const home = temporaryHome()
+    const server = composeEntries([prepareProductServerProfile(undefined, home, 'darwin').patches])
+    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin').patches])
+    const workerById = new Map(worker.map(row => [row.id, row] as const))
+
+    for (const id of GOUZI_WORKER_DISABLED_ROW_IDS) {
+      expect(server.find(row => row.id === id), id).toBeDefined()
+      expect(workerById.get(id)?.disabled, id).toBe(true)
+    }
+    expect(workerById.get('orchestration-remote-host')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-orchestration-local/remote-host',
+      config: { dshHome: home },
+    }))
+    expect(workerById.get('gouzi-member')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-host-gouzi-member',
+      config: { stateRoot: home },
+    }))
+    expect(workerById.get('resident-operators')?.disabled).not.toBe(true)
+    const inject = workerById.get('connection')?.inject as string[]
+    expect(inject).toContain('gouziMember')
+    expect(inject).not.toContain('orchestrations')
+    // The ordinary Product Server keeps waiting for the orchestration service and has no member gate.
+    expect(server.find(row => row.id === 'gouzi-member')).toBeUndefined()
+    expect(server.find(row => row.id === 'connection')?.inject).toContain('orchestrations')
   })
 
   it('mounts the sealed Synapse bundle exactly once on Desktop and Product Server', () => {

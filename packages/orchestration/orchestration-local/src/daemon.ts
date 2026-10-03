@@ -1165,6 +1165,8 @@ export class OrchestrationDaemon {
     readonly dispose: readonly (() => Promise<void>)[]
   }>()
   private remoteOperatorRefreshAt = 0
+  /** Operator id of each attempt's sealed plan; an attempt's plan never changes, so it is read once. */
+  private readonly attemptOperators = new Map<string, string>()
   private clusterActionAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
@@ -1807,7 +1809,6 @@ export class OrchestrationDaemon {
         this.observeGouzi(server, 'unreachable')
       }
     }
-    this.syncGouziActivity()
     this.remoteOperatorRefreshAt = Date.now() + 5_000
   }
 
@@ -1840,14 +1841,20 @@ export class OrchestrationDaemon {
 
   /** Mark a member `working` while one of its attempts is accepted or running, otherwise `resting`. */
   private syncGouziActivity(): void {
+    const members = this.store.gouzi.list().filter(member => member.membership !== 'archived')
+    if (members.length === 0) return
     const busy = new Set<string>()
     for (const attempt of this.store.attempts(['accepted', 'running'])) {
-      const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
-      const match = /^gouzi\.(.+?)\./u.exec(plan.operatorPlan.operatorId)
+      let operatorId = this.attemptOperators.get(attempt.executionId)
+      if (operatorId === undefined) {
+        const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+        operatorId = plan.operatorPlan.operatorId
+        this.attemptOperators.set(attempt.executionId, operatorId)
+      }
+      const match = /^gouzi\.(.+?)\./u.exec(operatorId)
       if (match?.[1] !== undefined) busy.add(match[1])
     }
-    for (const member of this.store.gouzi.list()) {
-      if (member.membership === 'archived') continue
+    for (const member of members) {
       const activity = busy.has(String(member.gouziId)) ? 'working' : 'resting'
       if (member.activity !== activity) this.store.gouzi.observe(member.gouziId, { activity })
     }
@@ -1868,6 +1875,7 @@ export class OrchestrationDaemon {
     if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
     await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
     await this.reconcile()
+    this.syncGouziActivity()
     await this.ctx.rlmRuntime.pumpMessages()
     await this.ctx.rlmRuntime.pumpHeartbeats()
     if (this.cluster !== undefined && !this.cluster.canSchedule()) return

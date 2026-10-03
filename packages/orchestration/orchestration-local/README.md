@@ -34,6 +34,8 @@ Schema 5 adds `gouzi_hosts` and `gouzi_members`, written only through `Orchestra
 
 `gouziOperatorServer` projects a registered, enabled member as a remote Server whose operators are addressed `gouzi.<gouziId>.<operatorId>`. For every attempt it reads the member, its host, and the attempt's sealed node execution plan, and signs a `GouziExecutionGrant`: run, node, attempt, execution id, generation, authority epoch, read, write, and effect scopes from the plan, a deadline, and a `planHash` equal to `gouziRequestHash` of the request it then posts. It refuses a member that is not `enabled` and any execution id that is not a top-level TaskGraph attempt, so a member never runs RLM children or Auto-Refine stages. The first version does not run without the main instance reachable, so `offlineUntil` equals `deadline`; the deadline is the member's own `grantDeadlineMs` (60 seconds to 24 hours, set at creation). Every remote refresh the daemon registers each `enabled` member, reading the host credential from `ctx.credentials` under the host's `credentialRef` (a loopback or tunnel endpoint needs none), and records `connection` as `online` or `unreachable` and `activity` as `working` while one of the member's attempts is accepted or running.
 
+The `./remote-host` entry mounts only the remote execution host service, so a Gouzi member can materialize exact-commit workspaces without a TaskGraph daemon, scheduler, or cluster election.
+
 ## Model Experience
 
 Indirectly, through `@deepseek-ai/dsh-tool-orchestration`. The daemon stores compiler artifacts and returns bounded projections but adds no prompt section itself.
