@@ -31,7 +31,7 @@ preset 在参考机制之上内置了额外保护，全部在 `agent.cordis.yml`
 
 被委派的子 Agent（`origin: subagent`）保留其父级过滤后的工具面。该工具面缺少 bootstrap shell 或某个通用工具时（例如只有结果工具的维护 worker），子 Agent 不受 phase 1 的工具隔离、prompt section 裁剪、消息过滤、输出预算封顶和 Code Mode 切换约束。顶层会话处于同样状态时仍会直接报错。
 
-## 安装
+插件启动时会把 preset 文件复制到 `~/.dsh/.agent-presets/liangshen`。在 Electron 应用里该包位于 `app.asar` 内，归档路径无法作为复制源，所以同步读取 `app.asar.unpacked` 中的副本；读取归档路径会让每次启动都以 `ENOENT` 失败，旧 preset 因此一直留在原处。
 
 ```sh
 # 方式一：全家桶（推荐）
