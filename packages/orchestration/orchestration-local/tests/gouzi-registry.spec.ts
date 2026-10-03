@@ -21,7 +21,7 @@ async function open(root?: string): Promise<{ store: OrchestrationStore; root: s
 }
 
 const HOST = {
-  hostId: GouziHostId('host-1'), label: 'Mac mini', endpoint: 'http://127.0.0.1:4100',
+  hostId: GouziHostId('host-1'), label: 'Mac mini',
   authorityEpoch: GouziAuthorityEpoch('epoch-1'), credentialRef: 'gouzi-host-1',
 }
 
@@ -42,6 +42,24 @@ describe('GouziRegistry hosts', () => {
     expect(store.gouzi.getHost(GouziHostId('other'))).toBeUndefined()
     expect(store.gouzi.listHosts()).toEqual([paired])
     expect(() => store.gouzi.pairHost(HOST)).toThrow('already paired')
+    store.close()
+  })
+})
+
+describe('GouziRegistry endpoint', () => {
+  it('records where a member listens, replaces it on restart, and rejects a non-http URL or an archived member', async () => {
+    const { store } = await open()
+    store.gouzi.pairHost(HOST)
+    store.gouzi.create(member(1))
+    const id = GouziId('gouzi-1')
+    expect(store.gouzi.read(id)).not.toHaveProperty('endpoint')
+    expect(store.gouzi.setEndpoint(id, 'http://127.0.0.1:4100').endpoint).toBe('http://127.0.0.1:4100/')
+    expect(store.gouzi.setEndpoint(id, 'http://127.0.0.1:4200').endpoint).toBe('http://127.0.0.1:4200/')
+    expect(() => store.gouzi.setEndpoint(id, 'ssh://mini')).toThrow('http or https')
+    expect(() => store.gouzi.setEndpoint(GouziId('missing'), 'http://127.0.0.1:1')).toThrow('does not exist')
+    store.gouzi.setMembership(id, 'retiring')
+    store.gouzi.archive(id, { credentialsRevoked: true, workSettled: true, processTreeStopped: true })
+    expect(() => store.gouzi.setEndpoint(id, 'http://127.0.0.1:4300')).toThrow('is archived')
     store.close()
   })
 })

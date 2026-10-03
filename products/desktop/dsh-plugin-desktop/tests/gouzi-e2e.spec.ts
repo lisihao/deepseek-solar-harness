@@ -1,0 +1,309 @@
+/**
+ * Gouzi members as real processes: two `dsh-gouzi-worker` processes with their own homes, reached over HTTP by a
+ * real orchestration daemon and by raw execution requests. The members run a keyless fixture driver, so no model,
+ * subscription, or network service is used.
+ */
+
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { gouziRequestHash, type RemoteResidentExecuteRequest } from '@deepseek-ai/dsh-client-connection'
+import {
+  GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId, type GouziExecutionGrant, type LogicalTaskGraphV1,
+} from '@deepseek-ai/dsh-orchestration'
+import {
+  OrchestrationDaemon,
+  OrchestrationDaemonClient,
+  OrchestrationStore,
+  RemoteSyncHttpClient,
+  RemoteSyncRejectedError,
+} from '@deepseek-ai/dsh-orchestration-local'
+import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
+import { GouziActiveLimitError, GouziSupervisor } from '../src/gouzi-supervisor.ts'
+import type { GouziWorkerReady } from '../src/gouzi-worker.ts'
+
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const FIXTURE_DRIVER = join(PACKAGE_ROOT, 'tests', 'fixtures', 'gouzi-fixture-driver.mjs')
+const REPOSITORY = 'github.com/lisihao/gouzi-fixture'
+const EPOCH = 'epoch-e2e'
+const OPERATOR = 'gouzi-fixture'
+const MEMBERS = ['gouzi-a', 'gouzi-b'] as const
+
+let scratch: string
+let membersRoot: string
+let mainHome: string
+let commit: string
+let supervisor: GouziSupervisor
+const ready = new Map<string, GouziWorkerReady>()
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+}
+
+/** Workspaces a member currently holds; a settled turn's workspace is released by the member. */
+function materialized(gouziId: string): string[] {
+  const executions = join(supervisor.homeOf(gouziId), 'orchestrations', 'remote-workspaces', 'executions')
+  return existsSync(executions) ? readdirSync(executions) : []
+}
+
+/** Executed turns recorded by the fixture driver as `[commandId, workspace]`. */
+function executions(gouziId: string): Array<[string, string]> {
+  const path = join(supervisor.homeOf(gouziId), 'fixture-executions.log')
+  if (!existsSync(path)) return []
+  return readFileSync(path, 'utf8').split('\n').filter(line => line.length > 0).map((line) => {
+    const [commandId, workspace] = line.split('\t')
+    return [commandId!, workspace!]
+  })
+}
+
+function commandIds(gouziId: string): string[] {
+  return executions(gouziId).map(([commandId]) => commandId)
+}
+
+function endpointOf(gouziId: string): string {
+  return `http://127.0.0.1:${String(ready.get(gouziId)?.port)}/`
+}
+
+function request(commandId: string): RemoteResidentExecuteRequest {
+  return {
+    commandId,
+    operatorId: OPERATOR,
+    laneId: commandId,
+    prompt: [{ type: 'text', text: 'write your file' }],
+    workspaceIdentity: { version: 1, repository: REPOSITORY, commit },
+    nativeToolPolicy: 'disabled',
+  } as RemoteResidentExecuteRequest
+}
+
+function grantFor(gouziId: string, plan: RemoteResidentExecuteRequest, patch: Partial<Record<keyof GouziExecutionGrant, unknown>> = {}): GouziExecutionGrant {
+  return {
+    runId: 'run-wire', nodeId: 'node-wire', attempt: 1, executionId: plan.commandId, gouziId, generation: 1,
+    authorityEpoch: EPOCH, planHash: gouziRequestHash(plan),
+    scopes: { read: [], write: [], effects: [] }, credentialRefs: [],
+    deadline: new Date(Date.now() + 600_000).toISOString(), offlineUntil: new Date(Date.now() + 600_000).toISOString(),
+    ...patch,
+  } as unknown as GouziExecutionGrant
+}
+
+function analysisGraph(workspace: string, operatorId: string): LogicalTaskGraphV1 {
+  const none = { read: [], write: [], execute: [], network: [], cost: [], risk: [] }
+  return {
+    version: 1, title: 'gouzi e2e', workspace, maxParallel: 1, risk: 'low',
+    nodes: [{
+      id: 'A', dependsOn: [], requiredForCompletion: true, title: 'Write', task: 'Write one file.', role: 'analysis',
+      capabilityRequirements: [], capabilityBudget: [],
+      contextPolicy: { maxTokens: 4_096, allowedSourceKinds: ['intent', 'artifact', 'capsule'], unavailableSource: 'degrade' },
+      effectBudget: none, readScopes: ['.'], writeScopes: [], approvedSecretRefs: [],
+      acceptance: [{ id: 'done', description: 'operator completes', kind: 'operator-completed' }],
+      retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
+      operator: { preferredIds: [operatorId] },
+    }],
+  } as LogicalTaskGraphV1
+}
+
+async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean, timeoutMs = 60_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const value = await read()
+    if (accept(value)) return value
+    if (Date.now() >= deadline) throw new Error(`did not converge: ${JSON.stringify(value).slice(0, 600)}`)
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+}
+
+describe.sequential('Gouzi members as real processes', () => {
+  let daemon: OrchestrationDaemon | undefined
+
+  beforeAll(async () => {
+    scratch = mkdtempSync(join(tmpdir(), 'dsh-gouzi-e2e-'))
+    membersRoot = join(scratch, 'members')
+    mainHome = join(scratch, 'main')
+    const source = join(scratch, 'source')
+    mkdirSync(source, { recursive: true })
+    writeFileSync(join(source, 'README.md'), 'gouzi fixture\n')
+    git(source, 'init', '--initial-branch=main')
+    git(source, 'config', 'user.name', 'DSH Test')
+    git(source, 'config', 'user.email', 'dsh-test@example.invalid')
+    git(source, 'add', '.')
+    git(source, 'commit', '-m', 'fixture')
+    git(source, 'remote', 'add', 'origin', 'https://github.com/lisihao/gouzi-fixture.git')
+    commit = git(source, 'rev-parse', 'HEAD')
+
+    supervisor = new GouziSupervisor({
+      membersRoot,
+      workerCommand: () => ({
+        command: process.execPath,
+        args: ['--import', pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm')).href, join(PACKAGE_ROOT, 'src', 'gouzi-worker-bin.ts'), '--host', '127.0.0.1', '--port', '0'],
+      }),
+      activeLimit: 2,
+      readyTimeoutMs: 120_000,
+      stopTimeoutMs: 20_000,
+    })
+    for (const gouziId of [...MEMBERS, 'gouzi-c']) {
+      const home = await supervisor.provision({
+        gouziId, ownerId: 'owner-e2e', hostId: 'host-e2e', generation: 1, authorityEpoch: EPOCH,
+        repositories: [{ repository: REPOSITORY, source }],
+      })
+      // A member-home patch is the existing way to add a Resident Driver module to one profile.
+      writeFileSync(join(home, 'cordis.patch.yml'), [
+        '- id: resident-operators',
+        '  config:',
+        '    driverModules:',
+        `      - ${FIXTURE_DRIVER}`,
+        '',
+      ].join('\n'))
+    }
+    await Promise.all(MEMBERS.map(async (gouziId) => { ready.set(gouziId, await supervisor.start(gouziId)) }))
+  }, 300_000)
+
+  afterAll(async () => {
+    await daemon?.close()
+    for (const gouziId of [...MEMBERS, 'gouzi-c']) await supervisor.stop(gouziId, { reclaimResident: true })
+    rmSync(scratch, { recursive: true, force: true })
+  }, 60_000)
+
+  it('runs each member as its own process with its own home and identity, and caps the running members', async () => {
+    const a = ready.get('gouzi-a')!
+    const b = ready.get('gouzi-b')!
+    expect(a.pid).not.toBe(b.pid)
+    expect(a.port).not.toBe(b.port)
+    expect(supervisor.homeOf('gouzi-a')).not.toBe(supervisor.homeOf('gouzi-b'))
+    expect(a).toMatchObject({ gouziId: 'gouzi-a', generation: 1, authorityEpoch: EPOCH })
+    expect(b).toMatchObject({ gouziId: 'gouzi-b', generation: 1, authorityEpoch: EPOCH })
+    // A third member would exceed the two the pilot host may run at once.
+    await expect(supervisor.start('gouzi-c')).rejects.toBeInstanceOf(GouziActiveLimitError)
+    expect(supervisor.running('gouzi-c')).toBeUndefined()
+    // The member runs no scheduler: no orchestration state is created in its home.
+    for (const gouziId of MEMBERS) {
+      expect(existsSync(join(supervisor.homeOf(gouziId), 'orchestrations', 'state.sqlite'))).toBe(false)
+    }
+  })
+
+  it('refuses a request without a grant, with a wrong generation, epoch, plan hash, or deadline, before any effect', async () => {
+    const client = new RemoteSyncHttpClient(endpointOf('gouzi-a'))
+    const plan = request('orch:wire:refused:1')
+    const refusals: Array<[string, Record<string, unknown> | undefined, string]> = [
+      ['no grant', undefined, 'gouziGrant must be an object'],
+      ['generation', { generation: 2 }, 'GOUZI_GENERATION_MISMATCH'],
+      ['epoch', { authorityEpoch: 'epoch-stale' }, 'GOUZI_EPOCH_MISMATCH'],
+      ['member', { gouziId: 'gouzi-b' }, 'GOUZI_IDENTITY_MISMATCH'],
+      ['plan hash', { planHash: 'f'.repeat(64) }, 'GOUZI_PLAN_MISMATCH'],
+      ['deadline', { deadline: new Date(Date.now() - 1_000).toISOString() }, 'GOUZI_GRANT_EXPIRED'],
+    ]
+    for (const [label, patch, code] of refusals) {
+      const body = patch === undefined ? plan : { ...plan, gouziGrant: grantFor('gouzi-a', plan, patch) }
+      await expect(client.operatorExecute(body), label).rejects.toThrow(code)
+    }
+    expect(materialized('gouzi-a')).toEqual([])
+    expect(commandIds('gouzi-a')).toEqual([])
+  })
+
+  it('executes an authorized request once, returns the stored receipt for a repeat, and conflicts on another request', async () => {
+    const client = new RemoteSyncHttpClient(endpointOf('gouzi-a'))
+    const plan = request('orch:wire:ok:1')
+    const grant = grantFor('gouzi-a', plan)
+    const first = await client.operatorExecute({ ...plan, gouziGrant: grant })
+    const repeat = await client.operatorExecute({ ...plan, gouziGrant: grant })
+    expect(repeat).toEqual(first)
+
+    const settled = await eventually(() => client.operatorInspect(first.turnId), turn => turn.state === 'settled')
+    expect(settled.result?.stopReason).toBe('completed')
+    expect(commandIds('gouzi-a')).toEqual(['orch:wire:ok:1'])
+    // The turn ran in a workspace the member materialized under its own home.
+    expect(executions('gouzi-a')[0]![1]).toContain(join(supervisor.homeOf('gouzi-a'), 'orchestrations', 'remote-workspaces'))
+
+    const changed = { ...plan, laneId: 'another-lane' }
+    const error = await client.operatorExecute({ ...changed, gouziGrant: grantFor('gouzi-a', changed) }).catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(RemoteSyncRejectedError)
+    expect(String(error)).toContain('GOUZI_EXECUTION_CONFLICT')
+    expect(commandIds('gouzi-a')).toEqual(['orch:wire:ok:1'])
+    // The other member never saw the work.
+    expect(commandIds('gouzi-b')).toEqual([])
+    expect(materialized('gouzi-b')).toEqual([])
+  })
+
+  it('reconciles after the member process restarts without running the execution a second time', async () => {
+    const before = ready.get('gouzi-a')!
+    await supervisor.stop('gouzi-a')
+    expect(supervisor.running('gouzi-a')).toBeUndefined()
+    const after = await supervisor.start('gouzi-a')
+    ready.set('gouzi-a', after)
+    expect(after.pid).not.toBe(before.pid)
+    expect(after.incarnation).toBe(before.incarnation + 1)
+
+    // The main instance lost the response: it asks again with the same execution id and grant.
+    const client = new RemoteSyncHttpClient(endpointOf('gouzi-a'))
+    const plan = request('orch:wire:ok:1')
+    const replayed = await client.operatorExecute({ ...plan, gouziGrant: grantFor('gouzi-a', plan) })
+    const turn = await client.operatorInspect(replayed.turnId)
+    expect(turn.state).toBe('settled')
+    expect(commandIds('gouzi-a')).toEqual(['orch:wire:ok:1'])
+  }, 180_000)
+
+  it('runs two TaskGraph runs on two members through a real orchestration daemon, each in its own workspace', async () => {
+    const mainRoot = join(mainHome, 'orchestrations')
+    const store = new OrchestrationStore(mainRoot)
+    store.gouzi.pairHost({
+      hostId: GouziHostId('host-e2e'), label: 'This Mac', authorityEpoch: GouziAuthorityEpoch(EPOCH), credentialRef: 'GOUZI_HOST_E2E',
+    })
+    for (const gouziId of MEMBERS) {
+      store.gouzi.create({
+        gouziId: GouziId(gouziId), ownerId: GouziOwnerId('owner-e2e'), hostId: GouziHostId('host-e2e'),
+        name: gouziId, avatarId: 'shiba', role: 'development', grantDeadlineMs: 600_000,
+      })
+      store.gouzi.setMembership(GouziId(gouziId), 'enabled')
+      store.gouzi.setEndpoint(GouziId(gouziId), endpointOf(gouziId))
+    }
+    store.close()
+
+    // Local execution is not used; any call to the local Resident client would be a bug in the routing.
+    const local = new Proxy({ providers: () => Promise.resolve([]) }, {
+      get: (target, property: string) => {
+        if (property in target) return (target as Record<string, unknown>)[property]
+        throw new Error(`the local Resident client must not be used: ${property}`)
+      },
+    }) as unknown as ResidentDaemonClient
+    daemon = new OrchestrationDaemon({
+      root: mainRoot, dshHome: mainHome, residentClient: local, modelWorkerProviders: [], schedulerIntervalMs: 50,
+    })
+    await daemon.start()
+    const client = new OrchestrationDaemonClient({ root: mainRoot, dshHome: mainHome, autoStart: false, connectTimeoutMs: 5_000 })
+    const workspace = join(scratch, 'source')
+
+    const runs = await Promise.all(MEMBERS.map(async (gouziId) => {
+      const compilation = await client.compile({
+        intent: { request: `Write the file on ${gouziId}.` },
+        admission: {
+          policy: 'auto', route: 'taskgraph', sourceSessionId: `e2e-${gouziId}`,
+          rlm: 'disabled', continualHarness: 'off', optimization: 'economy',
+        },
+        graph: analysisGraph(workspace, `gouzi.${gouziId}.${OPERATOR}`),
+      })
+      return client.start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId })
+    }))
+    const completed = await Promise.all(runs.map(started => eventually(
+      () => client.inspect(String(started.runId)), value => value.state === 'completed' || value.state === 'failed', 120_000,
+    )))
+    expect(completed.map(value => value.state)).toEqual(['completed', 'completed'])
+    expect(completed.map(value => value.nodes[0]?.operatorId)).toEqual(MEMBERS.map(gouziId => `gouzi.${gouziId}.${OPERATOR}`))
+
+    // Each member executed exactly its own run, in a workspace under its own home. gouzi-a also holds the earlier wire turn.
+    const [a, b] = MEMBERS.map(gouziId => executions(gouziId))
+    expect(a!.map(([commandId]) => commandId)).toEqual(['orch:wire:ok:1', expect.stringContaining(String(runs[0]!.runId))])
+    expect(b!.map(([commandId]) => commandId)).toEqual([expect.stringContaining(String(runs[1]!.runId))])
+    expect(a![1]![1]).toContain(supervisor.homeOf('gouzi-a'))
+    expect(b![0]![1]).toContain(supervisor.homeOf('gouzi-b'))
+    expect(a![1]![1]).not.toBe(b![0]![1])
+
+    // The daemon recorded the observed state of both members in the main store.
+    const watcher = new OrchestrationStore(mainRoot)
+    for (const gouziId of MEMBERS) {
+      expect(watcher.gouzi.read(GouziId(gouziId))).toMatchObject({ connection: 'online' })
+    }
+    watcher.close()
+  }, 240_000)
+})

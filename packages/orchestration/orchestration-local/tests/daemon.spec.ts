@@ -709,7 +709,7 @@ describe('orchestration daemon', () => {
     const root = join(home, 'orchestrations')
     const registry = new OrchestrationStore(root)
     registry.gouzi.pairHost({
-      hostId: GouziHostId('host-1'), label: 'Pilot host', endpoint: 'http://127.0.0.1:13301',
+      hostId: GouziHostId('host-1'), label: 'Pilot host',
       authorityEpoch: GouziAuthorityEpoch('epoch-9'), credentialRef: 'GOUZI_HOST_1_TOKEN',
     })
     for (const index of [1, 2]) {
@@ -719,6 +719,7 @@ describe('orchestration daemon', () => {
       })
     }
     registry.gouzi.setMembership(GouziId('gouzi-1'), 'enabled')
+    registry.gouzi.setEndpoint(GouziId('gouzi-1'), 'http://127.0.0.1:13301')
     registry.close()
 
     const local = new FakeResidentClient()
@@ -804,7 +805,11 @@ describe('orchestration daemon', () => {
     expect(completed.nodes[0]).toMatchObject({ operatorId: 'gouzi.gouzi-1.codex', state: 'passed' })
     expect(local.requests).toHaveLength(0)
 
-    const { gouziGrant, protocol: _protocol, ...request } = executePayload as { gouziGrant: Record<string, unknown> }
+    const { gouziGrant, protocol: _protocol, ...request } = executePayload as {
+      gouziGrant: Record<string, unknown>
+      protocol: unknown
+      commandId: string
+    }
     expect(gouziGrant).toMatchObject({
       runId: String(started.runId), nodeId: fixture.nodes[0]!.id, attempt: 1,
       gouziId: 'gouzi-1', generation: 1, authorityEpoch: 'epoch-9',

@@ -43,6 +43,16 @@ export { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleServi
 export { BROWSER_CAPABILITY, BROWSER_MODEL_TOOL_SCHEMA, BrowserModelToolBridge, parseBrowserModelPlan } from './browser-model-tool-bridge.ts'
 export { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from './store.ts'
 export { LocalRemoteOperatorHostService } from './remote-execution-host.ts'
+export { gouziOperatorServer, type GouziGrantStore, type GouziOperatorOptions } from './gouzi-operator.ts'
+export {
+  GouziRegistry,
+  type GouziArchiveEvidence,
+  type GouziHostRecord,
+  type GouziMemberEdit,
+  type GouziMemberView,
+} from './gouzi-registry.ts'
+export { RemotePhysicalOperator, createRemotePhysicalOperators, type RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
+export { RemoteSyncHttpClient, RemoteSyncRejectedError, RemoteSyncTransportError } from './remote-sync-http-client.ts'
 export * from './auto-refine.ts'
 
 export const name = 'orchestration-local'

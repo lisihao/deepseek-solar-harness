@@ -1,11 +1,17 @@
 /** Launcher of one Gouzi execution member: the product Server transport without a scheduler. */
 
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type {} from '@deepseek-ai/dsh-client-connection'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { prepareGouziWorkerProfile } from './profile.ts'
 import { startProductServer } from './product-server.ts'
 
 const BIN_NAME = 'dsh-gouzi-worker'
+
+/** File under `<member home>/gouzi/` that a booted member writes with its {@link GouziWorkerReady} record. */
+export const GOUZI_WORKER_FILE = 'worker.json'
 
 /** First stdout line of a booted member; a supervisor reads it to learn the listener and identity. */
 export interface GouziWorkerReady {
@@ -42,6 +48,10 @@ export async function startGouziWorker(argv: readonly string[] = process.argv.sl
         authorityEpoch: member.hello().authorityEpoch,
         incarnation: member.hello().incarnation,
       }
+      // A supervisor that outlives or replaces this process finds the member through this file.
+      const directory = join(resolveDshHome(), 'gouzi')
+      mkdirSync(directory, { recursive: true, mode: 0o700 })
+      writeFileSync(join(directory, GOUZI_WORKER_FILE), `${JSON.stringify(ready)}\n`, { mode: 0o600 })
       process.stdout.write(`${JSON.stringify(ready)}\n`)
     },
   })

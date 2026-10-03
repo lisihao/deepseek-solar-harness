@@ -44,7 +44,7 @@ const GOUZI = GouziId('gouzi-1')
 async function registered(): Promise<OrchestrationStore> {
   const store = new OrchestrationStore(await temporary('dsh-gouzi-operator-'))
   store.gouzi.pairHost({
-    hostId: GouziHostId('host-1'), label: 'Mac mini', endpoint: 'http://127.0.0.1:4100/',
+    hostId: GouziHostId('host-1'), label: 'Mac mini',
     authorityEpoch: GouziAuthorityEpoch('epoch-7'), credentialRef: 'gouzi-host-1',
   })
   store.gouzi.create({
@@ -52,6 +52,7 @@ async function registered(): Promise<OrchestrationStore> {
     name: 'Mochi', avatarId: 'shiba', role: 'development', grantDeadlineMs: 60_000,
   })
   store.gouzi.setMembership(GOUZI, 'enabled')
+  store.gouzi.setEndpoint(GOUZI, 'http://127.0.0.1:4100/')
   const plan = {
     version: 1, runId: 'run-1', nodeId: 'node-1', attempt: 1, executionId: EXECUTION_ID,
     effectiveReadScopes: ['src'], effectiveWriteScopes: ['out'],
@@ -92,6 +93,11 @@ describe('gouziOperatorServer', () => {
     const store = await registered()
     expect(() => gouziOperatorServer({ store, gouziId: GouziId('nobody'), accessToken: 't' }))
       .toThrow('is not registered')
+    store.gouzi.create({
+      gouziId: GouziId('unstarted'), ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
+      name: 'Unstarted', avatarId: 'corgi', role: 'testing', grantDeadlineMs: 60_000,
+    })
+    expect(() => gouziOperatorServer({ store, gouziId: GouziId('unstarted') })).toThrow('has not been started')
     const server = gouziOperatorServer({ store, gouziId: GOUZI, accessToken: 't' })
     const start = {} as PhysicalOperatorProviderStartRequest
     expect(() => server.gouzi!.issue({ ...PLAN, commandId: 'orch:run-1:node-1:1:rlm:child' }, start))

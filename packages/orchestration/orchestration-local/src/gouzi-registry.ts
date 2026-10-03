@@ -23,7 +23,6 @@ import {
 export interface GouziHostRecord {
   readonly hostId: GouziHostId
   readonly label: string
-  readonly endpoint: string
   /** The epoch this host accepts; minted when the host was paired. */
   readonly authorityEpoch: GouziAuthorityEpoch
   /** Name of the entry that holds the device credential. */
@@ -37,6 +36,8 @@ export interface GouziMemberView extends GouziRecord {
   readonly activity: GouziActivity
   /** How long after issue an execution grant may start work. */
   readonly grantDeadlineMs: number
+  /** Where the member's process listens now; absent until it has been started. */
+  readonly endpoint?: string
 }
 
 /** Fields a user may change on a member. */
@@ -79,6 +80,7 @@ interface MemberRow {
   connection: string
   activity: string
   grant_deadline_ms: number
+  endpoint: string | null
   created_at: string
   updated_at: string
 }
@@ -86,7 +88,6 @@ interface MemberRow {
 interface HostRow {
   host_id: string
   label: string
-  endpoint: string
   authority_epoch: string
   credential_ref: string
   paired_at: string
@@ -139,6 +140,7 @@ function memberView(row: MemberRow): GouziMemberView {
     connection: row.connection as GouziConnection,
     activity: row.activity as GouziActivity,
     grantDeadlineMs: row.grant_deadline_ms,
+    ...row.endpoint === null ? {} : { endpoint: row.endpoint },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -148,7 +150,6 @@ function hostView(row: HostRow): GouziHostRecord {
   return {
     hostId: GouziHostId(row.host_id),
     label: row.label,
-    endpoint: row.endpoint,
     authorityEpoch: GouziAuthorityEpoch(row.authority_epoch),
     credentialRef: row.credential_ref,
     pairedAt: row.paired_at,
@@ -161,7 +162,7 @@ export class GouziRegistry {
 
   /**
    * Record a newly paired host.
-   * @param host - host identity, endpoint, accepted epoch, and credential reference.
+   * @param host - host identity, accepted epoch, and credential reference.
    * @returns the stored host.
    * @throws OrchestrationError - when the host id is already paired; re-pairing is an explicit later operation.
    */
@@ -172,9 +173,9 @@ export class GouziRegistry {
       }
       const pairedAt = new Date().toISOString()
       this.db.prepare(`
-        INSERT INTO gouzi_hosts (host_id, label, endpoint, authority_epoch, credential_ref, paired_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(String(host.hostId), host.label, host.endpoint, String(host.authorityEpoch), host.credentialRef, pairedAt)
+        INSERT INTO gouzi_hosts (host_id, label, authority_epoch, credential_ref, paired_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(String(host.hostId), host.label, String(host.authorityEpoch), host.credentialRef, pairedAt)
       return { ...host, pairedAt }
     })
   }
@@ -328,6 +329,29 @@ export class GouziRegistry {
       }
       this.db.prepare("UPDATE gouzi_members SET membership = 'archived', updated_at = ? WHERE gouzi_id = ?")
         .run(new Date().toISOString(), String(gouziId))
+      return this.require(gouziId)
+    })
+  }
+
+  /**
+   * Record where a member's process listens after it has been started.
+   * @param gouziId - member identity.
+   * @param endpoint - absolute http or https URL of the member's Server.
+   * @returns the updated member.
+   * @throws OrchestrationError - `GOUZI_STATE_CONFLICT` for a missing or archived member or an invalid URL.
+   */
+  setEndpoint(gouziId: GouziId, endpoint: string): GouziMemberView {
+    return this.transaction(() => {
+      const current = this.require(gouziId)
+      if (current.membership === 'archived') {
+        throw new OrchestrationError(`gouzi ${String(gouziId)} is archived`, 'GOUZI_STATE_CONFLICT')
+      }
+      const url = new URL(endpoint)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        throw new OrchestrationError('gouzi endpoint must use http or https', 'GOUZI_STATE_CONFLICT')
+      }
+      this.db.prepare('UPDATE gouzi_members SET endpoint = ?, updated_at = ? WHERE gouzi_id = ?')
+        .run(url.href, new Date().toISOString(), String(gouziId))
       return this.require(gouziId)
     })
   }

@@ -1816,7 +1816,7 @@ export class OrchestrationDaemon {
   private async gouziServers(): Promise<RemotePhysicalOperatorServer[]> {
     const servers: RemotePhysicalOperatorServer[] = []
     for (const member of this.store.gouzi.list()) {
-      if (member.membership !== 'enabled') continue
+      if (member.membership !== 'enabled' || member.endpoint === undefined) continue
       const host = this.store.gouzi.getHost(member.hostId)
       if (host === undefined) continue
       try {

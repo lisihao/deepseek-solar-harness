@@ -47,14 +47,16 @@ export function gouziOperatorServer(options: GouziOperatorOptions): RemotePhysic
   const { store, gouziId } = options
   const now = options.now ?? Date.now
   const member = store.gouzi.read(gouziId)
-  const host = member === undefined ? undefined : store.gouzi.getHost(member.hostId)
-  if (member === undefined || host === undefined) {
+  if (member === undefined || store.gouzi.getHost(member.hostId) === undefined) {
     throw new PhysicalOperatorError(`gouzi ${String(gouziId)} is not registered`, 'OPERATOR_UNAVAILABLE')
+  }
+  if (member.endpoint === undefined) {
+    throw new PhysicalOperatorError(`gouzi ${String(gouziId)} has not been started`, 'OPERATOR_UNAVAILABLE')
   }
   return {
     id: `gouzi-${String(gouziId)}`,
     label: member.name,
-    endpoint: host.endpoint,
+    endpoint: member.endpoint,
     ...options.accessToken === undefined ? {} : { accessToken: options.accessToken },
     ...options.pollIntervalMs === undefined ? {} : { pollIntervalMs: options.pollIntervalMs },
     gouzi: {

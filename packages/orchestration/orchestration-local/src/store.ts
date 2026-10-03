@@ -108,12 +108,14 @@ const REPLICA_TABLES = Object.freeze({
 
 type ReplicaTable = keyof typeof REPLICA_TABLES
 
-/** Schema 5: Gouzi hosts and members. The device credential is referenced by name and never stored here. */
+/**
+ * Schema 5: Gouzi hosts and members. The device credential is referenced by name and never stored here. A member
+ * listens on its own port, so the endpoint belongs to the member and is set each time its process starts.
+ */
 const GOUZI_TABLES = `
   CREATE TABLE gouzi_hosts (
     host_id TEXT PRIMARY KEY,
     label TEXT NOT NULL,
-    endpoint TEXT NOT NULL,
     authority_epoch TEXT NOT NULL,
     credential_ref TEXT NOT NULL,
     paired_at TEXT NOT NULL
@@ -132,6 +134,7 @@ const GOUZI_TABLES = `
     connection TEXT NOT NULL,
     activity TEXT NOT NULL,
     grant_deadline_ms INTEGER NOT NULL,
+    endpoint TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (host_id) REFERENCES gouzi_hosts(host_id)
