@@ -24,6 +24,7 @@ preset 在参考机制之上内置了额外保护，全部在 `agent.cordis.yml`
 - `promotedPresentation: code`：晋升后 wire 为 Code Mode（PTC）——一个 `run_code` 工具、完整注册表通过生成 SDK 调用；切换等待 `turn/end`，因此首个用户轮次的每个模型步骤始终保持相同的原生双工具契约；
 - `deferredSources` + `deferredGraceSteps`：workspace 指令与 skill 目录在晋升后再等一步注入，工具目录切换和注入冲击不同时落地；
 - `bootstrapMaxTokens`：phase 1 请求的输出预算封顶（社区实测 `max_tokens=1024` 是 "We need" 轨迹的高命中窗口，DSH 默认 256k 命中率为 0），晋升后自动剥离该封顶，避免 `requestProposal` 把 1024 焊进后续每个请求。
+- `autoContinueOnMaxTokens`：首轮在封顶的输出预算下以 `max-tokens` 结束且没有给出回答时，晋升会话并把这段文本作为下一条用户消息发送一次（preset 设为 `继续`），用户无需自己输入；缺省关闭，且不作用于被委派的子 Agent。
 
 已支持 plan mode：phase 1 会把 prompt sections 过滤为仅剩一行 `deployment:persona`，晋升后恢复全部 sections 并在 persona 末尾追加所选工作区路径，因此 Agent 明确自己的工作目录，plan-mode 的 `plan:policy` 也在晋升后的每一步都生效。
 

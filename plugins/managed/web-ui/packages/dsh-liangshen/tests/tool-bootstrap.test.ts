@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
 import {
   apply,
@@ -598,6 +598,69 @@ describe('anchored-tool-bootstrap', () => {
       await expect(assemble(listener(register(), 'system-prompt/assemble'), [], resultOnly)).rejects.toThrow(
         /expected exactly one bootstrap shell/,
       )
+    })
+  })
+  describe('auto-continue after a capped first turn', () => {
+    const maxTokensEnd = { type: 'turn/end', data: { turn: 1, reason: { kind: 'max-tokens' } } }
+    const followups: any[] = []
+    const agentWithFollowup = (events: unknown[], origin?: string) => ({
+      session: { events, header: { cwd: '/workspace', ...origin === undefined ? {} : { origin } } },
+      followup: (message: unknown) => { followups.push(message) },
+    })
+
+    function sessionEventListener(customConfig: Record<string, unknown>) {
+      const listeners = register({ bootstrapMaxTokens: 1024, ...customConfig })
+      return { listeners, onEvent: listener(listeners, 'session/event') as unknown as (session: any, event: any) => void }
+    }
+
+    test('sends the configured text once, promotes the session, and does not repeat', async () => {
+      vi.useFakeTimers()
+      try {
+        followups.length = 0
+        const { listeners, onEvent } = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+        const agent = agentWithFollowup([])
+        await listener(listeners, 'agent/request')({ agent, turn: 1, step: 1, signal: {} }, async () => ({ maxTokens: 256000 }))
+        agent.session.events.push(maxTokensEnd)
+        onEvent(agent.session, maxTokensEnd)
+        onEvent(agent.session, maxTokensEnd)
+        await vi.runAllTimersAsync()
+
+        expect(followups).toHaveLength(1)
+        expect(followups[0]).toMatchObject({ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] })
+        const next = await listener(listeners, 'agent/request')({ agent, turn: 2, step: 1, signal: {} }, async () => ({ maxTokens: 1024 }))
+        expect(next.maxTokens).toBeUndefined()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('stays off by default, for subagents, and for other turn endings', async () => {
+      vi.useFakeTimers()
+      try {
+        followups.length = 0
+        const off = sessionEventListener({})
+        const plain = agentWithFollowup([])
+        await listener(off.listeners, 'agent/request')({ agent: plain, turn: 1, step: 1, signal: {} }, async () => ({}))
+        off.onEvent(plain.session, maxTokensEnd)
+
+        const on = sessionEventListener({ autoContinueOnMaxTokens: true })
+        const child = agentWithFollowup([], 'subagent')
+        await listener(on.listeners, 'agent/request')({ agent: child, turn: 1, step: 1, signal: {} }, async () => ({}))
+        on.onEvent(child.session, maxTokensEnd)
+
+        const done = agentWithFollowup([])
+        await listener(on.listeners, 'agent/request')({ agent: done, turn: 1, step: 1, signal: {} }, async () => ({}))
+        on.onEvent(done.session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+        await vi.runAllTimersAsync()
+
+        expect(followups).toHaveLength(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('rejects an invalid autoContinueOnMaxTokens value', () => {
+      expect(() => register({ autoContinueOnMaxTokens: 3 })).toThrow(/autoContinueOnMaxTokens/)
     })
   })
 })

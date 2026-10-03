@@ -55,7 +55,10 @@
 # two-tool contract; workspace instructions and the skill catalog are deferred
 # one step after promotion. `bootstrapMaxTokens` caps the phase-1 request output
 # budget (community-observed "We need" trigger window, 1024) and is stripped
-# again after promotion so the cap never solders into later requests.
+# again after promotion so the cap never solders into later requests. A first
+# turn that spends the capped budget on reasoning ends with no answer;
+# `autoContinueOnMaxTokens` then promotes the session and sends that text once
+# as the next user turn, so the user does not have to type it.
 - id: tool-bootstrap
   name: ./tool-bootstrap.mjs
   config:
@@ -66,6 +69,7 @@
     maxBootstrapSteps: 4
     promoteAfterFirstResponse: true
     bootstrapMaxTokens: 1024
+    autoContinueOnMaxTokens: 继续
     deferredSources: [agent-instructions, skill-catalog]
     deferredGraceSteps: 1
     promotedPresentation: code
