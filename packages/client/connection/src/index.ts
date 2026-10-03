@@ -14,6 +14,7 @@ import type {
   OrchestrationClusterVoteRequest,
 } from '@deepseek-ai/dsh-orchestration'
 import { SessionReplicationError, type SessionReplica } from '@deepseek-ai/dsh-session-persistence'
+import { GouziAdmissionError, gouziRequestHash, parseGouziGrant } from './gouzi-member.ts'
 import {
   RemoteAuthError,
   type RemoteAuthService,
@@ -51,6 +52,12 @@ export type {
 export { HostConnectionService } from './rpc-host.ts'
 export { REMOTE_AUTH_RPC_CHANNEL } from './remote-auth-wire.ts'
 export { RemoteOperatorHostService } from './remote-operator-host.ts'
+export {
+  GouziAdmissionError, GouziMemberService, gouziRequestHash, parseGouziGrant,
+} from './gouzi-member.ts'
+export type {
+  GouziAdmission, GouziAdmissionCode, GouziMemberHello,
+} from './gouzi-member.ts'
 export type { RemoteMaterializedWorkspaceV1, RemoteOperatorHostQualification } from './remote-operator-host.ts'
 export type {
   RemoteAccessSession, RemoteDeviceCredential, RemoteDeviceScope,
@@ -234,6 +241,7 @@ const REMOTE_POCKET_COMMAND_METHODS = new Set(['respond'])
  */
 const GOUZI_SYNC_ENDPOINTS: ReadonlySet<string> = new Set([
   'describe',
+  'gouzi.hello',
   'operator.providers',
   'operator.execute',
   'operator.inspect',
@@ -436,6 +444,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           if (endpoint === 'describe') {
             return { ok: true, value: await hub.describe(signal, access.scope, requestedRemoteSyncProtocol(payload)) }
           }
+          if (endpoint === 'gouzi.hello') {
+            const member = authCtx.get('gouziMember')
+            if (member === undefined) throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: member.hello() }
+          }
           if (endpoint === 'snapshot') {
             return { ok: true, value: await hub.snapshot(signal, requestedRemoteSyncProtocol(payload)) }
           }
@@ -499,7 +512,31 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
                 ? {}
                 : { nativeToolPolicy: residentNativeToolPolicy(body.nativeToolPolicy) },
             }
-            return { ok: true, value: await hub.operatorExecute(request) }
+            if (access.scope !== 'gouzi') return { ok: true, value: await hub.operatorExecute(request) }
+            const member = authCtx.get('gouziMember')
+            if (member === undefined) throw new ConnectionRpcHttpError(403, 'forbidden')
+            let grant: ReturnType<typeof parseGouziGrant>
+            try {
+              grant = parseGouziGrant(body.gouziGrant)
+            } catch (error) {
+              throw new ConnectionRpcHttpError(400, error instanceof Error ? error.message : String(error))
+            }
+            if (grant.executionId !== request.commandId) {
+              throw new ConnectionRpcHttpError(403, 'GOUZI_EXECUTION_MISMATCH: grant execution id differs from the command id')
+            }
+            try {
+              const admission = await member.admit(grant, gouziRequestHash(request), Date.now())
+              if (admission.kind === 'replay') return { ok: true, value: admission.accepted }
+            } catch (error) {
+              if (!(error instanceof GouziAdmissionError)) throw error
+              throw new ConnectionRpcHttpError(
+                error.code === 'GOUZI_EXECUTION_CONFLICT' ? 409 : 403,
+                `${error.code}: ${error.message}`,
+              )
+            }
+            const accepted = await hub.operatorExecute(request)
+            await member.recordAccepted(request.commandId, accepted)
+            return { ok: true, value: accepted }
           }
           if (endpoint === 'operator.inspect') {
             if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')

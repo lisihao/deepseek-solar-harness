@@ -20,6 +20,8 @@ Remote Sync 协议 1.4 保留 snapshot + cursor 投影，并为 cockpit/admin �
 
 远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。`operator.execute` 的上下文信封会在原生物化前重新解析；Server 返回精确的已接受回执，调用方会拒绝缺失、格式错误或不匹配的回执。超大已结算结果返回 `sha256:` 引用；`operator.artifact.read` 会在 Server deadline 内返回最多 8 MiB 的精确不可变 JSON，使调用方能验证远端 digest、校验完整 Resident 结果，并写入自己的本地 CAS。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
 
+持有 `gouzi` 范围凭据的是主实例，用来连接一只执行成员。Remote Sync RPC 只接受该范围调用 `describe`、`gouzi.hello` 和 `operator.*` 方法；`/api` 桥、snapshot、replica、cluster、设备名册和所有事件 socket 都会拒绝它。该范围的 `operator.execute` 必须带 `gouziGrant`（其 `planHash` 等于该请求的 `gouziRequestHash`），且必须挂载 `ctx.gouziMember` Provider；没有 Provider 时该范围既不能执行也不能 hello。Provider 在物化工作区之前，先按存储的身份、generation 与权威纪元检查授权，并查询幂等账本，因此被拒绝的授权不会产生副作用，重复的执行 ID 返回已存回执。`GouziMemberService` 是 Service Definition，`@deepseek-ai/dsh-host-gouzi-member` 是 Provider。
+
 当 `ctx.orchestrations` 暴露集群权威时，每个经过认证的 description 都可以带有有界只读投影（`nodeId`、term、role、leader id 和 `canSchedule`）。这样，配置了多个 Server 的 Frontend 可以优先连接当前持有多数租约的 Leader，而不会获得选举权威。`orchestration.cluster` 控制能力只向 admin peer 声明，承载 vote、heartbeat、逻辑副本 export 和受 term 约束的 install。生产 peer 应当通过经过认证的回环隧道调用这些控制操作；普通 Frontend bearer 不是集群凭据。
 
 ## 模型体验

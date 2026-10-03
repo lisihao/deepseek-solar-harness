@@ -454,7 +454,7 @@ export interface ConnectionConfig {
 }
 ```
 
-Source: [`packages/client/connection/src/index.ts:102`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:109`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -1170,6 +1170,20 @@ export interface Config {
 
 Source: [`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
 
+<a id="deepseek-aidsh-host-gouzi-member"></a>
+
+## `@deepseek-ai/dsh-host-gouzi-member`
+
+```ts config-catalog
+/** Gate configuration. */
+export interface Config {
+  /** Absolute state root of this member; `gouzi/identity.json` and `gouzi/ledger.json` live under it. */
+  stateRoot: string
+}
+```
+
+Source: [`packages/host/gouzi-member/src/index.ts:18`](../packages/host/gouzi-member/src/index.ts)
+
 <a id="deepseek-aidsh-host-remote-auth"></a>
 
 ## `@deepseek-ai/dsh-host-remote-auth`
@@ -1188,7 +1202,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/host/remote-auth/src/index.ts:123`](../packages/host/remote-auth/src/index.ts)
+Source: [`packages/host/remote-auth/src/index.ts:126`](../packages/host/remote-auth/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 

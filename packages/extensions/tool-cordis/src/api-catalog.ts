@@ -5543,7 +5543,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RemoteDeviceScope',
-    declaration: 'export type RemoteDeviceScope = \'cockpit\' | \'pocket\' | \'admin\';',
+    declaration: 'export type RemoteDeviceScope = \'cockpit\' | \'pocket\' | \'admin\' | \'gouzi\';',
   },
   {
     name: 'RemoteDeviceView',
