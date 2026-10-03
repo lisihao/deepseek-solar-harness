@@ -46,18 +46,25 @@ The member is reached through the existing remote execution path. P1 adds a rest
 
 The design was checked against `solar` at `24526765a4`, which is the current head. Each statement above was read in that source: roles in `startup.ts`, the launcher in `products/desktop/dsh-plugin-desktop/src/product-server.ts`, the operator routes in `connection/src/index.ts`, and the schema version 4 in `orchestration-local/src/store.ts`. None of it implies that a host or the installed app was exercised.
 
-### Paths P1 will change
+### What P1 builds
 
-| Area | Path |
+| Area | Where |
 |---|---|
-| Worker composition | new `packages/bundle/gouzi-worker/` |
-| Worker launcher | new `products/desktop/dsh-plugin-desktop/src/gouzi-worker.ts` |
-| Connection scope and grant check | `packages/client/connection/src/index.ts`, `remote-sync-host.ts` |
-| Member table and limit | `packages/orchestration/orchestration-local/src/store.ts` (schema 5), new `gouzi.ts` |
-| Operator wrapper | new `packages/physical-operator/physical-operator-gouzi/` |
-| Registration | `packages/orchestration/orchestration-local/src/daemon.ts` (`refreshRemoteOperators`) |
-| Host supervisor, minimal | `products/desktop/dsh-plugin-desktop/src/` |
-| Entry UI | new `packages/client/ui-gouzi/` |
+| Restricted device scope | `gouzi` scope in `packages/host/remote-auth` and `packages/client/connection`: only `describe`, `gouzi.hello`, and the `operator.*` methods; `/api`, snapshot, replica, cluster, the device roster, and the event sockets refuse it |
+| Member gate | `GouziMemberService` (Definition and wire Consumer) in `packages/client/connection`; Provider `packages/host/gouzi-member` (stored identity, grant admission, durable idempotency ledger) |
+| Member registry | `GouziRegistry` over schema 5 (`gouzi_hosts`, `gouzi_members`) in `packages/orchestration/orchestration-local`; the ten-member rule is one immediate transaction; exposed as `OrchestrationService.gouzi` (`GouziControl` in the contract) and as daemon protocol 6 methods `gouzi.*` |
+| Operator | `gouziOperatorServer` and the grant hook in `RemotePhysicalOperator`; the daemon registers enabled members each refresh and tracks `connection` and `activity` |
+| Member process | `dsh-gouzi-worker` (`prepareGouziWorkerProfile`, `startGouziWorker`) and the `./remote-host` entry of `orchestration-local` in `products/desktop/dsh-plugin-desktop`; `GouziSupervisor` starts, adopts, and stops detached members |
+| Entry UI | `packages/orchestration/ui-gouzi`: `/api/gouzi`, `GouziHostService` (Provider `gouzi-host` in the Desktop plugin), six SVG avatars, the four-step adoption wizard |
+
+Decisions the implementation settled:
+
+- **`planHash` seals the posted request.** It is `gouziRequestHash` of the execution request without `commandId` and the grant, so the member recomputes it from what it received. The sealed node plan is reachable from the attempt through the execution id.
+- **A member host gates every caller.** A host that mounts the member gate requires a grant for every `operator.execute`, including a loopback owner or an SSH-tunnel endpoint, which the connection treats as `admin`. Otherwise the `gouzi` scope would be bypassed.
+- **The endpoint belongs to the member.** Several members on one host listen on different ports, so the endpoint is on the member row and replaced at each start.
+- **Explicit refusals are not transport failures.** HTTP 400, 403, 404, 409, and 422 from a member are rejections; any other failure after the command left stays `COMMAND_INDETERMINATE`.
+- **The Resident daemon outlives its member.** Stopping a worker leaves its detached Resident daemon running so durable turns survive a restart; retiring stops both and archives only when no process remains.
+- **A member runs no scheduler.** The worker profile disables every orchestration row and mounts only the remote-host entry; its home gets no orchestration state.
 
 ### Phases
 

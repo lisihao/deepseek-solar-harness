@@ -881,6 +881,11 @@
         "src/**/*.ts"
       ]
     },
+    "packages/orchestration/ui-gouzi": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "packages/orchestration/ui-orchestration": {
       "project": [
         "src/**/*.ts"

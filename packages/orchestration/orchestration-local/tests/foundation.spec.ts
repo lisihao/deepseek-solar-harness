@@ -205,13 +205,27 @@ describe('immutable compilation foundations', () => {
     database.close()
 
     const store = new OrchestrationStore(root)
-    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(4)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(5)
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'command_receipts'").get())
       .toBeDefined()
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'autonomous_states'").get())
       .toBeDefined()
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cluster_election'").get())
       .toBeDefined()
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'gouzi_members'").get())
+      .toBeDefined()
+    store.close()
+  })
+
+  it.each([2, 3, 4])('adds the Gouzi tables when opening a schema-%i store', async (version) => {
+    const root = await temporary()
+    const database = new DatabaseSync(join(root, 'state.sqlite'))
+    database.exec(`PRAGMA user_version = ${String(version)};`)
+    database.close()
+
+    const store = new OrchestrationStore(root)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(5)
+    expect(store.gouzi.list()).toEqual([])
     store.close()
   })
 

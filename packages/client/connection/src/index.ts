@@ -14,6 +14,7 @@ import type {
   OrchestrationClusterVoteRequest,
 } from '@deepseek-ai/dsh-orchestration'
 import { SessionReplicationError, type SessionReplica } from '@deepseek-ai/dsh-session-persistence'
+import { GouziAdmissionError, gouziRequestHash, parseGouziGrant } from './gouzi-member.ts'
 import {
   RemoteAuthError,
   type RemoteAuthService,
@@ -51,6 +52,12 @@ export type {
 export { HostConnectionService } from './rpc-host.ts'
 export { REMOTE_AUTH_RPC_CHANNEL } from './remote-auth-wire.ts'
 export { RemoteOperatorHostService } from './remote-operator-host.ts'
+export {
+  GouziAdmissionError, GouziMemberService, gouziRequestHash, parseGouziGrant,
+} from './gouzi-member.ts'
+export type {
+  GouziAdmission, GouziAdmissionCode, GouziMemberHello,
+} from './gouzi-member.ts'
 export type { RemoteMaterializedWorkspaceV1, RemoteOperatorHostQualification } from './remote-operator-host.ts'
 export type {
   RemoteAccessSession, RemoteDeviceCredential, RemoteDeviceScope,
@@ -228,6 +235,20 @@ const REMOTE_COCKPIT_COMMAND_METHODS = new Set([
 
 /** Pocket is an observation/approval face, not a general execution client. */
 const REMOTE_POCKET_COMMAND_METHODS = new Set(['respond'])
+/**
+ * Remote Sync endpoints a `gouzi` credential may call: capability description and the operator execution
+ * methods. Every other endpoint (snapshot, replica, cluster, anything added later) is refused for that scope.
+ */
+const GOUZI_SYNC_ENDPOINTS: ReadonlySet<string> = new Set([
+  'describe',
+  'gouzi.hello',
+  'operator.providers',
+  'operator.execute',
+  'operator.inspect',
+  'operator.events',
+  'operator.artifact.read',
+  'operator.interrupt',
+])
 
 /**
  * Mounts the API gateway under the browser transport prefix. Every request on
@@ -341,6 +362,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         const method = pathname.startsWith(`${API_PATH}/`)
           ? pathname.slice(API_PATH.length + 1)
           : undefined
+        if (access.scope === 'gouzi') {
+          res.writeHead(403)
+          res.end('forbidden')
+          return
+        }
         if (access.scope === 'pocket'
           && (method === undefined
             || (!REMOTE_READ_METHODS.has(method) && !REMOTE_POCKET_COMMAND_METHODS.has(method)))) {
@@ -410,10 +436,18 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           const access = requireRemoteAccess(
             authCtx.remoteAuth,
             requestContext,
-            ['cockpit', 'pocket', 'admin'],
+            ['cockpit', 'pocket', 'admin', 'gouzi'],
           )
+          if (access.scope === 'gouzi' && !GOUZI_SYNC_ENDPOINTS.has(endpoint)) {
+            throw new ConnectionRpcHttpError(403, 'forbidden')
+          }
           if (endpoint === 'describe') {
             return { ok: true, value: await hub.describe(signal, access.scope, requestedRemoteSyncProtocol(payload)) }
+          }
+          if (endpoint === 'gouzi.hello') {
+            const member = authCtx.get('gouziMember')
+            if (member === undefined) throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: member.hello() }
           }
           if (endpoint === 'snapshot') {
             return { ok: true, value: await hub.snapshot(signal, requestedRemoteSyncProtocol(payload)) }
@@ -478,7 +512,35 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
                 ? {}
                 : { nativeToolPolicy: residentNativeToolPolicy(body.nativeToolPolicy) },
             }
-            return { ok: true, value: await hub.operatorExecute(request) }
+            // A host that mounts the member gate is a member host: every caller, including a loopback owner or a
+            // tunnel endpoint, needs a grant. Without the gate the `gouzi` scope cannot execute at all.
+            const member = authCtx.get('gouziMember')
+            if (member === undefined && access.scope !== 'gouzi') {
+              return { ok: true, value: await hub.operatorExecute(request) }
+            }
+            if (member === undefined) throw new ConnectionRpcHttpError(403, 'forbidden')
+            let grant: ReturnType<typeof parseGouziGrant>
+            try {
+              grant = parseGouziGrant(body.gouziGrant)
+            } catch (error) {
+              throw new ConnectionRpcHttpError(400, error instanceof Error ? error.message : String(error))
+            }
+            if (grant.executionId !== request.commandId) {
+              throw new ConnectionRpcHttpError(403, 'GOUZI_EXECUTION_MISMATCH: grant execution id differs from the command id')
+            }
+            try {
+              const admission = await member.admit(grant, gouziRequestHash(request), Date.now())
+              if (admission.kind === 'replay') return { ok: true, value: admission.accepted }
+            } catch (error) {
+              if (!(error instanceof GouziAdmissionError)) throw error
+              throw new ConnectionRpcHttpError(
+                error.code === 'GOUZI_EXECUTION_CONFLICT' ? 409 : 403,
+                `${error.code}: ${error.message}`,
+              )
+            }
+            const accepted = await hub.operatorExecute(request)
+            await member.recordAccepted(request.commandId, accepted)
+            return { ok: true, value: accepted }
           }
           if (endpoint === 'operator.inspect') {
             if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
@@ -854,6 +916,6 @@ function remoteWorkspaceIdentity(value: unknown): RemoteWorkspaceIdentityV1 {
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
-  if (value === 'cockpit' || value === 'pocket' || value === 'admin') return value
-  throw new ConnectionRpcHttpError(400, 'scope must be cockpit, pocket, or admin')
+  if (value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi') return value
+  throw new ConnectionRpcHttpError(400, 'scope must be cockpit, pocket, admin, or gouzi')
 }

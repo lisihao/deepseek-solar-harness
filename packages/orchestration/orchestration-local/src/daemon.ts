@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime from '@deepseek-ai/dsh-browser'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
@@ -66,11 +67,18 @@ import LocalRlmRuntime from '@deepseek-ai/dsh-rlm-runtime-local'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
+  GouziAuthorityEpoch,
+  GouziHostId,
+  GouziId,
+  GouziOwnerId,
   OrchestrationArtifactRef,
   OrchestrationError,
   OrchestrationRunId,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
+  type GouziAvatarId,
+  type GouziMembership,
+  type GouziRole,
   type NodeExecutionPlanV1,
   type OrchestrationBlocker,
   type OrchestrationAdmissionTraceV1,
@@ -146,6 +154,7 @@ import {
   createRemotePhysicalOperators,
   type RemotePhysicalOperatorServer,
 } from './remote-physical-operator.ts'
+import { gouziOperatorServer } from './gouzi-operator.ts'
 import { readRemoteOperatorCatalog } from './remote-operators.ts'
 import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,
@@ -155,7 +164,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 5
+export const ORCHESTRATION_PROTOCOL_VERSION = 6
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -176,6 +185,13 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'cluster.heartbeat',
   'cluster.export',
   'cluster.install',
+  'gouzi.list',
+  'gouzi.pair_host',
+  'gouzi.create',
+  'gouzi.edit',
+  'gouzi.set_membership',
+  'gouzi.set_endpoint',
+  'gouzi.archive',
 ] as const)
 
 /**
@@ -600,6 +616,14 @@ function requiredString(params: Record<string, unknown>, name: string): string {
   const value = params[name]
   if (typeof value !== 'string' || value.length === 0) throw new OrchestrationError(`protocol requires ${name}`, 'GRAPH_INVALID')
   return value
+}
+
+function requiredRecord(params: Record<string, unknown>, name: string): Record<string, unknown> {
+  const value = params[name]
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new OrchestrationError(`protocol requires ${name}`, 'GRAPH_INVALID')
+  }
+  return value as Record<string, unknown>
 }
 
 function requiredInteger(params: Record<string, unknown>, name: string): number {
@@ -1162,6 +1186,8 @@ export class OrchestrationDaemon {
     readonly dispose: readonly (() => Promise<void>)[]
   }>()
   private remoteOperatorRefreshAt = 0
+  /** Operator id of each attempt's sealed plan; an attempt's plan never changes, so it is read once. */
+  private readonly attemptOperators = new Map<string, string>()
   private clusterActionAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
@@ -1362,6 +1388,59 @@ export class OrchestrationDaemon {
       case 'cluster.heartbeat': return this.expectCluster().heartbeat(params.request as OrchestrationClusterHeartbeatRequest)
       case 'cluster.export': this.requireClusterLeader(); return this.store.exportClusterReplica()
       case 'cluster.install': return this.installClusterReplica(params.request as OrchestrationClusterInstallRequest)
+      case 'gouzi.list': return { hosts: this.store.gouzi.listHosts(), members: this.store.gouzi.list() }
+      case 'gouzi.pair_host': {
+        this.requireClusterLeader()
+        const host = requiredRecord(params, 'host')
+        return this.store.gouzi.pairHost({
+          hostId: GouziHostId(requiredString(host, 'host_id')),
+          label: requiredString(host, 'label'),
+          authorityEpoch: GouziAuthorityEpoch(requiredString(host, 'authority_epoch')),
+          credentialRef: requiredString(host, 'credential_ref'),
+        })
+      }
+      case 'gouzi.create': {
+        this.requireClusterLeader()
+        const member = requiredRecord(params, 'member')
+        return this.store.gouzi.create({
+          gouziId: GouziId(requiredString(member, 'gouzi_id')),
+          ownerId: GouziOwnerId(requiredString(member, 'owner_id')),
+          hostId: GouziHostId(requiredString(member, 'host_id')),
+          name: requiredString(member, 'name'),
+          avatarId: requiredString(member, 'avatar_id') as GouziAvatarId,
+          role: requiredString(member, 'role') as GouziRole,
+          grantDeadlineMs: requiredInteger(member, 'grant_deadline_ms'),
+        })
+      }
+      case 'gouzi.edit': {
+        this.requireClusterLeader()
+        const edit = requiredRecord(params, 'edit')
+        return this.store.gouzi.edit(GouziId(requiredString(params, 'gouzi_id')), {
+          ...edit.name === undefined ? {} : { name: requiredString(edit, 'name') },
+          ...edit.avatar_id === undefined ? {} : { avatarId: requiredString(edit, 'avatar_id') as GouziAvatarId },
+          ...edit.role === undefined ? {} : { role: requiredString(edit, 'role') as GouziRole },
+        })
+      }
+      case 'gouzi.set_membership': {
+        this.requireClusterLeader()
+        return this.store.gouzi.setMembership(
+          GouziId(requiredString(params, 'gouzi_id')),
+          requiredString(params, 'membership') as Exclude<GouziMembership, 'archived'>,
+        )
+      }
+      case 'gouzi.set_endpoint': {
+        this.requireClusterLeader()
+        return this.store.gouzi.setEndpoint(GouziId(requiredString(params, 'gouzi_id')), requiredString(params, 'endpoint'))
+      }
+      case 'gouzi.archive': {
+        this.requireClusterLeader()
+        const evidence = requiredRecord(params, 'evidence')
+        return this.store.gouzi.archive(GouziId(requiredString(params, 'gouzi_id')), {
+          credentialsRevoked: evidence.credentials_revoked === true,
+          workSettled: evidence.work_settled === true,
+          processTreeStopped: evidence.process_tree_stopped === true,
+        })
+      }
       case 'system.shutdown':
         setTimeout(() => { void this.close() }, 10)
         return { draining: true }
@@ -1768,7 +1847,10 @@ export class OrchestrationDaemon {
   private async refreshRemoteOperators(initial: boolean): Promise<void> {
     let servers: readonly RemotePhysicalOperatorServer[]
     try {
-      servers = this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root)
+      servers = [
+        ...this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root),
+        ...await this.gouziServers(),
+      ]
     } catch (error) {
       if (initial) throw error
       this.ctx.logger.warn(`remote operator catalog rejected: ${error instanceof Error ? error.message : String(error)}`)
@@ -1793,13 +1875,63 @@ export class OrchestrationDaemon {
         }
         const dispose = operators.map(operator => this.ctx.physicalOperators.registerOperator(operator))
         this.remoteOperatorRegistrations.set(server.id, { signature, dispose })
+        this.observeGouzi(server, 'online')
       } catch (error) {
         this.ctx.logger.warn(
           `remote operator Server "${server.label}" unavailable: ${error instanceof Error ? error.message : String(error)}`,
         )
+        this.observeGouzi(server, 'unreachable')
       }
     }
     this.remoteOperatorRefreshAt = Date.now() + 5_000
+  }
+
+  /** Enabled Gouzi members as remote Servers; a member whose credential cannot be read is skipped with a warning. */
+  private async gouziServers(): Promise<RemotePhysicalOperatorServer[]> {
+    const servers: RemotePhysicalOperatorServer[] = []
+    for (const member of this.store.gouzi.list()) {
+      if (member.membership !== 'enabled' || member.endpoint === undefined) continue
+      const host = this.store.gouzi.getHost(member.hostId)
+      if (host === undefined) continue
+      try {
+        const resolved = await this.ctx.get('credentials')?.resolve(credentialRef(host.credentialRef))
+        servers.push(gouziOperatorServer({
+          store: this.store,
+          gouziId: member.gouziId,
+          ...resolved === undefined ? {} : { accessToken: resolved.value },
+        }))
+      } catch (error) {
+        this.ctx.logger.warn(`gouzi "${member.name}" skipped: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    return servers
+  }
+
+  private observeGouzi(server: RemotePhysicalOperatorServer, connection: 'online' | 'unreachable'): void {
+    if (server.gouzi === undefined) return
+    const gouziId = GouziId(server.gouzi.gouziId)
+    if (this.store.gouzi.read(gouziId)?.connection !== connection) this.store.gouzi.observe(gouziId, { connection })
+  }
+
+  /** Mark a member `working` while one of its attempts is accepted or running, otherwise `resting`. */
+  private syncGouziActivity(): void {
+    const members = this.store.gouzi.list().filter(member => member.membership !== 'archived')
+    if (members.length === 0) return
+    const busy = new Set<string>()
+    for (const attempt of this.store.attempts(['accepted', 'running'])) {
+      let operatorId = this.attemptOperators.get(attempt.executionId)
+      if (operatorId === undefined) {
+        const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+        operatorId = plan.operatorPlan.operatorId
+        this.attemptOperators.set(attempt.executionId, operatorId)
+      }
+      const match = /^gouzi\.(.+?)\./u.exec(operatorId)
+      if (match?.[1] !== undefined) busy.add(match[1])
+    }
+    for (const member of members) {
+      const activity = busy.has(String(member.gouziId)) ? 'working' : 'resting'
+      if (member.activity !== activity) this.store.gouzi.observe(member.gouziId, { activity })
+    }
   }
 
   private tick(): Promise<void> {
@@ -1817,6 +1949,7 @@ export class OrchestrationDaemon {
     if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
     await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
     await this.reconcile()
+    this.syncGouziActivity()
     await this.ctx.rlmRuntime.pumpMessages()
     await this.ctx.rlmRuntime.pumpHeartbeats()
     if (this.cluster !== undefined && !this.cluster.canSchedule()) return

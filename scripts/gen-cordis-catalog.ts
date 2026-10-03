@@ -89,6 +89,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   permissionPresets: 'permission-presets.md',
   physicalOperators: 'physical-operator.md',
   orchestrations: 'orchestration.md',
+  gouziHost: 'orchestration.md',
   remoteAuth: 'credentials.md',
   residentOperators: 'physical-operator.md',
   rlmRuntime: 'orchestration.md',
@@ -166,6 +167,7 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   modules: 'client-side interface-typed browser service — packages/client/modules/README.md owns the API',
   remote: 'client-side interface-typed gateway accessor (ClientRemote) — packages/api/gateway/README.md owns the API',
   remoteOperatorHost: 'Server-local execution workspace and artifact Provider — packages/client/connection/README.md owns the API',
+  gouziMember: 'Server-local execution-member gate Provider — packages/client/connection/README.md owns the API and packages/host/gouzi-member/README.md owns the Provider',
   sessionLogDownload: 'client-side browser download controller — packages/session-query/session-log-export/README.md owns the API',
   inputTriggers: 'client-side interface-typed browser service — packages/client/ui-input-trigger/README.md owns the API',
   timer: 'client-side dynamic-package timer service — packages/extensions/cordis-client-runner/README.md owns the API',
@@ -704,6 +706,8 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  GouziProvisionInput: 'member provisioning input is owned by packages/orchestration/ui-gouzi/src/host-service.ts',
+  GouziProcessInfo: 'member process facts are owned by packages/orchestration/ui-gouzi/src/host-service.ts',
   ModelCatalogSource: 'discovery source registration is owned by packages/llm/model-catalog-local/README.md',
   ModelCatalogSnapshot: 'durable catalog inventory is owned by packages/llm/model-catalog-local/README.md',
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',

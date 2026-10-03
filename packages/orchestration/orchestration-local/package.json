@@ -11,10 +11,11 @@
     ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
     "./invariant": { "types": "./lib/types/invariant.d.ts", "default": "./lib/invariant.js" },
     "./startup": { "types": "./lib/types/startup.d.ts", "default": "./lib/startup.js" },
+    "./remote-host": { "types": "./lib/types/remote-host.d.ts", "default": "./lib/remote-host.js" },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
-  "files": ["lib/index.js", "lib/invariant.js", "lib/startup.js", "lib/daemon-*.js", "lib/types/**/*.d.ts"],
+  "files": ["lib/index.js", "lib/invariant.js", "lib/startup.js", "lib/remote-host.js", "lib/remote-host-*.js", "lib/remote-execution-host-*.js", "lib/daemon-*.js", "lib/types/**/*.d.ts"],
   "license": "MIT",
   "dependencies": { "@deepseek-ai/schemastery": "workspace:^" },
   "peerDependencies": {
@@ -24,6 +25,7 @@
     "@deepseek-ai/dsh-capability-capsule": "workspace:^",
     "@deepseek-ai/dsh-client-connection": "workspace:^",
     "@deepseek-ai/dsh-context-compiler": "workspace:^",
+    "@deepseek-ai/dsh-credentials": "workspace:^",
     "@deepseek-ai/dsh-credentials-local": "workspace:^",
     "@deepseek-ai/dsh-continual-harness": "workspace:^",
     "@deepseek-ai/dsh-continual-harness-local": "workspace:^",
@@ -59,6 +61,7 @@
     "@deepseek-ai/dsh-capability-capsule": "workspace:^",
     "@deepseek-ai/dsh-client-connection": "workspace:^",
     "@deepseek-ai/dsh-context-compiler": "workspace:^",
+    "@deepseek-ai/dsh-credentials": "workspace:^",
     "@deepseek-ai/dsh-credentials-local": "workspace:^",
     "@deepseek-ai/dsh-continual-harness": "workspace:^",
     "@deepseek-ai/dsh-continual-harness-local": "workspace:^",

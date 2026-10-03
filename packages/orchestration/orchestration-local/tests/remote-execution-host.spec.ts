@@ -2,13 +2,14 @@
 
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import {
   identifyRemoteWorkspace,
+  resolveRepositorySource,
   LocalRemoteOperatorHostService,
 } from '../src/remote-execution-host.ts'
 
@@ -72,6 +73,17 @@ describe('LocalRemoteOperatorHostService', () => {
     const checkoutRoot = join(first.path, '..', '..')
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: checkoutRoot, encoding: 'utf8' }).trim())
       .toBe(source.commit)
+  }, 15_000)
+
+  it('resolves a repository for an allowlist from a dirty subdirectory, and refuses a path with no origin', async () => {
+    const { source } = await serviceFixture()
+    await writeFile(join(source.root, 'uncommitted.txt'), 'dirty')
+    await expect(resolveRepositorySource(join(source.root, 'packages', 'core'), 10_000)).resolves.toEqual({
+      repository: 'github.com/lisihao/remote-fixture',
+      source: await realpath(source.root),
+    })
+    execFileSync('git', ['remote', 'remove', 'origin'], { cwd: source.root })
+    await expect(resolveRepositorySource(source.root, 10_000)).rejects.toThrow()
   }, 15_000)
 
   it('rejects dirty senders and repositories outside the Server allowlist', async () => {

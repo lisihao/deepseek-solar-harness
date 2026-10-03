@@ -3,7 +3,7 @@ import { EventEmitter, once } from 'node:events'
 import { createServer, request as httpRequest } from 'node:http'
 import { PassThrough, Readable } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
@@ -13,8 +13,8 @@ import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { RpcId, type ClientRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
-  API_PATH, apply, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH,
-  HostConnectionService, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL,
+  API_PATH, apply, GouziAdmissionError, GouziMemberService, gouziRequestHash, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH,
+  HostConnectionService, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
   type HostConnectionHandle,
 } from '../src/index.ts'
 
@@ -97,6 +97,7 @@ function fakeResponse(): { response: ServerResponse; state: { status?: number; b
 async function mounted(
   config?: { trustedHosts?: string[]; remoteSync?: boolean; remoteSyncJournalCapacity?: number },
   api: ApiProxy = {} as ApiProxy,
+  provide: (ctx: Context) => void = () => {},
 ): Promise<{
   routes: WebRoute[]
   upgrades: WebUpgradeRoute[]
@@ -108,6 +109,7 @@ async function mounted(
   const upgrades: WebUpgradeRoute[] = []
   ctx.provide('webServer', fakeHttpServer(routes, upgrades) as WebServer)
   ctx.provide('apiProxy', api)
+  provide(ctx)
   if (config?.remoteSync === true) {
     const commandReceipts = new Map<string, {
       requestHash: string
@@ -133,6 +135,7 @@ async function mounted(
         if (token === 'access') return { deviceId: 'device-1', deviceName: 'MacBook', scope: 'cockpit' }
         if (token === 'pocket-access') return { deviceId: 'device-2', deviceName: 'Phone', scope: 'pocket' }
         if (token === 'admin-access') return { deviceId: 'device-3', deviceName: 'Admin', scope: 'admin' }
+        if (token === 'gouzi-access') return { deviceId: 'device-4', deviceName: 'Gouzi', scope: 'gouzi' }
         return undefined
       },
       listDevices: () => [],
@@ -376,6 +379,186 @@ describe('connection node half', () => {
     })).toMatchObject({ status: 404, body: 'remote device not found' })
 
     await dispose()
+  })
+
+  it('confines a gouzi credential to describe and the operator execution methods', async () => {
+    const { routes, upgrades, dispose } = await mounted({
+      trustedHosts: ['harness.example'], remoteSync: true, remoteSyncJournalCapacity: 8,
+    }, remoteSyncApi())
+    const gouzi = { host: 'harness.example', authorization: 'Bearer gouzi-access' }
+    const syncRoute = routes.find(route => route.path === REMOTE_SYNC_RPC_CHANNEL)!
+    const syncCall = async (method: string, payload: Record<string, unknown> = {}): Promise<{ status?: number; body?: unknown }> => {
+      const result = fakeResponse()
+      await syncRoute.handler(fakePost(
+        gouzi, `${REMOTE_SYNC_RPC_CHANNEL}/${method}`,
+        { type: 'client-request', rpcId: `rpc-${method}`, method, payload },
+      ), result.response)
+      return result.state
+    }
+
+    // Everything outside describe and operator.* is refused before the handler runs.
+    for (const method of [
+      'snapshot', 'replica.list', 'replica.read', 'replica.apply',
+      'cluster.status', 'cluster.vote', 'cluster.heartbeat', 'cluster.export', 'cluster.install',
+      'gouzi.create', 'no.such.method',
+    ]) {
+      expect(await syncCall(method), method).toMatchObject({ status: 403, body: 'forbidden' })
+    }
+
+    const described = await syncCall('describe', { protocol: REMOTE_SYNC_PROTOCOL })
+    expect(described.status).toBe(200)
+    const envelope = JSON.parse(described.body as string) as {
+      result: { ok: true; value: { scope: string; capabilities: string[] } }
+    }
+    expect(envelope.result.value.scope).toBe('gouzi')
+    // No Resident host is mounted here, so the operator list is empty; no session or cluster capability may appear.
+    expect(envelope.result.value.capabilities).toEqual([])
+
+    // The operator methods pass the scope gate; without a Resident host they fail for another reason, not 403.
+    for (const method of ['operator.providers', 'operator.inspect', 'operator.events', 'operator.interrupt']) {
+      expect((await syncCall(method)).status, method).not.toBe(403)
+    }
+
+    // The API bridge, member management, and both event sockets stay closed to the scope.
+    const apiRoute = routes.find(route => route.path === API_PATH)!
+    for (const method of ['session.list', 'settings.describe', 'session.cancel']) {
+      const denied = fakeResponse()
+      await apiRoute.handler(fakePost(
+        gouzi, `${API_PATH}/${method}`,
+        { type: 'client-request', rpcId: `rpc-${method}`, method, payload: {} },
+      ), denied.response)
+      expect(denied.state, method).toMatchObject({ status: 403, body: 'forbidden' })
+    }
+    const authRoute = routes.find(route => route.path === '/remote-auth')!
+    const devices = fakeResponse()
+    await authRoute.handler(fakePost(
+      gouzi, '/remote-auth/device.list',
+      { type: 'client-request', rpcId: 'rpc-devices', method: 'device.list', payload: {} },
+    ), devices.response)
+    expect(devices.state).toMatchObject({ status: 403, body: 'forbidden' })
+    for (const path of [MUX_EVENTS_PATH, HOST_EVENTS_PATH, REMOTE_SYNC_EVENTS_PATH]) {
+      const socket = new PassThrough()
+      const chunks: Buffer[] = []
+      socket.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+      const ended = once(socket, 'end')
+      await upgrades.find(route => route.path === path)!.handler(fakeRequest(gouzi, path), socket, Buffer.alloc(0))
+      await ended
+      expect(Buffer.concat(chunks).toString(), path).toContain('HTTP/1.1 403 Forbidden')
+    }
+    await dispose()
+  })
+
+  it('admits gouzi execution only with a grant the member accepts and replays a stored receipt', async () => {
+    const accepted = { sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 }
+    const execute = vi.fn(async () => ({ ...accepted, result: new Promise(() => {}), dispose: async () => undefined }))
+    const materializeWorkspace = vi.fn(async (identity: unknown) => ({ version: 1, identity, path: '/srv/work' }))
+    const stored = new Map<string, { hash: string; accepted?: unknown }>()
+    class FakeMember extends GouziMemberService {
+      hello() {
+        return {
+          gouziId: 'gouzi-1', ownerId: 'owner-1', hostId: 'host-1', generation: 1, authorityEpoch: 'epoch-1', incarnation: 1,
+        }
+      }
+      async admit(grant: { executionId: string; generation: number; planHash: string }, hash: string) {
+        if (grant.generation !== 1) throw new GouziAdmissionError('GOUZI_GENERATION_MISMATCH', 'wrong generation')
+        if (grant.planHash !== hash) throw new GouziAdmissionError('GOUZI_PLAN_MISMATCH', 'wrong plan')
+        const entry = stored.get(grant.executionId)
+        if (entry === undefined) {
+          stored.set(grant.executionId, { hash })
+          return { kind: 'new' as const }
+        }
+        if (entry.hash !== hash) throw new GouziAdmissionError('GOUZI_EXECUTION_CONFLICT', 'conflict')
+        return entry.accepted === undefined ? { kind: 'new' as const } : { kind: 'replay' as const, accepted: entry.accepted as never }
+      }
+      async recordAccepted(executionId: string, receipt: unknown) { stored.get(executionId)!.accepted = receipt }
+    }
+    const withMember = async (member: boolean) => mounted(
+      { trustedHosts: ['harness.example'], remoteSync: true, remoteSyncJournalCapacity: 8 },
+      remoteSyncApi(),
+      (ctx) => {
+        ctx.provide('residentOperators', {
+          providers: async () => [], execute, inspectTurn: async () => ({}), readEvents: async () => ({}), interrupt: async () => undefined,
+        })
+        ctx.provide('remoteOperatorHost', {
+          qualification: async () => ({ available: true }),
+          materializeWorkspace,
+          renewWorkspace: async () => undefined,
+          releaseWorkspace: async () => undefined,
+          readResidentArtifact: async () => ({}),
+        })
+        if (member) ctx.plugin(FakeMember)
+      },
+    )
+    const request = (commandId: string) => ({
+      commandId, operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      workspaceIdentity: { version: 1, repository: 'github.com/lisihao/project', commit: 'a'.repeat(40) },
+    })
+    const grantFor = (commandId: string, patch: Record<string, unknown> = {}) => ({
+      runId: 'run-1', nodeId: 'node-1', attempt: 1, executionId: commandId, gouziId: 'gouzi-1', generation: 1,
+      authorityEpoch: 'epoch-1', planHash: gouziRequestHash(request(commandId) as never),
+      scopes: { read: [], write: [], effects: [] }, credentialRefs: [],
+      deadline: '2999-01-01T00:00:00.000Z', offlineUntil: '2999-01-01T00:00:00.000Z', ...patch,
+    })
+    const call = async (route: WebRoute, method: string, payload: Record<string, unknown>, token = 'gouzi-access') => {
+      const result = fakeResponse()
+      await route.handler(fakePost(
+        { host: 'harness.example', authorization: `Bearer ${token}` }, `${REMOTE_SYNC_RPC_CHANNEL}/${method}`,
+        { type: 'client-request', rpcId: `rpc-${method}`, method, payload },
+      ), result.response)
+      return result.state
+    }
+
+    const hosted = await withMember(true)
+    const route = hosted.routes.find(candidate => candidate.path === REMOTE_SYNC_RPC_CHANNEL)!
+    const body = (command: string, patch: Record<string, unknown> = {}) => ({
+      ...request(command), protocol: REMOTE_SYNC_PROTOCOL, gouziGrant: grantFor(command, patch),
+    })
+    const hello = await call(route, 'gouzi.hello', {})
+    expect(hello.status).toBe(200)
+    expect((JSON.parse(hello.body as string) as { result: { value: unknown } }).result.value)
+      .toMatchObject({ gouziId: 'gouzi-1', incarnation: 1 })
+
+    // A04: nothing reaches the workspace or the Resident host when the grant is refused.
+    expect(await call(route, 'operator.execute', body('exec-1', { generation: 2 })))
+      .toSatisfy((state: { status?: number; body?: unknown }) => state.status === 403 && String(state.body).includes('GOUZI_GENERATION_MISMATCH'))
+    expect(await call(route, 'operator.execute', body('exec-1', { planHash: 'f'.repeat(64) })))
+      .toSatisfy((state: { status?: number; body?: unknown }) => state.status === 403 && String(state.body).includes('GOUZI_PLAN_MISMATCH'))
+    expect(await call(route, 'operator.execute', body('exec-1', { executionId: 'exec-other' })))
+      .toSatisfy((state: { status?: number; body?: unknown }) => state.status === 403 && String(state.body).includes('GOUZI_EXECUTION_MISMATCH'))
+    expect(await call(route, 'operator.execute', { ...request('exec-1'), protocol: REMOTE_SYNC_PROTOCOL }))
+      .toMatchObject({ status: 400 })
+    expect(await call(route, 'operator.execute', { ...body('exec-1'), gouziGrant: { executionId: 'exec-1' } }))
+      .toMatchObject({ status: 400 })
+    expect(materializeWorkspace).not.toHaveBeenCalled()
+    expect(execute).not.toHaveBeenCalled()
+
+    // A05: the first call executes once; a repeat returns the stored receipt; another request under the id conflicts.
+    expect((await call(route, 'operator.execute', body('exec-1'))).status).toBe(200)
+    expect((await call(route, 'operator.execute', body('exec-1'))).status).toBe(200)
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(materializeWorkspace).toHaveBeenCalledTimes(1)
+    const changed = { ...request('exec-1'), laneId: 'lane-2' }
+    expect(await call(route, 'operator.execute', {
+      ...changed, protocol: REMOTE_SYNC_PROTOCOL,
+      gouziGrant: grantFor('exec-1', { planHash: gouziRequestHash(changed as never) }),
+    })).toSatisfy((state: { status?: number; body?: unknown }) => state.status === 409 && String(state.body).includes('GOUZI_EXECUTION_CONFLICT'))
+    expect(execute).toHaveBeenCalledTimes(1)
+
+    // A member host needs a grant from every caller, whatever its credential scope.
+    expect((await call(route, 'operator.execute', { ...request('exec-cockpit'), protocol: REMOTE_SYNC_PROTOCOL }, 'access')).status)
+      .toBe(400)
+    expect((await call(route, 'operator.execute', body('exec-cockpit'), 'access')).status).toBe(200)
+    await hosted.dispose()
+
+    // Without a mounted member gate the scope can neither execute nor say hello.
+    const bare = await withMember(false)
+    const bareRoute = bare.routes.find(candidate => candidate.path === REMOTE_SYNC_RPC_CHANNEL)!
+    expect(await call(bareRoute, 'operator.execute', body('exec-2'))).toMatchObject({ status: 403, body: 'forbidden' })
+    expect(await call(bareRoute, 'gouzi.hello', {})).toMatchObject({ status: 403, body: 'forbidden' })
+    // A host without the gate keeps the ordinary remote-execution path for cockpit callers.
+    expect((await call(bareRoute, 'operator.execute', { ...request('exec-3'), protocol: REMOTE_SYNC_PROTOCOL }, 'access')).status)
+      .toBe(200)
+    await bare.dispose()
   })
 
   it('never grants local-owner authority from a forged loopback Host', async () => {

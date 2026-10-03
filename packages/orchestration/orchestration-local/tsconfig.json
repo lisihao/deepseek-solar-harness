@@ -9,6 +9,7 @@
     { "path": "../../util/home-paths" },
     { "path": "../../browser/browser" },
     { "path": "../../host/apiproxy" },
+    { "path": "../../credentials/credentials" },
     { "path": "../../credentials/credentials-local" },
     { "path": "../../llm/llm" },
     { "path": "../../llm/llm-deepseek" },

@@ -14,7 +14,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import { installProfilePackageResolver } from './module-resolution.ts'
 import { installNativeProductRuntime } from './native-product-runtime.ts'
-import { prepareProductServerProfile } from './profile.ts'
+import { prepareProductServerProfile, type PreparedProductServerProfile } from './profile.ts'
 
 const BIN_NAME = 'dsh-product-server'
 const SHUTDOWN_TIMEOUT_MS = 5_000
@@ -24,9 +24,27 @@ export function productServerArgs(argv: readonly string[]): string[] {
   return [...argv, '--deployment-role', 'server']
 }
 
-/** Start the full product tree under plain Node and leave lifetime to its listeners. */
-export async function startProductServer(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
-  const environment = loadLayeredEnv(BIN_NAME, process.cwd())
+/** Differences between the Product Server and a launcher that reuses its lifecycle. */
+export interface ProductServerVariant {
+  /** Binary name used in diagnostics and layered environment lookup. */
+  readonly binName: string
+  /** Compose the profile; defaults to the Product Server profile. */
+  readonly prepare: (telemetryDisabled: string | undefined, home: string, platform: NodeJS.Platform) => PreparedProductServerProfile
+  /** Called once with the booted root context. */
+  readonly onBooted?: (ctx: Context) => void
+}
+
+/**
+ * Start a product tree under plain Node and leave lifetime to its listeners.
+ * @param argv - command-line arguments, without the executable.
+ * @param variant - launcher-specific naming, profile composition, and readiness hook.
+ */
+export async function startProductServer(
+  argv: readonly string[] = process.argv.slice(2),
+  variant: ProductServerVariant = { binName: BIN_NAME, prepare: prepareProductServerProfile },
+): Promise<void> {
+  const binName = variant.binName
+  const environment = loadLayeredEnv(binName, process.cwd())
   const home = resolveDshHome()
   const nativeProductRuntime = installNativeProductRuntime({
     platform: process.platform,
@@ -35,11 +53,7 @@ export async function startProductServer(argv: readonly string[] = process.argv.
     nodeBinDir: dirname(process.execPath),
     environment: process.env,
   })
-  const prepared = prepareProductServerProfile(
-    process.env.DSH_TELEMETRY_DISABLED,
-    home,
-    process.platform,
-  )
+  const prepared = variant.prepare(process.env.DSH_TELEMETRY_DISABLED, home, process.platform)
   const releasePackageResolver = installProfilePackageResolver(prepared.bareModuleBaseUrl)
   let current: Context | undefined
   let shutdownTask: Promise<void> | undefined
@@ -79,11 +93,11 @@ export async function startProductServer(argv: readonly string[] = process.argv.
     stderr: process.stderr,
     exit: code => { process.exit(code) },
   }
-  installFailLoud(BIN_NAME, failLoudProcess, dispose)
+  installFailLoud(binName, failLoudProcess, dispose)
 
   try {
     const ctx = await boot(
-      BIN_NAME,
+      binName,
       prepared.rootConfig,
       prepared.patches,
       (hostCtx) => {
@@ -105,6 +119,7 @@ export async function startProductServer(argv: readonly string[] = process.argv.
       prepared.bareModuleBaseUrl,
     )
     current = ctx
+    variant.onBooted?.(ctx)
   } catch (cause) {
     await dispose()
     throw cause
