@@ -81,6 +81,8 @@ class DurableOperator implements PhysicalOperator {
   productStarts = 0
   /** When set, a freshly started run fails with this message after the product has started. */
   resultFailureMessage?: string | undefined
+  /** When set, only runs on these models fail; every other model answers normally. */
+  resultFailureModels?: readonly string[] | undefined
 
   constructor(
     readonly id: 'codex' | 'claude-code' | 'chatgpt-web',
@@ -142,7 +144,8 @@ class DurableOperator implements PhysicalOperator {
     const bridged = this.bridgeToolName === undefined
       ? undefined
       : await callBridgeTool(request, this.bridgeToolName, { value: 'hello' })
-    if (created && this.resultFailureMessage !== undefined) {
+    const failsModel = this.resultFailureModels === undefined || this.resultFailureModels.includes(request.residentProfile?.model ?? '')
+    if (created && this.resultFailureMessage !== undefined && failsModel) {
       receipt.result.reject(new PhysicalOperatorError(`Claude Code returned an error result: ${this.resultFailureMessage}`, 'INVALID_RESULT'))
     } else if (created && this.immediate) receipt.result.resolve(this.resultValue(bridged))
     const activeReceipt = receipt
@@ -1294,6 +1297,22 @@ describe('host physical-operator routing', () => {
     }))
   })
 
+  it('returns to the primary model when the model needs usage credits and no fallback operator remains', async () => {
+    const { agent, deepseek, codex } = await setup({})
+    codex.resultFailureMessage = 'GPT-5.6 Sol requires usage credits.'
+
+    send(agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+    await agent.whenIdle()
+
+    expect(codex.productStarts).toBe(1)
+    expect(deepseek.requests).toHaveLength(1)
+    expect(lastAssistantMessage(agent).source).toMatchObject({ provider: 'deepseek' })
+    const decisions = agent.session.events.filter(event => event.type === 'physical-operator/routing-decision')
+    expect(decisions.at(-1)).toMatchObject({ data: { route: 'primary-model' } })
+    const terminal = agent.session.events.find(event => event.type === 'physical-operator/dispatch-terminal')
+    expect(terminal?.type === 'physical-operator/dispatch-terminal' ? terminal.data.code : undefined).toBe('MODEL_REQUIRES_CREDITS')
+  })
+
   it('falls back only after Smart Auto cannot admit its selected Claude runtime', async () => {
     const { agent, deepseek, codex, claude } = await setup({
       claudeStartErrorCode: 'RUNTIME_UNAVAILABLE',
@@ -1420,11 +1439,14 @@ describe('host physical-operator routing', () => {
       readonly models?: typeof codexModels
       readonly allocatorConfig?: AllocatorConfig
       readonly schedulingEvidence?: SchedulingEvidenceStub
+      /** Directory that keeps state across fixtures, as one app restart does; a fresh one by default. */
+      readonly stateRoot?: string
     } = {}) {
       const models = options.models ?? codexModels
+      const stateRoot = options.stateRoot ?? mkdtempSync(join(tmpdir(), 'dsh-router-state-'))
       const fixture = await setup({
         mountAllocator: true,
-        toolConfig: { catalogMaxAgeMs: options.catalogMaxAgeMs ?? 600_000 },
+        toolConfig: { catalogMaxAgeMs: options.catalogMaxAgeMs ?? 600_000, stateRoot },
         ...options.allocatorConfig === undefined ? {} : { allocatorConfig: options.allocatorConfig },
         ...options.schedulingEvidence === undefined ? {} : { schedulingEvidence: options.schedulingEvidence },
       })
@@ -1454,7 +1476,7 @@ describe('host physical-operator routing', () => {
         current: { provider: 'deepseek', model: 'deepseek' },
         assembled: undefined,
       })
-      return { ...fixture, reads, disposeSelection }
+      return { ...fixture, reads, disposeSelection, stateRoot }
     }
 
     function routingReason(agent: Awaited<ReturnType<typeof setup>>['agent']): string | undefined {
@@ -1704,6 +1726,51 @@ describe('host physical-operator routing', () => {
         expect(`${last.data.operatorId}:${last.data.residentProfile?.model}`).not.toBe('claude-code:claude-opus-5')
       } finally {
         disposeSelection()
+      }
+    })
+
+    it('asks the allocator for the next best offer before it uses the fallback operator when a model needs usage credits', async () => {
+      const { agent, codex, claude, deepseek, disposeSelection } = await allocationSetup()
+      try {
+        claude.resultFailureMessage = 'Claude Opus 5 requires usage credits.'
+        claude.resultFailureModels = ['claude-opus-5']
+        send(agent, '请深度分析这个系统的架构并给出评审意见')
+        await agent.whenIdle()
+
+        expect(claude.requests.map(request => request.residentProfile?.model)).toEqual(['claude-opus-5'])
+        expect(codex.requests).toHaveLength(1)
+        expect(deepseek.requests).toHaveLength(0)
+        expect(routingReason(agent)).toMatch(/改用 Codex · /u)
+        const decision = agent.session.events.findLast(event => event.type === 'physical-operator/routing-decision')
+        const chosen = decision?.type === 'physical-operator/routing-decision' ? decision.data.allocation?.chosenOfferId : undefined
+        expect(chosen?.startsWith('codex:')).toBe(true)
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    it('remembers a model that needs usage credits across sessions and restarts', async () => {
+      const first = await allocationSetup()
+      try {
+        first.claude.resultFailureMessage = 'Claude Opus 5 requires usage credits.'
+        first.claude.resultFailureModels = ['claude-opus-5']
+        send(first.agent, '请深度分析这个系统的架构并给出评审意见')
+        await first.agent.whenIdle()
+      } finally {
+        first.disposeSelection()
+      }
+
+      const second = await allocationSetup({ stateRoot: first.stateRoot })
+      try {
+        send(second.agent, '请深度分析这个系统的存储架构并给出评审意见')
+        await second.agent.whenIdle()
+        expect(second.claude.requests.map(request => request.residentProfile?.model)).not.toContain('claude-opus-5')
+        const dispatches = second.agent.session.events.filter(event => event.type === 'physical-operator/dispatch')
+        if (dispatches.length === 0) throw new Error('expected a dispatch in the second session')
+        expect(dispatches.map(event => event.type === 'physical-operator/dispatch' ? event.data.residentProfile?.model : undefined))
+          .not.toContain('claude-opus-5')
+      } finally {
+        second.disposeSelection()
       }
     })
 

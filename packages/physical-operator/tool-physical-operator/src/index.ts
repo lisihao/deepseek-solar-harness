@@ -39,6 +39,7 @@ import type {
 } from '@deepseek-ai/dsh-system-prompt'
 import type { TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
 import { inferTaskAttributes, renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
+import { CreditBlockStore, sessionCreditBlocked } from './credit-blocks.ts'
 import { z as zod } from 'zod'
 import z from '@deepseek-ai/schemastery'
 import type {
@@ -230,7 +231,20 @@ export interface Config {
    * minutes.
    */
   readonly catalogMaxAgeMs?: number
+  /**
+   * Hours a model stays out of Smart Collaboration after one run reported that it needs usage credits the
+   * subscription lacks. The record is shared by every session and survives restarts. Defaults to 24.
+   */
+  readonly creditBlockTtlHours?: number
+  /**
+   * Most models Smart Collaboration tries for one request after runs reported a usage-credits requirement,
+   * before it hands the request to the fallback operator or the primary model. Defaults to 3.
+   */
+  readonly creditFallbackMaxAttempts?: number
 }
+
+const DEFAULT_CREDIT_BLOCK_TTL_HOURS = 24
+const DEFAULT_CREDIT_FALLBACK_MAX_ATTEMPTS = 3
 
 /** Loader schema for the model-menu entry settings. */
 // An omitted list must stay omitted: a plain `z.array` resolves absence to `[]`, which would offer no entry.
@@ -245,12 +259,16 @@ export const Config: z<Config> = z.object({
   ]),
   stateRoot: z.string(),
   catalogMaxAgeMs: z.natural().default(DEFAULT_CATALOG_MAX_AGE_MS),
+  creditBlockTtlHours: z.natural().min(1).default(DEFAULT_CREDIT_BLOCK_TTL_HOURS),
+  creditFallbackMaxAttempts: z.natural().min(1).default(DEFAULT_CREDIT_FALLBACK_MAX_ATTEMPTS),
 })
 
 /** The resolved menu entries and catalogs of one mounted router, keyed by its plugin context. */
 interface RouterCatalogs {
   readonly entries: ModelEntries
   readonly live: LiveCatalogs
+  readonly credits: CreditBlockStore
+  readonly creditFallbackMaxAttempts: number
 }
 const routerCatalogs = new WeakMap<Context, RouterCatalogs>()
 
@@ -445,6 +463,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     config.catalogMaxAgeMs ?? DEFAULT_CATALOG_MAX_AGE_MS,
     (catalogs) => { entries.catalogs.replace(catalogs) },
   )
+  const credits = new CreditBlockStore(
+    config.stateRoot,
+    (config.creditBlockTtlHours ?? DEFAULT_CREDIT_BLOCK_TTL_HOURS) * 3_600_000,
+    (message) => { ctx.logger.warn(message) },
+  )
+  const creditFallbackMaxAttempts = config.creditFallbackMaxAttempts ?? DEFAULT_CREDIT_FALLBACK_MAX_ATTEMPTS
   const nativeCatalogSources = new NativeCatalogSources(
     options => ctx.physicalOperators.residentCatalogs(options),
     operatorId => ctx.physicalOperators.list().find(operator => String(operator.id) === operatorId)?.displayName,
@@ -455,7 +479,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     yield async () => { await modelTools.dispose() }
   }, 'tool-physical-operator: model tool bridge')
   ctx.effect(() => {
-    routerCatalogs.set(ctx, { entries, live })
+    routerCatalogs.set(ctx, { entries, live, credits, creditFallbackMaxAttempts })
     return () => {
       routerCatalogs.delete(ctx)
       nativeCatalogSources.close()
@@ -569,17 +593,34 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.on('agent/request-error', async ({ agent, turn, step, provider, failure, signal }, next) => {
     if (provider !== ROUTER_PROVIDER || failure.code !== FALLBACK_REQUIRED_CODE || signal.aborted) return next()
     const failed = dispatchForPosition(agent.session.events, turn, step)
-    if (failed?.fallbackOperatorId === undefined) return next()
-    const fallback = fallbackHostRoute(ctx, agent, failed, failed.fallbackOperatorId)
+    if (failed === undefined) return next()
+    const creditsFailure = terminalCodeOf(agent.session.events, failed.commandId) === CREDITS_REQUIRED_CODE
+    const replacement = creditsFailure
+      ? await creditReplacement(ctx, agent, failed)
+      : failed.fallbackOperatorId === undefined ? undefined : {
+        route: fallbackHostRoute(ctx, agent, failed, failed.fallbackOperatorId),
+        reason: `${operatorDisplayName(failed.operatorId)} 订阅资格不可用，智能协作切换到 ${operatorDisplayName(failed.fallbackOperatorId)}`,
+      }
+    if (replacement === undefined) return next()
+    if (replacement.route === undefined) {
+      agent.session.append('physical-operator/routing-decision', {
+        policy: 'auto',
+        route: 'primary-model',
+        requestedByMessageId: failed.requestedByMessageId,
+        reason: replacement.reason,
+      }, { ignorable: true })
+      return { kind: 'retry' }
+    }
     agent.session.append('physical-operator/routing-decision', {
       policy: 'auto',
-      route: routeKind(fallback.executionMode),
+      route: routeKind(replacement.route.executionMode),
       requestedByMessageId: failed.requestedByMessageId,
-      reason: `${operatorDisplayName(failed.operatorId)} 订阅资格不可用，智能协作切换到 ${operatorDisplayName(fallback.operatorId)}`,
-      operatorId: fallback.operatorId,
+      reason: replacement.reason,
+      operatorId: replacement.route.operatorId,
+      ...replacement.allocation === undefined ? {} : { allocation: replacement.allocation },
     }, { ignorable: true })
     agent.session.append('physical-operator/dispatch', {
-      ...fallback,
+      ...replacement.route,
       turn,
       step,
     }, { ignorable: true })
@@ -1034,6 +1075,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
           code: terminalCodeFor(result.stopReason),
         }, { ignorable: true })
       }
+      if (result.stopReason === 'completed' && dispatch.residentProfile?.model !== undefined) {
+        routerCatalogs.get(this.ctx)?.credits.clear(`${dispatch.operatorId}:${dispatch.residentProfile.model}`)
+      }
       yield* resultChunks(result)
     } catch (error) {
       if (observer !== undefined) await observer.stop()
@@ -1043,12 +1087,17 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       if (!signal.aborted) {
         const creditsRequired = dispatch.executionMode === 'resident' && CREDITS_REQUIRED_PATTERN.test(error instanceof Error ? error.message : '')
         const code = creditsRequired ? CREDITS_REQUIRED_CODE : errorCode(error)
+        if (creditsRequired && dispatch.residentProfile?.model !== undefined) {
+          routerCatalogs.get(this.ctx)?.credits.block(`${dispatch.operatorId}:${dispatch.residentProfile.model}`)
+        }
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
           code,
         }, { ignorable: true })
-        const fallbackAllowed = creditsRequired || (run === undefined && smartAutoUnavailable(code))
-        if (fallbackAllowed && dispatch.fallbackOperatorId !== undefined) {
+        const automatic = routedByAuto(agent.session.events, dispatch.requestedByMessageId)
+        const fallbackAllowed = (creditsRequired && automatic)
+          || (run === undefined && smartAutoUnavailable(code) && dispatch.fallbackOperatorId !== undefined)
+        if (fallbackAllowed) {
           throw new PhysicalOperatorError(
             `${operatorDisplayName(dispatch.operatorId)} subscription qualification failed; trying the Smart Auto fallback`,
             FALLBACK_REQUIRED_CODE,
@@ -1318,7 +1367,7 @@ async function allocateSmartAuto(
   let offers: ModelExecutionOffer[]
   let alternatives: ModelExecutionOffer[]
   try {
-    ({ offers, alternatives } = smartAutoOffers(ctx, await catalogs.current(), creditBlockedOffers(agent.session.events)))
+    ({ offers, alternatives } = smartAutoOffers(ctx, await catalogs.current(), creditBlockedOffers(ctx, agent.session.events)))
   } catch (error) {
     return { unavailable: `原生目录读取失败：${error instanceof Error ? error.message : String(error)}` }
   }
@@ -1465,21 +1514,16 @@ function smartAutoOffers(
 }
 
 /**
- * Models this session already found to need usage credits the subscription lacks, as `operator:model` keys.
- * The catalog lists them as available, so without this the allocator would pick the same model for every request.
+ * Models that a run already found to need usage credits the subscription lacks, as `operator:model` keys: this
+ * session's dispatches plus the shared record other sessions and earlier runs of the app left. The catalog lists
+ * such a model as available, so without this the allocator would pick it again for every request.
+ * @param ctx - the router's plugin context.
  * @param events - the session's ordered durable log.
- * @returns the operator and model of every dispatch that ended with the credits-required code.
+ * @returns the blocked keys.
  */
-function creditBlockedOffers(events: readonly SessionEvent[]): ReadonlySet<string> {
-  const blocked = new Set<string>()
-  for (const event of events) {
-    if (event.type !== 'physical-operator/dispatch-terminal' || event.data.code !== CREDITS_REQUIRED_CODE) continue
-    const dispatch = events.find(candidate => candidate.type === 'physical-operator/dispatch' && candidate.data.commandId === event.data.commandId)
-    if (dispatch?.type === 'physical-operator/dispatch' && dispatch.data.residentProfile?.model !== undefined) {
-      blocked.add(`${dispatch.data.operatorId}:${dispatch.data.residentProfile.model}`)
-    }
-  }
-  return blocked
+function creditBlockedOffers(ctx: Context, events: readonly SessionEvent[]): ReadonlySet<string> {
+  const shared = routerCatalogs.get(ctx)?.credits.active() ?? new Set<string>()
+  return new Set([...shared, ...sessionCreditBlocked(events, CREDITS_REQUIRED_CODE)])
 }
 
 /** Native preferences can constrain TaskGraph workers without replacing a selected primary model. */
@@ -1638,13 +1682,20 @@ function recoveredHostRoute(recoverable: DispatchRecord, requestedByMessageId: s
   }
 }
 
-function fallbackHostRoute(ctx: Context, agent: Agent, failed: PendingHostRoute, operatorId: string): PendingHostRoute {
+function fallbackHostRoute(
+  ctx: Context,
+  agent: Agent,
+  failed: PendingHostRoute,
+  operatorId: string,
+  profile?: PhysicalOperatorExecutionPreference,
+): PendingHostRoute {
   const executionMode = executionModeFor(ctx, operatorId)
   const residentProfile = executionMode === 'resident' && isPhysicalOperatorProfileOwner(operatorId)
-    ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
+    ? profile ?? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
     : undefined
+  const seed = `${failed.commandId}\0fallback\0${operatorId}${profile?.model === undefined ? '' : `\0${profile.model}`}`
   return {
-    commandId: `resident-${createHash('sha256').update(`${failed.commandId}\0fallback\0${operatorId}`).digest('hex').slice(0, 32)}`,
+    commandId: `resident-${createHash('sha256').update(seed).digest('hex').slice(0, 32)}`,
     operatorId,
     promptMessageId: failed.promptMessageId,
     requestedByMessageId: failed.requestedByMessageId,
@@ -1653,6 +1704,77 @@ function fallbackHostRoute(ctx: Context, agent: Agent, failed: PendingHostRoute,
     ...residentProfile === undefined ? {} : { residentProfile },
     ...failed.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(failed.fallbackConfig) },
   }
+}
+
+/** The terminal code recorded for one dispatch, when it ended in a failure. */
+function terminalCodeOf(events: readonly SessionEvent[], commandId: string): string | undefined {
+  const terminal = events.find(event => event.type === 'physical-operator/dispatch-terminal' && event.data.commandId === commandId)
+  return terminal?.type === 'physical-operator/dispatch-terminal' ? terminal.data.code : undefined
+}
+
+/** Whether Smart Collaboration, not an explicit user choice, routed this request. */
+function routedByAuto(events: readonly SessionEvent[], requestedByMessageId: string): boolean {
+  const decision = events.find(event => event.type === 'physical-operator/routing-decision'
+    && event.data.requestedByMessageId === requestedByMessageId)
+  return decision?.type === 'physical-operator/routing-decision' && decision.data.policy === 'auto'
+}
+
+/** How many dispatches of one request ended because their model needed usage credits. */
+function creditFailureCount(events: readonly SessionEvent[], requestedByMessageId: string): number {
+  return events.filter((event) => {
+    if (event.type !== 'physical-operator/dispatch-terminal' || event.data.code !== CREDITS_REQUIRED_CODE) return false
+    const commandId = event.data.commandId
+    return events.some(candidate => candidate.type === 'physical-operator/dispatch'
+      && candidate.data.commandId === commandId && candidate.data.requestedByMessageId === requestedByMessageId)
+  }).length
+}
+
+/** What replaces a run that ended because its model needs usage credits: another model, the fallback operator, or the primary model. */
+interface CreditReplacement {
+  /** The next dispatch; absent when the request returns to the primary model. */
+  readonly route?: PendingHostRoute
+  readonly reason: string
+  readonly allocation?: RoutingAllocationSummary
+}
+
+/**
+ * Choose the next step for a request whose started run needs usage credits the subscription lacks. The allocator
+ * runs again with that model excluded, so the next-best model of the same operator or another operator is tried
+ * first; then the fallback operator; then the primary model, so the turn does not end in an error.
+ * @param ctx - the router's plugin context.
+ * @param agent - the Agent that owns the request.
+ * @param failed - the dispatch that ended with the credits-required code.
+ * @returns the replacement and why it was chosen.
+ */
+async function creditReplacement(ctx: Context, agent: Agent, failed: PendingHostRoute): Promise<CreditReplacement> {
+  const events = agent.session.events
+  const catalogs = routerCatalogs.get(ctx)
+  const failedName = operatorDisplayName(failed.operatorId)
+  const maxAttempts = catalogs?.creditFallbackMaxAttempts ?? DEFAULT_CREDIT_FALLBACK_MAX_ATTEMPTS
+  if (creditFailureCount(events, failed.requestedByMessageId) < maxAttempts) {
+    const prompt = promptForMessage(events, failed.promptMessageId)
+    const text = prompt === undefined ? '' : textContent(prompt)
+    const automatic = automaticOperator(text) ?? (isPhysicalOperatorProfileOwner(failed.operatorId) ? failed.operatorId : undefined)
+    if (automatic !== undefined) {
+      const difficulty = smartAutoDifficulty(events, failed.requestedByMessageId, text)
+      const allocation = await allocateSmartAuto(ctx, agent, failed.requestedByMessageId, text, automatic, difficulty)
+      if (allocation.plan !== undefined && isPhysicalOperatorRoutingTarget(allocation.plan.operatorId)) {
+        const { plan } = allocation
+        return {
+          route: fallbackHostRoute(ctx, agent, failed, plan.operatorId, plan.profile),
+          reason: `${failedName} 的模型需要额外 usage credits，智能协作改用 ${allocation.displayName}`,
+          allocation: allocationSummary(plan, difficulty),
+        }
+      }
+    }
+  }
+  if (failed.fallbackOperatorId !== undefined) {
+    return {
+      route: fallbackHostRoute(ctx, agent, failed, failed.fallbackOperatorId),
+      reason: `${failedName} 的模型需要额外 usage credits，智能协作切换到 ${operatorDisplayName(failed.fallbackOperatorId)}`,
+    }
+  }
+  return { reason: `${failedName} 的模型需要额外 usage credits且没有可用的回退算子，智能协作回到主模型` }
 }
 
 function explicitOperator(text: string): PhysicalOperatorRoutingTarget | undefined {
@@ -1765,6 +1887,12 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
   const found = [...events].reverse().find(event => event.type === 'physical-operator/dispatch'
     && event.data.turn === turn && event.data.step === step)
   if (found?.type !== 'physical-operator/dispatch') return undefined
+  // A later primary-model decision for the same request releases the dispatch: the request returned to the primary model.
+  const released = events.some(event => event.seq > found.seq
+    && event.type === 'physical-operator/routing-decision'
+    && event.data.requestedByMessageId === found.data.requestedByMessageId
+    && event.data.route === 'primary-model')
+  if (released) return undefined
   const {
     commandId, operatorId, fallbackOperatorId, promptMessageId, requestedByMessageId, recovered,
     executionMode, residentProfile, fallbackConfig,

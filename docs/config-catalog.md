@@ -3241,6 +3241,16 @@ export interface Config {
    * minutes.
    */
   readonly catalogMaxAgeMs?: number
+  /**
+   * Hours a model stays out of Smart Collaboration after one run reported that it needs usage credits the
+   * subscription lacks. The record is shared by every session and survives restarts. Defaults to 24.
+   */
+  readonly creditBlockTtlHours?: number
+  /**
+   * Most models Smart Collaboration tries for one request after runs reported a usage-credits requirement,
+   * before it hands the request to the fallback operator or the primary model. Defaults to 3.
+   */
+  readonly creditFallbackMaxAttempts?: number
 }
 
 /** One operator whose newest native models the model menu offers as entries. */
@@ -3252,7 +3262,7 @@ export interface LatestModelEntries {
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:205`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:206`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
