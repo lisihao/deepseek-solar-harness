@@ -46,18 +46,25 @@ Status: proposed
 
 设计对照 `solar` 的 `24526765a4` 核对，这也是当前的头提交。上面每一条都读过该源码：`startup.ts` 的角色、`products/desktop/dsh-plugin-desktop/src/product-server.ts` 的启动器、`connection/src/index.ts` 的算子路由、`orchestration-local/src/store.ts` 的 schema 版本 4。这些都不表示某台宿主或已安装的应用被运行验证过。
 
-### P1 将修改的路径
+### P1 构建的内容
 
-| 范围 | 路径 |
+| 范围 | 位置 |
 |---|---|
-| worker 组合 | 新增 `packages/bundle/gouzi-worker/` |
-| worker 启动器 | 新增 `products/desktop/dsh-plugin-desktop/src/gouzi-worker.ts` |
-| 连接范围与授权检查 | `packages/client/connection/src/index.ts`、`remote-sync-host.ts` |
-| 成员表与上限 | `packages/orchestration/orchestration-local/src/store.ts`（schema 5）、新增 `gouzi.ts` |
-| 算子包装 | 新增 `packages/physical-operator/physical-operator-gouzi/` |
-| 注册 | `packages/orchestration/orchestration-local/src/daemon.ts`（`refreshRemoteOperators`） |
-| 宿主 Supervisor（最小版） | `products/desktop/dsh-plugin-desktop/src/` |
-| 入口 UI | 新增 `packages/client/ui-gouzi/` |
+| 受限设备范围 | `packages/host/remote-auth` 与 `packages/client/connection` 中的 `gouzi` 范围：只放行 `describe`、`gouzi.hello` 与 `operator.*`；`/api`、snapshot、replica、cluster、设备名册和事件 socket 都会拒绝它 |
+| 成员闸门 | `packages/client/connection` 中的 `GouziMemberService`（Definition 与线上 Consumer）；Provider 为 `packages/host/gouzi-member`（存储的身份、授权准入、持久幂等账本） |
+| 成员注册表 | `packages/orchestration/orchestration-local` 中基于 schema 5（`gouzi_hosts`、`gouzi_members`）的 `GouziRegistry`；十只上限是一个立即事务；以 `OrchestrationService.gouzi`（契约里的 `GouziControl`）和 daemon 协议 6 的 `gouzi.*` 方法暴露 |
+| 算子 | `gouziOperatorServer` 与 `RemotePhysicalOperator` 里的授权钩子；daemon 在每次刷新时注册已启用的成员，并跟踪 `connection` 与 `activity` |
+| 成员进程 | `products/desktop/dsh-plugin-desktop` 中的 `dsh-gouzi-worker`（`prepareGouziWorkerProfile`、`startGouziWorker`）与 `orchestration-local` 的 `./remote-host` 入口；`GouziSupervisor` 负责启动、接管和停止脱离终端的成员 |
+| 入口 UI | `packages/orchestration/ui-gouzi`：`/api/gouzi`、`GouziHostService`（Desktop 插件里的 `gouzi-host` 提供它）、六个 SVG 头像、四步领养向导 |
+
+实现中确定的决定：
+
+- **`planHash` 封存实际发送的请求。** 它是不含 `commandId` 与授权的执行请求的 `gouziRequestHash`，所以成员按它收到的内容重新计算。封存的节点计划可以通过执行 ID 从 attempt 找到。
+- **成员宿主对每个调用方都要求授权。** 挂载了成员闸门的宿主，对每一次 `operator.execute` 都要求授权，包括回环属主或 SSH 隧道端点（connection 把它们当作 `admin`）。否则 `gouzi` 范围会被绕过。
+- **端点属于成员。** 同一宿主上的多个成员监听不同端口，所以端点放在成员记录上，每次启动时替换。
+- **明确的拒绝不是传输失败。** 成员返回的 HTTP 400、403、404、409、422 是拒绝；命令发出后的其他失败仍为 `COMMAND_INDETERMINATE`。
+- **Resident daemon 比成员活得久。** 停止 worker 会让它启动的脱离终端的 Resident daemon 继续运行，以便持久轮次在重启后仍在；退役会同时停止两者，并且只有没有任何进程残留时才归档。
+- **成员不运行调度器。** worker 配置停用所有编排行，只挂载 remote-host 入口；它的 home 里不会产生编排状态。
 
 ### 阶段
 

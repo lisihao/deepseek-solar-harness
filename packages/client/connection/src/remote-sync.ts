@@ -194,6 +194,11 @@ export interface RemoteResidentExecuteRequest {
   readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
   /** Sealed native product-tool authority. Protocol 1.4 only. */
   readonly nativeToolPolicy?: 'inherit' | 'disabled'
+  /**
+   * Execution grant for a `gouzi` credential; opaque here and parsed by the Server with `parseGouziGrant`. It is
+   * never part of {@link gouziRequestHash}, which the grant itself seals.
+   */
+  readonly gouziGrant?: unknown
 }
 
 /** Durable turn projection returned by the remote control plane. */
@@ -816,7 +821,7 @@ function isoInstant(value: unknown, label: string): string {
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
-  if (value === 'cockpit' || value === 'pocket' || value === 'admin') return value
+  if (value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi') return value
   throw new Error(`remote sync scope is invalid: ${String(value)}`)
 }
 

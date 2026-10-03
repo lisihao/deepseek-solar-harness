@@ -454,7 +454,7 @@ export interface ConnectionConfig {
 }
 ```
 
-Source: [`packages/client/connection/src/index.ts:102`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:109`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -1170,6 +1170,20 @@ export interface Config {
 
 Source: [`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
 
+<a id="deepseek-aidsh-host-gouzi-member"></a>
+
+## `@deepseek-ai/dsh-host-gouzi-member`
+
+```ts config-catalog
+/** Gate configuration. */
+export interface Config {
+  /** Absolute state root of this member; `gouzi/identity.json` and `gouzi/ledger.json` live under it. */
+  stateRoot: string
+}
+```
+
+Source: [`packages/host/gouzi-member/src/index.ts:18`](../packages/host/gouzi-member/src/index.ts)
+
 <a id="deepseek-aidsh-host-remote-auth"></a>
 
 ## `@deepseek-ai/dsh-host-remote-auth`
@@ -1188,7 +1202,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/host/remote-auth/src/index.ts:123`](../packages/host/remote-auth/src/index.ts)
+Source: [`packages/host/remote-auth/src/index.ts:126`](../packages/host/remote-auth/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 
@@ -1771,9 +1785,7 @@ Source: [`packages/llm/model-catalog-local/src/index.ts:38`](../packages/llm/mod
 
 ```ts config-catalog
 /** Local daemon client configuration. */
-export interface Config {
-  /** Optional DSH home; defaults to the ordinary harness-owned location. */
-  readonly dshHome?: string
+export interface Config extends RemoteHostConfig {
   /** Start an independent daemon when no compatible socket is available. */
   readonly autoStart?: boolean
   /** Maximum handshake and per-request connection wait in milliseconds. */
@@ -1786,6 +1798,12 @@ export interface Config {
   readonly browserProviderModules?: string[]
   /** Explicit executable or helper used for the detached headless daemon. */
   readonly headlessNodeExecutable?: string
+}
+
+/** Remote execution host configuration shared with the full local orchestration plugin. */
+export interface RemoteHostConfig {
+  /** Optional DSH home; defaults to the ordinary harness-owned location. */
+  readonly dshHome?: string
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -1797,7 +1815,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/orchestration/orchestration-local/src/index.ts:53`](../packages/orchestration/orchestration-local/src/index.ts)
+Source: [`packages/orchestration/orchestration-local/src/index.ts:58`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -3566,6 +3584,22 @@ export interface Config {
 ```
 
 Source: [`packages/typert/loader/src/index.ts:47`](../packages/typert/loader/src/index.ts)
+
+<a id="deepseek-aidsh-ui-gouzi"></a>
+
+## `@deepseek-ai/dsh-ui-gouzi`
+
+Requires: `orchestrations` · `webServer`
+
+```ts config-catalog
+/** Gouzi plugin configuration. */
+export interface Config {
+  /** How long after issue an execution grant may start work, in milliseconds. */
+  readonly grantDeadlineMs?: number
+}
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/index.ts:40`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

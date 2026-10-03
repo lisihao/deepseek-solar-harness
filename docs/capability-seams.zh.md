@@ -101,6 +101,8 @@ flowchart LR
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
   pkg_ui_orchestration["ui-orchestration"]
+  pkg_ui_gouzi["ui-gouzi"]
+  svc_gouziHost["ctx.gouziHost<br/>Gouzi member process host"]
   pkg_remote_auth["remote-auth"]
   svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
   pkg_connection["connection"]
@@ -372,6 +374,7 @@ flowchart LR
   pkg_token_meter --> svc_tokenMeter
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
+  pkg_ui_gouzi --> svc_gouziHost
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
   pkg_web_fetch_http --> svc_web
@@ -409,6 +412,7 @@ flowchart LR
   svc_e2b --> pkg_fs_e2b
   svc_e2b --> pkg_subprocess_e2b
   svc_fs --> pkg_tool_fs
+  svc_gouziHost --> pkg_ui_gouzi
   svc_invariants --> pkg_agent
   svc_invariants --> pkg_agent_loop
   svc_invariants --> pkg_scope
@@ -550,6 +554,7 @@ flowchart LR
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 在节点 Attempt 内封存有界递归执行指令，永不创建或修改全局 TaskGraph。 |
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 持有节点内 TypeScript Kernel、异步子项注册表、家族消息、Receipt、Goal 与恢复机制，不成为第二个全局 TaskGraph 调度器。 |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
+| `ctx.gouziHost` | `seam` | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | 在运行 Server 的机器上启动、接管和停止执行成员进程；Desktop 产品提供它，名册只消费它。 |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Server 是配对、凭据交换、固定设备范围、撤销和无正文命令回执的唯一写者；传输和编排投影消费已认证 principal，但不持有凭据状态。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |

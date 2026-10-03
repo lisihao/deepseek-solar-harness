@@ -1,0 +1,25 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo",
+    "types": ["node"]
+  },
+  "files": [
+    "src/client/api.ts",
+    "src/client/avatars.tsx",
+    "src/client/GouziPanel.tsx",
+    "src/client/index.ts",
+    "src/contracts.ts",
+    "src/css-modules.d.ts"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../client/connection/tsconfig.client.json" },
+    { "path": "../../client/runtime" },
+    { "path": "../../client/ui-primitives" },
+    { "path": "../../client/ui-sidebar" },
+    { "path": "../../client/ui-slots" }
+  ]
+}

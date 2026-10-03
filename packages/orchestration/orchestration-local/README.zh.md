@@ -30,6 +30,12 @@ Scheduler 会在 Graph 的 `maxParallel` 上限内启动彼此独立的节点，
 
 Attempt 运行时，daemon 会将有界 Resident 进度阶段复制到编排事件流。结算会把完整算子结果保留在 Evidence 产物中，并向终态事件添加有界的面向用户输出预览。协议版本 4 包含经 digest 校验的 `artifact.read`、schema-v3 持久 Autonomous 状态和 term-fenced 集群控制方法，因此经过认证的投影可以按需读取已保留的 Evidence 结果，而不把提示词、私有推理、终端屏幕或产品本地 transcript 复制进事件流。
 
+Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStore.gouzi`（`GouziRegistry`）写入。host 记录保存它接受的权威纪元和凭据条目名称；凭据本身从不存入 SQLite。成员记录保存其进程监听的端点，因为同一宿主上的多个成员监听不同端口；进程每次启动都会用 `setEndpoint` 替换它，没有端点的成员不会被注册为算子。成员从 `provisioning` 开始，经过 `enabled` 与 `retiring`，只有 `archive` 才会离开十只的计数，而 `archive` 需要凭据已撤销、在途工作已结算和进程树已停止。`connection` 与 `activity` 和 `membership` 并列保存，各自独立变化。创建是一个立即事务，会统计所有未归档成员，所以第十一次创建以 `GOUZI_LIMIT_REACHED` 失败。这两张表不属于集群副本；被提升的 follower 需要重新配对宿主。Schema 5 是单向迁移：旧程序会拒绝打开该数据库。
+
+`gouziOperatorServer` 把已注册且已启用的成员投影为远端 Server，其算子地址为 `gouzi.<gouziId>.<operatorId>`。对每一次 attempt，它读取成员、其宿主以及该 attempt 封存的节点执行计划，并签发 `GouziExecutionGrant`：run、node、attempt、执行 ID、generation、权威纪元、来自计划的读、写与 effect 范围、截止时间，以及等于随后所发请求的 `gouziRequestHash` 的 `planHash`。它拒绝未 `enabled` 的成员，也拒绝不是顶层 TaskGraph attempt 的执行 ID，所以成员不会运行 RLM 子任务或 Auto-Refine 阶段。第一版不支持在主实例不可达时运行，所以 `offlineUntil` 等于 `deadline`；截止时间是成员自己的 `grantDeadlineMs`（60 秒到 24 小时，创建时设定）。每次远端刷新时，daemon 会注册每个 `enabled` 成员，并按宿主的 `credentialRef` 从 `ctx.credentials` 读取宿主凭据（回环或隧道端点不需要凭据），把 `connection` 记为 `online` 或 `unreachable`，并在该成员有 attempt 处于 accepted 或 running 时把 `activity` 记为 `working`。
+
+`./remote-host` 入口只挂载远端执行宿主服务，所以狗子成员无需 TaskGraph daemon、调度器或集群选举，也能物化精确提交的工作区。
+
 ## Model Experience
 
 间接产生影响：由 `@deepseek-ai/dsh-tool-orchestration` 呈现。daemon 保存 Compiler 产物并返回有界投影，但自身不增加提示词段落。

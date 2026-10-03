@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "files": ["src/index.ts", "src/invariant.ts", "src/contracts.ts", "src/host-service.ts"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../host/remote-auth" },
+    { "path": "../../host/webserver" },
+    { "path": "../orchestration" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

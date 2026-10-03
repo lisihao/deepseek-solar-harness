@@ -329,6 +329,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer.',
   },
   {
+    key: 'gouziHost',
+    pkg: 'ui-gouzi',
+    title: 'Gouzi member process host',
+    mode: 'seam',
+    consumers: ['ui-gouzi'],
+    note: 'Starts, adopts, and stops execution-member processes on the machine that runs the Server; the Desktop product provides it and the roster only consumes it.',
+  },
+  {
     key: 'remoteAuth',
     pkg: 'remote-auth',
     title: 'Remote device authentication authority',

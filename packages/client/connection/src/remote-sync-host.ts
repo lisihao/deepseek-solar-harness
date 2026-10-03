@@ -31,7 +31,7 @@ import {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL,
   parseRemoteSyncCursor,
   type RemoteSyncCursor, type RemoteSyncEvent, type RemoteSyncFrame,
-  type RemoteSyncDescription, type RemoteSyncResyncRequired, type RemoteSyncSnapshot,
+  type RemoteSyncCapability, type RemoteSyncDescription, type RemoteSyncResyncRequired, type RemoteSyncSnapshot,
   type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument,
   type RemoteSessionReplicaSummary,
   type RemoteResidentAcceptedTurn,
@@ -232,6 +232,34 @@ export class RemoteSyncHub {
       const remoteExecutionAvailable = remoteExecution === undefined
         ? false
         : (await remoteExecution.qualification()).available
+      const operatorCapabilities: RemoteSyncCapability[] = this.resident === undefined
+        ? []
+        : [
+          'operator.read',
+          'operator.interrupt',
+          ...!remoteExecutionAvailable || protocol.minor < REMOTE_SYNC_PROTOCOL.minor
+            ? []
+            : ['operator.execute' as const, 'operator.workspace.materialize' as const, 'operator.artifact.read' as const],
+        ]
+      let capabilities: RemoteSyncCapability[]
+      if (scope === 'pocket') {
+        capabilities = ['session.read', 'workspace.read', 'event.subscribe', 'approval.respond']
+      } else if (scope === 'gouzi') {
+        capabilities = operatorCapabilities
+      } else {
+        capabilities = [
+          'session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond',
+          ...this.persistence === undefined
+            ? []
+            : ['session.replicate.read' as const, 'session.replicate.write' as const],
+          ...operatorCapabilities,
+          // A mounted orchestration Provider also serves standalone Servers;
+          // only a concrete cluster status means cluster control exists.
+          ...scope !== 'admin' || cluster === undefined
+            ? []
+            : ['orchestration.cluster' as const],
+        ]
+      }
       if (this.journal.cursor().deploymentId !== cursor.deploymentId) continue
       return {
         protocol,
@@ -239,32 +267,7 @@ export class RemoteSyncHub {
         cursor,
         describedAt: new Date().toISOString(),
         scope,
-        capabilities: scope === 'pocket'
-          ? ['session.read', 'workspace.read', 'event.subscribe', 'approval.respond']
-          : [
-            'session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond',
-            ...this.persistence === undefined
-              ? []
-              : ['session.replicate.read' as const, 'session.replicate.write' as const],
-            ...this.resident === undefined
-              ? []
-              : [
-                'operator.read' as const,
-                'operator.interrupt' as const,
-                ...!remoteExecutionAvailable || protocol.minor < REMOTE_SYNC_PROTOCOL.minor
-                  ? []
-                  : [
-                    'operator.execute' as const,
-                    'operator.workspace.materialize' as const,
-                    'operator.artifact.read' as const,
-                  ],
-              ],
-            // A mounted orchestration Provider also serves standalone Servers;
-            // only a concrete cluster status means cluster control exists.
-            ...scope !== 'admin' || cluster === undefined
-              ? []
-              : ['orchestration.cluster' as const],
-          ],
+        capabilities,
         host: host.result.value,
         ...cluster === undefined ? {} : {
           cluster: {

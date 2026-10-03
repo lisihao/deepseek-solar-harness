@@ -14,9 +14,11 @@ import {
 import {
   parseRemoteResidentResult,
   type RemoteResidentAcceptedTurn,
+  type RemoteResidentExecuteRequest,
   type RemoteResidentProviderStatus,
   type RemoteResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-client-connection'
+import type { GouziExecutionGrant } from '@deepseek-ai/dsh-orchestration'
 import { residentProgressPage } from '@deepseek-ai/dsh-resident-operator'
 import {
   RemoteSyncHttpClient,
@@ -36,6 +38,20 @@ type RemoteResultStore = Pick<
   'putArtifact' | 'readArtifact' | 'recordArtifact'
 >
 
+/** Binding that turns a remote Server into a Gouzi execution member. */
+export interface RemotePhysicalOperatorGouzi {
+  /** Stable member identity; the operator id becomes `gouzi.<gouziId>.<operatorId>`. */
+  readonly gouziId: string
+  /**
+   * Seal one attempt as an execution grant. Runs once per `start`, with the exact request that will be sent.
+   * @param plan - the Resident execution request without a grant.
+   * @param start - the Provider start request that carries the execution id.
+   * @returns the grant the member verifies before any side effect.
+   * @throws PhysicalOperatorError - when the member cannot be granted this attempt.
+   */
+  readonly issue: (plan: RemoteResidentExecuteRequest, start: PhysicalOperatorProviderStartRequest) => GouziExecutionGrant
+}
+
 /** One independently addressable DSH Server execution member. */
 export interface RemotePhysicalOperatorServer {
   /** Stable deployment id used to namespace Provider and quota identities. */
@@ -45,13 +61,16 @@ export interface RemotePhysicalOperatorServer {
   readonly accessToken?: string
   /** Settlement polling interval; defaults to 250ms. */
   readonly pollIntervalMs?: number
+  /** Present when this Server is a Gouzi execution member. */
+  readonly gouzi?: RemotePhysicalOperatorGouzi
 }
 
-function alias(serverId: string, nativeOperatorId: string): string {
+function alias(server: RemotePhysicalOperatorServer, nativeOperatorId: string): string {
+  const serverId = server.gouzi?.gouziId ?? server.id
   if (!/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u.test(serverId)) {
     throw new Error('remote physical operator server id must use lowercase letters, digits, dots, underscores, or hyphens')
   }
-  return `remote.${serverId}.${nativeOperatorId}`
+  return `${server.gouzi === undefined ? 'remote' : 'gouzi'}.${serverId}.${nativeOperatorId}`
 }
 
 /** One remote Server's native product projected through the Physical Operator seam. */
@@ -70,10 +89,13 @@ export class RemotePhysicalOperator implements PhysicalOperator {
     this.provider = provider
     this.client = new RemoteSyncHttpClient(server.endpoint, server.accessToken, request)
     this.descriptor = {
-      id: PhysicalOperatorId(alias(server.id, provider.operatorId)),
+      id: PhysicalOperatorId(alias(server, provider.operatorId)),
       displayName: `${provider.displayName} · ${server.label}`,
       description: `${provider.description} Remote execution on ${server.label}.`,
-      tags: Object.freeze([...provider.tags, 'remote', `server.${server.id}`]),
+      tags: Object.freeze([
+        ...provider.tags, 'remote', `server.${server.id}`,
+        ...server.gouzi === undefined ? [] : ['gouzi', `gouzi.${server.gouzi.gouziId}`],
+      ]),
       maxConcurrency: provider.maxConcurrency,
       executionModes: ['resident'] as const,
     }
@@ -154,20 +176,25 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         { cause },
       )
     }
+    const plan: RemoteResidentExecuteRequest = {
+      commandId: String(request.executionId),
+      operatorId: this.provider.operatorId,
+      workspaceIdentity,
+      laneId: request.residentLaneId ?? String(request.executionId),
+      ...request.label === undefined ? {} : { taskLabel: request.label },
+      prompt: request.prompt,
+      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
+      ...request.contextEnvelope === undefined ? {} : { contextEnvelope: request.contextEnvelope },
+      ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+      ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
+    }
+    const gouziGrant = this.server.gouzi?.issue(plan, request)
     let accepted: RemoteResidentAcceptedTurn
     try {
-      accepted = await this.client.operatorExecute({
-        commandId: String(request.executionId),
-        operatorId: this.provider.operatorId,
-        workspaceIdentity,
-        laneId: request.residentLaneId ?? String(request.executionId),
-        ...request.label === undefined ? {} : { taskLabel: request.label },
-        prompt: request.prompt,
-        ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
-        ...request.contextEnvelope === undefined ? {} : { contextEnvelope: request.contextEnvelope },
-        ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
-        ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
-      }, request.signal)
+      accepted = await this.client.operatorExecute(
+        gouziGrant === undefined ? plan : { ...plan, gouziGrant },
+        request.signal,
+      )
       this.unavailableReason = undefined
     } catch (error) {
       this.unavailableReason = `${this.server.label} admission failed: ${renderError(error)}`
