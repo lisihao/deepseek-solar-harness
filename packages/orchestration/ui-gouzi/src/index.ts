@@ -56,6 +56,8 @@ const NAME_LIMIT = 40
 /** A request the caller got wrong, as opposed to a state the system refuses. */
 class GouziInputError extends Error {}
 
+/* jscpd:ignore-start -- the independently unloadable Gouzi Host plugin owns its transport boundary; sharing these
+ * helpers with orchestration would add a forbidden cross-plugin runtime dependency. */
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const encoded = Buffer.from(JSON.stringify(value))
   response.statusCode = status
@@ -84,6 +86,7 @@ async function readBody(request: IncomingMessage): Promise<Record<string, unknow
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new GouziInputError('request must be an object')
   return parsed as Record<string, unknown>
 }
+/* jscpd:ignore-end */
 
 function text(body: Record<string, unknown>, key: string): string {
   const value = body[key]

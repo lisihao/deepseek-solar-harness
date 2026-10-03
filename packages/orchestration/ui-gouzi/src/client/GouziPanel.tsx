@@ -249,12 +249,14 @@ function GouziDialog({ request, onClose }: { request: BrowserRequest; onClose: (
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string>()
   const closeButton = useRef<HTMLButtonElement | null>(null)
+  /* jscpd:ignore-start -- modal focus and Escape handling is repeated per independently unloadable surface. */
   useEffect(() => {
     closeButton.current?.focus()
     const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [onClose])
+  /* jscpd:ignore-end */
   const act = async (action: 'wake' | 'rest' | 'retire', member: GouziMemberProjection): Promise<void> => {
     if (action === 'retire' && !window.confirm(`让 ${member.name} 退役？它会停下并交出名额，不能再回来。`)) return
     setBusy(true)
