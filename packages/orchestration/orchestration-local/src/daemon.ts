@@ -67,12 +67,18 @@ import LocalRlmRuntime from '@deepseek-ai/dsh-rlm-runtime-local'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
+  GouziAuthorityEpoch,
+  GouziHostId,
   GouziId,
+  GouziOwnerId,
   OrchestrationArtifactRef,
   OrchestrationError,
   OrchestrationRunId,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
+  type GouziAvatarId,
+  type GouziMembership,
+  type GouziRole,
   type NodeExecutionPlanV1,
   type OrchestrationBlocker,
   type OrchestrationAdmissionTraceV1,
@@ -158,7 +164,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 5
+export const ORCHESTRATION_PROTOCOL_VERSION = 6
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -179,6 +185,13 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'cluster.heartbeat',
   'cluster.export',
   'cluster.install',
+  'gouzi.list',
+  'gouzi.pair_host',
+  'gouzi.create',
+  'gouzi.edit',
+  'gouzi.set_membership',
+  'gouzi.set_endpoint',
+  'gouzi.archive',
 ] as const)
 
 /**
@@ -603,6 +616,14 @@ function requiredString(params: Record<string, unknown>, name: string): string {
   const value = params[name]
   if (typeof value !== 'string' || value.length === 0) throw new OrchestrationError(`protocol requires ${name}`, 'GRAPH_INVALID')
   return value
+}
+
+function requiredRecord(params: Record<string, unknown>, name: string): Record<string, unknown> {
+  const value = params[name]
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new OrchestrationError(`protocol requires ${name}`, 'GRAPH_INVALID')
+  }
+  return value as Record<string, unknown>
 }
 
 function requiredInteger(params: Record<string, unknown>, name: string): number {
@@ -1367,6 +1388,59 @@ export class OrchestrationDaemon {
       case 'cluster.heartbeat': return this.expectCluster().heartbeat(params.request as OrchestrationClusterHeartbeatRequest)
       case 'cluster.export': this.requireClusterLeader(); return this.store.exportClusterReplica()
       case 'cluster.install': return this.installClusterReplica(params.request as OrchestrationClusterInstallRequest)
+      case 'gouzi.list': return { hosts: this.store.gouzi.listHosts(), members: this.store.gouzi.list() }
+      case 'gouzi.pair_host': {
+        this.requireClusterLeader()
+        const host = requiredRecord(params, 'host')
+        return this.store.gouzi.pairHost({
+          hostId: GouziHostId(requiredString(host, 'host_id')),
+          label: requiredString(host, 'label'),
+          authorityEpoch: GouziAuthorityEpoch(requiredString(host, 'authority_epoch')),
+          credentialRef: requiredString(host, 'credential_ref'),
+        })
+      }
+      case 'gouzi.create': {
+        this.requireClusterLeader()
+        const member = requiredRecord(params, 'member')
+        return this.store.gouzi.create({
+          gouziId: GouziId(requiredString(member, 'gouzi_id')),
+          ownerId: GouziOwnerId(requiredString(member, 'owner_id')),
+          hostId: GouziHostId(requiredString(member, 'host_id')),
+          name: requiredString(member, 'name'),
+          avatarId: requiredString(member, 'avatar_id') as GouziAvatarId,
+          role: requiredString(member, 'role') as GouziRole,
+          grantDeadlineMs: requiredInteger(member, 'grant_deadline_ms'),
+        })
+      }
+      case 'gouzi.edit': {
+        this.requireClusterLeader()
+        const edit = requiredRecord(params, 'edit')
+        return this.store.gouzi.edit(GouziId(requiredString(params, 'gouzi_id')), {
+          ...edit.name === undefined ? {} : { name: requiredString(edit, 'name') },
+          ...edit.avatar_id === undefined ? {} : { avatarId: requiredString(edit, 'avatar_id') as GouziAvatarId },
+          ...edit.role === undefined ? {} : { role: requiredString(edit, 'role') as GouziRole },
+        })
+      }
+      case 'gouzi.set_membership': {
+        this.requireClusterLeader()
+        return this.store.gouzi.setMembership(
+          GouziId(requiredString(params, 'gouzi_id')),
+          requiredString(params, 'membership') as Exclude<GouziMembership, 'archived'>,
+        )
+      }
+      case 'gouzi.set_endpoint': {
+        this.requireClusterLeader()
+        return this.store.gouzi.setEndpoint(GouziId(requiredString(params, 'gouzi_id')), requiredString(params, 'endpoint'))
+      }
+      case 'gouzi.archive': {
+        this.requireClusterLeader()
+        const evidence = requiredRecord(params, 'evidence')
+        return this.store.gouzi.archive(GouziId(requiredString(params, 'gouzi_id')), {
+          credentialsRevoked: evidence.credentials_revoked === true,
+          workSettled: evidence.work_settled === true,
+          processTreeStopped: evidence.process_tree_stopped === true,
+        })
+      }
       case 'system.shutdown':
         setTimeout(() => { void this.close() }, 10)
         return { draining: true }

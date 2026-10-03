@@ -79,6 +79,7 @@
     { "path": "./packages/client/ui-directory-picker-native" },
     { "path": "./packages/client/ui-goal" },
     { "path": "./packages/physical-operator/ui-physical-operator/tsconfig.client.json" },
+    { "path": "./packages/orchestration/ui-gouzi/tsconfig.client.json" },
     { "path": "./packages/orchestration/ui-orchestration/tsconfig.client.json" },
     { "path": "./packages/orchestration/ui-debate/tsconfig.client.json" },
     { "path": "./packages/client/ui-message-feedback" },

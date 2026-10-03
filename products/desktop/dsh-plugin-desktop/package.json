@@ -34,6 +34,10 @@
       "types": "./lib/types/gouzi-worker.d.ts",
       "default": "./lib/gouzi-worker.js"
     },
+    "./gouzi-host": {
+      "types": "./lib/types/gouzi-host.d.ts",
+      "default": "./lib/gouzi-host.js"
+    },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
@@ -284,6 +288,7 @@
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.6",
     "@deepseek-ai/dsh-ui-debate": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-ui-gouzi": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-user-approval": "0.1.0-rc.6",

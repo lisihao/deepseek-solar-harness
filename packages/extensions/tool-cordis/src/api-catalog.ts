@@ -926,6 +926,48 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'gouziHost',
+    summary: 'Starts and stops member processes on the machine that runs this Server.',
+    description: 'Starts and stops member processes on the machine that runs this Server. The Desktop product provides it; a Server without it can still list members but cannot adopt or wake one.',
+    methods: [
+      {
+        signature: 'abstract readonly ownerId: string',
+        description: 'Stable identity of this main instance, written into every grant epoch binding.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract resolveRepository(path: string): Promise<{ readonly repository: string; readonly source: string }>',
+        description: 'Resolve a local workspace to the repository identity a member may materialize.',
+        parameters: [{ name: 'path', description: 'absolute path inside a Git repository.' }],
+        returns: 'the canonical repository identity and the path to clone from.',
+        throws: ['Error - when the path is not inside a Git repository with a usable remote.'],
+      },
+      {
+        signature: 'abstract provision(input: GouziProvisionInput): Promise<void>',
+        description: 'Create the member\'s home, identity, and repository allowlist. Idempotent for the same identity.',
+        parameters: [{ name: 'input', description: 'identity and allowlist.' }],
+      },
+      {
+        signature: 'abstract start(gouziId: string): Promise<GouziProcessInfo>',
+        description: 'Start the member\'s process, or adopt the one already running.',
+        parameters: [{ name: 'gouziId', description: 'member identity.' }],
+        returns: 'where it listens and which incarnation answered.',
+      },
+      {
+        signature: 'abstract stop(gouziId: string, options?: { readonly reclaimResident?: boolean }): Promise<{ readonly processTreeStopped: boolean }>',
+        description: 'Stop the member\'s process.',
+        parameters: [{ name: 'gouziId', description: 'member identity.' }, { name: 'options', description: '`reclaimResident` also stops the Resident daemon the member started.' }],
+        returns: 'whether no process of the member remains.',
+      },
+      {
+        signature: 'abstract isRunning(gouziId: string): boolean',
+        description: 'Whether the member\'s process is running now.',
+        parameters: [{ name: 'gouziId', description: 'member identity.' }],
+        returns: 'true while the process answers to its ready record.',
+      },
+    ],
+  },
+  {
     key: 'intentCompiler',
     summary: 'Provider-neutral Intent compilation service.',
     description: 'Provider-neutral Intent compilation service.',
@@ -1204,6 +1246,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'Provider-neutral durable orchestration control service.',
     description: 'Provider-neutral durable orchestration control service.',
     methods: [
+      {
+        signature: 'readonly gouzi?: GouziControl',
+        description: 'Gouzi host and member registry; absent in Providers that do not manage execution members.',
+        parameters: [],
+      },
       {
         signature: 'abstract compile(request: OrchestrationCompileRequest): Promise<OrchestrationCompilationV1>',
         description: 'Compile immutable Intent and Graph inputs.',
@@ -4664,6 +4711,78 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'GoalView',
     declaration: 'export interface GoalView extends GoalSnapshot {\n    readonly roundsStarted: number;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n    readonly activation: GoalActivation;\n}',
+  },
+  {
+    name: 'GouziActivity',
+    declaration: 'export type GouziActivity = \'resting\' | \'queued\' | \'working\' | \'awaiting-approval\' | \'paused\' | \'faulted\';',
+  },
+  {
+    name: 'GouziArchiveEvidence',
+    declaration: 'export interface GouziArchiveEvidence {\n    readonly credentialsRevoked: boolean;\n    readonly workSettled: boolean;\n    readonly processTreeStopped: boolean;\n}',
+  },
+  {
+    name: 'GouziAuthorityEpoch',
+    declaration: 'export type GouziAuthorityEpoch = Branded<\'GouziAuthorityEpoch\'>;',
+  },
+  {
+    name: 'GouziAvatarId',
+    declaration: 'export type GouziAvatarId = (typeof GOUZI_AVATAR_IDS)[number];',
+  },
+  {
+    name: 'GouziConnection',
+    declaration: 'export type GouziConnection = \'online\' | \'unreachable\';',
+  },
+  {
+    name: 'GouziControl',
+    declaration: 'export interface GouziControl {\n    list(): Promise<{\n        readonly hosts: readonly GouziHostRecord[];\n        readonly members: readonly GouziMemberView[];\n    }>;\n    pairHost(host: Omit<GouziHostRecord, \'pairedAt\'>): Promise<GouziHostRecord>;\n    create(input: GouziCreateInput): Promise<GouziMemberView>;\n    edit(gouziId: GouziId, edit: GouziMemberEdit): Promise<GouziMemberView>;\n    setMembership(gouziId: GouziId, membership: Exclude<GouziMembership, \'archived\'>): Promise<GouziMemberView>;\n    setEndpoint(gouziId: GouziId, endpoint: string): Promise<GouziMemberView>;\n    archive(gouziId: GouziId, evidence: GouziArchiveEvidence): Promise<GouziMemberView>;\n}',
+  },
+  {
+    name: 'GouziCreateInput',
+    declaration: 'export interface GouziCreateInput {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly grantDeadlineMs: number;\n}',
+  },
+  {
+    name: 'GouziHostId',
+    declaration: 'export type GouziHostId = Branded<\'GouziHostId\'>;',
+  },
+  {
+    name: 'GouziHostRecord',
+    declaration: 'export interface GouziHostRecord {\n    readonly hostId: GouziHostId;\n    readonly label: string;\n    readonly authorityEpoch: GouziAuthorityEpoch;\n    readonly credentialRef: string;\n    readonly pairedAt: string;\n}',
+  },
+  {
+    name: 'GouziId',
+    declaration: 'export type GouziId = Branded<\'GouziId\'>;',
+  },
+  {
+    name: 'GouziMemberEdit',
+    declaration: 'export interface GouziMemberEdit {\n    readonly name?: string;\n    readonly avatarId?: GouziAvatarId;\n    readonly role?: GouziRole;\n}',
+  },
+  {
+    name: 'GouziMembership',
+    declaration: 'export type GouziMembership = \'provisioning\' | \'enabled\' | \'retiring\' | \'archived\';',
+  },
+  {
+    name: 'GouziMemberView',
+    declaration: 'export interface GouziMemberView extends GouziRecord {\n    readonly connection: GouziConnection;\n    readonly activity: GouziActivity;\n    readonly grantDeadlineMs: number;\n    readonly endpoint?: string;\n}',
+  },
+  {
+    name: 'GouziOwnerId',
+    declaration: 'export type GouziOwnerId = Branded<\'GouziOwnerId\'>;',
+  },
+  {
+    name: 'GouziProcessInfo',
+    declaration: 'export interface GouziProcessInfo {\n    readonly endpoint: string;\n    readonly pid: number;\n    readonly incarnation: number;\n}',
+  },
+  {
+    name: 'GouziProvisionInput',
+    declaration: 'export interface GouziProvisionInput {\n    readonly gouziId: string;\n    readonly ownerId: string;\n    readonly hostId: string;\n    readonly generation: number;\n    readonly authorityEpoch: string;\n    readonly repositories: readonly {\n        readonly repository: string;\n        readonly source: string;\n    }[];\n}',
+  },
+  {
+    name: 'GouziRecord',
+    declaration: 'export interface GouziRecord {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly generation: number;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly roleVersion: number;\n    readonly policyVersion: number;\n    readonly membership: GouziMembership;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'GouziRole',
+    declaration: 'export type GouziRole = (typeof GOUZI_ROLES)[number];',
   },
   {
     name: 'ImageAttachmentLimits',

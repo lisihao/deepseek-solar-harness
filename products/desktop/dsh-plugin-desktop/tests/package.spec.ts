@@ -184,6 +184,7 @@ describe('published package surface', () => {
     expect(config).toContain("'product-server': 'src/product-server.ts'")
     expect(config).toContain("entry: { 'product-server-bin': 'src/product-server-bin.ts' }")
     expect(config).toContain("'gouzi-worker': 'src/gouzi-worker.ts'")
+    expect(config).toContain("'gouzi-host': 'src/gouzi-host.ts'")
     expect(config).toContain("entry: { 'gouzi-worker-bin': 'src/gouzi-worker-bin.ts' }")
     expect(config).toContain("pnpm: 'src/pnpm.ts'")
     expect(config).toContain("profiles: 'src/profiles.ts'")

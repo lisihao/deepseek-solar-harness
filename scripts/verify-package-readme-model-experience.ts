@@ -73,6 +73,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/orchestration/rlm-runtime-local': { kind: 'indirect', reason: 'The local persistent RLM Provider delegates tool registration and result rendering to a model-provider Consumer.' },
   'packages/orchestration/orchestration': { kind: 'indirect', reason: 'The Service Definition delegates model rendering to dsh-tool-orchestration.' },
   'packages/orchestration/orchestration-local': { kind: 'indirect', reason: 'The daemon Provider delegates model rendering to dsh-tool-orchestration and physical operators.' },
+  'packages/orchestration/ui-gouzi': { kind: 'none', reason: 'The trusted browser roster registers no model-facing prompt, schema, or Session event.' },
   'packages/orchestration/ui-orchestration': { kind: 'none', reason: 'The trusted browser control projection registers no model-facing prompt, schema, or Session event.' },
   'packages/physical-operator/ui-physical-operator': { kind: 'none', reason: 'The trusted browser projection and execution-policy controls register no model-facing prompt, schema, or Session event.' },
   'packages/code-runtime/code-runtime': { kind: 'indirect', reason: 'The service interface delegates model rendering to Code Mode in dsh-tools.' },

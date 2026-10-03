@@ -6,6 +6,9 @@ import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-p
 import { fileURLToPath } from 'node:url'
 import {
   OrchestrationError,
+  type GouziArchiveEvidence,
+  type GouziHostRecord,
+  type GouziMemberView,
   type OrchestrationArtifactRef,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
@@ -181,6 +184,103 @@ export class OrchestrationDaemonClient {
    */
   proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt> {
     return this.request('capability.propose_update', { request })
+  }
+
+  /**
+   * List Gouzi hosts and members with their observed state.
+   * @returns every paired host and every member, archived ones included.
+   */
+  gouziList(): Promise<{ hosts: GouziHostRecord[]; members: GouziMemberView[] }> {
+    return this.request('gouzi.list', {})
+  }
+
+  /**
+   * Record a newly paired execution host.
+   * @param host - host identity, accepted authority epoch, and credential reference.
+   * @returns the stored host.
+   */
+  gouziPairHost(host: Omit<GouziHostRecord, 'pairedAt'>): Promise<GouziHostRecord> {
+    return this.request('gouzi.pair_host', {
+      host: {
+        host_id: host.hostId, label: host.label, authority_epoch: host.authorityEpoch, credential_ref: host.credentialRef,
+      },
+    })
+  }
+
+  /**
+   * Create a member in `provisioning`; fails with `GOUZI_LIMIT_REACHED` for the eleventh.
+   * @param member - member identity, presentation, role, and grant lifetime.
+   * @returns the stored member.
+   */
+  gouziCreate(member: {
+    gouziId: string
+    ownerId: string
+    hostId: string
+    name: string
+    avatarId: string
+    role: string
+    grantDeadlineMs: number
+  }): Promise<GouziMemberView> {
+    return this.request('gouzi.create', {
+      member: {
+        gouzi_id: member.gouziId, owner_id: member.ownerId, host_id: member.hostId, name: member.name,
+        avatar_id: member.avatarId, role: member.role, grant_deadline_ms: member.grantDeadlineMs,
+      },
+    })
+  }
+
+  /**
+   * Change a member's name, avatar, or role.
+   * @param gouziId - member identity.
+   * @param edit - fields to change.
+   * @returns the updated member.
+   */
+  gouziEdit(gouziId: string, edit: { name?: string; avatarId?: string; role?: string }): Promise<GouziMemberView> {
+    return this.request('gouzi.edit', {
+      gouzi_id: gouziId,
+      edit: {
+        ...edit.name === undefined ? {} : { name: edit.name },
+        ...edit.avatarId === undefined ? {} : { avatar_id: edit.avatarId },
+        ...edit.role === undefined ? {} : { role: edit.role },
+      },
+    })
+  }
+
+  /**
+   * Move a member along `provisioning → enabled ⇄ retiring`.
+   * @param gouziId - member identity.
+   * @param membership - the next membership.
+   * @returns the updated member.
+   */
+  gouziSetMembership(gouziId: string, membership: 'provisioning' | 'enabled' | 'retiring'): Promise<GouziMemberView> {
+    return this.request('gouzi.set_membership', { gouzi_id: gouziId, membership })
+  }
+
+  /**
+   * Record where a member's process listens.
+   * @param gouziId - member identity.
+   * @param endpoint - absolute http or https URL.
+   * @returns the updated member.
+   */
+  gouziSetEndpoint(gouziId: string, endpoint: string): Promise<GouziMemberView> {
+    return this.request('gouzi.set_endpoint', { gouzi_id: gouziId, endpoint })
+  }
+
+  /**
+   * Archive a retiring member, which releases its slot.
+   * @param gouziId - member identity.
+   * @param evidence - revoked credentials, settled work, and a stopped process tree.
+   * @returns the archived member.
+   */
+  gouziArchive(gouziId: string, evidence: GouziArchiveEvidence): Promise<GouziMemberView> {
+    return this.request('gouzi.archive', {
+      gouzi_id: gouziId,
+      evidence: {
+        credentials_revoked: evidence.credentialsRevoked,
+        work_settled: evidence.workSettled,
+        process_tree_stopped: evidence.processTreeStopped,
+      },
+    })
   }
 
   /**

@@ -13,6 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { evaluate, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -431,6 +432,7 @@ export const GOUZI_WORKER_DISABLED_ROW_IDS = [
   'tool-debate',
   'ui-debate',
   'ui-orchestration',
+  'ui-gouzi',
   SCHEDULING_EVIDENCE_ROW_ID,
   SCHEDULING_EVIDENCE_RPC_ROW_ID,
   SCHEDULING_EVIDENCE_SETTINGS_ROW_ID,
@@ -441,6 +443,10 @@ export const GOUZI_REMOTE_HOST_PACKAGE = '@deepseek-ai/dsh-orchestration-local/r
 
 /** Plugin that provides the member identity, grant admission, and idempotency ledger. */
 export const GOUZI_MEMBER_PACKAGE = '@deepseek-ai/dsh-host-gouzi-member'
+
+/** Row and plugin that start and stop Gouzi member processes on the machine that runs this Server. */
+export const GOUZI_HOST_ROW_ID = 'gouzi-host'
+export const GOUZI_HOST_PACKAGE = 'dsh-plugin-desktop/gouzi-host'
 
 const DESKTOP_ADAPTER_ROW_IDS = [
   'desktop-shell',
@@ -662,6 +668,19 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
       inject: options.gouziWorker === true
         ? ['webRuntime', 'webStartup', 'residentOperators', 'remoteOperatorHost', 'gouziMember']
         : ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations', 'remoteOperatorHost'],
+    })
+  }
+  if (options.gouziWorker !== true && !composeEntries([patches]).some(row => row.id === GOUZI_HOST_ROW_ID)) {
+    patches.push({
+      insert: [{
+        id: GOUZI_HOST_ROW_ID,
+        name: GOUZI_HOST_PACKAGE,
+        config: {
+          membersRoot: join(home, 'gouzi', 'members'),
+          // Stable per installation and distinct between machines; it is an identity, not a secret.
+          ownerId: `main-${createHash('sha256').update(home).digest('hex').slice(0, 12)}`,
+        },
+      }],
     })
   }
   if (options.gouziWorker === true) {

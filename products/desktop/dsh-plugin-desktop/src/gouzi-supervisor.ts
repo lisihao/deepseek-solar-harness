@@ -12,6 +12,8 @@ import { GOUZI_WORKER_FILE, type GouziWorkerReady } from './gouzi-worker.ts'
 export interface GouziWorkerCommand {
   readonly command: string
   readonly args: readonly string[]
+  /** Extra environment for the process, for example `ELECTRON_RUN_AS_NODE` when the command is Electron. */
+  readonly env?: Readonly<Record<string, string>>
 }
 
 /** Supervisor configuration. */
@@ -158,7 +160,7 @@ export class GouziSupervisor {
     const home = this.homeOf(gouziId)
     const file = join(home, 'gouzi', GOUZI_WORKER_FILE)
     rmSync(file, { force: true })
-    const { command, args } = this.options.workerCommand(home)
+    const { command, args, env } = this.options.workerCommand(home)
     // The member keeps running if the supervisor's process ends, so output goes to a file, not a pipe.
     const log = openSync(join(home, 'worker.log'), 'a', 0o600)
     let child: ChildProcess
@@ -167,7 +169,7 @@ export class GouziSupervisor {
         cwd: home,
         detached: true,
         stdio: ['ignore', log, log],
-        env: { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: process.env.DSH_TELEMETRY_DISABLED ?? '1' },
+        env: { ...process.env, ...env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: process.env.DSH_TELEMETRY_DISABLED ?? '1' },
       })
     } finally {
       closeSync(log)

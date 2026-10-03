@@ -227,3 +227,98 @@ export const GOUZI_EVENT_TYPES = [
 ] as const
 /** One Gouzi orchestration event name. */
 export type GouziEventType = (typeof GOUZI_EVENT_TYPES)[number]
+
+/** A paired execution host. The credential itself is never stored, only its reference. */
+export interface GouziHostRecord {
+  readonly hostId: GouziHostId
+  readonly label: string
+  /** The authority epoch this host accepts; minted when the host was paired. */
+  readonly authorityEpoch: GouziAuthorityEpoch
+  /** Name of the credential entry that holds the device credential. */
+  readonly credentialRef: string
+  readonly pairedAt: string
+}
+
+/** A member with its three independent state dimensions and process facts. */
+export interface GouziMemberView extends GouziRecord {
+  readonly connection: GouziConnection
+  readonly activity: GouziActivity
+  /** How long after issue an execution grant may start work. */
+  readonly grantDeadlineMs: number
+  /** Where the member's process listens now; absent until it has been started. */
+  readonly endpoint?: string
+}
+
+/** Fields a user may change on a member; identity and generation never change. */
+export interface GouziMemberEdit {
+  readonly name?: string
+  readonly avatarId?: GouziAvatarId
+  readonly role?: GouziRole
+}
+
+/** Facts required before a retiring member leaves the member count. */
+export interface GouziArchiveEvidence {
+  readonly credentialsRevoked: boolean
+  readonly workSettled: boolean
+  readonly processTreeStopped: boolean
+}
+
+/** Input for creating a member in `provisioning`. */
+export interface GouziCreateInput {
+  readonly gouziId: GouziId
+  readonly ownerId: GouziOwnerId
+  readonly hostId: GouziHostId
+  readonly name: string
+  readonly avatarId: GouziAvatarId
+  readonly role: GouziRole
+  readonly grantDeadlineMs: number
+}
+
+/**
+ * Registry operations the main instance offers for hosts and members. Every mutation is a single transaction of
+ * the sole TaskGraph authority; a refused eleventh member fails with `GOUZI_LIMIT_REACHED`.
+ */
+export interface GouziControl {
+  /** @returns every paired host and every member, archived ones included. */
+  list(): Promise<{ readonly hosts: readonly GouziHostRecord[]; readonly members: readonly GouziMemberView[] }>
+  /**
+   * Record a newly paired host.
+   * @param host - identity, accepted authority epoch, and credential reference.
+   * @returns the stored host.
+   */
+  pairHost(host: Omit<GouziHostRecord, 'pairedAt'>): Promise<GouziHostRecord>
+  /**
+   * Create a member in `provisioning`.
+   * @param input - identity, presentation, role, and grant lifetime.
+   * @returns the stored member.
+   */
+  create(input: GouziCreateInput): Promise<GouziMemberView>
+  /**
+   * Change a member's name, avatar, or role.
+   * @param gouziId - member identity.
+   * @param edit - fields to change.
+   * @returns the updated member.
+   */
+  edit(gouziId: GouziId, edit: GouziMemberEdit): Promise<GouziMemberView>
+  /**
+   * Move a member along `provisioning → enabled ⇄ retiring`.
+   * @param gouziId - member identity.
+   * @param membership - the next membership.
+   * @returns the updated member.
+   */
+  setMembership(gouziId: GouziId, membership: Exclude<GouziMembership, 'archived'>): Promise<GouziMemberView>
+  /**
+   * Record where a member's process listens.
+   * @param gouziId - member identity.
+   * @param endpoint - absolute http or https URL.
+   * @returns the updated member.
+   */
+  setEndpoint(gouziId: GouziId, endpoint: string): Promise<GouziMemberView>
+  /**
+   * Archive a retiring member, which releases its slot.
+   * @param gouziId - member identity.
+   * @param evidence - revoked credentials, settled work, and a stopped process tree.
+   * @returns the archived member.
+   */
+  archive(gouziId: GouziId, evidence: GouziArchiveEvidence): Promise<GouziMemberView>
+}

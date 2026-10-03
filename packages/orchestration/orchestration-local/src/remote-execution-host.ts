@@ -67,6 +67,23 @@ export async function identifyRemoteWorkspace(
   }
 }
 
+/**
+ * Resolve a local workspace to the repository a member may be allowed to materialize. Unlike
+ * {@link identifyRemoteWorkspace} it does not require a clean tree: it names a repository, not a commit.
+ * @param workspace - path inside a Git repository that has an `origin` remote.
+ * @param timeoutMs - upper bound for each Git inspection command.
+ * @returns the canonical repository identity and the repository root to clone from.
+ */
+export async function resolveRepositorySource(
+  workspace: string,
+  timeoutMs: number,
+): Promise<{ readonly repository: string; readonly source: string }> {
+  const cwd = await realpath(workspace)
+  const root = await realpath((await git(['rev-parse', '--show-toplevel'], cwd, timeoutMs)).trim())
+  const origin = (await git(['remote', 'get-url', 'origin'], root, timeoutMs)).trim()
+  return { repository: canonicalRemoteRepositoryIdentity(origin), source: root }
+}
+
 /** Host Provider backed by immutable Git caches and per-command writable checkouts. */
 export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   private readonly cacheMaterializations = new Map<string, Promise<string>>()

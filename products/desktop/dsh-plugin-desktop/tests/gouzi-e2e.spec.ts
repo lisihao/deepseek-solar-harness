@@ -23,7 +23,12 @@ import {
   RemoteSyncRejectedError,
 } from '@deepseek-ai/dsh-orchestration-local'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
-import { GouziActiveLimitError, GouziSupervisor } from '../src/gouzi-supervisor.ts'
+import { Context } from '@deepseek-ai/cordis'
+import * as OrchestrationLocal from '@deepseek-ai/dsh-orchestration-local'
+import * as UiGouzi from '@deepseek-ai/dsh-ui-gouzi'
+import { GouziHostService, type GouziProvisionInput } from '@deepseek-ai/dsh-ui-gouzi'
+import { LocalGouziHost, Config as HostConfig } from '../src/gouzi-host.ts'
+import { GouziActiveLimitError, GouziSupervisor, residentDaemonPid } from '../src/gouzi-supervisor.ts'
 import type { GouziWorkerReady } from '../src/gouzi-worker.ts'
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -39,6 +44,9 @@ let mainHome: string
 let commit: string
 let supervisor: GouziSupervisor
 const ready = new Map<string, GouziWorkerReady>()
+/** Host of the members adopted through the route; its members live under their own root. */
+let adoptedHost: LocalGouziHost | undefined
+let adoptedRoot = ''
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
@@ -162,6 +170,9 @@ describe.sequential('Gouzi members as real processes', () => {
 
   afterAll(async () => {
     await daemon?.close()
+    if (adoptedHost !== undefined) {
+      for (const entry of existsSync(adoptedRoot) ? readdirSync(adoptedRoot) : []) await adoptedHost.stop(entry, { reclaimResident: true })
+    }
     for (const gouziId of [...MEMBERS, 'gouzi-c']) await supervisor.stop(gouziId, { reclaimResident: true })
     rmSync(scratch, { recursive: true, force: true })
   }, 60_000)
@@ -306,4 +317,102 @@ describe.sequential('Gouzi members as real processes', () => {
     }
     watcher.close()
   }, 240_000)
+
+  it('adopts a member through the Host route with a real worker process, runs a TaskGraph on it, and retires it', async () => {
+    const mainRoot = join(mainHome, 'orchestrations')
+    const hostContext = new Context()
+    adoptedRoot = join(scratch, 'adopted')
+    const inner = new LocalGouziHost(hostContext, HostConfig({
+      membersRoot: adoptedRoot,
+      ownerId: 'owner-e2e',
+      activeLimit: 2,
+      readyTimeoutMs: 120_000,
+      stopTimeoutMs: 20_000,
+      gitTimeoutMs: 10_000,
+      workerScript: join(PACKAGE_ROOT, 'src', 'gouzi-worker-bin.ts'),
+      nodeArgs: ['--import', pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm')).href],
+    }))
+    adoptedHost = inner
+    // The test member needs the keyless fixture driver, which a member home gets through its own profile patch.
+    class FixtureHost extends GouziHostService {
+      readonly ownerId = inner.ownerId
+      resolveRepository(path: string) { return inner.resolveRepository(path) }
+      async provision(input: GouziProvisionInput) {
+        await inner.provision(input)
+        writeFileSync(join(adoptedRoot, input.gouziId, 'cordis.patch.yml'), [
+          '- id: resident-operators', '  config:', '    driverModules:', `      - ${FIXTURE_DRIVER}`, '',
+        ].join('\n'))
+      }
+      start(gouziId: string) { return inner.start(gouziId) }
+      stop(gouziId: string, options?: { reclaimResident?: boolean }) { return inner.stop(gouziId, options) }
+      isRunning(gouziId: string) { return inner.isRunning(gouziId) }
+    }
+
+    const ctx = new Context()
+    const routes: Array<{ handler: (request: never, response: never) => Promise<void> }> = []
+    ctx.provide('webServer', { register: (route: (typeof routes)[number]) => { routes.push(route); return () => {} } } as never)
+    new FixtureHost(ctx)
+    await ctx.plugin({ name: OrchestrationLocal.name, apply: OrchestrationLocal.apply }, OrchestrationLocal.Config({
+      dshHome: mainHome, autoStart: false, headlessNodeExecutable: process.execPath,
+    })).await()
+    await ctx.plugin({ name: UiGouzi.name, inject: [...UiGouzi.inject], apply: UiGouzi.apply }, UiGouzi.Config({ grantDeadlineMs: 600_000 })).await()
+
+    const send = async (method: 'GET' | 'POST', body?: unknown): Promise<{ status: number; body: any }> => {
+      const { PassThrough } = await import('node:stream')
+      const request = new PassThrough()
+      Object.assign(request, {
+        url: UiGouzi.GOUZI_DASHBOARD_PATH, method, socket: { remoteAddress: '127.0.0.1' },
+        headers: { host: '127.0.0.1:3080', [UiGouzi.GOUZI_CONTROL_HEADER]: '1' },
+      })
+      request.end(body === undefined ? undefined : JSON.stringify(body))
+      const chunks: Buffer[] = []
+      let status = 200
+      const response = {
+        statusCode: 200, setHeader: () => {}, writeHead: (value: number) => { status = value },
+        end(value?: Uint8Array) { if (value !== undefined) chunks.push(Buffer.from(value)); status = status === 200 ? this.statusCode : status },
+      }
+      await routes[0]!.handler(request as never, response as never)
+      return { status, body: JSON.parse(Buffer.concat(chunks).toString()) as never }
+    }
+
+    const adopted = await send('POST', {
+      action: 'adopt', name: 'Wire', avatarId: 'corgi', role: 'development', projects: [join(scratch, 'source')],
+    })
+    expect(adopted.status, JSON.stringify(adopted.body)).toBe(200)
+    const gouziId = adopted.body.gouziId as string
+    expect(adopted.body).toMatchObject({ name: 'Wire', membership: 'enabled', avatarId: 'corgi' })
+    expect(inner.isRunning(gouziId)).toBe(true)
+
+    // The daemon registers the new operator on its next refresh and marks the member online.
+    const roster = await eventually(() => send('GET'), reply => reply.body.members.some(
+      (value: { gouziId: string; state: string }) => value.gouziId === gouziId && value.state === 'resting',
+    ), 60_000)
+    expect(roster.body).toMatchObject({ used: 3, limit: 10, canManage: true, hostAvailable: true })
+
+    const client = new OrchestrationDaemonClient({ root: mainRoot, dshHome: mainHome, autoStart: false, connectTimeoutMs: 5_000 })
+    const compilation = await client.compile({
+      intent: { request: 'Write the file on the adopted member.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'e2e-adopted', rlm: 'disabled', continualHarness: 'off', optimization: 'economy',
+      },
+      graph: analysisGraph(join(scratch, 'source'), `gouzi.${gouziId}.${OPERATOR}`),
+    })
+    const started = await client.start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId })
+    const finished = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed' || value.state === 'failed', 120_000)
+    expect(finished.state).toBe('completed')
+    const log = readFileSync(join(adoptedRoot, gouziId, 'fixture-executions.log'), 'utf8')
+    expect(log).toContain(String(started.runId))
+
+    // Retiring stops the member and its Resident daemon, then archives it and frees the slot.
+    const home = join(adoptedRoot, gouziId)
+    expect(residentDaemonPid(home)).toBeDefined()
+    const retired = await send('POST', { action: 'retire', gouziId })
+    expect(retired.status, JSON.stringify(retired.body)).toBe(200)
+    expect(inner.isRunning(gouziId)).toBe(false)
+    expect(residentDaemonPid(home)).toBeUndefined()
+    const after = await send('GET')
+    expect(after.body.used).toBe(2)
+    expect(after.body.members.map((value: { gouziId: string }) => value.gouziId)).not.toContain(gouziId)
+    await ctx.fiber.dispose()
+  }, 360_000)
 })

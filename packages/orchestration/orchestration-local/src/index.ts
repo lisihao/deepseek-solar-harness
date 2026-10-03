@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import OrchestrationService, {
+  type GouziControl,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
   type OrchestrationArtifactRef,
@@ -28,7 +29,7 @@ import OrchestrationService, {
   type OrchestrationStartRequest,
 } from '@deepseek-ai/dsh-orchestration'
 import { OrchestrationDaemonClient } from './client.ts'
-import { mountRemoteOperatorHost, REMOTE_HOST_CONFIG_FIELDS, type RemoteHostConfig } from './remote-host.ts'
+import { mountRemoteOperatorHost, type RemoteHostConfig } from './remote-host.ts'
 
 export { OrchestrationDaemonClient, startDetachedOrchestrationDaemon } from './client.ts'
 export {
@@ -42,15 +43,9 @@ export { graphCertificate, nodesConflict, scopeOverlap, validateGraph } from './
 export { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from './providers.ts'
 export { BROWSER_CAPABILITY, BROWSER_MODEL_TOOL_SCHEMA, BrowserModelToolBridge, parseBrowserModelPlan } from './browser-model-tool-bridge.ts'
 export { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from './store.ts'
-export { LocalRemoteOperatorHostService } from './remote-execution-host.ts'
+export { LocalRemoteOperatorHostService, resolveRepositorySource } from './remote-execution-host.ts'
 export { gouziOperatorServer, type GouziGrantStore, type GouziOperatorOptions } from './gouzi-operator.ts'
-export {
-  GouziRegistry,
-  type GouziArchiveEvidence,
-  type GouziHostRecord,
-  type GouziMemberEdit,
-  type GouziMemberView,
-} from './gouzi-registry.ts'
+export { GouziRegistry } from './gouzi-registry.ts'
 export { RemotePhysicalOperator, createRemotePhysicalOperators, type RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
 export { RemoteSyncHttpClient, RemoteSyncRejectedError, RemoteSyncTransportError } from './remote-sync-http-client.ts'
 export * from './auto-refine.ts'
@@ -82,12 +77,25 @@ export const Config: z<Config> = z.object({
   skillProviderModules: z.array(z.string()).default([]),
   headlessNodeExecutable: z.string(),
   browserProviderModules: z.array(z.string()).default([]),
-  ...REMOTE_HOST_CONFIG_FIELDS,
+  remoteMaterializationTimeoutMs: z.number().step(1).min(1_000).max(15 * 60_000).default(120_000),
+  remoteArtifactReadTimeoutMs: z.number().step(1).min(100).max(60_000).default(15_000),
+  remoteArtifactMaxBytes: z.number().step(1).min(1_024).max(8 * 1024 * 1024).default(8 * 1024 * 1024),
+  remoteWorkspaceLeaseMs: z.number().step(1).min(60_000).max(7 * 24 * 60 * 60_000).default(24 * 60 * 60_000),
+  dshHome: z.string(),
 })
 /* jscpd:ignore-end */
 
 class LocalOrchestrationService extends OrchestrationService {
   private readonly client: OrchestrationDaemonClient
+  override readonly gouzi: GouziControl = {
+    list: () => this.client.gouziList(),
+    pairHost: host => this.client.gouziPairHost(host),
+    create: input => this.client.gouziCreate(input),
+    edit: (gouziId, edit) => this.client.gouziEdit(gouziId, edit),
+    setMembership: (gouziId, membership) => this.client.gouziSetMembership(gouziId, membership),
+    setEndpoint: (gouziId, endpoint) => this.client.gouziSetEndpoint(gouziId, endpoint),
+    archive: (gouziId, evidence) => this.client.gouziArchive(gouziId, evidence),
+  }
 
   constructor(ctx: Context, config: Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>) {
     super(ctx)

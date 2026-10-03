@@ -21,6 +21,7 @@ import type {
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
 import { HarnessError, type ContentBlock, type ContextSnapshotSection } from '@deepseek-ai/dsh-llm'
+import type { GouziControl } from './gouzi.ts'
 import type {
   PhysicalOperatorExecutionId,
   PhysicalOperatorExecutionPreference,
@@ -657,6 +658,9 @@ declare module '@deepseek-ai/cordis' {
 
 /** Provider-neutral durable orchestration control service. */
 export abstract class OrchestrationService extends Service {
+  /** Gouzi host and member registry; absent in Providers that do not manage execution members. */
+  readonly gouzi?: GouziControl
+
   constructor(ctx: Context) {
     if (new.target === OrchestrationService) {
       throw new Error('@deepseek-ai/dsh-orchestration is an abstract seam; load a Provider')

@@ -25,16 +25,13 @@ export interface RemoteHostConfig {
   readonly remoteWorkspaceLeaseMs?: number
 }
 
-/** Schema fields of {@link RemoteHostConfig}, spread into the full plugin's schema. */
-export const REMOTE_HOST_CONFIG_FIELDS = {
+export const Config: z<RemoteHostConfig> = z.object({
   dshHome: z.string(),
   remoteMaterializationTimeoutMs: z.number().step(1).min(1_000).max(15 * 60_000).default(120_000),
   remoteArtifactReadTimeoutMs: z.number().step(1).min(100).max(60_000).default(15_000),
   remoteArtifactMaxBytes: z.number().step(1).min(1_024).max(8 * 1024 * 1024).default(8 * 1024 * 1024),
   remoteWorkspaceLeaseMs: z.number().step(1).min(60_000).max(7 * 24 * 60 * 60_000).default(24 * 60 * 60_000),
-}
-
-export const Config: z<RemoteHostConfig> = z.object(REMOTE_HOST_CONFIG_FIELDS)
+})
 
 /**
  * Register the remote execution host service.

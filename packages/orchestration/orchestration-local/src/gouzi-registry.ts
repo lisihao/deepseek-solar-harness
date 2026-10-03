@@ -11,48 +11,16 @@ import {
   GouziId,
   GouziOwnerId,
   OrchestrationError,
+  type GouziArchiveEvidence,
   type GouziAvatarId,
   type GouziActivity,
   type GouziConnection,
+  type GouziHostRecord,
+  type GouziMemberEdit,
+  type GouziMemberView,
   type GouziMembership,
-  type GouziRecord,
   type GouziRole,
 } from '@deepseek-ai/dsh-orchestration'
-
-/** A paired execution host. The credential itself is never stored here, only its reference. */
-export interface GouziHostRecord {
-  readonly hostId: GouziHostId
-  readonly label: string
-  /** The epoch this host accepts; minted when the host was paired. */
-  readonly authorityEpoch: GouziAuthorityEpoch
-  /** Name of the entry that holds the device credential. */
-  readonly credentialRef: string
-  readonly pairedAt: string
-}
-
-/** A member with the three independent state dimensions. */
-export interface GouziMemberView extends GouziRecord {
-  readonly connection: GouziConnection
-  readonly activity: GouziActivity
-  /** How long after issue an execution grant may start work. */
-  readonly grantDeadlineMs: number
-  /** Where the member's process listens now; absent until it has been started. */
-  readonly endpoint?: string
-}
-
-/** Fields a user may change on a member. */
-export interface GouziMemberEdit {
-  readonly name?: string
-  readonly avatarId?: GouziAvatarId
-  readonly role?: GouziRole
-}
-
-/** Evidence required before a member leaves the member count. */
-export interface GouziArchiveEvidence {
-  readonly credentialsRevoked: boolean
-  readonly workSettled: boolean
-  readonly processTreeStopped: boolean
-}
 
 const MEMBERSHIP_FLOW: Readonly<Record<GouziMembership, readonly GouziMembership[]>> = {
   provisioning: ['enabled', 'retiring'],

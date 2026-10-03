@@ -186,6 +186,31 @@ describe('desktop profile composition', () => {
     expect(server.find(row => row.id === 'connection')?.inject).toContain('orchestrations')
   })
 
+  it('mounts the local Gouzi host on Desktop and Product Server but never inside a member', () => {
+    const home = temporaryHome()
+    for (const patches of [
+      prepareDesktopProfile(undefined, home, 'darwin').patches,
+      prepareProductServerProfile(undefined, home, 'darwin').patches,
+    ]) {
+      const rows = composeEntries([patches]).filter(row => row.id === 'gouzi-host')
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toEqual(expect.objectContaining({
+        name: 'dsh-plugin-desktop/gouzi-host',
+        config: { membersRoot: join(home, 'gouzi', 'members'), ownerId: expect.stringMatching(/^main-[0-9a-f]{12}$/u) },
+      }))
+    }
+    const ids = (prepareProductServerProfile(undefined, home, 'darwin').patches)
+    expect(composeEntries([ids]).find(row => row.id === 'ui-gouzi')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-ui-gouzi',
+    }))
+    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin').patches])
+    expect(worker.find(row => row.id === 'gouzi-host')).toBeUndefined()
+    expect(worker.find(row => row.id === 'ui-gouzi')?.disabled).toBe(true)
+    // The owner identity differs between two installations.
+    const other = composeEntries([prepareProductServerProfile(undefined, temporaryHome(), 'darwin').patches]).find(row => row.id === 'gouzi-host')
+    expect((other?.config as { ownerId: string }).ownerId).not.toBe((composeEntries([ids]).find(row => row.id === 'gouzi-host')?.config as { ownerId: string }).ownerId)
+  })
+
   it('mounts the sealed Synapse bundle exactly once on Desktop and Product Server', () => {
     expect(PRODUCT_BUNDLE_PACKAGES).toContain(SYNAPSE_PACKAGE)
     expect(SEALED_RUNTIME_PACKAGES).toContain(SYNAPSE_PACKAGE)

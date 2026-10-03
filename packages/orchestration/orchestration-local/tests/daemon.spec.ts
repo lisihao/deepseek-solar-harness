@@ -821,6 +821,42 @@ describe('orchestration daemon', () => {
     watcher.close()
   })
 
+  it('manages Gouzi hosts and members over the daemon protocol and enforces the ten-member limit', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-rpc-'))
+    const root = join(home, 'orchestrations')
+    const daemon = createDaemon(root, home, new FakeResidentClient(), 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+
+    expect(await client.gouziList()).toEqual({ hosts: [], members: [] })
+    const host = await client.gouziPairHost({
+      hostId: GouziHostId('host-1'), label: 'This Mac', authorityEpoch: GouziAuthorityEpoch('epoch-1'), credentialRef: 'GOUZI_HOST_1',
+    })
+    expect(host).toMatchObject({ hostId: 'host-1', authorityEpoch: 'epoch-1' })
+    const draft = (index: number) => ({
+      gouziId: `gouzi-${String(index)}`, ownerId: 'owner-1', hostId: 'host-1', name: `Dog ${String(index)}`,
+      avatarId: 'shiba', role: 'research', grantDeadlineMs: 3_600_000,
+    })
+    for (let index = 1; index <= 10; index++) await client.gouziCreate(draft(index))
+    await expect(client.gouziCreate(draft(11))).rejects.toThrow('at most 10')
+
+    const edited = await client.gouziEdit('gouzi-1', { name: 'Mochi', avatarId: 'corgi', role: 'testing' })
+    expect(edited).toMatchObject({ name: 'Mochi', avatarId: 'corgi', role: 'testing', roleVersion: 2 })
+    expect((await client.gouziSetEndpoint('gouzi-1', 'http://127.0.0.1:4100')).endpoint).toBe('http://127.0.0.1:4100/')
+    expect((await client.gouziSetMembership('gouzi-1', 'enabled')).membership).toBe('enabled')
+    await client.gouziSetMembership('gouzi-1', 'retiring')
+    await expect(client.gouziArchive('gouzi-1', {
+      credentialsRevoked: true, workSettled: true, processTreeStopped: false,
+    })).rejects.toThrow('stopped process tree')
+    expect((await client.gouziArchive('gouzi-1', {
+      credentialsRevoked: true, workSettled: true, processTreeStopped: true,
+    })).membership).toBe('archived')
+    // The archived member released its slot, so an eleventh member can now be created.
+    expect((await client.gouziCreate(draft(11))).gouziId).toBe('gouzi-11')
+    expect((await client.gouziList()).members).toHaveLength(11)
+  })
+
   it('closes accepted control sockets before shutdown settles', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-close-'))
     const root = join(home, 'orchestrations')

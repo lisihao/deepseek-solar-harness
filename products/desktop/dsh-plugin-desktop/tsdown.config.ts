@@ -13,6 +13,7 @@ export default defineConfig([
       'profile-service': 'src/profile-service.ts',
       'product-server': 'src/product-server.ts',
       'gouzi-worker': 'src/gouzi-worker.ts',
+      'gouzi-host': 'src/gouzi-host.ts',
       pnpm: 'src/pnpm.ts',
       profiles: 'src/profiles.ts',
       runtime: 'src/runtime.ts',

@@ -89,6 +89,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   permissionPresets: 'permission-presets.md',
   physicalOperators: 'physical-operator.md',
   orchestrations: 'orchestration.md',
+  gouziHost: 'orchestration.md',
   remoteAuth: 'credentials.md',
   residentOperators: 'physical-operator.md',
   rlmRuntime: 'orchestration.md',
@@ -705,6 +706,8 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  GouziProvisionInput: 'member provisioning input is owned by packages/orchestration/ui-gouzi/src/host-service.ts',
+  GouziProcessInfo: 'member process facts are owned by packages/orchestration/ui-gouzi/src/host-service.ts',
   ModelCatalogSource: 'discovery source registration is owned by packages/llm/model-catalog-local/README.md',
   ModelCatalogSnapshot: 'durable catalog inventory is owned by packages/llm/model-catalog-local/README.md',
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',
