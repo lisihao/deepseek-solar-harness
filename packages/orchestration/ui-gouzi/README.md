@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The Gouzi roster for the browser: one sidebar entry that opens a dialog listing the long-lived execution members of this main instance, and the controls to adopt, edit, wake, rest, and retire them. The Host half serves `/api/gouzi` on the same origin as the Web UI; the browser half draws six inline SVG avatars and a four-step adoption wizard (avatar, name, role and projects, confirmation).
+The Gouzi roster for the browser: one sidebar entry that opens a dialog listing the long-lived execution members of this main instance, and the controls to adopt, edit, wake, rest, and retire them. The Host half serves `/api/gouzi` on the same origin as the Web UI; the browser half draws six inline SVG avatars and a four-step adoption wizard (avatar, name, role and projects, confirmation). The project step never asks for a typed path: it lists the user's most recently used workspaces as checkboxes (the current one preselected) and a button that opens the Host's native folder picker; the chosen absolute paths go to `/api/gouzi` as `projects`.
 
 `GET /api/gouzi` returns `GouziDashboardV1`: the limit of ten, how many members hold a slot, whether this caller may manage, whether this Host can start members, and every member that is not archived. Each member carries `membership`, `connection`, and `activity` plus one `state` reduced by `gouziPrimaryState`: a member outside `enabled` shows its membership, an unreachable member shows that before its last activity, and otherwise the activity shows. `POST` takes a `GouziControlRequest` and requires the `x-dsh-gouzi-control: 1` header; a loopback owner, `cockpit`, and `admin` devices may manage, while `pocket` devices only read and a `gouzi` credential is refused.
 

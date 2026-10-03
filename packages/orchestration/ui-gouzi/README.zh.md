@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-浏览器里的狗子名册：一个侧栏入口，打开后是一个对话框，列出这个主实例的长期执行成员，并提供领养、修改、唤醒、休息和退役的操作。Host 半部在与 Web UI 同源的 `/api/gouzi` 提供服务；浏览器半部绘制六个内联 SVG 头像和四步领养向导（头像、名字、角色与项目、确认）。
+浏览器里的狗子名册：一个侧栏入口，打开后是一个对话框，列出这个主实例的长期执行成员，并提供领养、修改、唤醒、休息和退役的操作。Host 半部在与 Web UI 同源的 `/api/gouzi` 提供服务；浏览器半部绘制六个内联 SVG 头像和四步领养向导（头像、名字、角色与项目、确认）。项目这一步不要求手输路径：它把用户最近用过的工作区列成可勾选项（当前工作区默认选中），并提供一个打开 Host 原生文件夹选择器的按钮；选中的绝对路径作为 `projects` 发给 `/api/gouzi`。
 
 `GET /api/gouzi` 返回 `GouziDashboardV1`：十只的上限、已占用名额数、当前调用方能否管理、这个 Host 能否启动成员，以及所有未归档的成员。每个成员带有 `membership`、`connection`、`activity`，以及由 `gouziPrimaryState` 归约出的一个 `state`：不在 `enabled` 的成员显示其 membership，联系不上的成员先显示这一点而不是它最后的活动，其余显示活动。`POST` 接收 `GouziControlRequest`，并要求带 `x-dsh-gouzi-control: 1` 头；本机回环属主、`cockpit` 与 `admin` 设备可以管理，`pocket` 设备只读，`gouzi` 凭据会被拒绝。
 
