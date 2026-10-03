@@ -126,6 +126,14 @@ function isAllowedMessage(message, allowedSources) {
   return kind === 'user' && allowedSources.has(kind)
 }
 
+/**
+ * Whether the message is the user's own task-template instruction. The user wrote the template and it is only
+ * injected when it matched this very task, so with `keepTaskTemplate` it passes phase 1 beside the user message.
+ */
+function isKeptTaskTemplate(message, keepTaskTemplate) {
+  return keepTaskTemplate && message.source?.kind === 'task-template'
+}
+
 /** Whether one pre-step message belongs to a deferred injection kind. */
 function isDeferredMessage(message, deferredSources) {
   const kind = message.source?.kind
@@ -314,6 +322,7 @@ export function apply(ctx, config) {
     maxBootstrapSteps: integerAtLeast(config.maxBootstrapSteps ?? 4, 'maxBootstrapSteps', 1),
     deferredGraceSteps: integerAtLeast(config.deferredGraceSteps ?? 0, 'deferredGraceSteps', 0),
     autoContinueText: autoContinueText(config.autoContinueOnMaxTokens),
+    keepTaskTemplate: config.keepTaskTemplate === true,
     promotedPresentation: presentation,
     bootstrapMaxTokens,
   }
@@ -400,7 +409,8 @@ export function apply(ctx, config) {
     if (!state.promoted) {
       return {
         ...decision,
-        messages: decision.messages.filter(message => isAllowedMessage(message, messageSources)),
+        messages: decision.messages.filter(message => isAllowedMessage(message, messageSources)
+          || isKeptTaskTemplate(message, policy.keepTaskTemplate)),
       }
     }
     if (state.deferredSteps < policy.deferredGraceSteps) {

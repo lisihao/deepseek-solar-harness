@@ -260,6 +260,12 @@ const TASKGRAPH_SOURCE = 'physical-operator-taskgraph'
 const ORCHESTRATION_TOOL = 'orchestration'
 const CHATGPT_WEB_OPERATOR_ID = 'chatgpt-web'
 const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
+/** Terminal code of a run whose model the account can only use with extra paid usage credits. */
+const CREDITS_REQUIRED_CODE = 'MODEL_REQUIRES_CREDITS'
+
+/** The native product's own wording when the selected model needs usage credits the subscription does not include. */
+const CREDITS_REQUIRED_PATTERN = /requires? (?:extra )?usage credits/iu
+
 const SMART_AUTO_UNAVAILABLE_CODES = new Set([
   'AUTH_MODE_MISMATCH',
   'OPERATOR_UNAVAILABLE',
@@ -1035,12 +1041,14 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         await projectPhysicalOperatorProgress(this.ctx, agent, run, dispatch.commandId)
       }
       if (!signal.aborted) {
-        const code = errorCode(error)
+        const creditsRequired = dispatch.executionMode === 'resident' && CREDITS_REQUIRED_PATTERN.test(error instanceof Error ? error.message : '')
+        const code = creditsRequired ? CREDITS_REQUIRED_CODE : errorCode(error)
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
           code,
         }, { ignorable: true })
-        if (run === undefined && dispatch.fallbackOperatorId !== undefined && smartAutoUnavailable(code)) {
+        const fallbackAllowed = creditsRequired || (run === undefined && smartAutoUnavailable(code))
+        if (fallbackAllowed && dispatch.fallbackOperatorId !== undefined) {
           throw new PhysicalOperatorError(
             `${operatorDisplayName(dispatch.operatorId)} subscription qualification failed; trying the Smart Auto fallback`,
             FALLBACK_REQUIRED_CODE,
@@ -1310,7 +1318,7 @@ async function allocateSmartAuto(
   let offers: ModelExecutionOffer[]
   let alternatives: ModelExecutionOffer[]
   try {
-    ({ offers, alternatives } = smartAutoOffers(ctx, await catalogs.current()))
+    ({ offers, alternatives } = smartAutoOffers(ctx, await catalogs.current(), creditBlockedOffers(agent.session.events)))
   } catch (error) {
     return { unavailable: `原生目录读取失败：${error instanceof Error ? error.message : String(error)}` }
   }
@@ -1410,7 +1418,11 @@ interface SmartAutoOffers {
  * and each offer's rank follows the newest-first order of the model menu so
  * an equally scored newer model wins.
  */
-function smartAutoOffers(ctx: Context, catalogs: readonly PhysicalOperatorResidentCatalog[]): SmartAutoOffers {
+function smartAutoOffers(
+  ctx: Context,
+  catalogs: readonly PhysicalOperatorResidentCatalog[],
+  creditBlocked: ReadonlySet<string> = new Set(),
+): SmartAutoOffers {
   const statuses = new Map(ctx.physicalOperators.list().map(status => [String(status.id), status] as const))
   const offers: ModelExecutionOffer[] = []
   const alternatives: ModelExecutionOffer[] = []
@@ -1420,6 +1432,7 @@ function smartAutoOffers(ctx: Context, catalogs: readonly PhysicalOperatorReside
     if (status === undefined || !isPhysicalOperatorProfileOwner(operatorId) || !catalog.supportsModelToolBridge) continue
     const qualified = catalog.available && catalog.authentication === 'native-subscription' && status.state !== 'unavailable'
     for (const [rank, model] of latestNativeModels(catalog.models, catalog.models.length).entries()) {
+      if (creditBlocked.has(`${operatorId}:${model.model}`)) continue
       const quotaPool = catalog.quotaPools?.find(pool => pool.models.includes(model.model))
       const offerFor = (offerId: string, effort: PhysicalOperatorReasoningEffort | undefined, offerRank: number): ModelExecutionOffer => ({
         offerId,
@@ -1449,6 +1462,24 @@ function smartAutoOffers(ctx: Context, catalogs: readonly PhysicalOperatorReside
     }
   }
   return { offers, alternatives }
+}
+
+/**
+ * Models this session already found to need usage credits the subscription lacks, as `operator:model` keys.
+ * The catalog lists them as available, so without this the allocator would pick the same model for every request.
+ * @param events - the session's ordered durable log.
+ * @returns the operator and model of every dispatch that ended with the credits-required code.
+ */
+function creditBlockedOffers(events: readonly SessionEvent[]): ReadonlySet<string> {
+  const blocked = new Set<string>()
+  for (const event of events) {
+    if (event.type !== 'physical-operator/dispatch-terminal' || event.data.code !== CREDITS_REQUIRED_CODE) continue
+    const dispatch = events.find(candidate => candidate.type === 'physical-operator/dispatch' && candidate.data.commandId === event.data.commandId)
+    if (dispatch?.type === 'physical-operator/dispatch' && dispatch.data.residentProfile?.model !== undefined) {
+      blocked.add(`${dispatch.data.operatorId}:${dispatch.data.residentProfile.model}`)
+    }
+  }
+  return blocked
 }
 
 /** Native preferences can constrain TaskGraph workers without replacing a selected primary model. */

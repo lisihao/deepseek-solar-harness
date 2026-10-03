@@ -238,6 +238,14 @@ describe('anchored-tool-bootstrap', () => {
     expect(result.messages.map((entry: any) => entry.id)).toEqual(['user'])
   })
 
+  test('keepTaskTemplate lets only the matched task-template instruction through phase 1', async () => {
+    const messages = [message('user', 'user'), message('task-template', 'template'), message('agent-instructions', 'instructions')]
+    const kept = await preStep(listener(register({ keepTaskTemplate: true }), 'agent/pre-step'), [], messages)
+    expect(kept.messages.map((entry: any) => entry.id)).toEqual(['user', 'template'])
+    const dropped = await preStep(listener(register(), 'agent/pre-step'), [], messages)
+    expect(dropped.messages.map((entry: any) => entry.id)).toEqual(['user'])
+  })
+
   test('anchorGate holds promotion after a standard-like first block', async () => {
     const assembleListener = listener(register({ anchorGate: true, maxBootstrapSteps: 4 }), 'system-prompt/assemble')
     const tools = [{ name: 'bash' }, { name: 'read' }, { name: 'edit' }]

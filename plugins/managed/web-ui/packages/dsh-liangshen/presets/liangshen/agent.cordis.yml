@@ -59,6 +59,9 @@
 # turn that spends the capped budget on reasoning ends with no answer;
 # `autoContinueOnMaxTokens` then promotes the session and sends that text once
 # as the next user turn, so the user does not have to type it.
+# `keepTaskTemplate` lets a matched task-template instruction through phase 1;
+# otherwise the phase-1 message filter drops it for the whole first turn, and
+# a template never reaches the first task of a session or its operator dispatch.
 - id: tool-bootstrap
   name: ./tool-bootstrap.mjs
   config:
@@ -70,6 +73,7 @@
     promoteAfterFirstResponse: true
     bootstrapMaxTokens: 1024
     autoContinueOnMaxTokens: 继续
+    keepTaskTemplate: true
     deferredSources: [agent-instructions, skill-catalog]
     deferredGraceSteps: 1
     promotedPresentation: code

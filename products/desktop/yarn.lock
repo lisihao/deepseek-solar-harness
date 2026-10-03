@@ -4528,7 +4528,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=be79bd&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=73417d&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -4550,7 +4550,7 @@ __metadata:
     "@deepseek-ai/dsh-task-template-context": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     zod: ^4.4.3
-  checksum: 10c0/230f294efaca19f82d91845f68022777ac03831f151ffa123d83c6981ddc48a7c4e88fa069c6c7ce3c22d7be1c1858a530238b6122ae188901a11af81a61bb54
+  checksum: 10c0/367278962f0f40123e72a0dc1809aa1ca344f7b823cb14557fe2d7c1867342225a5854d77208af96cb5b82db3599ff5efd89c9f2c8263d077751230b090fa11c
   languageName: node
   linkType: hard
 
@@ -6014,12 +6014,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.21.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
-  version: 0.1.21
-  resolution: "@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.21.tgz#vendor/dsh-packages/linxin666-dsh-liangshen-0.1.21.tgz::hash=2686c1&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
+"@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.22.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
+  version: 0.1.22
+  resolution: "@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.22.tgz#vendor/dsh-packages/linxin666-dsh-liangshen-0.1.22.tgz::hash=245f3d&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
   dependencies:
     schemastery: "npm:^3.18.0"
-  checksum: 10c0/6b33dbb7ce07e6bd7012751c513c11994e6812c84ffa3ecb0b3bb7b88bd4ef934a82d199b8ea8a1edcb6e879dca65a22e8d5d18a51e2f52e70f1d5947e742a64
+  checksum: 10c0/2bb9198377bcd123d43bf8f868912e84c88945e117b82607d1327f5aa708a2515ea2b9c85aa9f804869e415ad28368115ca0ccd63ff8195262101824a7d98c95
   languageName: node
   linkType: hard
 
@@ -9466,7 +9466,7 @@ __metadata:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
     "@linxin666/dsh-client-ui-skin-blue-fantasy": "file:vendor/dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz"
-    "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.21.tgz"
+    "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.22.tgz"
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
     "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.14.tgz"
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5-solar.1.tgz"
