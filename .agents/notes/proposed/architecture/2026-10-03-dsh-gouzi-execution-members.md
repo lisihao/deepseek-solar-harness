@@ -79,6 +79,15 @@ A member can live on another machine, such as a Mac mini, that the user adds fro
 
 Limits: a task takes its workspace identity from a clean Git checkout on the main instance, so a repository that exists only on the remote machine cannot receive tasks yet; that needs a remote-resident workspace identity and is the next piece. The user-facing local/remote Server picker stays until remote members cover that case, and is then retired with a migration of saved Server entries.
 
+### The kennel
+
+The adopted dogs are not worked with through a management dialog. Adoption, editing, wake, rest, retire, and adding machines are configuration and live in Settings (a **狗子** section). What the user meets every day is the **kennel**, a sidebar row that opens one chat.
+
+- **First version: an ordinary session with a preset.** The row opens the newest session whose preset is `kennel`, or starts a session in the current workspace and gives it the preset while it is still blank (the host refuses to change the preset of a session that has history). The `kennel` preset is the standard coding composition with a steward persona and a context plugin that lists the enabled dogs, where each lives, whether it answers, and the operator ids `gouzi.<id>.codex` and `gouzi.<id>.claude-code`.
+- **The steward is the main instance's agent, not a dog.** It plans and routes with the existing `orchestration` tool, setting `operator.preferredIds` per node, so the main instance stays the only TaskGraph, Scheduler, and acceptance authority. Parallel nodes assigned to different dogs are how "split the work" happens, and the existing task-graph, progress, and approval surfaces show it.
+- **Why not a dedicated group-chat room first.** A room needs its own message log, a view with a speaker per dog, and a channel for dog-to-dog messages with bounds on cost and loops. That is the P3 scope (roles, automatic division of work, bounded messages). Reusing the chat session gives a working kennel now and keeps the room as a later view over the same dispatch path.
+- **Limits that follow.** A dog does not speak in its own bubble and dogs do not message each other; the steward reports and relays. The roster is read on every prompt assembly, so a dog adopted or retired in Settings appears on the next request. The workspace of the kennel session must still be a clean Git checkout whose `origin` is a repository the dog was allowed.
+
 ### Phases
 
 P0 is this note and the contract types, with no behavior change. P1 is one member end to end: create it from the entry UI, pair a pilot host, run one authorized task in an isolated worktree, persist the receipt and artifacts, and let the main instance confirm. P2 adds atomic resource admission, process-tree reclamation, bounded offline execution, and cancel and reconnect handling. P3 adds roles, automatic division of work, bounded messages, and independent verification. P4 adds experience proposals, versioned release and rollback, and migration. Computer use is out of scope.

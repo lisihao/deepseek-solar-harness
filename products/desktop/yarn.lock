@@ -4856,15 +4856,17 @@ __metadata:
 
 "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::hash=6d9c4f&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::hash=560180&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     clsx: "npm:^2.0.0"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-api-remotes": ^0.1.0-rc.5
     "@deepseek-ai/dsh-client-connection": ^0.1.0-rc.5
     "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.5
     "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-ui-settings": ^0.1.0-rc.5
     "@deepseek-ai/dsh-client-ui-sidebar": ^0.1.0-rc.5
     "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.5
     "@deepseek-ai/dsh-host-remote-auth": ^0.1.0-rc.5
@@ -4873,7 +4875,7 @@ __metadata:
     "@deepseek-ai/dsh-orchestration": ^0.1.0-rc.5
     react: ^18.2.0
     react-dom: ^18.2.0
-  checksum: 10c0/5f229e855413d691b9b7d1e8f43759a79bc8e8b2e31ecad971b2f9c6eb3ad586143687e81f88e9ff5fa7e146afc361233c919d8cd02aa9a0d5e761f608e73d69
+  checksum: 10c0/1e144dd3cd70f122445ec56ebb706269ade765a32d7093584c7ccb90318de332228a174807af94ea6b09490b1f3038eaa8a34a6d2b75cdd2a82ce542b2a91ebb
   languageName: node
   linkType: hard
 

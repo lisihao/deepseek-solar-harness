@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/orchestration/ui-gouzi/README.md
-README.md: f9db13e4575dc0159a3454d7f60546941e6a7678
-README.zh.md: 1e0d72ac7a31d1e2e0a1f36f82c546f7c0d7b308
+README.md: dbe310a47ba63b7a5b9c5aad4741f40784acf3dc
+README.zh.md: 0a2827fac97d4f5454e367c0b803d708c6ea9b17
