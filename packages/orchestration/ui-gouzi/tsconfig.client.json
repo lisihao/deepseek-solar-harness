@@ -12,6 +12,7 @@
     "src/client/GouziPanel.tsx",
     "src/client/HostStep.tsx",
     "src/client/index.ts",
+    "src/client/KennelHero.tsx",
     "src/client/kennel.ts",
     "src/client/KennelEntry.tsx",
     "src/client/RemoteFolderPicker.tsx",
@@ -23,6 +24,7 @@
     { "path": "../../api/remotes/tsconfig.client.json" },
     { "path": "../../client/connection/tsconfig.client.json" },
     { "path": "../../client/runtime" },
+    { "path": "../../client/ui-conversation" },
     { "path": "../../client/ui-primitives" },
     { "path": "../../client/ui-sidebar" },
     { "path": "../../client/ui-slots" }

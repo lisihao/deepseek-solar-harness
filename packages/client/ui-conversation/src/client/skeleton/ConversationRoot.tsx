@@ -161,6 +161,7 @@ export function ConversationRoot({
       {hero && <HeroGlow className={css.heroGlow} />}
       {hero && <HeroShell t={t} />}
       {hero && heroWorkspaceRow}
+      {hero && renderSlot('conversation.hero.extra', {})}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {inputBar}
     </div>
