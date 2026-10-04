@@ -27,10 +27,16 @@ function alive(pid: number): boolean {
 let root: string
 const spawned = new Set<number>()
 
+/** Spawns the supervisor asked for, counted by the supervisor's own command callback rather than by the stand-in's log. */
+let spawnCount = 0
+
 function supervisor(mode: string, extra: Record<string, string> = {}, options: { activeLimit?: number; readyTimeoutMs?: number } = {}) {
   return new GouziSupervisor({
     membersRoot: root,
-    workerCommand: () => ({ command: process.execPath, args: [STAND_IN], env: { STAND_IN_MODE: mode, ...extra } }),
+    workerCommand: () => {
+      spawnCount += 1
+      return { command: process.execPath, args: [STAND_IN], env: { STAND_IN_MODE: mode, ...extra } }
+    },
     activeLimit: options.activeLimit ?? 2,
     readyTimeoutMs: options.readyTimeoutMs ?? 600,
     stopTimeoutMs: 400,
@@ -51,7 +57,20 @@ function spawnedPids(gouziId: string): number[] {
   return pids
 }
 
-beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'dsh-gouzi-supervisor-')) })
+/** Wait until the stand-in processes of a member have written `count` pids; on a loaded machine Node starts slowly. */
+async function waitForPids(gouziId: string, count: number): Promise<number[]> {
+  const deadline = Date.now() + 15_000
+  for (;;) {
+    const pids = spawnedPids(gouziId)
+    if (pids.length >= count || Date.now() > deadline) return pids
+    await new Promise(resolveWait => setTimeout(resolveWait, 50))
+  }
+}
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'dsh-gouzi-supervisor-'))
+  spawnCount = 0
+})
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -69,14 +88,12 @@ describe('a start that times out', () => {
     home('a')
     const members = supervisor('silent')
     await expect(members.start('a')).rejects.toThrow(/was not ready after 600 ms/u)
-    const [first] = spawnedPids('a')
-    expect(first).toBeDefined()
-    expect(alive(first!)).toBe(false)
+    // The failure was reported only after the process was gone: nothing the stand-in managed to log is alive.
+    expect(spawnedPids('a').filter(alive)).toEqual([])
 
     await expect(members.start('a')).rejects.toThrow(/was not ready/u)
-    const pids = spawnedPids('a')
-    expect(pids).toHaveLength(2)
-    expect(pids.filter(alive)).toEqual([])
+    expect(spawnCount).toBe(2)
+    expect(spawnedPids('a').filter(alive)).toEqual([])
   }, 30_000)
 
   it('refuses to start another process while the old one cannot be stopped, and says why', async () => {
@@ -91,13 +108,14 @@ describe('a start that times out', () => {
     await expect(members.start('a')).rejects.toThrow(/did not exit and still holds its slot/u)
     vi.restoreAllMocks()
     // Still alive and still tracked: another start must not spawn a second process on top of it.
-    const [first] = spawnedPids('a')
+    const [first] = await waitForPids('a', 1)
     expect(alive(first!)).toBe(true)
     vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
       if (signal === 'SIGTERM' || signal === 'SIGKILL') return true
       return kill(pid, signal as number)
     }) as typeof process.kill)
     await expect(members.start('a')).rejects.toThrow(/still has a process/u)
+    expect(spawnCount).toBe(1)
     expect(spawnedPids('a')).toHaveLength(1)
   }, 30_000)
 
@@ -108,6 +126,7 @@ describe('a start that times out', () => {
     const booting = members.start('a')
     await new Promise(resolveWait => setTimeout(resolveWait, 200))
     await expect(members.start('b')).rejects.toBeInstanceOf(GouziActiveLimitError)
+    expect(spawnCount).toBe(1)
     expect(spawnedPids('b')).toEqual([])
     await booting
     await members.stop('a')
@@ -120,6 +139,7 @@ describe('two starts of the same member', () => {
     const members = supervisor('ready', { STAND_IN_DELAY_MS: '300' }, { readyTimeoutMs: 5_000 })
     const [first, second] = await Promise.all([members.start('a'), members.start('a')])
     expect(first.pid).toBe(second.pid)
+    expect(spawnCount).toBe(1)
     expect(spawnedPids('a')).toHaveLength(1)
     await members.stop('a')
   }, 30_000)
