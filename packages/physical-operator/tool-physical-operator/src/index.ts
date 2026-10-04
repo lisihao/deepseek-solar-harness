@@ -1,7 +1,8 @@
 /**
  * Model-facing `physical_operator` consumer. The model discovers stable
  * operator ids and invokes one without selecting a subprocess, SDK, model, or
- * provider transport. All execution remains on `ctx.physicalOperators`.
+ * provider transport. Gouzi ids require TaskGraph dispatch; admitted direct
+ * execution remains on `ctx.physicalOperators`.
  *
  * @module @deepseek-ai/dsh-tool-physical-operator
  */
@@ -812,6 +813,12 @@ export function apply(ctx: Context, config: Config = {}): void {
         throw new Error('physical_operator action=run requires a calling agent (exec.agent was undefined)')
       }
       const operatorId = requireTrimmed(request.operator_id, 'operator_id')
+      if (operatorId.startsWith('gouzi.')) {
+        throw new PhysicalOperatorError(
+          `operator ${operatorId} is TaskGraph-only: use orchestration.start with this id in a TaskGraph node's operator.preferredIds; physical_operator cannot dispatch it directly`,
+          'OPERATOR_MODE_UNSUPPORTED',
+        )
+      }
       const description = requireTrimmed(request.description, 'description')
       const prompt = requireTrimmed(request.prompt, 'prompt')
       rejectUnsupportedCapabilityMode(request)

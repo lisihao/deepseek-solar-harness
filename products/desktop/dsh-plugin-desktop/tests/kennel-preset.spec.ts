@@ -1,5 +1,6 @@
 /** The kennel preset: it is discoverable as a system preset, and its context tells the steward who the dogs are. */
 
+import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -25,6 +26,32 @@ const dog = (patch: Partial<Member> = {}): Member => ({
 const hosts = [{ hostId: 'local', label: '这台 Mac' }, { hostId: 'ssh-1', label: 'Mac mini' }]
 
 describe('the kennel preset', () => {
+  it('requires TaskGraph dispatch for a named dog even when the task is a single read-only request', async () => {
+    const preset = await readFile(join(PRESETS, 'kennel', 'agent.cordis.yml'), 'utf8')
+    const persona = preset.split('      工作方式：')[1]!.split('\n- id: kennel-context')[0]!
+    expect(persona).toContain('即使只有一个只读任务，也必须用 orchestration.start 提交完整的单节点 TaskGraph')
+    expect(persona).toContain('gouzi.* id 只用于节点的 operator.preferredIds')
+    expect(persona).toContain('不要把 gouzi.* 交给 physical_operator.run')
+    expect(persona).toContain('不要用本地执行者或自己执行来替代用户指定的狗子')
+    expect(persona).toContain('用户没有指定狗子时')
+  })
+
+  it('names the complete graph fields and repairs compilation errors before reporting execution', async () => {
+    const preset = await readFile(join(PRESETS, 'kennel', 'agent.cordis.yml'), 'utf8')
+    for (const field of ['version: 1', 'title', 'workspace', 'maxParallel', 'risk', 'nodes', 'dependsOn',
+      'requiredForCompletion', 'task', 'role', 'capabilityRequirements', 'capabilityBudget', 'contextPolicy',
+      'effectBudget', 'readScopes', 'writeScopes', 'approvedSecretRefs', 'acceptance', 'retryPolicy']) {
+      expect(preset).toContain(field)
+    }
+    expect(preset).toContain('任务写在 task，不用 prompt')
+    expect(preset).toContain('不用 capabilities')
+    expect(preset).toContain('不用 scope')
+    expect(preset).toContain('GRAPH_INVALID 是图编译错误')
+    expect(preset).toContain('修正完整图，再重试 orchestration.start')
+    expect(preset).toContain('不要把它报成狗子连接故障')
+    expect(preset).toContain('不要把尚未执行的任务报成完成')
+  })
+
   it('is discovered as a working system preset next to the other Desktop presets', async () => {
     const found = await discoverPresets([{ path: PRESETS, trust: 'system' }])
     const kennel = found.find(preset => preset.id === 'kennel')
@@ -35,6 +62,19 @@ describe('the kennel preset', () => {
 })
 
 describe('the roster context', () => {
+  it('distinguishes a reachable member from verified provider eligibility and ephemeral execution', () => {
+    const text = renderRoster({ hosts, members: [dog()] })
+    expect(text).toContain('TaskGraph only')
+    expect(text).toContain('预测，未核验注册')
+    expect(text).toContain('在线只表示成员连接可达')
+    expect(text).toContain('不证明已注册或可执行任务')
+    expect(text).toContain('实际资格为准')
+    expect(text).toContain('普通 physical_operator 目录中没有这些 id 是预期情况')
+    expect(text).toContain('单个只读任务也要提交完整的单节点 TaskGraph')
+    expect(text).toContain('不能用于 physical_operator.run')
+    expect(text).toContain('修正错误指出的具体字段后重试 orchestration.start')
+  })
+
   it('names each enabled dog with where it lives, whether it answers, and the operator ids to route to', () => {
     const text = renderRoster({ hosts, members: [dog(), dog({ gouziId: 'gouzi-c2', name: '小满', hostId: 'local', activity: 'working', connection: 'unreachable' })] })
     expect(text).toContain('现在有 2 只启用的狗子')

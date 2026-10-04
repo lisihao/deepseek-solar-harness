@@ -6,8 +6,10 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { describe, expect, it } from 'vitest'
+import type { LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
+import { validateGraph } from '@deepseek-ai/dsh-orchestration-local'
 import * as tool from '../src/index.ts'
-import { foldOrchestrationPreferences, orchestrationGuidance } from '../src/index.ts'
+import { foldOrchestrationPreferences, orchestrationGuidance, orchestrationGraphGuidance } from '../src/index.ts'
 
 async function setupCommand(): Promise<{ readonly ctx: Context; readonly agent: Agent }> {
   const ctx = new Context()
@@ -37,6 +39,16 @@ describe('orchestration model guidance', () => {
     expect(orchestrationGuidance).toContain('without a phase barrier')
     expect(orchestrationGuidance).toContain('Sol for planning/verification')
     expect(orchestrationGuidance).toContain('Luna for qualified coding leaves')
+  })
+
+  it('gives the model a complete read-only graph accepted by the actual graph validator', () => {
+    const example = JSON.parse(orchestrationGraphGuidance.slice(orchestrationGraphGuidance.indexOf('{"version":1'))) as LogicalTaskGraphV1
+    expect(validateGraph(example)).toEqual(['read-readme'])
+    expect(example.nodes[0]?.effectBudget).toEqual({ read: ['README.md'], write: [], execute: [], network: [], cost: [], risk: [] })
+    expect(orchestrationGraphGuidance).toContain('Gouzi ids route through this tool only')
+    expect(orchestrationGraphGuidance).toContain('repair the reported graph field')
+    const { title: _title, ...missingTitle } = example
+    expect(() => validateGraph(missingTitle)).toThrow('graph.title must be non-blank and trimmed')
   })
 
   it('defaults to Auto and preserves explicit RLM or Standard choices for comparison', () => {

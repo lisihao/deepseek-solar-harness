@@ -18,7 +18,7 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 `dsh-gouzi-worker` 用同一套封装组合启动一只狗子执行成员。`DSH_HOME` 选定成员自己的 home；该 home 里必须已有 `provisionGouziIdentity` 写入的身份，以及一份单成员的 `orchestrations/cluster.json`，用来列出该成员可以物化的仓库。`prepareGouziWorkerProfile` 会停用所有调度行（`orchestration-local`、Debate 与编排工具、调度证据），挂载 `@deepseek-ai/dsh-orchestration-local/remote-host` 与 `@deepseek-ai/dsh-host-gouzi-member`，并让 connection 等待成员闸门而不是编排服务。启动完成后它会打印一行 JSON `gouzi-worker-ready`，包含 pid、端口、身份和 incarnation。停止 worker 不会停止它所启动的 Resident daemon；回收这棵进程树属于后续阶段。
 
-Desktop 自有的预设根目录 `vendor/agent-presets` 还带有 `kennel` 预设：标准编码组合加上一个面向用户狗子的总管人格，以及 `kennel-context.mjs`，它把实时名单（名字、角色、宿主、能否联系上，以及 `gouzi.<id>.<provider>` 形式的 operator id）追加到狗窝会话每一次提示词组装里。
+Desktop 自有的预设根目录 `vendor/agent-presets` 还带有 `kennel` 预设：标准编码组合加上一个面向用户狗子的总管人格，以及 `kennel-context.mjs`，它把实时名单（名字、角色、宿主、能否联系上，以及按命名规则预测、仅用于 TaskGraph 的 `gouzi.<id>.<provider>` operator id）追加到狗窝会话每一次提示词组装里。 用户指定狗子时，单个只读任务也通过完整的编排任务图派发；这些 id 只放入节点的 `operator.preferredIds`，连接可达不证明提供方具备任务资格。
 
 `dsh-gouzi-agent` 是主实例通过 SSH 在另一台机器上管理成员时运行的命令。每次调用只做一个操作（`probe`、`resolve`、`browse`、`provision`、`start`、`stop`），并打印一行 `DSH-GOUZI-AGENT {json}` 结果；它启动的成员是脱离终端的进程，调用结束后继续运行。远程主实例的成员放在 DSH home 的 `gouzi/remote-members` 下，与本机成员分开。在主实例一侧，`gouzi-host` Provider 把 SSH 宿主保存在 `gouzi/hosts` 下：一份目录、每台宿主一把专用 ed25519 密钥，以及固定下来的主机密钥。它只用密码登录一次来安装这把密钥，从不保存密码，之后使用系统 `ssh`，并以 `StrictHostKeyChecking=yes` 对照固定的密钥。每个运行中的远程成员有一个回环端口转发，其本地端口记录在目录里，所以端点保持稳定，应用重启时转发会重新打开。远程机器上需要在 `/Applications/DSH Desktop.app` 装有 DSH Desktop 3.36.0 或更新版本。
 
