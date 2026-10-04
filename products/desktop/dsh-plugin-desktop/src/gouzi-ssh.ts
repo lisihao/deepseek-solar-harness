@@ -89,6 +89,9 @@ function run(
         timedOut: failure?.killed === true,
       })
     })
+    // A command that exits without reading its input closes the pipe under the write. That EPIPE says only that the
+    // input was not needed; the exit code and standard error already describe what the command did.
+    child.stdin?.on('error', () => undefined)
     child.stdin?.end(options.stdin ?? '')
   })
 }

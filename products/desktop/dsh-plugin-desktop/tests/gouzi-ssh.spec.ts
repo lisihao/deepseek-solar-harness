@@ -124,3 +124,22 @@ describe('shellQuote', () => {
     expect(shellQuote("it's")).toBe("'it'\\''s'")
   })
 })
+
+describe('a command that exits without reading its input', () => {
+  const target: SshHostTarget = { address: '127.0.0.1', port: 22, user: 'nobody', keyPath: '/nonexistent', knownHostsPath: '/nonexistent' }
+
+  it('settles normally instead of raising an unhandled EPIPE from the closed input pipe', async () => {
+    const unhandled: unknown[] = []
+    const record = (error: unknown): void => { unhandled.push(error) }
+    process.on('uncaughtException', record)
+    try {
+      // `true` ignores its standard input and exits at once; two megabytes cannot fit in the pipe before it does.
+      const output = await sshExec({ ...SYSTEM_SSH, ssh: 'true' }, target, 'ignored', { stdin: 'x'.repeat(2_000_000) })
+      expect(output).toBe('')
+      await new Promise(resolveWait => setTimeout(resolveWait, 100))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('uncaughtException', record)
+    }
+  })
+})
