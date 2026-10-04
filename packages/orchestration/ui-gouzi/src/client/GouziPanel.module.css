@@ -1,66 +1,12 @@
 /* Sidebar row, roster dialog, and the adoption wizard. */
 
-.trigger {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: calc(100% + 8px);
-  height: 34px;
-  margin: 0 -4px;
-  padding: 6px 2px 6px 10px;
-  box-sizing: border-box;
-  border: none;
-  border-radius: 12px;
-  overflow: hidden;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  cursor: pointer;
-  font: inherit;
-}
-.trigger:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.trigger.rail {
-  width: 36px;
-  height: 36px;
-  margin: 2px 0;
-  justify-content: center;
-  gap: 0;
-  padding: 0;
-  border-radius: 50%;
-}
-.triggerLabel { min-width: 0; flex: 1 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
-.badge { flex: none; margin-right: 8px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
-
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  box-sizing: border-box;
-}
-.mask {
-  position: absolute;
-  inset: 0;
-  background: var(--dsw-alias-bg-mask-1);
-  backdrop-filter: var(--dsw-mask-blur);
-}
-.panel {
-  position: relative;
-  z-index: 1;
+.manager {
   display: flex;
   flex-direction: column;
-  width: min(720px, 100%);
-  max-height: min(760px, 100%);
   min-width: 0;
-  min-height: 0;
-  overflow: hidden;
   border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 18px;
+  border-radius: 14px;
   background: var(--dsw-alias-bg-layer-2);
-  box-shadow: var(--dsw-shadow-lv3);
 }
 .header {
   flex: none;
@@ -91,7 +37,7 @@
   font-size: 13px;
   cursor: pointer;
 }
-.primary { border: none; background: var(--dsw-alias-brand-primary); color: #fff; }
+.primary { border: none; background: var(--dsw-alias-interactive-bg-primary); color: var(--dsw-alias-label-inverse); }
 .primary:disabled { opacity: 0.45; cursor: not-allowed; }
 .secondary { border: 1px solid var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-primary); }
 .secondary:hover { background: var(--dsw-alias-interactive-bg-hover); }

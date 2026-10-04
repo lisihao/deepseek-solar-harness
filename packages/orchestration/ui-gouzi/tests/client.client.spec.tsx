@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, GouziAvatarImage, GouziEntry, inject, loadGouzi } from '../src/client/index.ts'
+import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
 import type { GouziFolders } from '../src/client/index.ts'
 import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection } from '../src/contracts.ts'
 
@@ -63,8 +63,7 @@ const BETA: FakeWorkspace = { workspaceId: 'w2', path: '/work/beta', title: 'bet
 
 /** Walk the wizard to the project step with the avatar and name filled in. */
 async function openProjectStep(harness: ReturnType<typeof fakeRequest>, folders: GouziFolders): Promise<void> {
-  render(<GouziEntry wide request={harness.request} folders={folders} />)
-  fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+  render(<GouziManager request={harness.request} folders={folders} />)
   fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
   fireEvent.click(screen.getByRole('button', { name: '下一步' }))
   fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
@@ -94,25 +93,20 @@ describe('Gouzi avatars', () => {
 })
 
 describe('Gouzi sidebar entry and roster', () => {
-  it('shows the member count, opens the roster, and describes each member in one primary state', async () => {
+  it('shows the member count and describes each member in one primary state', async () => {
     const { request } = fakeRequest({ roster: dashboard([member(), member({ gouziId: 'g2', name: 'Pixel', state: 'working', activity: 'working' })]) })
-    render(<GouziEntry wide request={request} folders={fakeFolders().folders} />)
-    await screen.findByText('2/10')
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
-    const dialog = await screen.findByRole('dialog', { name: '狗子' })
-    expect(within(dialog).getByText('2 / 10 个名额')).toBeTruthy()
-    expect(within(dialog).getByText('Mochi')).toBeTruthy()
-    expect(within(dialog).getByText('休息中')).toBeTruthy()
-    expect(within(dialog).getByText('工作中')).toBeTruthy()
-    fireEvent.keyDown(document, { key: 'Escape' })
-    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
+    render(<GouziManager request={request} folders={fakeFolders().folders} />)
+    const page = await screen.findByRole('region', { name: '狗子' })
+    expect(await within(page).findByText('2 / 10 个名额')).toBeTruthy()
+    expect(within(page).getByText('Mochi')).toBeTruthy()
+    expect(within(page).getByText('休息中')).toBeTruthy()
+    expect(within(page).getByText('工作中')).toBeTruthy()
   })
 
   it('walks the four adoption steps, suggesting the recent project, and posts one adopt request with the control header', async () => {
     const harness = fakeRequest({ roster: dashboard([]) })
     const { folders } = fakeFolders([ALPHA, BETA], async () => null, 'w1')
-    render(<GouziEntry wide request={harness.request} folders={folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={folders} />)
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
 
     fireEvent.click(screen.getByRole('radio', { name: /贵宾/ }))
@@ -186,8 +180,7 @@ describe('Gouzi sidebar entry and roster', () => {
       roster: dashboard([]),
       reply: () => Response.json({ error: 'GOUZI_START_FAILED', message: 'Mochi 已创建，但还没能启动：端口被占用' }, { status: 502 }),
     })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Mochi' } })
@@ -201,14 +194,12 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('disables adoption when the roster is full or the Host cannot start members', async () => {
     const full = fakeRequest({ roster: dashboard(Array.from({ length: 10 }, (_, index) => member({ gouziId: `g${String(index)}` }))) })
-    const { unmount } = render(<GouziEntry wide request={full.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    const { unmount } = render(<GouziManager request={full.request} folders={fakeFolders().folders} />)
     expect(await screen.findByRole('button', { name: '领养狗子' })).toHaveProperty('disabled', true)
     unmount()
 
     const noHost = fakeRequest({ roster: dashboard([], { hostAvailable: false }) })
-    render(<GouziEntry wide request={noHost.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={noHost.request} folders={fakeFolders().folders} />)
     expect(await screen.findByRole('button', { name: '领养狗子' })).toHaveProperty('disabled', true)
     expect(await screen.findByText('这台机器还不能启动狗子，只能查看。')).toBeTruthy()
   })
@@ -220,9 +211,8 @@ describe('Gouzi sidebar entry and roster', () => {
         member({ gouziId: 'busy', name: 'Busy', state: 'working', activity: 'working' }),
       ]),
     })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
-    const dialog = await screen.findByRole('dialog')
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
+    const dialog = await screen.findByRole('region')
     const cards = await within(dialog).findAllByRole('listitem')
     expect(within(cards[0]!).getByRole('button', { name: '唤醒' })).toBeTruthy()
     expect(within(cards[0]!).queryByRole('button', { name: '休息' })).toBeNull()
@@ -235,8 +225,7 @@ describe('Gouzi sidebar entry and roster', () => {
     const harness = fakeRequest({ roster: dashboard([member()]) })
     const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true)
     vi.stubGlobal('confirm', confirm)
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
     const retire = await screen.findByRole('button', { name: '退役' })
     fireEvent.click(retire)
     expect(harness.posts).toEqual([])
@@ -246,8 +235,7 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('edits the name, avatar, and role of a member', async () => {
     const harness = fakeRequest({ roster: dashboard([member()]) })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
     fireEvent.click(await screen.findByRole('button', { name: '修改' }))
     fireEvent.change(screen.getByDisplayValue('Mochi'), { target: { value: 'Pixel' } })
     fireEvent.click(screen.getByRole('radio', { name: /比熊/ }))
@@ -259,8 +247,7 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('hides every control from a read-only device and says so', async () => {
     const harness = fakeRequest({ roster: dashboard([member()], { canManage: false }) })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
     expect(await screen.findByText('这个设备只能查看狗子。')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '领养狗子' })).toBeNull()
     expect(screen.queryByRole('button', { name: '退役' })).toBeNull()
@@ -268,21 +255,13 @@ describe('Gouzi sidebar entry and roster', () => {
 
   it('shows an empty roster invitation and a load failure', async () => {
     const empty = fakeRequest({ roster: dashboard([]) })
-    const { unmount } = render(<GouziEntry wide request={empty.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    const { unmount } = render(<GouziManager request={empty.request} folders={fakeFolders().folders} />)
     expect(await screen.findByText(/还没有狗子/u)).toBeTruthy()
     unmount()
 
     const failing = vi.fn(async () => Response.json({ error: 'GOUZI_UNAVAILABLE', message: '当前编排服务不管理狗子' }, { status: 503 }))
-    render(<GouziEntry wide request={failing as never} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={failing as never} folders={fakeFolders().folders} />)
     expect((await screen.findByRole('alert')).textContent).toContain('当前编排服务不管理狗子')
-  })
-
-  it('renders the rail form without a label when the sidebar is collapsed', async () => {
-    const harness = fakeRequest({ roster: dashboard([member()]) })
-    render(<GouziEntry wide={false} request={harness.request} folders={fakeFolders().folders} />)
-    expect(screen.getByRole('button', { name: '狗子' }).textContent).toBe('')
   })
 
   it('wraps a malformed failure body in a generic explanation', async () => {
@@ -318,8 +297,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
   it('adds a machine: shows its fingerprint first, then logs in once with the password and selects it', async () => {
     const state = { added: false }
     const harness = fakeRequest({ roster: dashboard([]), reply: remoteReply(state) })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
@@ -353,8 +331,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
       roster: dashboard([]),
       reply: () => Response.json({ error: 'GOUZI_FAILED', message: '连不上 mini.local:22' }, { status: 502 }),
     })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders().folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
@@ -370,8 +347,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
 
   it('browses the remote machine, only offers Git folders, and adopts onto it with the remote paths', async () => {
     const harness = fakeRequest({ roster: dashboard([], { hosts: [LOCAL_HOST, MINI_HOST] }), reply: remoteReply() })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
@@ -400,8 +376,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
       roster: dashboard([member({ hostId: 'ssh-1', hostLabel: 'Mac mini' })], { hosts: [LOCAL_HOST, MINI_HOST] }),
       reply: remoteReply(),
     })
-    render(<GouziEntry wide request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
-    fireEvent.click(screen.getByRole('button', { name: '狗子' }))
+    render(<GouziManager request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
     expect((await screen.findByText(/住在 Mac mini/)).textContent).toContain('开发')
     fireEvent.click(screen.getByRole('button', { name: '领养狗子' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
@@ -416,25 +391,190 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
   })
 })
 
+describe('the kennel row', () => {
+  it('shows the dogs and how many are awake, and opens the kennel on click', async () => {
+    const harness = fakeRequest({ roster: dashboard([member(), member({ gouziId: 'g2', name: 'Pixel', connection: 'unreachable', state: 'unreachable' })]) })
+    const open = vi.fn(async () => undefined)
+    render(<KennelEntry wide request={harness.request} open={open} />)
+    expect(await screen.findByText('1/2')).toBeTruthy()
+    expect(screen.getAllByRole('img')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
+    await waitFor(() => { expect(open).toHaveBeenCalledTimes(1) })
+  })
+
+  it('invites the user to adopt when there are no dogs, and keeps the collapsed form label-free', async () => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    render(<KennelEntry wide={false} request={harness.request} open={vi.fn(async () => undefined)} />)
+    await waitFor(() => { expect(harness.calls).toHaveBeenCalled() })
+    expect(screen.getByRole('button', { name: '狗窝' }).textContent).toBe('')
+    expect(screen.getAllByRole('img')).toHaveLength(1)
+  })
+
+  it('stays disabled while opening and shows why it could not open', async () => {
+    const harness = fakeRequest({ roster: dashboard([member()]) })
+    let release: (() => void) | undefined
+    const open = vi.fn(() => new Promise<void>((resolveOpen, rejectOpen) => { release = () => { rejectOpen(new Error('没能新建狗窝会话')) }; void resolveOpen }))
+    render(<KennelEntry wide request={harness.request} open={open} />)
+    fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: '狗窝' })).toHaveProperty('disabled', true) })
+    release?.()
+    expect((await screen.findByRole('alert')).textContent).toContain('没能新建狗窝会话')
+    expect(screen.getByRole('button', { name: '狗窝' })).toHaveProperty('disabled', false)
+  })
+})
+
+type Summary = { id: string; blank: boolean; updatedAt: number; agentPreset?: string }
+
+/** A session list the test moves by hand; `subscribe` returns the unsubscribe function. */
+function fakeSessions(initial: { ids: string[]; byId: Record<string, Summary>; current?: string | undefined }) {
+  let state = { ...initial }
+  const listeners = new Set<() => void>()
+  const sessions = {
+    list: { getSnapshot: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } } },
+    open: vi.fn(),
+    noteAgentPreset: vi.fn(),
+  }
+  return {
+    sessions: sessions as never,
+    raw: sessions,
+    set(next: typeof state) { state = next; for (const fn of [...listeners]) fn() },
+    listeners,
+  }
+}
+
+/** A workspace service with no workspaces, whose start the test observes. */
+function emptyWorkspaces(startSession: () => void) {
+  return { startSession, list: { getSnapshot: () => ({ items: [], recentWorkspaceId: null }), subscribe: () => () => undefined } } as never
+}
+
+function fakeApi(result: unknown) {
+  const select = vi.fn(async () => ({ result }))
+  return { api: { agentPresets: { select } } as never, select }
+}
+
+describe('openKennel', () => {
+  it('reuses the newest kennel session instead of starting another', async () => {
+    const fake = fakeSessions({
+      ids: ['a', 'b', 'c'],
+      byId: {
+        a: { id: 'a', blank: false, updatedAt: 10, agentPreset: KENNEL_PRESET },
+        b: { id: 'b', blank: false, updatedAt: 50, agentPreset: KENNEL_PRESET },
+        c: { id: 'c', blank: false, updatedAt: 99, agentPreset: 'standard' },
+      },
+    })
+    const startSession = vi.fn()
+    await openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(startSession), api: fakeApi({ ok: true }).api })
+    expect(fake.raw.open).toHaveBeenCalledWith('b')
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
+  const ws = (workspaceId: string, updatedAt: string) => ({ workspaceId, updatedAt, path: `/work/${workspaceId}`, title: workspaceId })
+  const workspacesOf = (items: ReturnType<typeof ws>[], recentWorkspaceId: string | null = null) => ({
+    list: { getSnapshot: () => ({ items, recentWorkspaceId }), subscribe: () => () => undefined },
+    startSession: vi.fn(),
+  })
+
+  it('starts a session in the most recent workspace when none is current, and says so when there is no workspace at all', async () => {
+    const fake = fakeSessions({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: undefined })
+    const { api } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
+    const recent = workspacesOf([ws('a', '2026-10-01'), ws('b', '2026-10-03'), ws('c', '2026-10-02')], 'a')
+    setTimeout(() => { fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' }) }, 5)
+    await openKennel({ sessions: fake.sessions, workspaces: recent as never, api })
+    expect(recent.startSession).toHaveBeenCalledWith('a')
+
+    const newest = workspacesOf([ws('a', '2026-10-01'), ws('b', '2026-10-03')])
+    setTimeout(() => { fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: undefined }); fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' }) }, 5)
+    fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: undefined })
+    await openKennel({ sessions: fake.sessions, workspaces: newest as never, api })
+    expect(newest.startSession).toHaveBeenCalledWith('b')
+
+    const none = workspacesOf([])
+    fake.set({ ids: [], byId: {}, current: undefined })
+    await expect(openKennel({ sessions: fake.sessions, workspaces: none as never, api })).rejects.toThrow('请先在侧栏添加一个工作区')
+    expect(none.startSession).not.toHaveBeenCalled()
+  })
+
+  it('starts a session, waits for the blank one, and gives it the kennel preset', async () => {
+    const fake = fakeSessions({ ids: ['x'], byId: { x: { id: 'x', blank: false, updatedAt: 1, agentPreset: 'standard' } }, current: 'x' })
+    fake.set({ ids: [], byId: {}, current: 'x' })
+    const { api, select } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
+    const startSession = vi.fn(() => {
+      // The runtime publishes the new blank session some time after the start.
+      setTimeout(() => { fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' }) }, 5)
+    })
+    await openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(startSession), api })
+    expect(select).toHaveBeenCalledWith({ sessionId: 'n', agentPreset: KENNEL_PRESET })
+    expect(fake.raw.noteAgentPreset).toHaveBeenCalledWith('n', KENNEL_PRESET)
+    expect(fake.listeners.size).toBe(0)
+  })
+
+  it('does not wait when the current session is already blank', async () => {
+    const fake = fakeSessions({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' })
+    const { api, select } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
+    await openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(vi.fn()), api })
+    expect(select).toHaveBeenCalledTimes(1)
+    expect(fake.listeners.size).toBe(0)
+  })
+
+  it('ignores a current session that already has history and gives up with an explanation', async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = fakeSessions({ ids: ['x'], byId: { x: { id: 'x', blank: false, updatedAt: 1, agentPreset: 'standard' } }, current: 'x' })
+      const { api, select } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
+      const pending = openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(vi.fn()), api })
+      const outcome = expect(pending).rejects.toThrow('没能新建狗窝会话')
+      await vi.advanceTimersByTimeAsync(16_000)
+      await outcome
+      expect(select).not.toHaveBeenCalled()
+      expect(fake.listeners.size).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports the host explanation when it refuses the preset', async () => {
+    const fake = fakeSessions({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' })
+    const { api } = fakeApi({ ok: false, error: { message: 'agent-preset-locked' } })
+    await expect(openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(vi.fn()), api })).rejects.toThrow('agent-preset-locked')
+    expect(fake.raw.noteAgentPreset).not.toHaveBeenCalled()
+  })
+})
+
 describe('Gouzi client registration', () => {
-  it('registers one sidebar footer action that hands the connection fetch to the entry', async () => {
-    expect(inject).toEqual(['slots', 'connection', 'workspaces'])
+  it('registers the kennel row in the sidebar and the management page in Settings', async () => {
+    expect(inject).toEqual(['slots', 'connection', 'workspaces', 'sessions'])
     const ctx = new Context()
     await ctx.plugin(SlotRegistry).await()
     const slots = ctx.get('slots') as SlotRegistry
-    slots.register({ name: 'root', children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' } } } as never, () => null)
+    slots.register({
+      name: 'root',
+      children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' }, 'settings.section': { kind: 'list', scope: 'root' } },
+    } as never, () => null)
     const fetchStub = vi.fn()
     const workspaces = fakeFolders().folders
-    ctx.provide('connection', { request: fetchStub } as never)
+    const fake = fakeSessions({ ids: ['k'], byId: { k: { id: 'k', blank: false, updatedAt: 1, agentPreset: KENNEL_PRESET } } })
+    ctx.provide('connection', { request: fetchStub, api: fakeApi({ ok: true }).api } as never)
     ctx.provide('workspaces', workspaces as never)
+    ctx.provide('sessions', fake.sessions)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
-    const entries = slots.entries('sidebar.footer.action')
-    expect(entries.map(entry => [entry.options.id, entry.options.order])).toEqual([['gouzi', 90]])
-    const injected = (entries[0]!.inject as () => { request: unknown; folders: unknown })()
-    expect(injected.request).toBe(fetchStub)
-    expect(injected.folders).toBe(workspaces)
+
+    const sidebar = slots.entries('sidebar.footer.action')
+    expect(sidebar.map(entry => [entry.options.id, entry.options.order])).toEqual([['kennel', 90]])
+    const row = (sidebar[0]!.inject as () => { request: unknown; open: () => Promise<void> })()
+    expect(row.request).toBe(fetchStub)
+    await row.open()
+    expect(fake.raw.open).toHaveBeenCalledWith('k')
+
+    const settings = slots.entries('settings.section')
+    expect(settings.map(entry => [entry.options.id, entry.options.order])).toEqual([['gouzi', 38]])
+    expect((settings[0]!.options.label as () => string)()).toBe('狗子')
+    const page = (settings[0]!.inject as () => { request: unknown; folders: unknown })()
+    expect(page.request).toBe(fetchStub)
+    expect(page.folders).toBe(workspaces)
+
     await fiber.dispose()
     expect(slots.entries('sidebar.footer.action')).toEqual([])
+    expect(slots.entries('settings.section')).toEqual([])
   })
 })

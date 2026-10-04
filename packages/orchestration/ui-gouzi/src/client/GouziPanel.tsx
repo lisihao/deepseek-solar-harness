@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import clsx from 'clsx'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { IWorkspaces } from '@deepseek-ai/dsh-client-runtime/client'
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import {
   GOUZI_AVATARS,
@@ -24,17 +23,10 @@ import { HostStep, messageOf } from './HostStep.tsx'
 import { RemoteFolderPicker } from './RemoteFolderPicker.tsx'
 import css from './GouziPanel.module.css'
 
-/** Roster refresh interval while the dialog is open. */
+/** Roster refresh interval while the management page is open. */
 const OPEN_POLL_MS = 3_000
-/** Roster refresh interval while only the sidebar badge is visible. */
+/** Roster refresh interval while only the sidebar entry is visible. */
 const IDLE_POLL_MS = 20_000
-
-/** Slot runtime plus the browser's authenticated fetch. */
-export type GouziEntryProps = Pick<PropsRuntime<'sidebar.footer.action'>, 'wide'> & {
-  request: BrowserRequest
-  /** The workspaces the user already opened, and the Host's native folder picker. */
-  folders: GouziFolders
-}
 
 /** The slice of the workspace service the adoption wizard reads: known folders and the native picker. */
 export type GouziFolders = Pick<IWorkspaces, 'list' | 'pickDirectory'>
@@ -51,8 +43,13 @@ function basename(path: string): string {
   return path.split('/').filter(part => part.length > 0).at(-1) ?? path
 }
 
-/** Poll the roster; `open` shortens the interval. */
-function useRoster(request: BrowserRequest, open: boolean) {
+/**
+ * Poll the roster; `open` shortens the interval.
+ * @param request - authenticated fetch.
+ * @param open - whether a management page is showing, which polls faster.
+ * @returns the latest dashboard, the latest load error, and a manual refresh.
+ */
+export function useRoster(request: BrowserRequest, open: boolean) {
   const [dashboard, setDashboard] = useState<GouziDashboardV1>()
   const [error, setError] = useState<string>()
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -339,20 +336,16 @@ function MemberCard({ member, canManage, busy, onAction, onEdit }: {
   )
 }
 
-function GouziDialog({ request, folders, onClose }: { request: BrowserRequest; folders: GouziFolders; onClose: () => void }) {
+/**
+ * Roster, adoption, and per-member controls for the Settings page.
+ * @param props - authenticated fetch and the workspace slice the adoption wizard reads.
+ * @returns the management surface.
+ */
+export function GouziManager({ request, folders }: { request: BrowserRequest; folders: GouziFolders }) {
   const { dashboard, error: loadError, refresh } = useRoster(request, true)
   const [mode, setMode] = useState<{ kind: 'list' } | { kind: 'adopt' } | { kind: 'edit'; member: GouziMemberProjection }>({ kind: 'list' })
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string>()
-  const closeButton = useRef<HTMLButtonElement | null>(null)
-  /* jscpd:ignore-start -- modal focus and Escape handling is repeated per independently unloadable surface. */
-  useEffect(() => {
-    closeButton.current?.focus()
-    const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKeyDown)
-    return () => { document.removeEventListener('keydown', onKeyDown) }
-  }, [onClose])
-  /* jscpd:ignore-end */
   const act = async (action: 'wake' | 'rest' | 'retire', member: GouziMemberProjection): Promise<void> => {
     if (action === 'retire' && !window.confirm(`让 ${member.name} 退役？它会停下并交出名额，不能再回来。`)) return
     setBusy(true)
@@ -368,102 +361,85 @@ function GouziDialog({ request, folders, onClose }: { request: BrowserRequest; f
   }
   const full = dashboard !== undefined && dashboard.used >= dashboard.limit
   return (
-    <div className={css.overlay} role="presentation">
-      <div className={css.mask} aria-hidden="true" onClick={onClose} />
-      <section className={css.panel} role="dialog" aria-modal="true" aria-label="狗子">
-        <header className={css.header}>
-          <div className={css.titles}>
-            <strong>狗子</strong>
-            <span>{dashboard === undefined ? '正在读取…' : `${dashboard.used} / ${dashboard.limit} 个名额`}</span>
-          </div>
-          <div className={css.headerActions}>
-            {dashboard?.canManage === true && mode.kind === 'list' && (
-              <Tooltip label={full ? '名额已满，先让一只狗子退役' : '领养一只新狗子'} disabled={false}>
-                <button
-                  type="button"
-                  className={css.primary}
-                  disabled={full || !dashboard.hostAvailable}
-                  onClick={() => { setMode({ kind: 'adopt' }) }}
-                >
-                  领养狗子
-                </button>
-              </Tooltip>
-            )}
-            <button ref={closeButton} type="button" className={css.secondary} aria-label="关闭" onClick={onClose}>关闭</button>
-          </div>
-        </header>
-        <div className={css.body}>
-          {(loadError ?? actionError) !== undefined && <p className={css.error} role="alert">{loadError ?? actionError}</p>}
-          {dashboard?.hostAvailable === false && <p className={css.note}>这台机器还不能启动狗子，只能查看。</p>}
-          {dashboard?.canManage === false && <p className={css.note}>这个设备只能查看狗子。</p>}
-          {mode.kind === 'adopt' && dashboard !== undefined && (
-            <AdoptWizard
-              request={request}
-              folders={folders}
-              hosts={dashboard.hosts}
-              onHostsChanged={async () => { await refresh() }}
-              used={dashboard.used}
-              limit={dashboard.limit}
-              onCancel={() => { setMode({ kind: 'list' }) }}
-              onDone={() => { setMode({ kind: 'list' }); void refresh() }}
-            />
-          )}
-          {mode.kind === 'edit' && (
-            <EditForm
-              member={mode.member}
-              request={request}
-              onCancel={() => { setMode({ kind: 'list' }) }}
-              onDone={() => { setMode({ kind: 'list' }); void refresh() }}
-            />
-          )}
-          {mode.kind === 'list' && dashboard !== undefined && (
-            dashboard.members.length === 0
-              ? <p className={css.empty}>还没有狗子。领养一只，让它在后台替你持续干活。</p>
-              : (
-                <ul className={css.list}>
-                  {dashboard.members.map(member => (
-                    <MemberCard
-                      key={member.gouziId}
-                      member={member}
-                      canManage={dashboard.canManage}
-                      busy={busy}
-                      onAction={(action, target) => { void act(action, target) }}
-                      onEdit={(target) => { setMode({ kind: 'edit', member: target }) }}
-                    />
-                  ))}
-                </ul>
-              )
+    <section className={css.manager} aria-label="狗子">
+      <header className={css.header}>
+        <div className={css.titles}>
+          <strong>狗子</strong>
+          <span>{dashboard === undefined ? '正在读取…' : `${dashboard.used} / ${dashboard.limit} 个名额`}</span>
+        </div>
+        <div className={css.headerActions}>
+          {dashboard?.canManage === true && mode.kind === 'list' && (
+            <Tooltip label={full ? '名额已满，先让一只狗子退役' : '领养一只新狗子'} disabled={false}>
+              <button
+                type="button"
+                className={css.primary}
+                disabled={full || !dashboard.hostAvailable}
+                onClick={() => { setMode({ kind: 'adopt' }) }}
+              >
+                领养狗子
+              </button>
+            </Tooltip>
           )}
         </div>
-      </section>
-    </div>
+      </header>
+      <div className={css.body}>
+        {(loadError ?? actionError) !== undefined && <p className={css.error} role="alert">{loadError ?? actionError}</p>}
+        {dashboard?.hostAvailable === false && <p className={css.note}>这台机器还不能启动狗子，只能查看。</p>}
+        {dashboard?.canManage === false && <p className={css.note}>这个设备只能查看狗子。</p>}
+        {mode.kind === 'adopt' && dashboard !== undefined && (
+          <AdoptWizard
+            request={request}
+            folders={folders}
+            hosts={dashboard.hosts}
+            onHostsChanged={async () => { await refresh() }}
+            used={dashboard.used}
+            limit={dashboard.limit}
+            onCancel={() => { setMode({ kind: 'list' }) }}
+            onDone={() => { setMode({ kind: 'list' }); void refresh() }}
+          />
+        )}
+        {mode.kind === 'edit' && (
+          <EditForm
+            member={mode.member}
+            request={request}
+            onCancel={() => { setMode({ kind: 'list' }) }}
+            onDone={() => { setMode({ kind: 'list' }); void refresh() }}
+          />
+        )}
+        {mode.kind === 'list' && dashboard !== undefined && (
+          dashboard.members.length === 0
+            ? <p className={css.empty}>还没有狗子。领养一只，让它在后台替你持续干活。</p>
+            : (
+              <ul className={css.list}>
+                {dashboard.members.map(member => (
+                  <MemberCard
+                    key={member.gouziId}
+                    member={member}
+                    canManage={dashboard.canManage}
+                    busy={busy}
+                    onAction={(action, target) => { void act(action, target) }}
+                    onEdit={(target) => { setMode({ kind: 'edit', member: target }) }}
+                  />
+                ))}
+              </ul>
+            )
+        )}
+      </div>
+    </section>
   )
 }
 
-/** The sidebar entry: a button with the current count, opening the roster dialog. */
-export function GouziEntry({ wide, request, folders }: GouziEntryProps) {
-  const [open, setOpen] = useState(false)
-  const { dashboard } = useRoster(request, open)
-  const close = useCallback(() => { setOpen(false) }, [])
-  const label = '狗子'
-  const badge = dashboard === undefined ? undefined : `${dashboard.used}/${dashboard.limit}`
-  return (
-    <>
-      <Tooltip label={label} delayMs={500} disabled={wide}>
-        <button
-          type="button"
-          className={clsx(css.trigger, !wide && css.rail)}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={label}
-          onClick={() => { setOpen(true) }}
-        >
-          <GouziAvatarImage avatarId="shiba" size={wide ? 20 : 24} />
-          {wide && <span className={css.triggerLabel}>{label}</span>}
-          {wide && badge !== undefined && <span className={css.badge}>{badge}</span>}
-        </button>
-      </Tooltip>
-      {open && <GouziDialog request={request} folders={folders} onClose={close} />}
-    </>
-  )
+/** What the Settings page is given: the authenticated fetch and the workspace slice the wizard reads. */
+export interface GouziSettingsInjected {
+  readonly request: BrowserRequest
+  readonly folders: GouziFolders
+}
+
+/**
+ * The Settings section: the management surface under the page the registry supplies.
+ * @param props - authenticated fetch and workspace slice.
+ * @returns the management surface.
+ */
+export function GouziSettings({ request, folders }: GouziSettingsInjected) {
+  return <GouziManager request={request} folders={folders} />
 }
