@@ -78,6 +78,30 @@ describe('relay redirect handling', () => {
     expect(await landed.text()).toBe('alias served /page?q=1')
   })
 
+  it.each([
+    ['//', '//'],
+    ['backslashes, which a browser also reads as protocol-relative', '\\\\'],
+  ])('resolves a protocol-relative destination with %s against the current target before deciding', async (_name, slashes) => {
+    const alias = await origin((req, res) => { res.end(`alias served ${req.url ?? ''}`) }, 'localhost')
+    const authority = alias.replace('http:', '')
+    const home = await origin((_req, res) => { res.writeHead(302, { location: `${slashes}${authority.slice(2)}/landing` }); res.end() })
+    const started = await relay(home, () => true)
+    const redirect = await get(started.embedUrl)
+    // The destination is the alias, which the rule accepts, so the browser is sent back through the relay.
+    expect(redirect.headers.get('location')).toMatch(/^http:\/\/localhost:\d+\/landing$/)
+    expect(redirect.headers.get('location')).not.toContain(authority.slice(2).split('/')[0]!.replace(/^localhost/, 'other'))
+    const landed = await get(`${started.embedUrl.replace(/\/$/, '')}/landing`)
+    expect(await landed.text()).toBe('alias served /landing')
+  })
+
+  it('names a declined protocol-relative destination in full, with the target scheme, so the browser cannot reinterpret it', async () => {
+    const elsewhere = await origin((_req, res) => { res.end('elsewhere') }, 'localhost')
+    const home = await origin((_req, res) => { res.writeHead(302, { location: `${elsewhere.replace('http:', '')}/landing` }); res.end() })
+    const started = await relay(home)
+    const redirect = await get(started.embedUrl)
+    expect(redirect.headers.get('location')).toBe(`${elsewhere}/landing`)
+  })
+
   it('keeps an upstream cache policy on a redirect', async () => {
     const home = await origin((_req, res) => {
       res.writeHead(307, { location: '/next', 'cache-control': 'max-age=60' })
@@ -91,6 +115,7 @@ describe('relay redirect handling', () => {
     ['a non-redirect status', 200, 'http://other.invalid/'],
     ['a redirect without a destination', 302, undefined],
     ['an unparseable destination', 302, 'http://['],
+    ['an unparseable protocol-relative destination', 302, '//['],
     ['a non-HTTP destination', 302, 'ftp://other.invalid/'],
     ['a redirect to its own origin', 302, 'SELF'],
   ])('does not move for %s', async (_name, status, location) => {

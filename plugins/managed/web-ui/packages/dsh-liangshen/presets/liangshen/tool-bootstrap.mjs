@@ -164,6 +164,7 @@ function stateFor(session) {
       presentationApplied: false,
       exempt: false,
       autoContinued: false,
+      signal: undefined,
     }
     promotionBySession.set(session, state)
   }
@@ -327,6 +328,20 @@ export function apply(ctx, config) {
     bootstrapMaxTokens,
   }
 
+  // Continuations queued but not yet sent. They are dropped when the plugin unloads or the agent is disposed, and a
+  // cancelled turn is checked again when the timer fires.
+  const pending = new Map()
+  const clearPending = (agent) => {
+    const timer = pending.get(agent)
+    if (timer !== undefined) clearTimeout(timer)
+    pending.delete(agent)
+  }
+  ctx.effect(() => () => {
+    for (const timer of pending.values()) clearTimeout(timer)
+    pending.clear()
+  }, `${name}: pending continuations`)
+  ctx.on('agent/disposed', ({ agent }) => { clearPending(agent) })
+
   // A resumed Agent starts with a fresh process-local tool presenter. Rebuild
   // its presentation from durable session events before the driver can issue
   // a resume request; otherwise the first resumed request can advertise the
@@ -353,8 +368,15 @@ export function apply(ctx, config) {
       && !state.autoContinued && !isSubagentSession(agent) && endedAtMaxTokens(event)) {
       state.autoContinued = true
       state.promoted = true
+      // The activity signal of the capped turn: a cancel aborts it, and a continuation must not outlive that.
+      const turnSignal = state.signal
       // After the listener returns: the session is still appending this very event.
-      setTimeout(() => sendContinuation(agent, policy.autoContinueText), 0)
+      clearPending(agent)
+      pending.set(agent, setTimeout(() => {
+        pending.delete(agent)
+        if (turnSignal?.aborted === true) return
+        sendContinuation(agent, policy.autoContinueText)
+      }, 0))
     }
     if (state.promoted && !state.exempt && agent !== undefined) applyPresentation(agent, state, policy)
   })
@@ -401,6 +423,7 @@ export function apply(ctx, config) {
   ctx.on('agent/pre-step', async (payload, next) => {
     const agent = payload.agent
     const state = agent === undefined ? undefined : refresh(agent, policy)
+    if (state !== undefined && payload.signal !== undefined) state.signal = payload.signal
     const decision = await next()
     if (agent === undefined || decision.kind !== 'enter') return decision
     if (state === undefined) return decision
@@ -435,6 +458,7 @@ export function apply(ctx, config) {
     // delegating so a cold resume cannot emit one stale native header and
     // switch to `run_code` only after that request has already started.
     const state = agent === undefined ? undefined : refresh(agent, policy)
+    if (state !== undefined && payload.signal !== undefined) state.signal = payload.signal
     const resolved = await next()
     if (state === undefined || state.exempt || policy.bootstrapMaxTokens === undefined) return resolved
     if (state.promoted) {

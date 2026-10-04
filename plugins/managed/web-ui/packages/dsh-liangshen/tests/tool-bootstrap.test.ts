@@ -20,11 +20,20 @@ const SECTIONS = [
 
 type Listener = (payload: any, next: () => Promise<any>) => Promise<any>
 
+/** Disposers of the effects the last registered plugin created; running them is the plugin being unloaded. */
+let effectDisposers: Array<() => void> = []
+
 function register(customConfig: Record<string, unknown> = {}): Map<string, { listener: Listener, options: any }> {
   const listeners = new Map<string, { listener: Listener, options: any }>()
+  effectDisposers = []
   const ctx = {
     on(event: string, callback: Listener, options?: any) {
       listeners.set(event, { listener: callback, options })
+    },
+    effect(setup: () => () => void) {
+      const dispose = setup()
+      effectDisposers.push(dispose)
+      return dispose
     },
   }
   apply(ctx, { ...config, ...customConfig })
@@ -640,6 +649,74 @@ describe('anchored-tool-bootstrap', () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+
+    describe('a pending continuation', () => {
+      const capped = async (events: ReturnType<typeof sessionEventListener>, agent: ReturnType<typeof agentWithFollowup>, signal: unknown) => {
+        await listener(events.listeners, 'agent/request')({ agent, turn: 1, step: 1, signal }, async () => ({ maxTokens: 256000 }))
+        agent.session.events.push(maxTokensEnd)
+        events.onEvent(agent.session, maxTokensEnd)
+      }
+
+      test('is not sent when the turn was cancelled before it fired', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          const turn = new AbortController()
+          await capped(events, agent, turn.signal)
+          turn.abort({ kind: 'user' })
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      test('is dropped when the plugin is unloaded before it fired', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          await capped(events, agent, new AbortController().signal)
+          for (const dispose of effectDisposers) dispose()
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      test('is dropped when its agent is disposed before it fired', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          await capped(events, agent, new AbortController().signal)
+          await listener(events.listeners, 'agent/disposed')({ agent }, async () => undefined)
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      test('is still sent when nothing cancelled the turn', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          await capped(events, agent, new AbortController().signal)
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(1)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
     })
 
     test('stays off by default, for subagents, and for other turn endings', async () => {

@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveRepositorySource } from '@deepseek-ai/dsh-orchestration-local'
 import type { GouziFolderListing, GouziProvisionInput } from '@deepseek-ai/dsh-ui-gouzi'
-import { GouziSupervisor, residentDaemonPid } from './gouzi-supervisor.ts'
+import { GouziSupervisor } from './gouzi-supervisor.ts'
 
 /** Settings of one machine's member operations. */
 export interface LocalGouziConfig {
@@ -70,9 +70,9 @@ export class LocalGouziOperations {
   }
 
   async stop(gouziId: string, options: { readonly reclaimResident?: boolean } = {}): Promise<{ readonly processTreeStopped: boolean }> {
-    await this.supervisor.stop(gouziId, options)
-    const resident = options.reclaimResident === true ? residentDaemonPid(this.supervisor.homeOf(gouziId)) : undefined
-    return { processTreeStopped: this.supervisor.running(gouziId) === undefined && resident === undefined }
+    const outcome = await this.supervisor.stop(gouziId, options)
+    // Only a confirmed exit counts: a missing ready record says nothing about a process that was killed but not reaped.
+    return { processTreeStopped: outcome.workerStopped && outcome.residentStopped && this.supervisor.running(gouziId) === undefined }
   }
 
   /**
