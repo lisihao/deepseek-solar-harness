@@ -373,14 +373,48 @@ function isRlmOnlyBridge(bridge: NonNullable<ResidentDriverExecuteRequest['model
   return bridge.tools.length === 1 && bridge.tools[0]?.name === RESIDENT_RLM_TOOL_NAME
 }
 
-function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
-  const bridge = ensureModelToolBridge(request)
+/** Codex keeps the `mcp__` namespace for its own MCP servers and rejects a dynamic tool whose name starts with it. */
+const CODEX_RESERVED_TOOL_PREFIX = 'mcp__'
+const CODEX_ALIAS_PREFIX = 'dsh_'
+
+/**
+ * The name under which a bridge tool is offered to Codex. A DSH tool that comes from an MCP server is already called
+ * `mcp__<server>__<tool>`, which Codex refuses, so it is offered as `dsh_mcp__<server>__<tool>`; every other name is
+ * unchanged.
+ * @param name - the tool's name in the DSH bridge.
+ * @returns the name Codex is given and calls back with.
+ */
+export function codexToolName(name: string): string {
+  return name.startsWith(CODEX_RESERVED_TOOL_PREFIX) ? `${CODEX_ALIAS_PREFIX}${name}` : name
+}
+
+/**
+ * Describe the bridge tools to Codex under names it accepts.
+ * @param bridge - the sealed model tool bridge, when the turn has one.
+ * @returns one dynamic tool per bridge tool.
+ * @throws ResidentOperatorError - when two bridge tools would end up with the same Codex name.
+ */
+export function codexDynamicToolSpecs(
+  bridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+): readonly CodexDynamicToolSpec[] {
   if (bridge === undefined) return []
-  return bridge.tools.map(spec => ({
-    type: 'function', name: spec.name,
-    description: `DSH model-tool bridge tool ${JSON.stringify(spec.name)}. This tool executes through DSH permissions and logging. ${spec.description}`,
-    inputSchema: spec.inputSchema, deferLoading: false,
-  }))
+  const seen = new Set<string>()
+  return bridge.tools.map((spec) => {
+    const name = codexToolName(spec.name)
+    if (seen.has(name)) {
+      throw new ResidentOperatorError(`Codex tool name ${JSON.stringify(name)} collides with another DSH bridge tool`, 'PROTOCOL_MISMATCH')
+    }
+    seen.add(name)
+    return {
+      type: 'function', name,
+      description: `DSH model-tool bridge tool ${JSON.stringify(name)}. This tool executes through DSH permissions and logging. ${spec.description}`,
+      inputSchema: spec.inputSchema, deferLoading: false,
+    }
+  })
+}
+
+function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
+  return codexDynamicToolSpecs(ensureModelToolBridge(request))
 }
 
 /**
@@ -443,14 +477,16 @@ export function createCodexRlmToolHandler(
   resolveBridge: () => PhysicalOperatorModelToolBridgeV1 = () => bridge,
 ): (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult> {
   return async (call) => {
-    if (!bridge.tools.some(spec => spec.name === call.tool)) {
+    // Codex calls a tool by the name it was offered, which for an MCP-origin tool is the renamed one.
+    const allowed = bridge.tools.find(spec => codexToolName(spec.name) === call.tool)
+    if (allowed === undefined) {
       throw new ResidentOperatorError(
         `Codex requested a model tool that is not allowlisted: ${JSON.stringify(call.tool)}`,
         'PROTOCOL_MISMATCH',
       )
     }
     const commandId = modelToolCommandId(executionId, 'codex', call.callId)
-    const result = bridgeToolResult(await callModelToolBridge(resolveBridge(), call.tool, call.arguments, commandId, signal))
+    const result = bridgeToolResult(await callModelToolBridge(resolveBridge(), allowed.name, call.arguments, commandId, signal))
     return { success: !result.isError, text: bridgeToolText(result) }
   }
 }

@@ -33,6 +33,8 @@ import {
   CodexResidentDriver,
   codexDaemonVersion,
   createClaudeRlmMcpServer,
+  codexDynamicToolSpecs,
+  codexToolName,
   createCodexRlmToolHandler,
   isClaudeNativeSubscription,
   missingCodexProtocolMethods,
@@ -563,6 +565,66 @@ describe('Codex RLM host tool', () => {
       await expect(handler({
         threadId: 'thread-1', turnId: 'turn-1', callId: 'call-2',
         tool: 'bash', arguments: { command: 'id' },
+      })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+    } finally {
+      await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Codex dynamic tool names', () => {
+  const spec = (name: string) => ({ name, description: `The ${name} tool.`, inputSchema: { type: 'object' } })
+
+  it('renames a tool in the namespace Codex reserves for its own MCP servers, and leaves every other name alone', () => {
+    expect(codexToolName('mcp__reference_memory__add_observations')).toBe('dsh_mcp__reference_memory__add_observations')
+    expect(codexToolName('bash')).toBe('bash')
+    expect(codexToolName('typescript_repl')).toBe('typescript_repl')
+    expect(codexToolName('my_mcp__tool')).toBe('my_mcp__tool')
+  })
+
+  it('offers Codex only names it accepts', () => {
+    const tools = codexDynamicToolSpecs({
+      version: 1, socketPath: '/tmp/x', sessionId: 's',
+      tools: [spec('bash'), spec('mcp__reference_memory__add_observations'), spec('mcp__github__search')],
+    })
+    expect(tools.map(tool => tool.name)).toEqual(['bash', 'dsh_mcp__reference_memory__add_observations', 'dsh_mcp__github__search'])
+    expect(tools.some(tool => tool.name.startsWith('mcp__'))).toBe(false)
+  })
+
+  it('refuses a bridge whose renamed tool would collide with another tool', () => {
+    expect(() => codexDynamicToolSpecs({
+      version: 1, socketPath: '/tmp/x', sessionId: 's',
+      tools: [spec('mcp__a__b'), spec('dsh_mcp__a__b')],
+    })).toThrow(/collides/u)
+  })
+
+  it('maps a call on the renamed tool back to the real tool, and refuses the reserved name itself', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-codex-alias-'))
+    const socketPath = localIpcAddress(root, 'bridge')
+    const called: string[] = []
+    const bridgeServer = createServer((socket) => {
+      const transport = new JsonRpcLineTransport(socket, socket)
+      transport.onRequest((_method, params) => {
+        called.push(String(params.tool))
+        return Promise.resolve({ value: 'ok' })
+      })
+      transport.start()
+    })
+    await new Promise<void>((resolve, reject) => {
+      bridgeServer.once('error', reject)
+      bridgeServer.listen(socketPath, resolve)
+    })
+    const handler = createCodexRlmToolHandler('resident-command', {
+      version: 1, socketPath, sessionId: 'alias-session', tools: [spec('mcp__reference_memory__add_observations')],
+    }, new AbortController().signal)
+    try {
+      await expect(handler({
+        threadId: 't', turnId: 'u', callId: 'c1', tool: 'dsh_mcp__reference_memory__add_observations', arguments: {},
+      })).resolves.toMatchObject({ success: true })
+      expect(called).toEqual(['mcp__reference_memory__add_observations'])
+      await expect(handler({
+        threadId: 't', turnId: 'u', callId: 'c2', tool: 'mcp__reference_memory__add_observations', arguments: {},
       })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
     } finally {
       await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
