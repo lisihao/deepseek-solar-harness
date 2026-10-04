@@ -22,6 +22,8 @@ Codex 响应流的传输故障（包括 responses 请求断开）会报告为 `R
 
 Receipt 按 `accepted -> running -> settled` 推进。`completed` 表示提供方正常结束原生回合，不表示 DSH 已验证任务验收或任务正确性。有界 `turn.progress` 阶段会暴露连接、原生 Session 就绪、推理/工具活动与结果整理进度，但不保存 prompt 或 transcript。Driver 还会追加可由 cursor 续读的 `turn.observation` event，用于公开模型文本、工具生命周期、审批请求和用量更新。每条 observation 都由 daemon 分配 sequence、time、command id 与 turn id；preview 有界，凭据形态的值会被清洗。thinking、原始 prompt、system prompt、工具参数/结果、stderr、环境、凭据和完整原生 transcript 都不会成为 observation 输入。协议 v5 在 Receipt 与 accepted 事件中携带必需的调用方 lane 以及清理后的 160 字符展示任务摘要，并让 `session.list` 无需原生产品资格探测即可读取持久状态。状态迁移按列名复制历史记录，因此早期 `ALTER TABLE` 形成的列顺序不会在重建表时错置 Receipt 字段。同一算子的并发资格探测请求共享一个进行中的探测；Claude Code 按顺序检查版本、订阅状态和模型目录。准入前，daemon 会根据实时产品目录校验显式模型/强度，补全 Smart Auto 字段，并把有效 profile 锁定到算子/工作区/lane Session。手动指定强度但让模型自动选择时，候选范围只包含明确支持该强度的模型；若不存在兼容模型，准入会明确失败，而不是选出不兼容组合。后续 profile 变化在 reset 前都会失败。重新连接的 DSH 或 Desktop 客户端可以从 daemon 权威状态检查该 profile、lane、活动 turn、最新阶段及已结算结果。daemon 在无法证明结算前崩溃时，启动恢复会将 Receipt 标为 `indeterminate`。相同 command 与 canonical hash 重放会返回同一 Receipt，内容或 profile 变化则冲突。重试只能在显式处置后用新 command ID 准入，并唯一关联旧 Receipt。正常停止会排空已准入 turn，并在报告关闭完成前结束所有已接受的控制连接；进程被强制终止时由启动恢复处理，绝不自动重放。
 
+调用 Driver 前，新轮次准入会在同一原子操作中，将完整的规范已解析输入私有记录为 `turn.accepted` 事件中的 `inputSnapshot`：工作区、提示词、可选系统提示词与原生上下文，以及原生工具策略。相同 command/hash 的重放既不替换该快照，也不追加准入记录；hash 不同则冲突。公开的 `readEvents` 与 `latestEvent` 投影会移除该快照。不含该字段的旧 accepted 事件仍可读取，但不保证能重建输入。此记录使用现有事件存储，不修改 schema、表或协议版本。决策见[输入保留](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md)。
+
 命令准入后，调用方取消和客户端 dispose 只会分离本地轮询句柄，不会发送 `turn.interrupt`。因此 daemon 权威的原生 turn 能跨 DSH、HMR 或 Desktop 重启继续运行。可信调用方若确实要停止产品工作，必须使用显式 interrupt 方法。
 
 ## 原生 CLI 运行时
@@ -40,13 +42,13 @@ Receipt 按 `accepted -> running -> settled` 推进。`completed` 表示提供�
 | `cliRegistryUrl` | `https://registry.npmjs.org` | 发布原生 Claude Code 与 Codex CLI 的 npm 兼容注册表。 |
 | `cliDownloadTimeoutMs` | `600000` | 每次 CLI 注册表请求、包下载和 Codex daemon 更新的时间上限。 |
 
-根目录权限为 `0700`，socket、lock、pid、SQLite 文件与 Artifact 为 `0600`。系统不保存原始 prompt 或终端屏幕；Receipt 只保存 canonical hash，持久化错误会脱敏 prompt 与疑似凭据。产品子进程使用共享的凭据清理环境，产品原生权限和 approval 策略仍是权威，两个 Driver 都不会回退到 API key。`connectTimeoutMs` 还会从 client 经 daemon 到 Driver 约束工具桥准入；它不会限制原生回合的时长。
+根目录权限为 `0700`，socket、lock、pid、SQLite 文件与 Artifact 为 `0600`。已解析的轮次输入只保存在私有 accepted 事件快照中；系统不保存终端屏幕或产品私有推理。Receipt 保存 canonical hash，公开进展不含该快照，持久化错误会脱敏 prompt 与疑似凭据。产品子进程使用共享的凭据清理环境，产品原生权限和 approval 策略仍是权威，两个 Driver 都不会回退到 API key。`connectTimeoutMs` 还会从 client 经 daemon 到 Driver 约束工具桥准入；它不会限制原生回合的时长。
 
 当宿主是已启用 RunAsNode fuse 的 Electron 应用时，客户端只向 detached daemon 的 bootstrap 子进程加入 `ELECTRON_RUN_AS_NODE=1`。daemon 会在资格审查或启动 Claude Code、Codex 前移除该标记，因此产品进程不会继承 Electron 启动模式；普通 Node 宿主也会清除意外继承的旧标记。
 
 ## Model Experience
 
-Indirectly, through the dual-mode physical-operator provider and `physical_operator` tool. The daemon stores no raw prompt or terminal screen; a large final result becomes a SHA-256 artifact reference.
+通过双模式 physical-operator 提供方与 `physical_operator` 工具间接影响模型。私有输入保留遵循上述准入规则；大型最终结果会成为 SHA-256 产物引用。
 
 #### KV Cache effect
 

@@ -1,0 +1,15 @@
+{
+  "sender": "TaskGraph sender workspace",
+  "receiver": "member materialized checkout",
+  "repository": "github.com/lisihao/gouzi-fixture",
+  "requestedCommitMatches": true,
+  "nativeCwdMatchesBinding": true,
+  "privateInputMatchesDriver": true,
+  "originalInputContextRetained": true,
+  "output": [
+    {
+      "text": "README.md:1: gouzi fixture\nFiles: README.md",
+      "type": "text"
+    }
+  ]
+}

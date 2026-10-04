@@ -16,6 +16,10 @@ Scheduler 会在 Graph 的 `maxParallel` 上限内启动彼此独立的节点，
 
 每次远程 Attempt 都会从发送端的干净 Git 工作区派生仓库身份、精确 HEAD 与可选子目录。接收 Server 在 `<DSH_HOME>/orchestrations/remote-workspaces/cache` 保存不可变 Git 对象，并在 `executions` 下为每个 execution id 建立独立、带租约的可写 checkout；因此同 commit 的并行 Attempt 无法看到彼此的 tracked 或 untracked 修改。终态检查会删除 settled checkout，running 或 indeterminate receipt 会续租，过期租约会被回收。Server 绝不解释发送端的绝对路径。超大 Resident 结果按远端 `sha256:` 引用在明确的字节／时间上限内取回，针对精确 JSON 字节验证 digest，校验为完整的提供方无关结果，再写入并读回调度 Leader 的本地 Orchestration CAS。内联与传输结果均保留原 execution id、持久 command Receipt、Server 亲和性和 generation fencing。
 
+TaskGraph 节点提示词将上下文路径标为 `Sender workspace`，并指示原生执行器以当前工作目录解析文件操作和相对范围。这不改变列出的权限或任务验收。接收端 Host 通过 [Remote Sync 执行上下文](../../client/connection/README.md#remote-sync-and-stable-session-handoff)提供精确的 checkout 身份；[Agent Note](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md)记录保留发送方文本的原因。
+
+远程 HTTP 5xx 响应的传输诊断最多保留响应体的 500 个字符；无法读取时使用明确的响应体不可用说明。它们仍属于 `TransportError`，并产生 `COMMAND_INDETERMINATE`：响应不能确定是否已经准入或执行原生操作。任何显式重试前都必须核对现有命令状态；响应正文或状态码本身不会被归类为原生拒绝。
+
 同一份 `cluster.json` 让这些成员共享唯一 TaskGraph 权威。每个成员分别持久化自身 term、vote、leader lease 和已复制的逻辑编排状态。Campaign 与续租分别只允许一个 in-flight 操作，并使用 election epoch 栅栏，因此更高 term 的 heartbeat 不会被迟到 vote 或 replica 响应覆盖。只有持有未过期多数租约的节点才能修改 Scheduler 状态。任何已封存 Attempt 到达 Resident 或 model-worker Provider 之前，Leader 都必须续期该租约，并把足够数量的 Follower 推进到当前 `commitIndex`；完成后才允许开始外部产品调用。Follower 不会重放已接受命令，也会拒绝旧 term 的副本。Desktop 描述只暴露多 Server 入口选择所需的有界 Leader 投影；vote、heartbeat、export 和 install 始终是仅 admin 可用的 Remote Sync 操作。
 
 所有成员必须使用相同的 `cluster.json` 成员表，并通过经过认证的回环隧道访问其他成员。首发复制会发送完整逻辑快照，验证每个内容寻址 Artifact digest，并在保留接收方本地选举身份的同时以事务安装。完整快照明确受 Remote Sync 请求上限约束；超大编排存储的增量状态传输后置。
@@ -38,7 +42,7 @@ Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStor
 
 ## Model Experience
 
-间接产生影响：由 `@deepseek-ai/dsh-tool-orchestration` 呈现。daemon 保存 Compiler 产物并返回有界投影，但自身不增加提示词段落。
+通过消费上述密封 TaskGraph 节点提示词的 `@deepseek-ai/dsh-tool-orchestration` 与物理算子间接影响模型。
 
 #### KV Cache effect
 
@@ -53,5 +57,5 @@ Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStor
 - RLM 只在一个已封存节点内进行有界递归；它是执行策略，不是另一个产品或全局 Scheduler；如果崩溃后无法证明复合执行的终态，就会进入 indeterminate，绝不自动重放。
 - Autonomous Mode 需要显式选择，当前使用宿主 shell 质量门禁；未配置门禁时，它不会自行猜测任务专属的结束条件。
 - 基础 Bundle 不内置生产 Skill 目录。部署必须显式安装可信 Skill Provider 插件；缺少 Provider 的受管条目仍可见，但状态为不可用。
-- 远程物化目前要求干净且已经提交的 Git 工作区、已配置的 origin，以及每台执行 Server 上允许的 source。未提交的发送端修改、凭据传输、任意绝对路径映射和可变共享 worktree 都明确不支持。
+- 远程物化目前要求干净且已经提交的 Git 工作区、已配置的 origin，以及每台执行 Server 上包含锁定 commit 的允许 source。未提交的发送端修改、凭据传输、任意绝对路径映射和可变共享 worktree 都明确不支持。
 - 首发集群成员表是固定配置。成员变化与增量副本需要未来显式升级协议；两成员集群失去任意一个成员后无法继续调度，因为它不再拥有多数派。

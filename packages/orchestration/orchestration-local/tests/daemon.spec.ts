@@ -616,9 +616,15 @@ describe('orchestration daemon', () => {
       const call = JSON.parse(init.body) as {
         rpcId: string
         method: string
-        payload: { contextEnvelope: { digest: string } }
+        payload: { contextEnvelope: { digest: string; task: Array<{ type: string; text?: string }> } }
       }
       methods.push(call.method)
+      if (call.method === 'operator.execute') {
+        const task = call.payload.contextEnvelope.task.map(block => block.text ?? '').join('\n')
+        expect(task).toContain('Sender workspace: ')
+        expect(task).toContain('Use the executor current working directory for filesystem operations.')
+        expect(task).toContain('Resolve the listed relative scopes against the executor working directory.')
+      }
       const value = call.method === 'operator.providers' ? [provider]
         : call.method === 'operator.execute'
           ? {

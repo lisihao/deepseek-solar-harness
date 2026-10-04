@@ -703,6 +703,13 @@ export class ResidentDaemon {
       laneId,
       nativeToolPolicy,
       modelToolBridge,
+      {
+        workspace,
+        prompt,
+        ...systemPrompt === undefined ? {} : { systemPrompt },
+        ...nativeContext === undefined ? {} : { nativeContext },
+        nativeToolPolicy,
+      },
     )
     const existing = this.active.get(accepted.turnId)
     if (existing !== undefined && modelToolBridge !== undefined
