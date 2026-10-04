@@ -115,6 +115,7 @@ describe('relay redirect handling', () => {
     ['a non-redirect status', 200, 'http://other.invalid/'],
     ['a redirect without a destination', 302, undefined],
     ['an unparseable destination', 302, 'http://['],
+    ['an unparseable protocol-relative destination', 302, '//['],
     ['a non-HTTP destination', 302, 'ftp://other.invalid/'],
     ['a redirect to its own origin', 302, 'SELF'],
   ])('does not move for %s', async (_name, status, location) => {
