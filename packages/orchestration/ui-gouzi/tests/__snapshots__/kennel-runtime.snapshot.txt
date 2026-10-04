@@ -1,0 +1,17 @@
+{
+  "existingKennelReusedWithoutCreateOrSelect": true,
+  "independentSession": true,
+  "kennelPreset": "kennel",
+  "originalBlankPreset": "standard",
+  "originalSelectionPreservedUntilComposition": true,
+  "returnedSessionBoundBeforeComposition": true,
+  "target": "original selected workspace",
+  "targetWorkspaceRetained": true,
+  "transitions": [
+    "create independent session",
+    "compose exact created session",
+    "record confirmed composition",
+    "open kennel session",
+    "open kennel session",
+  ],
+}

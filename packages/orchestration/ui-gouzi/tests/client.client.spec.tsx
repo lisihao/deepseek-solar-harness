@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { Context } from '@deepseek-ai/cordis'
+import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import { SessionRuntime, SlotRegistry, WorkspaceRuntime } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KennelHero, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
 import type { GouziFolders } from '../src/client/index.ts'
 import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection } from '../src/contracts.ts'
@@ -431,7 +432,8 @@ function fakeSessions(initial: { ids: string[]; byId: Record<string, Summary>; c
   const listeners = new Set<() => void>()
   const sessions = {
     list: { getSnapshot: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } } },
-    open: vi.fn(),
+    create: vi.fn(async (_input: { workspaceId: string }) => 'n'),
+    open: vi.fn((id: string) => { state = { ...state, current: id } }),
     noteAgentPreset: vi.fn(),
   }
   return {
@@ -442,9 +444,19 @@ function fakeSessions(initial: { ids: string[]; byId: Record<string, Summary>; c
   }
 }
 
-/** A workspace service with no workspaces, whose start the test observes. */
-function emptyWorkspaces(startSession: () => void) {
-  return { startSession, list: { getSnapshot: () => ({ items: [], recentWorkspaceId: null }), subscribe: () => () => undefined } } as never
+function kennelWorkspaces(
+  items: Array<{ workspaceId: string; sessionIds: string[]; updatedAt: string }>,
+  recentWorkspaceId: string | null = null,
+  archivedSessionIds: string[] = [],
+) {
+  return { list: { getSnapshot: () => ({ items, recentWorkspaceId, archivedSessionIds }), subscribe: () => () => undefined } } as never
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
 }
 
 function fakeApi(result: unknown) {
@@ -501,90 +513,161 @@ describe('the kennel welcome card', () => {
 })
 
 describe('openKennel', () => {
-  it('reuses the newest kennel session instead of starting another', async () => {
-    const fake = fakeSessions({
-      ids: ['a', 'b', 'c'],
-      byId: {
-        a: { id: 'a', blank: false, updatedAt: 10, agentPreset: KENNEL_PRESET },
-        b: { id: 'b', blank: false, updatedAt: 50, agentPreset: KENNEL_PRESET },
-        c: { id: 'c', blank: false, updatedAt: 99, agentPreset: 'standard' },
-      },
-    })
-    const startSession = vi.fn()
-    await openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(startSession), api: fakeApi({ ok: true }).api })
-    expect(fake.raw.open).toHaveBeenCalledWith('b')
-    expect(startSession).not.toHaveBeenCalled()
-  })
+  const workspace = (workspaceId: string, sessionIds: string[], updatedAt = '2026-10-01') => ({ workspaceId, sessionIds, updatedAt })
+  const origin = () => fakeSessions({ ids: ['old'], byId: { old: { id: 'old', blank: true, updatedAt: 1, agentPreset: 'standard' } }, current: 'old' })
 
-  const ws = (workspaceId: string, updatedAt: string) => ({ workspaceId, updatedAt, path: `/work/${workspaceId}`, title: workspaceId })
-  const workspacesOf = (items: ReturnType<typeof ws>[], recentWorkspaceId: string | null = null) => ({
-    list: { getSnapshot: () => ({ items, recentWorkspaceId }), subscribe: () => () => undefined },
-    startSession: vi.fn(),
-  })
-
-  it('starts a session in the most recent workspace when none is current, and says so when there is no workspace at all', async () => {
-    const fake = fakeSessions({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: undefined })
-    const { api } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
-    const recent = workspacesOf([ws('a', '2026-10-01'), ws('b', '2026-10-03'), ws('c', '2026-10-02')], 'a')
-    setTimeout(() => { fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' }) }, 5)
-    await openKennel({ sessions: fake.sessions, workspaces: recent as never, api })
-    expect(recent.startSession).toHaveBeenCalledWith('a')
-
-    const newest = workspacesOf([ws('a', '2026-10-01'), ws('b', '2026-10-03')])
-    setTimeout(() => { fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: undefined }); fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' }) }, 5)
-    fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: undefined })
-    await openKennel({ sessions: fake.sessions, workspaces: newest as never, api })
-    expect(newest.startSession).toHaveBeenCalledWith('b')
-
-    const none = workspacesOf([])
-    fake.set({ ids: [], byId: {}, current: undefined })
-    await expect(openKennel({ sessions: fake.sessions, workspaces: none as never, api })).rejects.toThrow('请先在侧栏添加一个工作区')
-    expect(none.startSession).not.toHaveBeenCalled()
-  })
-
-  it('starts a session, waits for the blank one, and gives it the kennel preset', async () => {
-    const fake = fakeSessions({ ids: ['x'], byId: { x: { id: 'x', blank: false, updatedAt: 1, agentPreset: 'standard' } }, current: 'x' })
-    fake.set({ ids: [], byId: {}, current: 'x' })
+  it('keeps the current workspace ahead of a newer recent workspace and composes the exact created session', async () => {
+    const fake = origin()
     const { api, select } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
-    const startSession = vi.fn(() => {
-      // The runtime publishes the new blank session some time after the start.
-      setTimeout(() => { fake.set({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' }) }, 5)
-    })
-    await openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(startSession), api })
+    const workspaces = kennelWorkspaces([workspace('a', ['old']), workspace('b', [], '2026-10-03')], 'b')
+    await openKennel({ sessions: fake.sessions, workspaces, api })
+    expect(fake.raw.create).toHaveBeenCalledWith({ workspaceId: 'a' })
     expect(select).toHaveBeenCalledWith({ sessionId: 'n', agentPreset: KENNEL_PRESET })
     expect(fake.raw.noteAgentPreset).toHaveBeenCalledWith('n', KENNEL_PRESET)
+    expect(fake.raw.open).toHaveBeenCalledWith('n')
+    expect(fake.raw.list.getSnapshot().byId.old?.agentPreset).toBe('standard')
     expect(fake.listeners.size).toBe(0)
   })
 
-  it('does not wait when the current session is already blank', async () => {
-    const fake = fakeSessions({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' })
-    const { api, select } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
-    await openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(vi.fn()), api })
-    expect(select).toHaveBeenCalledTimes(1)
-    expect(fake.listeners.size).toBe(0)
+  it('keeps the original view through deferred create and preset selection', async () => {
+    const fake = origin()
+    const creation = deferred<string>()
+    fake.raw.create.mockReturnValue(creation.promise)
+    const preset = deferred<{ result: { ok: true; value: { agentPreset: string } } }>()
+    const select = vi.fn(() => preset.promise)
+    const pending = openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old'])]), api: { agentPresets: { select } } as never })
+    expect(fake.raw.list.getSnapshot().current).toBe('old')
+    expect(select).not.toHaveBeenCalled()
+    creation.resolve('new-kennel')
+    await waitFor(() => { expect(select).toHaveBeenCalledWith({ sessionId: 'new-kennel', agentPreset: KENNEL_PRESET }) })
+    expect(fake.raw.open).not.toHaveBeenCalled()
+    expect(fake.raw.list.getSnapshot().current).toBe('old')
+    preset.resolve({ result: { ok: true, value: { agentPreset: KENNEL_PRESET } } })
+    await pending
+    expect(fake.raw.noteAgentPreset).toHaveBeenCalledWith('new-kennel', KENNEL_PRESET)
+    expect(fake.raw.list.getSnapshot().current).toBe('new-kennel')
   })
 
-  it('ignores a current session that already has history and gives up with an explanation', async () => {
-    vi.useFakeTimers()
-    try {
-      const fake = fakeSessions({ ids: ['x'], byId: { x: { id: 'x', blank: false, updatedAt: 1, agentPreset: 'standard' } }, current: 'x' })
-      const { api, select } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
-      const pending = openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(vi.fn()), api })
-      const outcome = expect(pending).rejects.toThrow('没能新建狗窝会话')
-      await vi.advanceTimersByTimeAsync(16_000)
-      await outcome
-      expect(select).not.toHaveBeenCalled()
-      expect(fake.listeners.size).toBe(0)
-    } finally {
-      vi.useRealTimers()
-    }
+  it('reuses only the latest unarchived kennel in the target workspace with its history intact', async () => {
+    const fake = fakeSessions({
+      ids: ['old', 'a1', 'a2', 'archived', 'other'], current: 'old',
+      byId: {
+        old: { id: 'old', blank: false, updatedAt: 1, agentPreset: 'standard' },
+        a1: { id: 'a1', blank: false, updatedAt: 10, agentPreset: KENNEL_PRESET },
+        a2: { id: 'a2', blank: false, updatedAt: 20, agentPreset: KENNEL_PRESET },
+        archived: { id: 'archived', blank: false, updatedAt: 30, agentPreset: KENNEL_PRESET },
+        other: { id: 'other', blank: false, updatedAt: 99, agentPreset: KENNEL_PRESET },
+      },
+    })
+    const before = fake.raw.list.getSnapshot().byId
+    const { api, select } = fakeApi({ ok: true })
+    await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old', 'a1', 'a2', 'archived']), workspace('b', ['other'])], 'b', ['archived']), api })
+    expect(fake.raw.open).toHaveBeenCalledWith('a2')
+    expect(fake.raw.create).not.toHaveBeenCalled()
+    expect(select).not.toHaveBeenCalled()
+    expect(fake.raw.list.getSnapshot().byId).toBe(before)
   })
 
-  it('reports the host explanation when it refuses the preset', async () => {
-    const fake = fakeSessions({ ids: ['n'], byId: { n: { id: 'n', blank: true, updatedAt: 1 } }, current: 'n' })
-    const { api } = fakeApi({ ok: false, error: { message: 'agent-preset-locked' } })
-    await expect(openKennel({ sessions: fake.sessions, workspaces: emptyWorkspaces(vi.fn()), api })).rejects.toThrow('agent-preset-locked')
+  it('preserves another workspace kennel while creating the target workspace kennel', async () => {
+    const fake = origin()
+    fake.set({ ...fake.raw.list.getSnapshot(), ids: ['old', 'other'], byId: { ...fake.raw.list.getSnapshot().byId, other: { id: 'other', blank: false, updatedAt: 99, agentPreset: KENNEL_PRESET } } })
+    await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old']), workspace('b', ['other'])], 'b'), api: fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } }).api })
+    expect(fake.raw.create).toHaveBeenCalledWith({ workspaceId: 'a' })
+    expect(fake.raw.list.getSnapshot().byId.other).toMatchObject({ blank: false, agentPreset: KENNEL_PRESET })
+  })
+
+  it.each([['a', 'a'], ['missing', 'b'], [null, 'b']])('uses a valid recent workspace or the newest when the current session has no membership (%s)', async (recent, target) => {
+    const fake = origin()
+    await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', []), workspace('b', [], '2026-10-03')], recent), api: fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } }).api })
+    expect(fake.raw.create).toHaveBeenCalledWith({ workspaceId: target })
+  })
+
+  it.each(['no-workspace', 'create', 'preset-refusal', 'preset-transport'])('preserves the original view when %s fails', async (failure) => {
+    const fake = origin()
+    const { api, select } = fakeApi(failure === 'preset-refusal' ? { ok: false, error: { message: 'agent-preset-locked' } } : { ok: true, value: { agentPreset: KENNEL_PRESET } })
+    if (failure === 'create') fake.raw.create.mockRejectedValue(new Error('workspace unavailable'))
+    if (failure === 'preset-transport') select.mockRejectedValue(new Error('preset transport lost'))
+    const workspaces = kennelWorkspaces(failure === 'no-workspace' ? [] : [workspace('a', ['old'])])
+    const explanation = failure === 'no-workspace' ? '请先在侧栏添加一个工作区'
+      : failure === 'create' ? 'workspace unavailable'
+        : failure === 'preset-refusal' ? 'agent-preset-locked' : 'preset transport lost'
+    await expect(openKennel({ sessions: fake.sessions, workspaces, api })).rejects.toThrow(explanation)
+    expect(fake.raw.list.getSnapshot().current).toBe('old')
+    expect(fake.raw.open).not.toHaveBeenCalled()
     expect(fake.raw.noteAgentPreset).not.toHaveBeenCalled()
+    if (failure === 'no-workspace') expect(fake.raw.create).not.toHaveBeenCalled()
+  })
+})
+
+describe('openKennel with the real client runtime', () => {
+  it('creates and binds an independent session before composing and opening it, keeping the original blank selected until ready', async () => {
+    localStorage.clear()
+    const old = 'runtime-old' as SessionId
+    const created = 'runtime-kennel' as SessionId
+    const target = 'runtime-alpha' as WorkspaceId
+    const creation = deferred<{ rpcId: never; result: { ok: true; value: { sessionId: SessionId } } }>()
+    const composition = deferred<{ rpcId: never; result: { ok: true; value: { agentPreset: string } } }>()
+    const ok = <T,>(value: T) => ({ rpcId: 'fixture' as never, result: { ok: true as const, value } })
+    const transitions: string[] = []
+    const create = vi.fn((_payload: { workspaceId?: WorkspaceId }) => { transitions.push('create independent session'); return creation.promise })
+    const select = vi.fn((_payload: { sessionId: SessionId; agentPreset: string }) => { transitions.push('compose exact created session'); return composition.promise })
+    const api = {
+      sessions: {
+        list: async () => ok({ items: [{ sessionId: old, blank: true, running: false, updatedAt: 1, cwd: '/work/alpha', agentPreset: 'standard' }] }),
+        create,
+        history: async () => ok({ events: [], hasMore: false }),
+        models: async () => ok({ current: { provider: 'fixture', model: 'fixture' }, routable: true, groups: [], failures: [] }),
+      },
+      workspace: { list: async () => ok({ items: [{ workspaceId: target, path: '/work/alpha', title: 'alpha', createdAt: '2026-10-01', updatedAt: '2026-10-01', sessionIds: [old] }], archivedSessionIds: [] }) },
+      agentPresets: { select },
+    }
+    const remote = { commands: { list: async () => ({ ok: true, value: [] }), execute: async () => ({ ok: true, value: undefined }) } }
+    const ctx = new Context()
+    const sessions = new SessionRuntime(ctx, api as unknown as ConstructorParameters<typeof SessionRuntime>[1], remote as never)
+    const workspaces = new WorkspaceRuntime(ctx, api as unknown as ConstructorParameters<typeof WorkspaceRuntime>[1], sessions)
+    await Promise.all([sessions.refresh(), workspaces.refresh()])
+    sessions.open(old)
+    const originalOpen = sessions.open.bind(sessions)
+    vi.spyOn(sessions, 'open').mockImplementation((id) => { transitions.push('open kennel session'); originalOpen(id) })
+    const originalNote = sessions.noteAgentPreset.bind(sessions)
+    vi.spyOn(sessions, 'noteAgentPreset').mockImplementation((id, preset) => { transitions.push('record confirmed composition'); originalNote(id, preset) })
+    const opening = openKennel({ sessions, workspaces, api: api as never })
+    expect(create).toHaveBeenCalledWith({ workspaceId: target })
+    const originalSelectionWhileCreating = sessions.list.getSnapshot().current === old
+    expect(originalSelectionWhileCreating).toBe(true)
+    creation.resolve(ok({ sessionId: created }))
+    await waitFor(() => { expect(select).toHaveBeenCalledWith({ sessionId: created, agentPreset: KENNEL_PRESET }) })
+    const bindingBeforeComposition = sessions.binding(created) !== undefined
+    expect(bindingBeforeComposition).toBe(true)
+    expect(sessions.list.getSnapshot().byId[created]).toMatchObject({ blank: true })
+    const originalSelectionWhileComposing = sessions.list.getSnapshot().current === old
+    expect(originalSelectionWhileComposing).toBe(true)
+    expect(sessions.list.getSnapshot().byId[old]?.agentPreset).toBe('standard')
+    workspaces.handleHostEnvelope({ rpcId: 'membership' as never, payload: {
+      type: 'host/workspace-changed',
+      workspace: { workspaceId: target, path: '/work/alpha', title: 'alpha', createdAt: '2026-10-01', updatedAt: '2026-10-01', sessionIds: [old, created] },
+    } })
+    composition.resolve(ok({ agentPreset: KENNEL_PRESET }))
+    await opening
+    expect(sessions.list.getSnapshot().current).toBe(created)
+    expect(sessions.list.getSnapshot().byId[created]?.agentPreset).toBe(KENNEL_PRESET)
+    expect(sessions.list.getSnapshot().byId[old]?.agentPreset).toBe('standard')
+    expect(workspaces.list.getSnapshot().items[0]?.sessionIds).toEqual([old, created])
+    await openKennel({ sessions, workspaces, api: api as never })
+    expect(create).toHaveBeenCalledOnce()
+    expect(select).toHaveBeenCalledOnce()
+    await expect({
+      target: 'original selected workspace',
+      originalBlankPreset: sessions.list.getSnapshot().byId[old]?.agentPreset,
+      kennelPreset: sessions.list.getSnapshot().byId[created]?.agentPreset,
+      independentSession: created !== old,
+      returnedSessionBoundBeforeComposition: bindingBeforeComposition,
+      originalSelectionPreservedUntilComposition: originalSelectionWhileCreating && originalSelectionWhileComposing,
+      targetWorkspaceRetained: workspaces.list.getSnapshot().items[0]?.sessionIds.includes(created),
+      existingKennelReusedWithoutCreateOrSelect: create.mock.calls.length === 1 && select.mock.calls.length === 1,
+      transitions,
+    }).toMatchFileSnapshot('./__snapshots__/kennel-runtime.snapshot.txt')
+    localStorage.clear()
   })
 })
 
@@ -603,10 +686,10 @@ describe('Gouzi client registration', () => {
       },
     } as never, () => null)
     const fetchStub = vi.fn()
-    const workspaces = fakeFolders().folders
+    const workspaces = kennelWorkspaces([{ workspaceId: 'w1', sessionIds: ['k'], updatedAt: '2026-10-01' }])
     const fake = fakeSessions({ ids: ['k'], byId: { k: { id: 'k', blank: false, updatedAt: 1, agentPreset: KENNEL_PRESET } } })
     ctx.provide('connection', { request: fetchStub, api: fakeApi({ ok: true }).api } as never)
-    ctx.provide('workspaces', workspaces as never)
+    ctx.provide('workspaces', workspaces)
     ctx.provide('sessions', fake.sessions)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
