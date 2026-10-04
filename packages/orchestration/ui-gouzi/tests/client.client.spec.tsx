@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
+import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KennelHero, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
 import type { GouziFolders } from '../src/client/index.ts'
 import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection } from '../src/contracts.ts'
 
@@ -452,6 +452,54 @@ function fakeApi(result: unknown) {
   return { api: { agentPresets: { select } } as never, select }
 }
 
+describe('the kennel welcome card', () => {
+  const kennelSession = { ids: ['k'], byId: { k: { id: 'k', blank: true, updatedAt: 1, agentPreset: KENNEL_PRESET } }, current: 'k' }
+
+  it('introduces the enabled dogs, where they live and what they are doing, on a blank kennel session', async () => {
+    const harness = fakeRequest({
+      roster: dashboard([
+        member({ name: 'Mochi', hostLabel: 'Mac mini' }),
+        member({ gouziId: 'g2', name: 'Pixel', role: 'research', state: 'working', activity: 'working' }),
+        member({ gouziId: 'g3', name: 'Gone', membership: 'retiring', state: 'retiring' }),
+      ]),
+    })
+    render(<KennelHero request={harness.request} sessions={fakeSessions(kennelSession).sessions} />)
+    const card = await screen.findByRole('region', { name: '狗窝' })
+    expect(await within(card).findByText('Mochi')).toBeTruthy()
+    expect(within(card).getByText('Pixel')).toBeTruthy()
+    expect(within(card).queryByText('Gone')).toBeNull()
+    expect(card.textContent).toContain('住在 Mac mini')
+    expect(card.textContent).toContain('工作中')
+    expect(card.textContent).toContain('@名字')
+    expect(card.textContent).toContain('这个会话用的是「狗窝」预设')
+  })
+
+  it('invites the user to adopt when there are no dogs', async () => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    render(<KennelHero request={harness.request} sessions={fakeSessions(kennelSession).sessions} />)
+    expect((await screen.findByRole('region', { name: '狗窝' })).textContent).toContain('设置 → 狗子 领养')
+  })
+
+  it.each([
+    ['another preset', { ids: ['s'], byId: { s: { id: 's', blank: true, updatedAt: 1, agentPreset: 'standard' } }, current: 's' }],
+    ['a session with no preset', { ids: ['s'], byId: { s: { id: 's', blank: true, updatedAt: 1 } }, current: 's' }],
+    ['no current session', { ids: [], byId: {}, current: undefined }],
+  ])('renders nothing for %s', async (_label, state) => {
+    const harness = fakeRequest({ roster: dashboard([member()]) })
+    const { container } = render(<KennelHero request={harness.request} sessions={fakeSessions(state).sessions} />)
+    await waitFor(() => { expect(harness.calls).toHaveBeenCalled() })
+    expect(container.textContent).toBe('')
+  })
+
+  it('goes away once the kennel session has history', async () => {
+    const harness = fakeRequest({ roster: dashboard([member()]) })
+    const started = { ids: ['k'], byId: { k: { id: 'k', blank: false, updatedAt: 2, agentPreset: KENNEL_PRESET } }, current: 'k' }
+    const { container } = render(<KennelHero request={harness.request} sessions={fakeSessions(started).sessions} />)
+    await waitFor(() => { expect(harness.calls).toHaveBeenCalled() })
+    expect(container.textContent).toBe('')
+  })
+})
+
 describe('openKennel', () => {
   it('reuses the newest kennel session instead of starting another', async () => {
     const fake = fakeSessions({
@@ -548,7 +596,11 @@ describe('Gouzi client registration', () => {
     const slots = ctx.get('slots') as SlotRegistry
     slots.register({
       name: 'root',
-      children: { 'sidebar.footer.action': { kind: 'list', scope: 'root' }, 'settings.section': { kind: 'list', scope: 'root' } },
+      children: {
+        'sidebar.footer.action': { kind: 'list', scope: 'root' },
+        'settings.section': { kind: 'list', scope: 'root' },
+        'conversation.input.dock': { kind: 'list', scope: 'session' },
+      },
     } as never, () => null)
     const fetchStub = vi.fn()
     const workspaces = fakeFolders().folders
@@ -573,8 +625,15 @@ describe('Gouzi client registration', () => {
     expect(page.request).toBe(fetchStub)
     expect(page.folders).toBe(workspaces)
 
+    const dock = slots.entries('conversation.input.dock')
+    expect(dock.map(entry => [entry.options.id, entry.options.order])).toEqual([['kennel', 5]])
+    const card = (dock[0]!.inject as () => { request: unknown; sessions: unknown })()
+    expect(card.request).toBe(fetchStub)
+    expect(card.sessions).toBe(fake.sessions)
+
     await fiber.dispose()
     expect(slots.entries('sidebar.footer.action')).toEqual([])
     expect(slots.entries('settings.section')).toEqual([])
+    expect(slots.entries('conversation.input.dock')).toEqual([])
   })
 })

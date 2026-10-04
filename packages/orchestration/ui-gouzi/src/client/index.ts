@@ -2,16 +2,19 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConnectionHandle as ApiConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { GouziSettings, type GouziSettingsInjected } from './GouziPanel.tsx'
 import { KennelEntry } from './KennelEntry.tsx'
+import { KennelHero } from './KennelHero.tsx'
 import { openKennel } from './kennel.ts'
 
 export { controlGouzi, GouziRequestError, loadGouzi, type BrowserRequest } from './api.ts'
 export { GouziAvatarImage } from './avatars.tsx'
 export { GouziManager, GouziSettings, type GouziFolders, type GouziSettingsInjected } from './GouziPanel.tsx'
 export { KennelEntry, type KennelEntryProps } from './KennelEntry.tsx'
+export { KennelHero, type KennelHeroProps } from './KennelHero.tsx'
 export { KENNEL_PRESET, openKennel, type KennelServices } from './kennel.ts'
 
 /** Browser services required by the kennel row and the management page. */
@@ -32,6 +35,14 @@ export function apply(ctx: ClientContext): void {
     label: '狗窝',
     inject: () => ({ request: connection.request, open: () => openKennel({ sessions, workspaces, api }) }),
   }, KennelEntry))
+  // The welcome card above the input box of a blank kennel session; every other session renders nothing. The dock
+  // is the existing place for a strip above the input, and it is rendered on the new-session screen too.
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: 'kennel',
+    order: 5,
+    inject: () => ({ request: connection.request, sessions }),
+  }, KennelHero))
   // Adopting, editing, waking, resting, retiring, and adding machines are configuration, so they live in Settings.
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
