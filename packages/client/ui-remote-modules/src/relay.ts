@@ -74,6 +74,19 @@ export function followsPublicAlias(from: URL, to: URL): boolean {
     && to.username === '' && to.password === ''
 }
 
+/**
+ * Make a protocol-relative `Location` (`//host/path`, or the backslash form a browser reads the same way) absolute
+ * against the current target. Left as is, the browser would resolve it against the relay's own scheme and send the
+ * frame straight to that host, past both the redirect rule and the proxy rewrite.
+ * @param location - `Location` header of the upstream response.
+ * @param target - Origin the relay currently forwards to.
+ * @returns the header with a protocol-relative destination made absolute; any other value unchanged.
+ */
+function absoluteLocation(location: string | undefined, target: URL): string | undefined {
+  if (location === undefined || !/^[\\/]{2}/u.test(location)) return location
+  try { return new URL(location, target).href } catch { return location }
+}
+
 function followRedirect(state: RelayState, status: number, location: string | undefined): void {
   if (!REDIRECT_STATUSES.has(status) || location === undefined) return
   let destination: URL
@@ -178,8 +191,14 @@ function upstreamRequest(
 function handleHttp(req: IncomingMessage, res: ServerResponse, state: RelayState, port: number, id: string): void {
   const upstream = upstreamRequest(req, state.target, port, (response, origin) => {
     const status = response.statusCode ?? 502
-    followRedirect(state, status, response.headers.location)
-    const headers = responseHeaders(response.headers, state.target, origin, id)
+    const location = absoluteLocation(response.headers.location, state.target)
+    followRedirect(state, status, location)
+    const headers = responseHeaders(
+      location === undefined ? response.headers : { ...response.headers, location },
+      state.target,
+      origin,
+      id,
+    )
     // A followed alias can turn a redirect into a link to the same relay URL; a cached permanent one would loop.
     if (REDIRECT_STATUSES.has(status) && headers['cache-control'] === undefined) headers['cache-control'] = 'no-store'
     res.writeHead(status, response.statusMessage, headers)

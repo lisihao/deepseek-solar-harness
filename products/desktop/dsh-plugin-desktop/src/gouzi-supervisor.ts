@@ -60,6 +60,20 @@ function alive(pid: number): boolean {
 }
 
 /**
+ * Send a signal to a process that may already be gone.
+ * @param pid - process id.
+ * @param signal - signal to send.
+ */
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(pid, signal)
+  } catch (error) {
+    // ESRCH: the process exited between the liveness check and the signal, which is the outcome being asked for.
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+  }
+}
+
+/**
  * Whether the pid still runs a Gouzi worker. A pid alone is not enough: after a crash the operating system may
  * hand the same number to an unrelated process, and the ready record would then adopt it.
  * @param pid - process id from a ready record.
@@ -84,6 +98,8 @@ function sleep(milliseconds: number): Promise<void> {
 /** Process lifecycle for the members on one host. The main instance decides who exists; this decides who runs. */
 export class GouziSupervisor {
   private readonly children = new Map<string, ChildProcess>()
+  /** Starts in flight, so a second request for the same member joins the first instead of spawning another. */
+  private readonly starting = new Map<string, Promise<GouziWorkerReady>>()
 
   constructor(private readonly options: GouziSupervisorOptions) {
     if (!Number.isSafeInteger(options.activeLimit) || options.activeLimit < 1 || options.activeLimit > GOUZI_MEMBER_LIMIT) {
@@ -155,6 +171,19 @@ export class GouziSupervisor {
   async start(gouziId: string): Promise<GouziWorkerReady> {
     const existing = this.running(gouziId)
     if (existing !== undefined) return existing
+    const inFlight = this.starting.get(gouziId)
+    if (inFlight !== undefined) return inFlight
+    const attempt = this.spawnAndWait(gouziId).finally(() => { this.starting.delete(gouziId) })
+    this.starting.set(gouziId, attempt)
+    return attempt
+  }
+
+  private async spawnAndWait(gouziId: string): Promise<GouziWorkerReady> {
+    // A process from an earlier failed start must be gone before another is spawned, or the two would overlap.
+    const previous = this.children.get(gouziId)
+    if (previous?.pid !== undefined && alive(previous.pid) && !await this.terminate(previous.pid)) {
+      throw new Error(`gouzi ${gouziId} still has a process (pid ${String(previous.pid)}) from an earlier start that did not exit`)
+    }
     const others = this.activeCount(gouziId)
     if (others >= this.options.activeLimit) throw new GouziActiveLimitError(this.options.activeLimit)
     const home = this.homeOf(gouziId)
@@ -177,7 +206,10 @@ export class GouziSupervisor {
     child.unref()
     this.children.set(gouziId, child)
     let exitCode: number | null | undefined
-    child.once('exit', (code) => { exitCode = code; this.children.delete(gouziId) })
+    child.once('exit', (code) => {
+      exitCode = code
+      if (this.children.get(gouziId) === child) this.children.delete(gouziId)
+    })
     const deadline = Date.now() + this.options.readyTimeoutMs
     while (Date.now() < deadline) {
       const ready = this.running(gouziId)
@@ -187,31 +219,49 @@ export class GouziSupervisor {
       }
       await sleep(100)
     }
-    child.kill('SIGTERM')
-    throw new Error(`gouzi ${gouziId} was not ready after ${String(this.options.readyTimeoutMs)} ms; see ${join(home, 'worker.log')}`)
+    // Report the failure only once the process is confirmed gone; a retry then cannot overlap it.
+    const reclaimed = child.pid === undefined || await this.terminate(child.pid)
+    const why = `gouzi ${gouziId} was not ready after ${String(this.options.readyTimeoutMs)} ms; see ${join(home, 'worker.log')}`
+    throw new Error(reclaimed ? why : `${why}; its process (pid ${String(child.pid)}) did not exit and still holds its slot`)
   }
 
   /**
-   * Stop a member's process and forget its ready record. Optionally also stop the Resident daemon it started,
+   * Stop a member's process. The ready record is forgotten only once the process is confirmed gone, so an
+   * unconfirmed stop leaves the member visible as running. Optionally also stop the Resident daemon it started,
    * which otherwise outlives the member so that durable turns survive a restart.
    * @param gouziId - member identity.
    * @param options - `reclaimResident` also stops the member's Resident daemon.
+   * @returns whether each process was confirmed gone; the Resident daemon counts as gone when it was not asked for.
    */
-  async stop(gouziId: string, options: { readonly reclaimResident?: boolean } = {}): Promise<void> {
+  async stop(
+    gouziId: string,
+    options: { readonly reclaimResident?: boolean } = {},
+  ): Promise<{ readonly workerStopped: boolean; readonly residentStopped: boolean }> {
     const home = this.homeOf(gouziId)
     const record = this.running(gouziId)
-    if (record !== undefined) await this.terminate(record.pid)
-    rmSync(join(home, 'gouzi', GOUZI_WORKER_FILE), { force: true })
-    this.children.delete(gouziId)
+    const starting = this.children.get(gouziId)
+    const workerStopped = (record === undefined || await this.terminate(record.pid))
+      && (starting?.pid === undefined || !alive(starting.pid) || await this.terminate(starting.pid))
+    if (workerStopped) {
+      rmSync(join(home, 'gouzi', GOUZI_WORKER_FILE), { force: true })
+      this.children.delete(gouziId)
+    }
+    let residentStopped = true
     if (options.reclaimResident === true) {
       const pid = residentDaemonPid(home)
-      if (pid !== undefined) await this.terminate(pid)
+      residentStopped = pid === undefined || await this.terminate(pid)
     }
+    return { workerStopped, residentStopped }
   }
 
   private activeCount(except: string): number {
     let count = 0
-    for (const gouziId of this.knownMembers()) if (gouziId !== except && this.running(gouziId) !== undefined) count++
+    for (const gouziId of this.knownMembers()) {
+      if (gouziId === except) continue
+      // A member that is still booting holds a slot as well, although it has not written its ready record yet.
+      const booting = this.children.get(gouziId)
+      if (this.running(gouziId) !== undefined || (booting?.pid !== undefined && alive(booting.pid))) count++
+    }
     return count
   }
 
@@ -224,11 +274,22 @@ export class GouziSupervisor {
     }
   }
 
-  private async terminate(pid: number): Promise<void> {
-    process.kill(pid, 'SIGTERM')
+  /**
+   * Stop a process: SIGTERM, then SIGKILL after the stop timeout, and wait for the exit each time.
+   * @param pid - process id.
+   * @returns true only when the process is confirmed gone.
+   */
+  private async terminate(pid: number): Promise<boolean> {
+    signalProcess(pid, 'SIGTERM')
+    if (await this.exited(pid)) return true
+    signalProcess(pid, 'SIGKILL')
+    return this.exited(pid)
+  }
+
+  private async exited(pid: number): Promise<boolean> {
     const deadline = Date.now() + this.options.stopTimeoutMs
     while (alive(pid) && Date.now() < deadline) await sleep(50)
-    if (alive(pid)) process.kill(pid, 'SIGKILL')
+    return !alive(pid)
   }
 }
 
