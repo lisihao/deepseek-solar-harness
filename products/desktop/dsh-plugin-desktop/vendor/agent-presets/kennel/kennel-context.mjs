@@ -11,10 +11,10 @@ export const name = 'kennel-context'
 /** The prompt registry whose assembly this plugin extends. */
 export const inject = ['systemPrompt']
 
-/** Provider ids a dog can advertise, in the order the steward should prefer them. */
+/** Predicted TaskGraph-only provider ids, not evidence of provider registration or task eligibility. */
 const PROVIDERS = [
   ['codex', 'Codex'],
-  ['claude-code', 'Claude Code，对方已登录时才可用'],
+  ['claude-code', 'Claude Code'],
 ]
 
 const ACTIVITY = {
@@ -46,12 +46,15 @@ export function renderRoster(listing) {
     const reach = dog.connection === 'online' ? '在线' : '联系不上'
     const doing = ACTIVITY[dog.activity] ?? dog.activity
     const operators = PROVIDERS.map(([provider, note]) => `\`gouzi.${id}.${provider}\`（${note}）`).join('、')
-    return `- ${dog.name}｜${dog.role}｜住在 ${where}｜${reach}｜${doing}\n  operator id：${operators}`
+    return `- ${dog.name}｜${dog.role}｜住在 ${where}｜${reach}｜${doing}\n  TaskGraph 候选 operator id（预测，未核验注册）：${operators}`
   })
   return [
     '## 狗窝',
     '',
-    `现在有 ${String(dogs.length)} 只启用的狗子（名单来自 设置 → 狗子）。派活时把对应 id 填进节点的 operator.preferredIds；联系不上的不要派：`,
+    `现在有 ${String(dogs.length)} 只启用的狗子（名单来自 设置 → 狗子）。联系不上的不要派。`,
+    '狗子入口为 TaskGraph only：gouzi.* 只填进任务图节点的 operator.preferredIds，不能用于 physical_operator.run。用户指定狗子时，单个只读任务也要提交完整的单节点 TaskGraph，不能改为本地执行。',
+    '在线只表示成员连接可达；下面的 provider id 按命名规则预测，不证明已注册或可执行任务。provider 可用性以任务图编译和调度时的实际资格为准；普通 physical_operator 目录中没有这些 id 是预期情况。',
+    'GRAPH_INVALID 表示图编译失败：修正错误指出的具体字段后重试 orchestration.start，不要报成连接故障或任务完成。',
     '',
     ...lines,
   ].join('\n')

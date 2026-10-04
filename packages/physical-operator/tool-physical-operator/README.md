@@ -25,11 +25,13 @@ Automatic routing still needs a decision source, but it does not require DeepSee
 | `list` | no additional fields | Stable ids, execution modes, descriptions, tags, availability, and capacity. |
 | `run` | `operator_id`, `description`, `prompt`, optional `mode` | Execution id and successful Provider output; Resident completion also returns continuity. |
 
+`run` rejects every `gouzi.*` ID with `OPERATOR_MODE_UNSUPPORTED` before preparing context, binding a tool bridge, or starting a provider, even if a direct operator advertises that ID. These IDs belong only in `operator.preferredIds` on TaskGraph nodes submitted through `orchestration.start`.
+
 `list` rejects run-only fields instead of silently ignoring work. `run` requires a real calling agent, forwards its cancellation signal, waits in the foreground, and always disposes the accepted provider run. Non-completed stop reasons are reported as tool errors while preserving any partial text. Independent result and disposal failures are both retained.
 
 The prompt must contain the complete work for this turn. An ephemeral Provider receives it in a fresh product context; a Resident Provider continues only the caller-owned lane within the canonical workspace. Large Resident results can return a content-addressed artifact reference instead of inline bytes.
 
-Each `run` builds a sealed operator-context envelope from the active runtime snapshot and a template selected for the delegated prompt itself. It never reuses a template attached to an earlier parent task. The Session records the exact envelope and delegated template receipt with the Provider receipt so the child input can be reconstructed after replay.
+Each admitted `run` builds a sealed operator-context envelope from the active runtime snapshot and a template selected for the delegated prompt itself. It never reuses a template attached to an earlier parent task. The Session records the exact envelope and delegated template receipt with the Provider receipt so the child input can be reconstructed after replay.
 
 ## Model Experience
 

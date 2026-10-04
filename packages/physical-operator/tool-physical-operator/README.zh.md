@@ -25,11 +25,13 @@ Resident 原生进度页会在运行结束（或运行报告错误）后复制�
 | `list` | 无额外字段 | 稳定 ID、执行模式、描述、标签、可用性与容量。 |
 | `run` | `operator_id`、`description`、`prompt` 与可选 `mode` | 执行 ID 与成功的 Provider 输出；Resident 完成时还返回连续性信息。 |
 
+`run` 对所有 `gouzi.*` ID 都返回 `OPERATOR_MODE_UNSUPPORTED`，并在准备上下文、绑定工具桥或启动提供方之前拒绝执行，即使某个直接算子声明了该 ID 也不例外。这些 ID 只用于通过 `orchestration.start` 提交的 TaskGraph 节点的 `operator.preferredIds`。
+
 `list` 会拒绝仅供运行使用的字段，不会静默忽略工作。`run` 要求真实的调用 agent，转发其取消信号，在前台等待，并始终释放已经接受的 Provider 运行。未成功完成的停止原因会作为工具错误报告，同时保留已有的部分文本。独立发生的结果错误和释放错误都会保留。
 
 prompt 必须包含本轮所需的完整工作。Ephemeral Provider 会在全新的产品上下文中接收它；Resident Provider 只会继续规范化 workspace 内由调用方拥有的 lane。大型 Resident 结果可以返回内容寻址的产物引用，而不内联原始字节。
 
-每次 `run` 都会从当前运行时快照和为委派提示词自身选出的模板构建密封算子上下文信封，绝不会复用附着在更早父任务上的模板。Session 会把精确的信封和委派模板回执与 Provider 回执一并记录，以便回放时重建子任务输入。
+每次获准的 `run` 都会从当前运行时快照和为委派提示词自身选出的模板构建密封算子上下文信封，绝不会复用附着在更早父任务上的模板。Session 会把精确的信封和委派模板回执与 Provider 回执一并记录，以便回放时重建子任务输入。
 
 ## 模型体验
 

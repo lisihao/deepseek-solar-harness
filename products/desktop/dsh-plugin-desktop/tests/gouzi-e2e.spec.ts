@@ -13,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { gouziRequestHash, type RemoteResidentExecuteRequest } from '@deepseek-ai/dsh-client-connection'
 import {
-  GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId, type GouziExecutionGrant, type LogicalTaskGraphV1,
+  GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId, type GouziExecutionGrant, type LogicalTaskGraphV1, type OrchestrationExecutionEvidenceV1,
 } from '@deepseek-ai/dsh-orchestration'
 import {
   OrchestrationDaemon,
@@ -22,6 +22,7 @@ import {
   RemoteSyncHttpClient,
   RemoteSyncRejectedError,
 } from '@deepseek-ai/dsh-orchestration-local'
+import { orchestrationGraphGuidance } from '@deepseek-ai/dsh-tool-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { Context } from '@deepseek-ai/cordis'
 import * as OrchestrationLocal from '@deepseek-ai/dsh-orchestration-local'
@@ -334,6 +335,27 @@ describe.sequential('Gouzi members as real processes', () => {
       expect(watcher.gouzi.read(GouziId(gouziId))).toMatchObject({ connection: 'online' })
     }
     watcher.close()
+
+    const template = JSON.parse(orchestrationGraphGuidance.slice(orchestrationGraphGuidance.indexOf('{"version":1'))) as LogicalTaskGraphV1
+    const selectedOperator = `gouzi.gouzi-a.${OPERATOR}`
+    const otherBefore = commandIds('gouzi-b')
+    const compilation = await client.compile({
+      intent: { request: 'Let gouzi-a read the repository README.' },
+      admission: { policy: 'auto', route: 'taskgraph', sourceSessionId: 'readme-template-e2e', rlm: 'disabled', continualHarness: 'off' },
+      graph: { ...template, workspace, nodes: template.nodes.map(node => ({ ...node, operator: { preferredIds: [selectedOperator] } })) },
+    })
+    const started = await client.start({ commandId: `readme:${compilation.compilationId}`, compilationId: compilation.compilationId })
+    const read = await eventually(
+      () => client.inspect(String(started.runId)), value => value.state === 'completed' || value.state === 'failed', 120_000,
+    )
+    expect(read.state).toBe('completed')
+    expect(read.nodes[0]?.operatorId).toBe(selectedOperator)
+    const evidenceRef = read.nodes[0]?.evidenceRefs[0]
+    expect(evidenceRef).toBeDefined()
+    const evidence = await client.readArtifact(evidenceRef!) as OrchestrationExecutionEvidenceV1
+    expect(evidence.output).toEqual([{ type: 'text', text: 'README.md:1: gouzi fixture\nFiles: README.md' }])
+    expect(executions('gouzi-a').at(-1)?.[1]).toContain(supervisor.homeOf('gouzi-a'))
+    expect(commandIds('gouzi-b')).toEqual(otherBefore)
   }, 240_000)
 
   it('adopts a member through the Host route with a real worker process, runs a TaskGraph on it, and retires it', async () => {

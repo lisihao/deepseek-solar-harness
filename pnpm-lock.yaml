@@ -575,6 +575,9 @@ importers:
       '@deepseek-ai/dsh-model-allocation-local':
         specifier: workspace:*
         version: link:../packages/orchestration/model-allocation-local
+      '@deepseek-ai/dsh-orchestration-local':
+        specifier: workspace:*
+        version: link:../packages/orchestration/orchestration-local
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../packages/interaction/permission-presets
@@ -758,6 +761,9 @@ importers:
       '@deepseek-ai/dsh-tool-lsp':
         specifier: workspace:*
         version: link:../packages/lsp/tool-lsp
+      '@deepseek-ai/dsh-tool-orchestration':
+        specifier: workspace:*
+        version: link:../packages/orchestration/tool-orchestration
       '@deepseek-ai/dsh-tool-physical-operator':
         specifier: workspace:*
         version: link:../packages/physical-operator/tool-physical-operator
