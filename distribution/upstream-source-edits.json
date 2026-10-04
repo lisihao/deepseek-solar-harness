@@ -90,6 +90,10 @@
       "kind": "migration-debt",
       "note": "fix(trajectory): enforce host-safe physical traces"
     },
+    "packages/client/runtime/src/client/contract/sessions.ts": {
+      "kind": "seam",
+      "note": "Expose existing workspace-scoped SessionRuntime.create on the browser service face so kennel navigation can create an independent conversation before switching views; see .agents/notes/implemented/bug-fix/2026-10-04-kennel-workspace-navigation.md."
+    },
     "packages/client/runtime/src/client/index.ts": {
       "kind": "migration-debt",
       "note": "feat: ship dual-mode workbench orchestration"
@@ -130,6 +134,14 @@
       "kind": "backport",
       "note": "feat(desktop): backport selected official behaviors"
     },
+    "packages/client/ui-model-selection/src/client/ModelSelect.module.css": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-model-selection/src/client/ModelSelect.tsx": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
     "packages/client/ui-model-selection/src/client/directory.ts": {
       "kind": "migration-debt",
       "note": "feat(model-selection): refresh models and operators from the model menu; feat: add Web coordination and live catalog refresh"
@@ -142,14 +154,6 @@
       "kind": "migration-debt",
       "note": "feat(model-selection): refresh models and operators from the model menu"
     },
-    "packages/client/ui-model-selection/src/client/ModelSelect.module.css": {
-      "kind": "migration-debt",
-      "note": "feat(model-selection): refresh models and operators from the model menu"
-    },
-    "packages/client/ui-model-selection/src/client/ModelSelect.tsx": {
-      "kind": "migration-debt",
-      "note": "feat(model-selection): refresh models and operators from the model menu"
-    },
     "packages/client/ui-model-selection/src/client/service.ts": {
       "kind": "migration-debt",
       "note": "feat(model-selection): refresh models and operators from the model menu"
@@ -157,6 +161,10 @@
     "packages/client/ui-model-selection/src/client/slots.ts": {
       "kind": "migration-debt",
       "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-primitives/src/ReadBlock.tsx": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
     },
     "packages/client/ui-primitives/src/markdown/CodeBlock.tsx": {
       "kind": "backport",
@@ -174,10 +182,6 @@
       "kind": "migration-debt",
       "note": "fix(markdown): try the math compatibility constructs before upstream math() so multi-line display-dollar TeX on the opening line parses as one block"
     },
-    "packages/client/ui-primitives/src/ReadBlock.tsx": {
-      "kind": "backport",
-      "note": "feat(desktop): backport selected official behaviors"
-    },
     "packages/client/ui-settings-models/src/client/store.ts": {
       "kind": "migration-debt",
       "note": "fix(remote): close release contract gaps; feat(runtime): promote subscription models"
@@ -189,26 +193,6 @@
     "packages/client/ui-sidebar/src/client/SidebarRoot.tsx": {
       "kind": "migration-debt",
       "note": "feat: ship dual-mode workbench orchestration"
-    },
-    "packages/client/ui-trajectory/src/client/index.ts": {
-      "kind": "migration-debt",
-      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
-    },
-    "packages/client/ui-trajectory/src/client/layout.ts": {
-      "kind": "migration-debt",
-      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
-    },
-    "packages/client/ui-trajectory/src/client/trajectory-contract.ts": {
-      "kind": "migration-debt",
-      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
-    },
-    "packages/client/ui-trajectory/src/client/trajectory-record.ts": {
-      "kind": "migration-debt",
-      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
-    },
-    "packages/client/ui-trajectory/src/client/trajectory-snapshot-builder.ts": {
-      "kind": "migration-debt",
-      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
     },
     "packages/client/ui-trajectory/src/client/TrajectoryCell.module.css": {
       "kind": "migration-debt",
@@ -235,6 +219,26 @@
       "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
     },
     "packages/client/ui-trajectory/src/client/TrajectoryView.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/layout.ts": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-contract.ts": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-record.ts": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-snapshot-builder.ts": {
       "kind": "migration-debt",
       "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
     },
@@ -414,6 +418,18 @@
       "kind": "migration-debt",
       "note": "feat(physical-operator): detect, verify, and update native Codex and Claude Code CLIs; fix(physical-operator): preserve effective execution routes"
     },
+    "packages/subagent/subagent-in-process-driver/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
+    "packages/subagent/subagent/src/child-agent.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
+    "packages/subagent/subagent/src/continuation.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
     "packages/subagent/subagent/src/index.ts": {
       "kind": "migration-debt",
       "note": "feat(orchestration): account native RLM usage; feat: require subscription auth for physical operators"
@@ -430,6 +446,10 @@
       "kind": "migration-debt",
       "note": "test(snapshot): normalize loaded-runner timeout diagnostics; test(acp-snapshot): stabilize timeout diagnostics"
     },
+    "packages/test-support/client-runtime/src/sessions.ts": {
+      "kind": "seam",
+      "note": "Keep the test sessions face aligned with the workspace-scoped create declaration and fail loud rather than simulate independent Host creation; see .agents/notes/implemented/bug-fix/2026-10-04-kennel-workspace-navigation.md."
+    },
     "packages/typert/generator/src/cordis-catalog.ts": {
       "kind": "migration-debt",
       "note": "chore(monorepo): complete solar P0-P2 integration"
@@ -441,18 +461,6 @@
     "packages/util/home-paths/src/index.ts": {
       "kind": "migration-debt",
       "note": "fix(desktop): shorten local daemon socket paths; fix(runtime): make local IPC portable"
-    },
-    "packages/subagent/subagent/src/child-agent.ts": {
-      "kind": "migration-debt",
-      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
-    },
-    "packages/subagent/subagent/src/continuation.ts": {
-      "kind": "migration-debt",
-      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
-    },
-    "packages/subagent/subagent-in-process-driver/src/index.ts": {
-      "kind": "migration-debt",
-      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
     }
   }
 }
