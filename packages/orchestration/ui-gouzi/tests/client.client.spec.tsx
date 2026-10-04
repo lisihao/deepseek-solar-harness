@@ -599,7 +599,7 @@ describe('Gouzi client registration', () => {
       children: {
         'sidebar.footer.action': { kind: 'list', scope: 'root' },
         'settings.section': { kind: 'list', scope: 'root' },
-        'conversation.hero.extra': { kind: 'list', scope: 'root' },
+        'conversation.input.dock': { kind: 'list', scope: 'session' },
       },
     } as never, () => null)
     const fetchStub = vi.fn()
@@ -625,15 +625,15 @@ describe('Gouzi client registration', () => {
     expect(page.request).toBe(fetchStub)
     expect(page.folders).toBe(workspaces)
 
-    const hero = slots.entries('conversation.hero.extra')
-    expect(hero.map(entry => [entry.options.id, entry.options.order])).toEqual([['kennel', 10]])
-    const card = (hero[0]!.inject as () => { request: unknown; sessions: unknown })()
+    const dock = slots.entries('conversation.input.dock')
+    expect(dock.map(entry => [entry.options.id, entry.options.order])).toEqual([['kennel', 5]])
+    const card = (dock[0]!.inject as () => { request: unknown; sessions: unknown })()
     expect(card.request).toBe(fetchStub)
     expect(card.sessions).toBe(fake.sessions)
 
     await fiber.dispose()
     expect(slots.entries('sidebar.footer.action')).toEqual([])
     expect(slots.entries('settings.section')).toEqual([])
-    expect(slots.entries('conversation.hero.extra')).toEqual([])
+    expect(slots.entries('conversation.input.dock')).toEqual([])
   })
 })

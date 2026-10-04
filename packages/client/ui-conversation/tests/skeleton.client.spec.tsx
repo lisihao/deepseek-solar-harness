@@ -486,13 +486,6 @@ describe('ConversationRoot resident composer', () => {
     // The agent-preset chip sits in the same row, for the same reason: both
     // choices are only open before the first message.
     expect(b.slotCalls).toContain('conversation.hero.agentPreset')
-    // The extra area under the row belongs to plugins that explain the session about to start.
-    expect(b.slotCalls).toContain('conversation.hero.extra')
-  })
-
-  it('does not render the hero extra area once the session has started', () => {
-    const b = mount(conversationSnapshot({ composerPhase: 'active', blank: false }))
-    expect(b.slotCalls).not.toContain('conversation.hero.extra')
   })
 
   it('prompt failure renders the promptError strip (ordinary failure, no transaction UI)', () => {

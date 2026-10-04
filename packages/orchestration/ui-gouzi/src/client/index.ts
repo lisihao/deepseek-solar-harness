@@ -35,11 +35,12 @@ export function apply(ctx: ClientContext): void {
     label: '狗窝',
     inject: () => ({ request: connection.request, open: () => openKennel({ sessions, workspaces, api }) }),
   }, KennelEntry))
-  // The welcome card on the new-session screen of a kennel session; every other session renders nothing.
-  ctx.slots.inject('conversation.hero.extra', () => ctx.slots.register({
-    name: 'conversation.hero.extra',
+  // The welcome card above the input box of a blank kennel session; every other session renders nothing. The dock
+  // is the existing place for a strip above the input, and it is rendered on the new-session screen too.
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
     id: 'kennel',
-    order: 10,
+    order: 5,
     inject: () => ({ request: connection.request, sessions }),
   }, KennelHero))
   // Adopting, editing, waking, resting, retiring, and adding machines are configuration, so they live in Settings.
