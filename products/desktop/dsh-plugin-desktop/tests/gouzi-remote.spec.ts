@@ -33,7 +33,10 @@ async function reachable(endpoint: string): Promise<boolean> {
   }
 }
 
-describe.skipIf(!SSHD_AVAILABLE).sequential('Gouzi SSH hosts', () => {
+/** Each login or agent call starts a Node process through tsx, which is slow on a loaded CI runner. */
+const STEP_TIMEOUT_MS = 120_000
+
+describe.skipIf(!SSHD_AVAILABLE).sequential('Gouzi SSH hosts', { timeout: STEP_TIMEOUT_MS }, () => {
   let server: TestSshd
   let scratch: string
   let hostsRoot: string
