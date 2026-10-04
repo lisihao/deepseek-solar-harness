@@ -4856,7 +4856,7 @@ __metadata:
 
 "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::hash=30d73d&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::hash=6d9c4f&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     clsx: "npm:^2.0.0"
@@ -4873,7 +4873,7 @@ __metadata:
     "@deepseek-ai/dsh-orchestration": ^0.1.0-rc.5
     react: ^18.2.0
     react-dom: ^18.2.0
-  checksum: 10c0/18eff895305f8805442e0d1f2274e4bdffa234fe5431b8fcf545a127fbb6b4260913bab32678879877f38a2a3d4ed9a0ff31ac3682db2b5bc026c867818b155b
+  checksum: 10c0/5f229e855413d691b9b7d1e8f43759a79bc8e8b2e31ecad971b2f9c6eb3ad586143687e81f88e9ff5fa7e146afc361233c919d8cd02aa9a0d5e761f608e73d69
   languageName: node
   linkType: hard
 
@@ -9543,6 +9543,7 @@ __metadata:
     electron: 43.4.0
   bin:
     dsh-desktop: lib/bin.js
+    dsh-gouzi-agent: lib/gouzi-agent-bin.js
     dsh-gouzi-worker: lib/gouzi-worker-bin.js
     dsh-plugin-desktop: lib/bin.js
     dsh-product-server: lib/product-server-bin.js

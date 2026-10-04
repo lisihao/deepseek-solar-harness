@@ -6,19 +6,20 @@ import { GouziEntry } from './GouziPanel.tsx'
 
 export { controlGouzi, GouziRequestError, loadGouzi, type BrowserRequest } from './api.ts'
 export { GouziAvatarImage } from './avatars.tsx'
-export { GouziEntry, type GouziEntryProps } from './GouziPanel.tsx'
+export { GouziEntry, type GouziEntryProps, type GouziFolders } from './GouziPanel.tsx'
 
 /** Browser services required by the roster entry. */
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'workspaces']
 
 /** Register the roster entry as one additive sidebar footer action. */
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
+  const workspaces = ctx.workspaces
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'gouzi',
     order: 90,
     label: '狗子',
-    inject: () => ({ request: connection.request }),
+    inject: () => ({ request: connection.request, folders: workspaces }),
   }, GouziEntry))
 }

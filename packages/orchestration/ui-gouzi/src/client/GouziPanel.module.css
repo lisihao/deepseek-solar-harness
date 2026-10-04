@@ -182,8 +182,34 @@
   font-size: 13px;
   resize: vertical;
 }
+.hint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.projectList { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.projectChoice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.projectChoice strong { color: var(--dsw-alias-label-primary); font-size: 13px; }
+.projectChoice span { grid-column: 2; color: var(--dsw-alias-label-tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .summary { margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .summary div { display: flex; gap: 12px; }
 .summary dt { width: 48px; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .summary dd { margin: 0; color: var(--dsw-alias-label-primary); font-size: 13px; overflow-wrap: anywhere; }
 .wizardActions { display: flex; justify-content: flex-end; gap: 8px; }
+.addHost { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px; }
+.addHost legend { padding: 0 6px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.addHost code { overflow-wrap: anywhere; }
+.inline { display: flex; gap: 10px; }
+.inline .field { flex: 1; }
+.inline .narrow { flex: 0 0 90px; }
+.pathBar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pathBar code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-secondary); }
+.folderRow { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; font-size: 13px; }
+.folderRow span:not(.gitBadge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.folderSpacer { width: 13px; flex: none; }
+.gitBadge { margin-left: auto; padding: 0 6px; border-radius: 8px; background: var(--dsw-alias-state-business-tertiary); color: var(--dsw-alias-brand-primary); font-size: 11px; }

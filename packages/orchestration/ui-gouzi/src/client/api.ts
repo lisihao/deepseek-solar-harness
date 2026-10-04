@@ -48,9 +48,9 @@ export async function loadGouzi(request: BrowserRequest, signal?: AbortSignal): 
  * Send one control.
  * @param request - authenticated fetch.
  * @param control - the action and its fields.
- * @returns the member after the action.
+ * @returns the Host's reply body, whose type the caller knows from the action.
  */
-export async function controlGouzi(request: BrowserRequest, control: GouziControlRequest): Promise<GouziMemberProjection> {
+export async function callGouzi<Reply>(request: BrowserRequest, control: GouziControlRequest): Promise<Reply> {
   const response = await request(GOUZI_DASHBOARD_PATH, {
     method: 'POST',
     cache: 'no-store',
@@ -58,5 +58,15 @@ export async function controlGouzi(request: BrowserRequest, control: GouziContro
     body: JSON.stringify(control),
   })
   if (!response.ok) throw await failure(response)
-  return await response.json() as GouziMemberProjection
+  return await response.json() as Reply
+}
+
+/**
+ * Send a control that answers with a member.
+ * @param request - authenticated fetch.
+ * @param control - the action and its fields.
+ * @returns the member after the action.
+ */
+export function controlGouzi(request: BrowserRequest, control: GouziControlRequest): Promise<GouziMemberProjection> {
+  return callGouzi<GouziMemberProjection>(request, control)
 }

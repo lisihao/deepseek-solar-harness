@@ -1,7 +1,8 @@
 /** Sidebar entry and dialog for the Gouzi roster: list, adopt, edit, wake, rest, and retire. */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import clsx from 'clsx'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { IWorkspaces } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import {
@@ -11,12 +12,16 @@ import {
   GOUZI_ROLE_IDS,
   GOUZI_STATE_COPY,
   type GouziAvatar,
+  GOUZI_LOCAL_HOST_ID,
   type GouziDashboardV1,
+  type GouziHostProjection,
   type GouziMemberProjection,
   type GouziRoleId,
 } from '../contracts.ts'
 import { GouziAvatarImage } from './avatars.tsx'
 import { controlGouzi, loadGouzi, type BrowserRequest } from './api.ts'
+import { HostStep, messageOf } from './HostStep.tsx'
+import { RemoteFolderPicker } from './RemoteFolderPicker.tsx'
 import css from './GouziPanel.module.css'
 
 /** Roster refresh interval while the dialog is open. */
@@ -25,10 +30,25 @@ const OPEN_POLL_MS = 3_000
 const IDLE_POLL_MS = 20_000
 
 /** Slot runtime plus the browser's authenticated fetch. */
-export type GouziEntryProps = Pick<PropsRuntime<'sidebar.footer.action'>, 'wide'> & { request: BrowserRequest }
+export type GouziEntryProps = Pick<PropsRuntime<'sidebar.footer.action'>, 'wide'> & {
+  request: BrowserRequest
+  /** The workspaces the user already opened, and the Host's native folder picker. */
+  folders: GouziFolders
+}
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/** The slice of the workspace service the adoption wizard reads: known folders and the native picker. */
+export type GouziFolders = Pick<IWorkspaces, 'list' | 'pickDirectory'>
+
+/** Suggested projects shown in the wizard; the rest stay reachable through the folder picker. */
+const SUGGESTION_LIMIT = 6
+
+interface FolderChoice {
+  path: string
+  title: string
+}
+
+function basename(path: string): string {
+  return path.split('/').filter(part => part.length > 0).at(-1) ?? path
 }
 
 /** Poll the roster; `open` shortens the interval. */
@@ -92,10 +112,81 @@ function RolePicker({ value, onChange }: { value: GouziRoleId; onChange: (next: 
   )
 }
 
-const WIZARD_STEPS = ['头像', '名字', '角色与项目', '确认'] as const
+const WIZARD_STEPS = ['头像', '名字', '住处', '角色与项目', '确认'] as const
 
-function AdoptWizard({ request, used, limit, onDone, onCancel }: {
+/**
+ * Step 3 project chooser: the user's known workspaces as checkboxes (the most recent preselected)
+ * plus a button that opens the Host's folder picker. No path is ever typed.
+ */
+function ProjectPicker({ folders, selected, onChange }: {
+  folders: GouziFolders
+  selected: readonly string[]
+  onChange: (paths: readonly string[]) => void
+}) {
+  const { list: source } = folders
+  const list = useSyncExternalStore(callback => source.subscribe(callback), () => source.getSnapshot())
+  const [picked, setPicked] = useState<readonly FolderChoice[]>([])
+  const [notice, setNotice] = useState<string>()
+  const suggestions = useMemo<readonly FolderChoice[]>(() => {
+    const known = [...list.items]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, SUGGESTION_LIMIT)
+      .map(item => ({ path: item.path, title: item.title }))
+    const extra = picked.filter(choice => !known.some(item => item.path === choice.path))
+    return [...extra, ...known]
+  }, [list.items, picked])
+  const preselected = useRef(false)
+  useEffect(() => {
+    const first = suggestions[0]
+    if (preselected.current || selected.length > 0 || first === undefined) return
+    preselected.current = true
+    const recent = list.items.find(item => item.workspaceId === list.recentWorkspaceId)
+    onChange([recent?.path ?? first.path])
+  }, [list.items, list.recentWorkspaceId, onChange, selected.length, suggestions])
+  const toggle = (path: string): void => {
+    preselected.current = true
+    onChange(selected.includes(path) ? selected.filter(item => item !== path) : [...selected, path])
+  }
+  const choose = async (): Promise<void> => {
+    setNotice(undefined)
+    try {
+      const path = await folders.pickDirectory()
+      if (path === null) return
+      setPicked(current => current.some(choice => choice.path === path) ? current : [...current, { path, title: basename(path) }])
+      if (!selected.includes(path)) onChange([...selected, path])
+    } catch (cause) {
+      setNotice(messageOf(cause))
+    }
+  }
+  return (
+    <div className={css.field}>
+      <span>它可以处理的项目（在运行 DSH 的这台机器上）</span>
+      {suggestions.length > 0
+        ? (
+          <ul className={css.projectList}>
+            {suggestions.map(choice => (
+              <li key={choice.path}>
+                <label className={clsx(css.projectChoice, selected.includes(choice.path) && css.chosen)}>
+                  <input type="checkbox" checked={selected.includes(choice.path)} onChange={() => { toggle(choice.path) }} />
+                  <strong>{choice.title}</strong>
+                  <span title={choice.path}>{choice.path}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )
+        : <p className={css.hint}>还没有打开过项目，点下面的按钮选择一个文件夹。</p>}
+      <button type="button" className={css.secondary} onClick={() => { void choose() }}>选择文件夹…</button>
+      {notice !== undefined && <p className={css.error} role="alert">{notice}</p>}
+    </div>
+  )
+}
+
+function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onDone, onCancel }: {
   request: BrowserRequest
+  folders: GouziFolders
+  hosts: readonly GouziHostProjection[]
+  onHostsChanged: () => Promise<void>
   used: number
   limit: number
   onDone: () => void
@@ -105,17 +196,18 @@ function AdoptWizard({ request, used, limit, onDone, onCancel }: {
   const [avatarId, setAvatarId] = useState<GouziAvatar>('shiba')
   const [name, setName] = useState('')
   const [role, setRole] = useState<GouziRoleId>('development')
-  const [projects, setProjects] = useState('')
+  const [hostId, setHostId] = useState(GOUZI_LOCAL_HOST_ID)
+  const [paths, setPaths] = useState<readonly string[]>([])
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
-  const paths = useMemo(() => projects.split('\n').map(line => line.trim()).filter(line => line.length > 0), [projects])
   const trimmed = name.trim()
-  const valid = [true, trimmed.length > 0 && trimmed.length <= 40, paths.length > 0 && paths.every(path => path.startsWith('/')), true]
+  const valid = [true, trimmed.length > 0 && trimmed.length <= 40, hosts.some(host => host.hostId === hostId), paths.length > 0, true]
+  const hostLabel = hosts.find(host => host.hostId === hostId)?.label ?? ''
   const adopt = async (): Promise<void> => {
     setPending(true)
     setError(undefined)
     try {
-      await controlGouzi(request, { action: 'adopt', name: trimmed, avatarId, role, projects: paths })
+      await controlGouzi(request, { action: 'adopt', name: trimmed, avatarId, role, hostId, projects: [...paths] })
       onDone()
     } catch (cause) {
       setError(messageOf(cause))
@@ -143,25 +235,29 @@ function AdoptWizard({ request, used, limit, onDone, onCancel }: {
         </label>
       )}
       {step === 2 && (
-        <>
-          <RolePicker value={role} onChange={setRole} />
-          <label className={css.field}>
-            <span>它可以处理的项目（每行一个绝对路径）</span>
-            <textarea
-              value={projects}
-              rows={3}
-              placeholder="/Users/你/Projects/某个仓库"
-              onChange={(event) => { setProjects(event.target.value) }}
-            />
-          </label>
-        </>
+        <HostStep
+          request={request}
+          hosts={hosts}
+          value={hostId}
+          onChange={(next) => { setHostId(next); setPaths([]) }}
+          onHostsChanged={onHostsChanged}
+        />
       )}
       {step === 3 && (
+        <>
+          <RolePicker value={role} onChange={setRole} />
+          {hostId === GOUZI_LOCAL_HOST_ID
+            ? <ProjectPicker folders={folders} selected={paths} onChange={setPaths} />
+            : <RemoteFolderPicker request={request} hostId={hostId} selected={paths} onChange={setPaths} />}
+        </>
+      )}
+      {step === 4 && (
         <dl className={css.summary}>
           <div><GouziAvatarImage avatarId={avatarId} size={64} /></div>
           <div><dt>名字</dt><dd>{trimmed}</dd></div>
+          <div><dt>住处</dt><dd>{hostLabel}</dd></div>
           <div><dt>角色</dt><dd>{GOUZI_ROLE_COPY[role].label}</dd></div>
-          <div><dt>项目</dt><dd>{paths.join('、')}</dd></div>
+          <div><dt>项目</dt><dd>{paths.map(basename).join('、')}</dd></div>
           <div><dt>名额</dt><dd>领养后 {used + 1} / {limit}</dd></div>
         </dl>
       )}
@@ -228,7 +324,7 @@ function MemberCard({ member, canManage, busy, onAction, onEdit }: {
       <GouziAvatarImage avatarId={member.avatarId} size={56} />
       <div className={css.identity}>
         <strong>{member.name}</strong>
-        <span>{GOUZI_ROLE_COPY[member.role].label}</span>
+        <span>{GOUZI_ROLE_COPY[member.role].label} · 住在 {member.hostLabel}</span>
       </div>
       <span className={css.status} data-state={member.state}>{GOUZI_STATE_COPY[member.state]}</span>
       {canManage && (
@@ -243,7 +339,7 @@ function MemberCard({ member, canManage, busy, onAction, onEdit }: {
   )
 }
 
-function GouziDialog({ request, onClose }: { request: BrowserRequest; onClose: () => void }) {
+function GouziDialog({ request, folders, onClose }: { request: BrowserRequest; folders: GouziFolders; onClose: () => void }) {
   const { dashboard, error: loadError, refresh } = useRoster(request, true)
   const [mode, setMode] = useState<{ kind: 'list' } | { kind: 'adopt' } | { kind: 'edit'; member: GouziMemberProjection }>({ kind: 'list' })
   const [busy, setBusy] = useState(false)
@@ -303,6 +399,9 @@ function GouziDialog({ request, onClose }: { request: BrowserRequest; onClose: (
           {mode.kind === 'adopt' && dashboard !== undefined && (
             <AdoptWizard
               request={request}
+              folders={folders}
+              hosts={dashboard.hosts}
+              onHostsChanged={async () => { await refresh() }}
               used={dashboard.used}
               limit={dashboard.limit}
               onCancel={() => { setMode({ kind: 'list' }) }}
@@ -342,7 +441,7 @@ function GouziDialog({ request, onClose }: { request: BrowserRequest; onClose: (
 }
 
 /** The sidebar entry: a button with the current count, opening the roster dialog. */
-export function GouziEntry({ wide, request }: GouziEntryProps) {
+export function GouziEntry({ wide, request, folders }: GouziEntryProps) {
   const [open, setOpen] = useState(false)
   const { dashboard } = useRoster(request, open)
   const close = useCallback(() => { setOpen(false) }, [])
@@ -364,7 +463,7 @@ export function GouziEntry({ wide, request }: GouziEntryProps) {
           {wide && badge !== undefined && <span className={css.badge}>{badge}</span>}
         </button>
       </Tooltip>
-      {open && <GouziDialog request={request} onClose={close} />}
+      {open && <GouziDialog request={request} folders={folders} onClose={close} />}
     </>
   )
 }

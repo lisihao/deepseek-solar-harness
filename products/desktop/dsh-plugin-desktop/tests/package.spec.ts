@@ -45,6 +45,7 @@ describe('published package surface', () => {
       'dsh-plugin-desktop': 'lib/bin.js',
       'dsh-desktop': 'lib/bin.js',
       'dsh-product-server': 'lib/product-server-bin.js',
+      'dsh-gouzi-agent': 'lib/gouzi-agent-bin.js',
       'dsh-gouzi-worker': 'lib/gouzi-worker-bin.js',
     })
   })
@@ -186,6 +187,7 @@ describe('published package surface', () => {
     expect(config).toContain("'gouzi-worker': 'src/gouzi-worker.ts'")
     expect(config).toContain("'gouzi-host': 'src/gouzi-host.ts'")
     expect(config).toContain("entry: { 'gouzi-worker-bin': 'src/gouzi-worker-bin.ts' }")
+    expect(config).toContain("entry: { 'gouzi-agent-bin': 'src/gouzi-agent-bin.ts' }")
     expect(config).toContain("pnpm: 'src/pnpm.ts'")
     expect(config).toContain("profiles: 'src/profiles.ts'")
     expect(config).toContain("terminal: 'src/terminal.ts'")

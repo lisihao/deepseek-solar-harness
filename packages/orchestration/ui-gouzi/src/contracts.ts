@@ -89,11 +89,43 @@ export interface GouziMemberProjection {
   readonly name: string
   readonly avatarId: GouziAvatar
   readonly role: GouziRoleId
+  /** Machine the member lives on. */
+  readonly hostId: string
+  readonly hostLabel: string
   readonly membership: GouziMembershipState
   readonly connection: GouziConnectionState
   readonly activity: GouziActivityState
   readonly state: GouziPrimaryState
   readonly createdAt: string
+}
+
+/** Id of the host that is the machine running this Server. */
+export const GOUZI_LOCAL_HOST_ID = 'local'
+
+/** A machine members can live on. */
+export interface GouziHostProjection {
+  readonly hostId: string
+  readonly label: string
+  readonly kind: 'local' | 'ssh'
+  /** `user@address:port` of an SSH host; absent for the local one. */
+  readonly address?: string
+  /** Version of DSH Desktop installed on an SSH host when it was last checked. */
+  readonly appVersion?: string
+}
+
+/** The key a remote machine presented, for the user to compare before trusting it. */
+export interface GouziHostInspection {
+  readonly keyType: string
+  /** `SHA256:` fingerprint in the form `ssh-keygen -lf` prints. */
+  readonly fingerprint: string
+}
+
+/** One directory level on a host. */
+export interface GouziFolderListing {
+  readonly path: string
+  /** Absent at the filesystem root. */
+  readonly parent?: string
+  readonly entries: readonly { readonly name: string; readonly path: string; readonly git: boolean }[]
 }
 
 /** Everything the panel renders. */
@@ -108,6 +140,8 @@ export interface GouziDashboardV1 {
   readonly canManage: boolean
   /** Whether this Host can start member processes at all. */
   readonly hostAvailable: boolean
+  /** The local machine first, then every SSH host the user added. */
+  readonly hosts: readonly GouziHostProjection[]
   readonly members: readonly GouziMemberProjection[]
 }
 
@@ -118,9 +152,25 @@ export type GouziControlRequest =
     readonly name: string
     readonly avatarId: GouziAvatar
     readonly role: GouziRoleId
-    /** Absolute paths of local workspaces the member may work on. */
+    /** Machine the member lives on; absent means {@link GOUZI_LOCAL_HOST_ID}. */
+    readonly hostId?: string
+    /** Absolute paths, on that machine, of the Git workspaces the member may work on. */
     readonly projects: readonly string[]
   }
+  | { readonly action: 'host-inspect'; readonly address: string; readonly port: number; readonly user: string }
+  | {
+    readonly action: 'host-add'
+    readonly address: string
+    readonly port: number
+    readonly user: string
+    /** Login password; used once to install a dedicated key and never stored. */
+    readonly password: string
+    /** Fingerprint the user confirmed after `host-inspect`. */
+    readonly fingerprint: string
+    readonly label?: string
+  }
+  | { readonly action: 'host-remove'; readonly hostId: string }
+  | { readonly action: 'browse'; readonly hostId: string; readonly path?: string }
   | {
     readonly action: 'edit'
     readonly gouziId: string

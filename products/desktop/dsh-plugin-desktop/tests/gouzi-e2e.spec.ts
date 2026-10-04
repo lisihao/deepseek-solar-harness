@@ -26,8 +26,9 @@ import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-lo
 import { Context } from '@deepseek-ai/cordis'
 import * as OrchestrationLocal from '@deepseek-ai/dsh-orchestration-local'
 import * as UiGouzi from '@deepseek-ai/dsh-ui-gouzi'
-import { GouziHostService, type GouziProvisionInput } from '@deepseek-ai/dsh-ui-gouzi'
+import { GouziHostService, type GouziProvisionInput, type GouziSshTarget } from '@deepseek-ai/dsh-ui-gouzi'
 import { LocalGouziHost, Config as HostConfig } from '../src/gouzi-host.ts'
+import { SYSTEM_SSH } from '../src/gouzi-ssh.ts'
 import { GouziActiveLimitError, GouziSupervisor, residentDaemonPid } from '../src/gouzi-supervisor.ts'
 import type { GouziWorkerReady } from '../src/gouzi-worker.ts'
 
@@ -47,6 +48,23 @@ const ready = new Map<string, GouziWorkerReady>()
 /** Host of the members adopted through the route; its members live under their own root. */
 let adoptedHost: LocalGouziHost | undefined
 let adoptedRoot = ''
+
+/** Whether the member adopted through the route still has a live process, read from its own ready record. */
+function adoptedMemberRuns(gouziId: string): boolean {
+  let record: GouziWorkerReady
+  try {
+    record = JSON.parse(readFileSync(join(adoptedRoot, gouziId, 'gouzi', 'worker.json'), 'utf8')) as GouziWorkerReady
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+  try {
+    process.kill(record.pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
@@ -171,7 +189,7 @@ describe.sequential('Gouzi members as real processes', () => {
   afterAll(async () => {
     await daemon?.close()
     if (adoptedHost !== undefined) {
-      for (const entry of existsSync(adoptedRoot) ? readdirSync(adoptedRoot) : []) await adoptedHost.stop(entry, { reclaimResident: true })
+      for (const entry of existsSync(adoptedRoot) ? readdirSync(adoptedRoot) : []) await adoptedHost.stop('local', entry, { reclaimResident: true })
     }
     for (const gouziId of [...MEMBERS, 'gouzi-c']) await supervisor.stop(gouziId, { reclaimResident: true })
     rmSync(scratch, { recursive: true, force: true })
@@ -329,6 +347,8 @@ describe.sequential('Gouzi members as real processes', () => {
       readyTimeoutMs: 120_000,
       stopTimeoutMs: 20_000,
       gitTimeoutMs: 10_000,
+      hostsRoot: join(scratch, 'hosts'),
+      ssh: SYSTEM_SSH,
       workerScript: join(PACKAGE_ROOT, 'src', 'gouzi-worker-bin.ts'),
       nodeArgs: ['--import', pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm')).href],
     }))
@@ -336,16 +356,20 @@ describe.sequential('Gouzi members as real processes', () => {
     // The test member needs the keyless fixture driver, which a member home gets through its own profile patch.
     class FixtureHost extends GouziHostService {
       readonly ownerId = inner.ownerId
-      resolveRepository(path: string) { return inner.resolveRepository(path) }
+      hosts() { return inner.hosts() }
+      inspectHost(target: GouziSshTarget) { return inner.inspectHost(target) }
+      addHost(input: Parameters<GouziHostService['addHost']>[0]) { return inner.addHost(input) }
+      removeHost(hostId: string) { return inner.removeHost(hostId) }
+      browse(hostId: string, path?: string) { return inner.browse(hostId, path) }
+      resolveRepository(hostId: string, path: string) { return inner.resolveRepository(hostId, path) }
       async provision(input: GouziProvisionInput) {
         await inner.provision(input)
         writeFileSync(join(adoptedRoot, input.gouziId, 'cordis.patch.yml'), [
           '- id: resident-operators', '  config:', '    driverModules:', `      - ${FIXTURE_DRIVER}`, '',
         ].join('\n'))
       }
-      start(gouziId: string) { return inner.start(gouziId) }
-      stop(gouziId: string, options?: { reclaimResident?: boolean }) { return inner.stop(gouziId, options) }
-      isRunning(gouziId: string) { return inner.isRunning(gouziId) }
+      start(hostId: string, gouziId: string) { return inner.start(hostId, gouziId) }
+      stop(hostId: string, gouziId: string, options?: { reclaimResident?: boolean }) { return inner.stop(hostId, gouziId, options) }
     }
 
     const ctx = new Context()
@@ -381,7 +405,7 @@ describe.sequential('Gouzi members as real processes', () => {
     expect(adopted.status, JSON.stringify(adopted.body)).toBe(200)
     const gouziId = adopted.body.gouziId as string
     expect(adopted.body).toMatchObject({ name: 'Wire', membership: 'enabled', avatarId: 'corgi' })
-    expect(inner.isRunning(gouziId)).toBe(true)
+    expect(adoptedMemberRuns(gouziId)).toBe(true)
 
     // The daemon registers the new operator on its next refresh and marks the member online.
     const roster = await eventually(() => send('GET'), reply => reply.body.members.some(
@@ -408,7 +432,7 @@ describe.sequential('Gouzi members as real processes', () => {
     expect(residentDaemonPid(home)).toBeDefined()
     const retired = await send('POST', { action: 'retire', gouziId })
     expect(retired.status, JSON.stringify(retired.body)).toBe(200)
-    expect(inner.isRunning(gouziId)).toBe(false)
+    expect(adoptedMemberRuns(gouziId)).toBe(false)
     expect(residentDaemonPid(home)).toBeUndefined()
     const after = await send('GET')
     expect(after.body.used).toBe(2)

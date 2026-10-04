@@ -936,34 +936,59 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
       },
       {
-        signature: 'abstract resolveRepository(path: string): Promise<{ readonly repository: string; readonly source: string }>',
-        description: 'Resolve a local workspace to the repository identity a member may materialize.',
-        parameters: [{ name: 'path', description: 'absolute path inside a Git repository.' }],
+        signature: 'abstract hosts(): Promise<readonly GouziHostProjection[]>',
+        description: 'List the SSH hosts the user added; the local machine is implicit.',
+        parameters: [],
+        returns: 'the stored SSH hosts.',
+      },
+      {
+        signature: 'abstract inspectHost(target: GouziSshTarget): Promise<GouziHostInspection>',
+        description: 'Read the key an SSH machine presents, without logging in.',
+        parameters: [{ name: 'target', description: 'machine and login name.' }],
+        returns: 'the key type and fingerprint for the user to confirm.',
+        throws: ['Error - when the machine cannot be reached.'],
+      },
+      {
+        signature: 'abstract addHost(input: GouziSshTarget & { readonly password: string readonly fingerprint: string readonly label?: string }): Promise<GouziHostProjection>',
+        description: 'Trust an SSH machine and prepare it: install a dedicated key with the password, then check that DSH Desktop with Gouzi support is installed. The password is used once and not kept.',
+        parameters: [{ name: 'input', description: 'machine, login, password, and the fingerprint the user confirmed.' }],
+        returns: 'the stored host.',
+        throws: ['Error - when the key changed since inspection, the login fails, or DSH Desktop is missing or too old.'],
+      },
+      {
+        signature: 'abstract removeHost(hostId: string): Promise<void>',
+        description: 'Forget an SSH host and its dedicated key. The caller has checked that no live member uses it.',
+        parameters: [{ name: 'hostId', description: 'host id.' }],
+      },
+      {
+        signature: 'abstract browse(hostId: string, path?: string): Promise<GouziFolderListing>',
+        description: 'List the directories one level below `path` on a host, marking Git repositories.',
+        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'absolute directory; absent lists the login home directory.' }],
+        returns: 'the directory and its subdirectories.',
+      },
+      {
+        signature: 'abstract resolveRepository(hostId: string, path: string): Promise<{ readonly repository: string; readonly source: string }>',
+        description: 'Resolve a workspace on a host to the repository identity a member may materialize.',
+        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'absolute path on that host, inside a Git repository.' }],
         returns: 'the canonical repository identity and the path to clone from.',
         throws: ['Error - when the path is not inside a Git repository with a usable remote.'],
       },
       {
         signature: 'abstract provision(input: GouziProvisionInput): Promise<void>',
-        description: 'Create the member\'s home, identity, and repository allowlist. Idempotent for the same identity.',
-        parameters: [{ name: 'input', description: 'identity and allowlist.' }],
+        description: 'Create the member\'s home, identity, and repository allowlist on its host. Idempotent for the same identity.',
+        parameters: [{ name: 'input', description: 'identity and allowlist; `hostId` selects the machine.' }],
       },
       {
-        signature: 'abstract start(gouziId: string): Promise<GouziProcessInfo>',
+        signature: 'abstract start(hostId: string, gouziId: string): Promise<GouziProcessInfo>',
         description: 'Start the member\'s process, or adopt the one already running.',
-        parameters: [{ name: 'gouziId', description: 'member identity.' }],
-        returns: 'where it listens and which incarnation answered.',
+        parameters: [{ name: 'hostId', description: 'host of the member.' }, { name: 'gouziId', description: 'member identity.' }],
+        returns: 'where the main instance reaches it and which incarnation answered.',
       },
       {
-        signature: 'abstract stop(gouziId: string, options?: { readonly reclaimResident?: boolean }): Promise<{ readonly processTreeStopped: boolean }>',
+        signature: 'abstract stop( hostId: string, gouziId: string, options?: { readonly reclaimResident?: boolean }, ): Promise<{ readonly processTreeStopped: boolean }>',
         description: 'Stop the member\'s process.',
-        parameters: [{ name: 'gouziId', description: 'member identity.' }, { name: 'options', description: '`reclaimResident` also stops the Resident daemon the member started.' }],
+        parameters: [{ name: 'hostId', description: 'host of the member.' }, { name: 'gouziId', description: 'member identity.' }, { name: 'options', description: '`reclaimResident` also stops the Resident daemon the member started.' }],
         returns: 'whether no process of the member remains.',
-      },
-      {
-        signature: 'abstract isRunning(gouziId: string): boolean',
-        description: 'Whether the member\'s process is running now.',
-        parameters: [{ name: 'gouziId', description: 'member identity.' }],
-        returns: 'true while the process answers to its ready record.',
       },
     ],
   },
@@ -4741,8 +4766,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GouziCreateInput {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly grantDeadlineMs: number;\n}',
   },
   {
+    name: 'GouziFolderListing',
+    declaration: 'export interface GouziFolderListing {\n    readonly path: string;\n    readonly parent?: string;\n    readonly entries: readonly {\n        readonly name: string;\n        readonly path: string;\n        readonly git: boolean;\n    }[];\n}',
+  },
+  {
     name: 'GouziHostId',
     declaration: 'export type GouziHostId = Branded<\'GouziHostId\'>;',
+  },
+  {
+    name: 'GouziHostInspection',
+    declaration: 'export interface GouziHostInspection {\n    readonly keyType: string;\n    readonly fingerprint: string;\n}',
+  },
+  {
+    name: 'GouziHostProjection',
+    declaration: 'export interface GouziHostProjection {\n    readonly hostId: string;\n    readonly label: string;\n    readonly kind: \'local\' | \'ssh\';\n    readonly address?: string;\n    readonly appVersion?: string;\n}',
   },
   {
     name: 'GouziHostRecord',
@@ -4783,6 +4820,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'GouziRole',
     declaration: 'export type GouziRole = (typeof GOUZI_ROLES)[number];',
+  },
+  {
+    name: 'GouziSshTarget',
+    declaration: 'export interface GouziSshTarget {\n    readonly address: string;\n    readonly port: number;\n    readonly user: string;\n}',
   },
   {
     name: 'ImageAttachmentLimits',

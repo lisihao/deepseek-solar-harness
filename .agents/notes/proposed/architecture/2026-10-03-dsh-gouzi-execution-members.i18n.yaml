@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-10-03-dsh-gouzi-execution-members.md
-2026-10-03-dsh-gouzi-execution-members.md: d59656f64d6091dc96bb90f9d93d0a09ecc9fbbd
-2026-10-03-dsh-gouzi-execution-members.zh.md: a06866827cd3b9f0a2c757607b920e97ede9ee3b
+2026-10-03-dsh-gouzi-execution-members.md: 4a7a7dda5c9eb4df2feaced2de7b3ab048d0510d
+2026-10-03-dsh-gouzi-execution-members.zh.md: 8e1b2f1296b4c9923c5fa39700b6c719deb7cf65
