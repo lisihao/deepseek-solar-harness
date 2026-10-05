@@ -87,7 +87,7 @@ function projectFiles(root: string): Record<string, string> {
 }
 
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+  return execFileSync('git', ['-c', 'maintenance.autoDetach=false', '-c', 'gc.autoDetach=false', ...args], { cwd, encoding: 'utf8' }).trim()
 }
 
 /** Workspaces a member currently holds; a settled turn's workspace is released by the member. */
