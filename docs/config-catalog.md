@@ -3599,7 +3599,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/index.ts:44`](../packages/orchestration/ui-gouzi/src/index.ts)
+Source: [`packages/orchestration/ui-gouzi/src/index.ts:45`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

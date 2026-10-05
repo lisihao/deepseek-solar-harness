@@ -28,13 +28,18 @@ function dashboard(members: GouziMemberProjection[], patch: Partial<GouziDashboa
 }
 
 /** A fetch whose GET returns the current roster and whose POST records the body and applies `reply`. */
-function fakeRequest(state: { roster: GouziDashboardV1; reply?: (body: Record<string, unknown>) => Response }) {
+function fakeRequest(state: {
+  roster: GouziDashboardV1
+  reply?: (body: Record<string, unknown>) => Response
+  checkReply?: (body: Record<string, unknown>) => Response | Promise<Response>
+}) {
   const posts: Array<{ body: Record<string, unknown>; header: string | null }> = []
   const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     void input
     if (init?.method === 'POST') {
       const body = JSON.parse(init.body as string) as Record<string, unknown>
       posts.push({ body, header: new Headers(init.headers).get(GOUZI_CONTROL_HEADER) })
+      if (body.action === 'check-projects') return await state.checkReply?.(body) ?? Response.json({ projects: (body.projects as string[]).map(path => ({ path, usable: true })) })
       return state.reply?.(body) ?? Response.json(member())
     }
     return Response.json(state.roster)
@@ -121,7 +126,7 @@ describe('Gouzi sidebar entry and roster', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: /测试/ }))
     expect(screen.queryByRole('textbox')).toBeNull()
-    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
     expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', false)
     fireEvent.click(screen.getByRole('checkbox', { name: /beta/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: /alpha/ }))
@@ -130,8 +135,8 @@ describe('Gouzi sidebar entry and roster', () => {
 
     expect(screen.getByText('领养后 1 / 10')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
-    await waitFor(() => { expect(harness.posts).toHaveLength(1) })
-    expect(harness.posts[0]).toEqual({
+    await waitFor(() => { expect(harness.posts.filter(post => post.body.action === 'adopt')).toHaveLength(1) })
+    expect(harness.posts.find(post => post.body.action === 'adopt')).toEqual({
       header: '1',
       body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', hostId: 'local', projects: ['/work/beta', '/work/alpha'] },
     })
@@ -141,7 +146,7 @@ describe('Gouzi sidebar entry and roster', () => {
   it('preselects the newest project when no recent workspace is known and blocks next when none is selected', async () => {
     const harness = fakeRequest({ roster: dashboard([]) })
     await openProjectStep(harness, fakeFolders([ALPHA, BETA]).folders)
-    expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', true) })
     fireEvent.click(screen.getByRole('checkbox', { name: /beta/ }))
     expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
   })
@@ -159,13 +164,105 @@ describe('Gouzi sidebar entry and roster', () => {
     expect(screen.queryByRole('checkbox')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
-    expect(await screen.findByRole('checkbox', { name: /picked/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /picked/ })).toHaveProperty('checked', true) })
     fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
     await waitFor(() => { expect(pickDirectory).toHaveBeenCalledTimes(3) })
     expect(screen.getAllByRole('checkbox')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
-    await waitFor(() => { expect(harness.posts[0]!.body.projects).toEqual(['/work/picked']) })
+    await waitFor(() => { expect(harness.posts.find(post => post.body.action === 'adopt')?.body.projects).toEqual(['/work/picked']) })
+  })
+
+  it.each([{ items: [] }, { items: [ALPHA] }])('keeps a native-picked project after returning from confirmation with history $items', async ({ items }) => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    await openProjectStep(harness, fakeFolders(items, async () => '/work/outside').folders)
+    if (items.length > 0) {
+      await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
+      fireEvent.click(screen.getByRole('checkbox', { name: /alpha/ }))
+    }
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /outside/ })).toHaveProperty('checked', true) })
+    await waitFor(() => { expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', false) })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByText('outside')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /outside/ })).toHaveProperty('checked', true) })
+    await waitFor(() => { expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', false) })
+    if (items.length > 0) expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '领养' }))
+    await waitFor(() => { expect(harness.posts.find(post => post.body.action === 'adopt')?.body.projects).toEqual(['/work/outside']) })
+  })
+
+  it('checks candidates before selecting, skips an unavailable recent project, and refuses an ordinary picked folder', async () => {
+    let finish!: (response: Response) => void
+    const harness = fakeRequest({ roster: dashboard([]), checkReply: (body) => {
+      if ((body.projects as string[]).includes('/work/plain')) return Response.json({ projects: (body.projects as string[]).map(path => path === '/work/plain'
+        ? { path, usable: false, message: '普通目录暂不支持' } : { path, usable: true }) })
+      return new Promise<Response>((resolve) => { finish = resolve })
+    } })
+    await openProjectStep(harness, fakeFolders([ALPHA, BETA], async () => '/work/plain', 'w1').folders)
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+    finish(Response.json({ projects: [{ path: BETA.path, usable: true }, { path: ALPHA.path, usable: false, message: '没有 origin' }] }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', true) })
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('disabled', true)
+    expect(screen.getByText('没有 origin')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    await screen.findByText('普通目录暂不支持')
+    expect(screen.getByRole('checkbox', { name: /plain/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('checkbox', { name: /plain/ })).toHaveProperty('disabled', true)
+    expect(harness.posts.filter(post => post.body.action === 'adopt')).toEqual([])
+  })
+
+  it('keeps next disabled on a failed project check and ignores a check that finishes after leaving the step', async () => {
+    let finish!: (response: Response) => void
+    let count = 0
+    const harness = fakeRequest({ roster: dashboard([]), checkReply: () => {
+      if (++count === 1) return Response.json({ error: 'GOUZI_FAILED', message: 'Git process timed out' }, { status: 502 })
+      return new Promise<Response>((resolve) => { finish = resolve })
+    } })
+    await openProjectStep(harness, fakeFolders([ALPHA]).folders)
+    expect((await screen.findByRole('alert')).textContent).toContain('Git process timed out')
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    finish(Response.json({ projects: [{ path: ALPHA.path, usable: true }] }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+  })
+
+  it.each([
+    { projects: [{ path: ALPHA.path, usable: false, message: '没有 origin' }] },
+    { projects: [{ path: '/wrong/path', usable: true }] },
+    { projects: [{ path: ALPHA.path, usable: false }] },
+    {},
+  ])('does not select an unavailable or malformed check result %j', async (reply) => {
+    const harness = fakeRequest({ roster: dashboard([]), checkReply: () => Response.json(reply) })
+    await openProjectStep(harness, fakeFolders([ALPHA]).folders)
+    if ('projects' in reply && reply.projects?.[0]?.usable === false && 'message' in reply.projects[0]) {
+      await screen.findByText('没有 origin')
+    } else await screen.findByRole('alert')
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+  })
+
+  it('ignores a native folder pick that completes after leaving the project step', async () => {
+    let picked!: (path: string) => void
+    const harness = fakeRequest({ roster: dashboard([]) })
+    const { folders } = fakeFolders([], () => new Promise<string>((resolve) => { picked = resolve }))
+    await openProjectStep(harness, folders)
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    picked('/work/late')
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    await waitFor(() => { expect(screen.queryByRole('checkbox')).toBeNull() })
+    expect(harness.posts.filter(post => post.body.action === 'check-projects')).toEqual([])
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
   })
 
   it('shows why the folder picker failed without losing the wizard', async () => {
@@ -187,6 +284,7 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Mochi' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', false) })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
     expect((await screen.findByRole('alert')).textContent).toContain('端口被占用')
@@ -384,7 +482,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
-    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
     fireEvent.click(screen.getByRole('button', { name: '上一步' }))
     fireEvent.click(screen.getByRole('radio', { name: /Mac mini/ }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))

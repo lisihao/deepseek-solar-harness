@@ -128,6 +128,14 @@ export interface GouziFolderListing {
   readonly entries: readonly { readonly name: string; readonly path: string; readonly git: boolean }[]
 }
 
+/** Side-effect-free repository checks for the requested paths, in request order. */
+export interface GouziProjectsCheck {
+  readonly projects: readonly (
+    | { readonly path: string; readonly usable: true }
+    | { readonly path: string; readonly usable: false; readonly message: string }
+  )[]
+}
+
 /** Everything the panel renders. */
 export interface GouziDashboardV1 {
   readonly version: 1
@@ -157,6 +165,7 @@ export type GouziControlRequest =
     /** Absolute paths, on that machine, of the Git workspaces the member may work on. */
     readonly projects: readonly string[]
   }
+  | { readonly action: 'check-projects'; readonly hostId: string; readonly projects: readonly string[] }
   | { readonly action: 'host-inspect'; readonly address: string; readonly port: number; readonly user: string }
   | {
     readonly action: 'host-add'

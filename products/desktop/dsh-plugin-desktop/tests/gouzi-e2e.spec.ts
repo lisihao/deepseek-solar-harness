@@ -5,6 +5,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -66,6 +67,23 @@ function adoptedMemberRuns(gouziId: string): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM'
   }
+}
+
+/** Relative file names and bytes used to detect writes inside a candidate project. */
+function projectFiles(root: string): Record<string, string> {
+  const files: Record<string, string> = {}
+  const visit = (directory: string, prefix: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relative = `${prefix}${entry.name}`
+      if (entry.isDirectory()) {
+        files[`${relative}/`] = 'directory'
+        visit(join(directory, entry.name), `${relative}/`)
+      }
+      else files[relative] = createHash('sha256').update(readFileSync(join(directory, entry.name))).digest('hex')
+    }
+  }
+  visit(root, '')
+  return files
 }
 
 function git(cwd: string, ...args: string[]): string {
@@ -414,6 +432,8 @@ describe.sequential('Gouzi members as real processes', () => {
     }))
     adoptedHost = inner
     // The test member needs the keyless fixture driver, which a member home gets through its own profile patch.
+    let provisionCalls = 0
+    let startCalls = 0
     class FixtureHost extends GouziHostService {
       readonly ownerId = inner.ownerId
       hosts() { return inner.hosts() }
@@ -423,12 +443,13 @@ describe.sequential('Gouzi members as real processes', () => {
       browse(hostId: string, path?: string) { return inner.browse(hostId, path) }
       resolveRepository(hostId: string, path: string) { return inner.resolveRepository(hostId, path) }
       async provision(input: GouziProvisionInput) {
+        provisionCalls += 1
         await inner.provision(input)
         writeFileSync(join(adoptedRoot, input.gouziId, 'cordis.patch.yml'), [
           '- id: resident-operators', '  config:', '    driverModules:', `      - ${FIXTURE_DRIVER}`, '',
         ].join('\n'))
       }
-      start(hostId: string, gouziId: string) { return inner.start(hostId, gouziId) }
+      start(hostId: string, gouziId: string) { startCalls += 1; return inner.start(hostId, gouziId) }
       stop(hostId: string, gouziId: string, options?: { reclaimResident?: boolean }) { return inner.stop(hostId, gouziId, options) }
     }
 
@@ -459,13 +480,88 @@ describe.sequential('Gouzi members as real processes', () => {
       return { status, body: JSON.parse(Buffer.concat(chunks).toString()) as never }
     }
 
+    const ordinary = join(scratch, 'ordinary-project')
+    const noOrigin = join(scratch, 'git-without-origin')
+    const source = join(scratch, 'source')
+    const subdirectory = join(source, 'nested-project')
+    for (const directory of [ordinary, noOrigin, subdirectory]) mkdirSync(directory)
+    writeFileSync(join(ordinary, 'notes.txt'), 'ordinary project must stay unchanged\n')
+    writeFileSync(join(noOrigin, 'README.md'), 'repository without origin\n')
+    git(noOrigin, 'init', '--initial-branch=main')
+    git(noOrigin, 'config', 'user.name', 'DSH Test')
+    git(noOrigin, 'config', 'user.email', 'dsh-test@example.invalid')
+    git(noOrigin, 'add', '.')
+    git(noOrigin, 'commit', '-m', 'fixture without origin')
+    const candidates = [
+      { label: 'ordinary-directory', path: ordinary, usable: false },
+      { label: 'git-without-origin', path: noOrigin, usable: false },
+      { label: 'git-with-origin', path: source, usable: true },
+      { label: 'repository-subdirectory', path: subdirectory, usable: true },
+    ]
+    const beforeFiles = candidates.map(candidate => projectFiles(candidate.path))
+    const readRegistry = () => {
+      const store = new OrchestrationStore(mainRoot)
+      try { return { hosts: store.gouzi.listHosts(), members: store.gouzi.list() } }
+      finally { store.close() }
+    }
+    const registryBefore = readRegistry()
+    const rosterBefore = await send('GET')
+    expect(registryBefore.hosts.map(host => String(host.hostId))).not.toContain('local')
+    const checked = await send('POST', { action: 'check-projects', hostId: 'local', projects: candidates.map(candidate => candidate.path) })
+    expect(checked.status, JSON.stringify(checked.body)).toBe(200)
+    expect(checked.body.projects).toHaveLength(candidates.length)
+    const outcomes = checked.body.projects as Array<{ path: string; usable: boolean; message?: string }>
+    for (const [index, candidate] of candidates.entries()) {
+      expect(outcomes[index]).toMatchObject({ path: candidate.path, usable: candidate.usable })
+      if (!candidate.usable) expect(outcomes[index]!.message).toEqual(expect.any(String))
+    }
+    expect(readRegistry()).toEqual(registryBefore)
+    expect(provisionCalls).toBe(0)
+    expect(startCalls).toBe(0)
+    const rejected: Array<{ fixture: string; status: number; error: string }> = []
+    for (const candidate of candidates.filter(value => !value.usable)) {
+      const reply = await send('POST', {
+        action: 'adopt', hostId: 'local', name: candidate.label, avatarId: 'corgi', role: 'development', projects: [candidate.path],
+      })
+      expect(reply.status).toBeGreaterThanOrEqual(400)
+      expect(reply.status).toBeLessThan(500)
+      expect(reply.body).toMatchObject({ error: 'GOUZI_PROJECT_UNAVAILABLE', message: expect.any(String) })
+      expect(readRegistry()).toEqual(registryBefore)
+      const roster = await send('GET')
+      expect(roster.body.used).toBe(rosterBefore.body.used)
+      expect(roster.body.members.map((value: { gouziId: string }) => value.gouziId)).toEqual(
+        rosterBefore.body.members.map((value: { gouziId: string }) => value.gouziId),
+      )
+      expect(provisionCalls).toBe(0)
+      expect(startCalls).toBe(0)
+      expect(existsSync(adoptedRoot)).toBe(false)
+      rejected.push({ fixture: candidate.label, status: reply.status, error: reply.body.error as string })
+    }
+    expect(existsSync(join(ordinary, '.git'))).toBe(false)
+    expect(git(noOrigin, 'remote')).toBe('')
+    const afterFiles = candidates.map(candidate => projectFiles(candidate.path))
+    expect(afterFiles).toEqual(beforeFiles)
+    const registryAfterRefusals = readRegistry()
+    const rosterAfterRefusals = await send('GET')
+    const invalidAdoption = {
+      membersUnchanged: JSON.stringify(registryAfterRefusals.members) === JSON.stringify(registryBefore.members),
+      slotsUnchanged: rosterAfterRefusals.body.used === rosterBefore.body.used,
+      pairedHostsUnchanged: JSON.stringify(registryAfterRefusals.hosts) === JSON.stringify(registryBefore.hosts),
+      provisionCalls, startCalls,
+      projectsUnchanged: JSON.stringify(afterFiles) === JSON.stringify(beforeFiles),
+    }
+
     const adopted = await send('POST', {
       action: 'adopt', name: 'Wire', avatarId: 'corgi', role: 'development', projects: [join(scratch, 'source')],
     })
     expect(adopted.status, JSON.stringify(adopted.body)).toBe(200)
     const gouziId = adopted.body.gouziId as string
     expect(adopted.body).toMatchObject({ name: 'Wire', membership: 'enabled', avatarId: 'corgi' })
-    expect(adoptedMemberRuns(gouziId)).toBe(true)
+    const workerStarted = adoptedMemberRuns(gouziId)
+    expect(workerStarted).toBe(true)
+    expect(gouziId).toMatch(/^gouzi-[0-9a-f-]{36}$/u)
+    expect(provisionCalls).toBe(1)
+    expect(startCalls).toBe(1)
 
     // The daemon registers the new operator on its next refresh and marks the member online.
     const roster = await eventually(() => send('GET'), reply => reply.body.members.some(
@@ -497,6 +593,16 @@ describe.sequential('Gouzi members as real processes', () => {
     const after = await send('GET')
     expect(after.body.used).toBe(2)
     expect(after.body.members.map((value: { gouziId: string }) => value.gouziId)).not.toContain(gouziId)
+    const transcript = {
+      candidates: candidates.map((candidate, index) => ({
+        fixture: candidate.label, usable: outcomes[index]!.usable,
+        ...candidate.usable ? {} : { refusalExplained: Boolean(outcomes[index]!.message) },
+      })),
+      rejected,
+      invalidAdoption,
+      validAdoption: { workerStarted, taskGraphState: finished.state, retired: !adoptedMemberRuns(gouziId), slotReleased: after.body.used === rosterBefore.body.used },
+    }
+    expect(`${JSON.stringify(transcript, null, 2)}\n`).toMatchFileSnapshot('./snapshots/local-gouzi-project-validation.json')
     await ctx.fiber.dispose()
   }, 360_000)
 })

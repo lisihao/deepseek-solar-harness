@@ -81,6 +81,7 @@ class FakeHost extends GouziHostService {
   sshHosts: GouziHostProjection[] = []
   added: Array<Parameters<GouziHostService['addHost']>[0]> = []
   removed: string[] = []
+  failResolve: Error | undefined
   failStart: string | undefined
   failAdd: string | undefined
   treeStopped = true
@@ -113,6 +114,8 @@ class FakeHost extends GouziHostService {
   }
   resolveRepository(hostId: string, path: string) {
     this.resolved.push([hostId, path])
+    if (this.failResolve !== undefined) return Promise.reject(this.failResolve)
+    if (path.includes('noorigin')) return Promise.reject(new Error("error: No such remote 'origin'"))
     if (path.includes('missing')) return Promise.reject(new Error(`${path} is not inside a Git repository`))
     return Promise.resolve({ repository: `github.com/lisihao/${path.split('/').pop()!}`, source: path })
   }
@@ -299,11 +302,71 @@ describe('Gouzi Host route', () => {
   })
 
   it('creates nothing when a project cannot be resolved', async () => {
-    const { control, send } = await mount()
+    const { control, host, send } = await mount()
     const reply = await send('POST', { ...ADOPT, projects: ['/work/missing'] }, CONTROL)
-    expect(reply.status).toBe(502)
-    expect(reply.body.message).toContain('not inside a Git repository')
+    expect(reply).toMatchObject({ status: 409, body: { error: 'GOUZI_PROJECT_UNAVAILABLE' } })
+    expect(reply.body.message).toContain('普通目录暂不支持')
     expect(control.calls).toEqual([])
+    expect(host!.order).toEqual([])
+  })
+
+  it('checks repositories without pairing, creating, provisioning or starting, and rechecks at adoption', async () => {
+    const { control, host, send } = await mount()
+    const projects = ['/work/missing', '/work/noorigin', '/work/alpha']
+    expect(await send('POST', { action: 'check-projects', hostId: 'local', projects }, CONTROL)).toMatchObject({ status: 200, body: { projects: [
+      { path: projects[0], usable: false, message: expect.stringContaining('不是 Git 仓库') as unknown },
+      { path: projects[1], usable: false, message: expect.stringContaining('没有 origin') as unknown },
+      { path: projects[2], usable: true },
+    ] } })
+    expect(control.calls).toEqual([])
+    expect(host!.order).toEqual([])
+    host!.failResolve = new Error("error: No such remote 'origin'")
+    expect(await send('POST', { ...ADOPT, projects: ['/work/alpha'] }, CONTROL)).toMatchObject({ status: 409, body: { error: 'GOUZI_PROJECT_UNAVAILABLE' } })
+    expect(control.calls).toEqual([])
+    expect(host!.order).toEqual([])
+  })
+
+  it('preserves genuine process failures as failures instead of project usability', async () => {
+    const { control, host, send } = await mount()
+    host!.failResolve = Object.assign(new Error('Git process timed out'), { killed: true, signal: 'SIGTERM' })
+    for (const action of ['check-projects', 'adopt']) {
+      expect(await send('POST', { ...ADOPT, action, hostId: 'local' }, CONTROL)).toMatchObject({ status: 502, body: { error: 'GOUZI_FAILED', message: 'Git process timed out' } })
+    }
+    expect(control.calls).toEqual([])
+    expect(host!.order).toEqual([])
+  })
+
+  it.each([
+    { error: new Error('Invalid URL') },
+    { error: new Error('remote repository identity must contain a valid host and repository path') },
+    { error: Object.assign(new Error('missing directory'), { code: 'ENOENT', syscall: 'realpath' }) },
+    { error: Object.assign(new Error('not a directory'), { code: 'ENOTDIR', syscall: 'realpath' }) },
+  ])('reports explicit repository and path failures without member effects: $error.message', async ({ error }) => {
+    const { control, host, send } = await mount()
+    host!.failResolve = error
+    const checked = await send('POST', { action: 'check-projects', hostId: 'local', projects: ['/work/alpha'] }, CONTROL)
+    expect(checked).toMatchObject({ status: 200, body: { projects: [{ path: '/work/alpha', usable: false }] } })
+    expect(await send('POST', { ...ADOPT, projects: ['/work/alpha'] }, CONTROL))
+      .toMatchObject({ status: 409, body: { error: 'GOUZI_PROJECT_UNAVAILABLE' } })
+    expect(control.calls).toEqual([])
+    expect(host!.order).toEqual([])
+  })
+
+  it('preserves an unknown non-timeout resolver process error as a failed request', async () => {
+    const { control, host, send } = await mount()
+    host!.failResolve = new Error('process execution failed')
+    for (const action of ['check-projects', 'adopt']) {
+      expect(await send('POST', { ...ADOPT, action, hostId: 'local' }, CONTROL))
+        .toMatchObject({ status: 502, body: { error: 'GOUZI_FAILED', message: 'process execution failed' } })
+    }
+    expect(control.calls).toEqual([])
+    expect(host!.order).toEqual([])
+  })
+
+  it.each([{ projects: [] }, { projects: ['relative'] }, { projects: [42] }])('refuses invalid project check paths $projects', async ({ projects }) => {
+    const { host, send } = await mount()
+    expect(await send('POST', { action: 'check-projects', hostId: 'local', projects }, CONTROL)).toMatchObject({ status: 400 })
+    expect(host!.resolved).toEqual([])
   })
 
   it('keeps the member in provisioning when the process fails to start, and a later wake finishes the job', async () => {
@@ -380,6 +443,7 @@ describe('Gouzi Host route', () => {
       { action: 'host-inspect', address: 'mini.local', port: 22, user: 'lisihao' },
       { action: 'host-remove', hostId: 'ssh-1' },
       { action: 'browse', hostId: 'ssh-1' },
+      { action: 'check-projects', hostId: 'local', projects: ['/work/alpha'] },
     ]) {
       expect(await send('POST', body, headers, true), body.action).toMatchObject({ status: 403, body: { error: 'REMOTE_SCOPE_FORBIDDEN' } })
     }

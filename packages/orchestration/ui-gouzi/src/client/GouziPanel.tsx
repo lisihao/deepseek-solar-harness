@@ -16,9 +16,10 @@ import {
   type GouziHostProjection,
   type GouziMemberProjection,
   type GouziRoleId,
+  type GouziProjectsCheck,
 } from '../contracts.ts'
 import { GouziAvatarImage } from './avatars.tsx'
-import { controlGouzi, loadGouzi, type BrowserRequest } from './api.ts'
+import { checkGouziProjects, controlGouzi, loadGouzi, type BrowserRequest } from './api.ts'
 import { HostStep, messageOf } from './HostStep.tsx'
 import { RemoteFolderPicker } from './RemoteFolderPicker.tsx'
 import css from './GouziPanel.module.css'
@@ -111,69 +112,112 @@ function RolePicker({ value, onChange }: { value: GouziRoleId; onChange: (next: 
 
 const WIZARD_STEPS = ['头像', '名字', '住处', '角色与项目', '确认'] as const
 
-/**
- * Step 3 project chooser: the user's known workspaces as checkboxes (the most recent preselected)
- * plus a button that opens the Host's folder picker. No path is ever typed.
- */
-function ProjectPicker({ folders, selected, onChange }: {
+/** Local projects are selectable only after the Host resolves their Git repository and origin. */
+function ProjectPicker({ request, folders, picked, onPick, selected, onChange, onValidity }: {
+  request: BrowserRequest
   folders: GouziFolders
+  picked: readonly FolderChoice[]
+  onPick: (path: string) => void
   selected: readonly string[]
   onChange: (paths: readonly string[]) => void
+  onValidity: (valid: boolean) => void
 }) {
   const { list: source } = folders
   const list = useSyncExternalStore(callback => source.subscribe(callback), () => source.getSnapshot())
-  const [picked, setPicked] = useState<readonly FolderChoice[]>([])
   const [notice, setNotice] = useState<string>()
+  const [picking, setPicking] = useState(false)
+  const [checks, setChecks] = useState<GouziProjectsCheck['projects']>([])
   const suggestions = useMemo<readonly FolderChoice[]>(() => {
     const known = [...list.items]
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, SUGGESTION_LIMIT)
       .map(item => ({ path: item.path, title: item.title }))
-    const extra = picked.filter(choice => !known.some(item => item.path === choice.path))
-    return [...extra, ...known]
+    return [...picked.filter(choice => !known.some(item => item.path === choice.path)), ...known]
   }, [list.items, picked])
   const preselected = useRef(false)
+  const pickSequence = useRef(0)
+  const desiredPick = useRef<string>()
+  const current = useRef({ selected, onChange })
+  current.current = { selected, onChange }
+  useEffect(() => () => { pickSequence.current++ }, [])
   useEffect(() => {
-    const first = suggestions[0]
-    if (preselected.current || selected.length > 0 || first === undefined) return
-    preselected.current = true
-    const recent = list.items.find(item => item.workspaceId === list.recentWorkspaceId)
-    onChange([recent?.path ?? first.path])
-  }, [list.items, list.recentWorkspaceId, onChange, selected.length, suggestions])
+    let active = true
+    setChecks([])
+    setNotice(undefined)
+    onValidity(false)
+    const paths = suggestions.map(choice => choice.path)
+    if (paths.length === 0) return () => { active = false }
+    void checkGouziProjects(request, paths)
+      .then((reply) => {
+        if (!active) return
+        setChecks(reply.projects)
+        const usable = new Set(reply.projects.filter(check => check.usable).map(check => check.path))
+        const retained = current.current.selected.filter(path => usable.has(path))
+        const desired = desiredPick.current
+        desiredPick.current = undefined
+        if (desired !== undefined && usable.has(desired)) {
+          preselected.current = true
+          current.current.onChange([...new Set([...retained, desired])])
+        } else if (!preselected.current && retained.length === 0) {
+          const recent = list.items.find(item => item.workspaceId === list.recentWorkspaceId)?.path
+          const first = recent !== undefined && usable.has(recent) ? recent : paths.find(path => usable.has(path))
+          if (first !== undefined) {
+            preselected.current = true
+            current.current.onChange([first])
+          } else current.current.onChange(retained)
+        } else current.current.onChange(retained)
+      })
+      .catch((cause: unknown) => { if (active) setNotice(messageOf(cause)) })
+    return () => { active = false }
+  }, [request, suggestions, list.items, list.recentWorkspaceId, onValidity])
+  useEffect(() => {
+    onValidity(!picking && selected.length > 0 && selected.every(path => checks.some(check => check.path === path && check.usable)))
+  }, [checks, selected, picking, onValidity])
   const toggle = (path: string): void => {
+    if (!checks.some(check => check.path === path && check.usable)) return
     preselected.current = true
     onChange(selected.includes(path) ? selected.filter(item => item !== path) : [...selected, path])
   }
   const choose = async (): Promise<void> => {
+    const sequence = ++pickSequence.current
     setNotice(undefined)
+    setPicking(true)
+    onValidity(false)
     try {
       const path = await folders.pickDirectory()
-      if (path === null) return
-      setPicked(current => current.some(choice => choice.path === path) ? current : [...current, { path, title: basename(path) }])
-      if (!selected.includes(path)) onChange([...selected, path])
+      if (sequence !== pickSequence.current || path === null) return
+      desiredPick.current = path
+      onPick(path)
     } catch (cause) {
-      setNotice(messageOf(cause))
+      if (sequence === pickSequence.current) setNotice(messageOf(cause))
+    } finally {
+      if (sequence === pickSequence.current) setPicking(false)
     }
   }
   return (
     <div className={css.field}>
       <span>它可以处理的项目（在运行 DSH 的这台机器上）</span>
+      <p className={css.hint}>当前需要带有效 origin 的 Git 仓库，普通目录暂不支持。</p>
       {suggestions.length > 0
         ? (
           <ul className={css.projectList}>
-            {suggestions.map(choice => (
-              <li key={choice.path}>
-                <label className={clsx(css.projectChoice, selected.includes(choice.path) && css.chosen)}>
-                  <input type="checkbox" checked={selected.includes(choice.path)} onChange={() => { toggle(choice.path) }} />
-                  <strong>{choice.title}</strong>
-                  <span title={choice.path}>{choice.path}</span>
-                </label>
-              </li>
-            ))}
+            {suggestions.map((choice) => {
+              const check = checks.find(value => value.path === choice.path)
+              return (
+                <li key={choice.path}>
+                  <label className={clsx(css.projectChoice, selected.includes(choice.path) && check?.usable === true && css.chosen)}>
+                    <input type="checkbox" disabled={check?.usable !== true || picking} checked={selected.includes(choice.path) && check?.usable === true} onChange={() => { toggle(choice.path) }} />
+                    <strong>{choice.title}</strong>
+                    <span title={choice.path}>{choice.path}</span>
+                    <span>{check === undefined ? notice === undefined ? '正在检查项目…' : '项目检查失败' : check.usable ? '可用' : check.message}</span>
+                  </label>
+                </li>
+              )
+            })}
           </ul>
         )
         : <p className={css.hint}>还没有打开过项目，点下面的按钮选择一个文件夹。</p>}
-      <button type="button" className={css.secondary} onClick={() => { void choose() }}>选择文件夹…</button>
+      <button type="button" disabled={picking} className={css.secondary} onClick={() => { void choose() }}>选择文件夹…</button>
       {notice !== undefined && <p className={css.error} role="alert">{notice}</p>}
     </div>
   )
@@ -195,10 +239,18 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
   const [role, setRole] = useState<GouziRoleId>('development')
   const [hostId, setHostId] = useState(GOUZI_LOCAL_HOST_ID)
   const [paths, setPaths] = useState<readonly string[]>([])
+  const [picked, setPicked] = useState<readonly FolderChoice[]>([])
+  const pickProject = useCallback((path: string) => {
+    setPicked(currentChoices => [...currentChoices.filter(choice => choice.path !== path), { path, title: basename(path) }])
+  }, [])
+  const [projectsValid, setProjectsValid] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
   const trimmed = name.trim()
-  const valid = [true, trimmed.length > 0 && trimmed.length <= 40, hosts.some(host => host.hostId === hostId), paths.length > 0, true]
+  const valid = [
+    true, trimmed.length > 0 && trimmed.length <= 40, hosts.some(host => host.hostId === hostId),
+    paths.length > 0 && (hostId !== GOUZI_LOCAL_HOST_ID || projectsValid), true,
+  ]
   const hostLabel = hosts.find(host => host.hostId === hostId)?.label ?? ''
   const adopt = async (): Promise<void> => {
     setPending(true)
@@ -236,7 +288,7 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
           request={request}
           hosts={hosts}
           value={hostId}
-          onChange={(next) => { setHostId(next); setPaths([]) }}
+          onChange={(next) => { setHostId(next); setPaths([]); setPicked([]); setProjectsValid(false) }}
           onHostsChanged={onHostsChanged}
         />
       )}
@@ -244,7 +296,10 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
         <>
           <RolePicker value={role} onChange={setRole} />
           {hostId === GOUZI_LOCAL_HOST_ID
-            ? <ProjectPicker folders={folders} selected={paths} onChange={setPaths} />
+            ? <ProjectPicker
+              request={request} folders={folders} picked={picked} onPick={pickProject}
+              selected={paths} onChange={setPaths} onValidity={setProjectsValid}
+            />
             : <RemoteFolderPicker request={request} hostId={hostId} selected={paths} onChange={setPaths} />}
         </>
       )}

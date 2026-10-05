@@ -31,6 +31,7 @@ import {
   type GouziHostInspection,
   type GouziHostProjection,
   type GouziMemberProjection,
+  type GouziProjectsCheck,
 } from './contracts.ts'
 import './host-service.ts'
 
@@ -139,11 +140,13 @@ function sshTarget(body: Record<string, unknown>): { address: string; port: numb
 function parseControl(body: Record<string, unknown>): GouziControlRequest {
   const action = text(body, 'action')
   switch (action) {
+    case 'check-projects':
     case 'adopt': {
       const projects = body.projects
       if (!Array.isArray(projects) || projects.length === 0 || projects.some(value => typeof value !== 'string' || !isAbsolute(value))) {
         throw new GouziInputError('projects must list at least one absolute path')
       }
+      if (action === 'check-projects') return { action, hostId: text(body, 'hostId'), projects: projects as string[] }
       return {
         action,
         name: memberName(text(body, 'name')),
@@ -261,6 +264,42 @@ class GouziRefusal extends Error {
   }
 }
 
+function projectUnavailable(path: string, error: unknown): GouziRefusal | undefined {
+  const message = error instanceof Error ? error.message : String(error)
+  const detail = error as { code?: unknown; syscall?: unknown; killed?: unknown; signal?: unknown } | undefined
+  if (detail?.killed === true || detail?.signal != null) return undefined
+  let reason: string | undefined
+  if (/not (?:inside |a )?(?:a )?git repository/iu.test(message)) reason = '这个目录不是 Git 仓库'
+  else if (/No such remote ['"]?origin/iu.test(message)) reason = '这个 Git 仓库没有 origin 远程地址'
+  else if (/remote repository identity must|Invalid URL/u.test(message)) reason = '这个 Git 仓库的 origin 远程地址无效'
+  else if ((detail?.code === 'ENOENT' || detail?.code === 'ENOTDIR') && detail.syscall === 'realpath') reason = '这个项目目录不存在或不是目录'
+  if (reason === undefined) return undefined
+  return new GouziRefusal('GOUZI_PROJECT_UNAVAILABLE', `${path}：${reason}。当前需要带有效 origin 的 Git 仓库，普通目录暂不支持。`)
+}
+
+async function resolveProject(host: ReturnType<typeof requireHost>, hostId: string, path: string) {
+  try {
+    return await host.resolveRepository(hostId, path)
+  } catch (error) {
+    throw projectUnavailable(path, error) ?? error
+  }
+}
+
+async function checkProjects(ctx: Context, request: Extract<GouziControlRequest, { action: 'check-projects' }>): Promise<GouziProjectsCheck> {
+  const host = requireHost(ctx)
+  if (!(await projectHosts(ctx)).some(value => value.hostId === request.hostId)) throw new GouziInputError(`unknown host ${request.hostId}`)
+  const projects = await Promise.all(request.projects.map(async (path) => {
+    try {
+      await resolveProject(host, request.hostId, path)
+      return { path, usable: true } as const
+    } catch (error) {
+      if (!(error instanceof GouziRefusal) || error.code !== 'GOUZI_PROJECT_UNAVAILABLE') throw error
+      return { path, usable: false, message: error.message } as const
+    }
+  }))
+  return { projects }
+}
+
 async function adopt(ctx: Context, control: GouziControl, request: Extract<GouziControlRequest, { action: 'adopt' }>, grantDeadlineMs: number) {
   const host = ctx.get('gouziHost')
   if (host === undefined) throw new GouziRefusal('GOUZI_HOST_UNAVAILABLE', '这台机器上还不能启动狗子')
@@ -268,7 +307,7 @@ async function adopt(ctx: Context, control: GouziControl, request: Extract<Gouzi
   const hostId = request.hostId ?? GOUZI_LOCAL_HOST_ID
   const known = (await projectHosts(ctx)).find(value => value.hostId === hostId)
   if (known === undefined) throw new GouziInputError(`unknown host ${hostId}`)
-  const resolved = await Promise.all(request.projects.map(path => host.resolveRepository(hostId, path)))
+  const resolved = await Promise.all(request.projects.map(path => resolveProject(host, hostId, path)))
   const repositories = [...new Map(resolved.map(value => [value.repository, value])).values()]
   const listing = await control.list()
   const pilot = listing.hosts.find(value => String(value.hostId) === hostId)
@@ -364,6 +403,7 @@ type ExecuteResult =
   | GouziHostInspection
   | GouziHostProjection
   | GouziFolderListing
+  | GouziProjectsCheck
   | { readonly removed: true }
 
 async function execute(ctx: Context, control: GouziControl, request: GouziControlRequest, grantDeadlineMs: number): Promise<ExecuteResult> {
@@ -380,6 +420,7 @@ async function execute(ctx: Context, control: GouziControl, request: GouziContro
       })
     case 'host-remove': return removeHost(ctx, control, request.hostId)
     case 'browse': return requireHost(ctx).browse(request.hostId, request.path)
+    case 'check-projects': return checkProjects(ctx, request)
     case 'adopt': return adopt(ctx, control, request, grantDeadlineMs)
     case 'edit':
       return view(control, await control.edit(GouziId(request.gouziId), {

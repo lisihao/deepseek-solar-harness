@@ -3601,7 +3601,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/orchestration/ui-gouzi/src/index.ts:44`](../packages/orchestration/ui-gouzi/src/index.ts)
+来源：[`packages/orchestration/ui-gouzi/src/index.ts:45`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

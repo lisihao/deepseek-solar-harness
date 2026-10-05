@@ -1,0 +1,48 @@
+{
+  "candidates": [
+    {
+      "fixture": "ordinary-directory",
+      "usable": false,
+      "refusalExplained": true
+    },
+    {
+      "fixture": "git-without-origin",
+      "usable": false,
+      "refusalExplained": true
+    },
+    {
+      "fixture": "git-with-origin",
+      "usable": true
+    },
+    {
+      "fixture": "repository-subdirectory",
+      "usable": true
+    }
+  ],
+  "rejected": [
+    {
+      "fixture": "ordinary-directory",
+      "status": 409,
+      "error": "GOUZI_PROJECT_UNAVAILABLE"
+    },
+    {
+      "fixture": "git-without-origin",
+      "status": 409,
+      "error": "GOUZI_PROJECT_UNAVAILABLE"
+    }
+  ],
+  "invalidAdoption": {
+    "membersUnchanged": true,
+    "slotsUnchanged": true,
+    "pairedHostsUnchanged": true,
+    "provisionCalls": 0,
+    "startCalls": 0,
+    "projectsUnchanged": true
+  },
+  "validAdoption": {
+    "workerStarted": true,
+    "taskGraphState": "completed",
+    "retired": true,
+    "slotReleased": true
+  }
+}

@@ -7,6 +7,7 @@ import {
   type GouziDashboardV1,
   type GouziErrorV1,
   type GouziMemberProjection,
+  type GouziProjectsCheck,
 } from '../contracts.ts'
 
 /** The authenticated fetch the connection publishes. */
@@ -69,4 +70,28 @@ export async function callGouzi<Reply>(request: BrowserRequest, control: GouziCo
  */
 export function controlGouzi(request: BrowserRequest, control: GouziControlRequest): Promise<GouziMemberProjection> {
   return callGouzi<GouziMemberProjection>(request, control)
+}
+
+/**
+ * Check local repository paths without changing member state.
+ * @param request - authenticated fetch.
+ * @param projects - nonempty absolute paths to check.
+ * @returns one validated usability result per requested path, in request order.
+ * @throws GouziRequestError - when the Host refuses or the reply does not match the requested paths.
+ */
+export async function checkGouziProjects(request: BrowserRequest, projects: readonly string[]): Promise<GouziProjectsCheck> {
+  const reply = await callGouzi<unknown>(request, { action: 'check-projects', hostId: 'local', projects })
+  const values = reply !== null && typeof reply === 'object' && 'projects' in reply ? reply.projects : undefined
+  if (!Array.isArray(values) || values.length !== projects.length) {
+    throw new GouziRequestError('GOUZI_INVALID_REPLY', '项目检查返回了无效结果，请重试。', 502)
+  }
+  return { projects: values.map((value: unknown, index) => {
+    if (value !== null && typeof value === 'object' && 'path' in value && value.path === projects[index] && 'usable' in value) {
+      if (value.usable === true) return { path: value.path as string, usable: true }
+      if (value.usable === false && 'message' in value && typeof value.message === 'string' && value.message.length > 0) {
+        return { path: value.path as string, usable: false, message: value.message }
+      }
+    }
+    throw new GouziRequestError('GOUZI_INVALID_REPLY', '项目检查返回了无效结果，请重试。', 502)
+  }) }
 }
