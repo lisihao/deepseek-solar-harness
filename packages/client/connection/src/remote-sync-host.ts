@@ -39,7 +39,7 @@ import {
   type RemoteResidentArtifactDocument,
   type RemoteSyncProtocolVersion,
 } from './remote-sync.ts'
-import type { RemoteOperatorHostService } from './remote-operator-host.ts'
+import type { RemoteMaterializedWorkspaceV1, RemoteOperatorHostService } from './remote-operator-host.ts'
 import type { RemoteDeviceScope } from './remote-auth-wire.ts'
 import {
   materializeOperatorContextEnvelopeNative,
@@ -390,6 +390,10 @@ export class RemoteSyncHub {
     const materializedContext = contextEnvelope === undefined
       ? undefined
       : materializeOperatorContextEnvelopeNative(contextEnvelope)
+    const executionSystemPrompt = this.remoteWorkspaceSystemPrompt(
+      materializedContext?.systemPrompt ?? systemPrompt,
+      materializedWorkspace,
+    )
     const turn = await this.expectResident().execute({
       commandId: commandId as never,
       operatorId,
@@ -397,9 +401,7 @@ export class RemoteSyncHub {
       laneId,
       ...taskLabel === undefined ? {} : { taskLabel },
       prompt: materializedContext?.prompt ?? prompt,
-      ...(materializedContext?.systemPrompt ?? systemPrompt) === undefined
-        ? {}
-        : { systemPrompt: materializedContext?.systemPrompt ?? systemPrompt },
+      systemPrompt: executionSystemPrompt,
       ...contextEnvelope === undefined
         ? {}
         : { nativeContext: { version: 1, digest: contextEnvelope.digest } },
@@ -564,6 +566,18 @@ export class RemoteSyncHub {
   private expectPersistence(): Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'> {
     if (this.persistence === undefined) throw new Error('remote Session replication is unavailable')
     return this.persistence
+  }
+
+  private remoteWorkspaceSystemPrompt(
+    systemPrompt: string | undefined,
+    workspace: RemoteMaterializedWorkspaceV1,
+  ): string {
+    const supplement = [
+      'Remote execution workspace:',
+      JSON.stringify({ cwd: workspace.path, repository: workspace.identity.repository, commit: workspace.identity.commit }),
+      'The current native execution cwd above is authoritative for this execution. Workspace paths in sender context refer to the source host. Existing relative read and write scopes apply unchanged within this cwd. This supplement does not expand permissions.',
+    ].join('\n')
+    return systemPrompt === undefined ? supplement : `${systemPrompt}\n\n${supplement}`
   }
 
   private expectResident(): Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'> {

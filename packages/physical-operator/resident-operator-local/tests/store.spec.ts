@@ -114,6 +114,82 @@ describe('ResidentStore', () => {
     store.close()
   })
 
+  it.each(['settled', 'cancelled', 'recovered'] as const)('retains one private admission input through %s and replay', (outcome) => {
+    const directory = root()
+    const store = new ResidentStore(directory)
+    const db = new DatabaseSync(join(directory, 'state.sqlite'), { readOnly: true })
+    const inputSnapshot = {
+      workspace: '/receiver/workspace',
+      prompt: [{ type: 'text' as const, text: `private task ${'x'.repeat(70 * 1024)}` }],
+      systemPrompt: 'private system with receiver cwd',
+      nativeContext: { version: 1 as const, digest: 'd'.repeat(64) },
+      nativeToolPolicy: 'disabled' as const,
+    }
+    const hash = canonicalRequestHash(
+      'codex', inputSnapshot.workspace, inputSnapshot.prompt, PROFILE, undefined, 'legacy', undefined,
+      inputSnapshot.systemPrompt, inputSnapshot.nativeToolPolicy, inputSnapshot.nativeContext,
+    )
+    const accept = (owner: ResidentStore, requestHash = hash) => owner.accept(
+      'private-command', requestHash, 'codex', inputSnapshot.workspace, PROFILE, PROFILE_SOURCE,
+      undefined, 'bounded label', 'legacy', 'disabled', undefined, inputSnapshot,
+    )
+    const privateRows = () => db.prepare("SELECT data_json FROM resident_events WHERE type = 'turn.accepted'").all() as Array<{ data_json: string }>
+    const accepted = accept(store)
+    const original = privateRows()[0]!.data_json
+    expect(JSON.parse(original)).toMatchObject({ inputSnapshot })
+    const publicPage = store.readEvents(accepted.sessionId)
+    expect(publicPage.events.find(event => event.type === 'turn.accepted')?.data).toEqual({
+      commandId: 'private-command', turnId: accepted.turnId, taskLabel: 'bounded label',
+      profile: PROFILE, supersedesCommandId: null,
+    })
+    expect(store.inspectSession(accepted.sessionId).latestEvent?.data).not.toHaveProperty('inputSnapshot')
+    expect(JSON.stringify(publicPage)).not.toContain('private task')
+    expect(publicPage.nextSequence).toBe(publicPage.events.at(-1)?.sequence)
+    store.markRunning('private-command', 'native-session', 'native-turn')
+    expect(accept(store).turnId).toBe(accepted.turnId)
+    expect(store.accept(
+      'private-command', hash, 'codex', inputSnapshot.workspace, PROFILE, PROFILE_SOURCE,
+      undefined, 'bounded label', 'legacy', 'disabled', undefined,
+      { ...inputSnapshot, systemPrompt: 'replacement must not overwrite the admitted input' },
+    ).turnId).toBe(accepted.turnId)
+    expect(privateRows()).toEqual([{ data_json: original }])
+    expect(() => accept(store, 'different-hash')).toThrow(expect.objectContaining({ code: 'COMMAND_CONFLICT' }))
+    if (outcome === 'settled') store.settle('private-command', { output: [], stopReason: 'completed' })
+    if (outcome === 'cancelled') store.fail('private-command', 'CANCELLED', 'cancelled', 'aborted')
+    store.close()
+    const reopened = new ResidentStore(directory)
+    try {
+      expect(accept(reopened).turnId).toBe(accepted.turnId)
+      expect(privateRows()).toEqual([{ data_json: original }])
+      expect(reopened.readEvents(accepted.sessionId).events
+        .find(event => event.type === 'turn.accepted')?.data).not.toHaveProperty('inputSnapshot')
+    } finally {
+      reopened.close()
+      db.close()
+    }
+  })
+
+  it('rolls back the receipt and lease when the private admission event cannot be written', () => {
+    const directory = root()
+    const store = new ResidentStore(directory)
+    const db = new DatabaseSync(join(directory, 'state.sqlite'))
+    db.exec(`CREATE TRIGGER fail_admission BEFORE INSERT ON resident_events
+      WHEN NEW.type = 'turn.accepted' BEGIN SELECT RAISE(ABORT, 'admission event failed'); END`)
+    try {
+      expect(() => store.accept(
+        'atomic-command', 'hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE,
+        undefined, undefined, 'legacy', 'inherit', undefined,
+        { workspace: '/workspace', prompt: [{ type: 'text', text: 'private task' }], nativeToolPolicy: 'inherit' },
+      )).toThrow('admission event failed')
+      for (const table of ['command_receipts', 'session_leases', 'resident_sessions', 'resident_events']) {
+        expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toMatchObject({ count: 0 })
+      }
+    } finally {
+      db.close()
+      store.close()
+    }
+  })
+
   it('persists only a bounded task label for user-facing reconnect projections', () => {
     const store = new ResidentStore(root())
     const accepted = store.accept(

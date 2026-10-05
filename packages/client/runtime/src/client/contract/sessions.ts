@@ -9,7 +9,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {
-  RpcResult, SessionId, SubagentAddress,
+  RpcResult, SessionId, SubagentAddress, WorkspaceId,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { HostObservable, SessionMaybeProvideInfo } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AgentContext } from '../agents/scope.ts'
@@ -71,6 +71,13 @@ export interface ISessions {
    * @param agentPreset - the preset id the host confirmed.
    */
   noteAgentPreset(sessionId: SessionId, agentPreset: string): void
+  /**
+   * Create an independent blank session in a registered Workspace without opening it.
+   * On resolution its list row and binding are synchronously available.
+   * @param opts - target registered workspace.
+   * @returns the created session id.
+   */
+  create(opts: { workspaceId: WorkspaceId }): Promise<SessionId>
   /** Clear the current selection into the no-session view state. */
   clear(): void
   /**

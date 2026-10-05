@@ -1,8 +1,9 @@
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
@@ -24,7 +25,7 @@ import { ResidentDaemonClient } from '../src/client.ts'
 import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
 import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
 import { unwrapWire } from '../src/protocol.ts'
-import { ResidentStore } from '../src/store.ts'
+import { canonicalRequestHash, ResidentStore } from '../src/store.ts'
 
 const CODEX_VERSION = 'codex-cli 0.151.0'
 const CODEX_SCHEMA_SHA256 = '2442b15801bc019ad55987ad03e0f0ae60c51417825b9b6d708db640e6c2651c'
@@ -1206,6 +1207,85 @@ describe('ResidentDaemon', () => {
     expect(JSON.stringify(persisted)).not.toContain('private prompt nonce')
     expect(JSON.stringify(persisted)).not.toContain('sk-test-secret-token')
     await daemon.close()
+  })
+
+  it('records actual Driver inputs privately before execution and preserves them on daemon replay', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    const alias = join(root, 'workspace-alias')
+    mkdirSync(workspace)
+    symlinkSync(workspace, alias)
+    const readAdmission = () => {
+      const db = new DatabaseSync(join(root, 'state.sqlite'), { readOnly: true })
+      try {
+        return db.prepare('SELECT data_json FROM resident_events WHERE type = \'turn.accepted\'').all()
+          .map(row => JSON.parse(String(row.data_json)) as Record<string, unknown>)
+      } finally {
+        db.close()
+      }
+    }
+    class RecordedDriver extends MemoryDriver {
+      override async execute(request: ResidentDriverExecuteRequest) {
+        expect(readAdmission()[0]?.inputSnapshot).toEqual({
+          workspace: request.workspace, prompt: request.prompt, systemPrompt: request.systemPrompt,
+          nativeContext: { version: 1, digest: 'e'.repeat(64) }, nativeToolPolicy: request.nativeToolPolicy,
+        })
+        return super.execute(request)
+      }
+    }
+    const driver = new RecordedDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const request = {
+      commandId: 'private-admission', operatorId: 'codex', workspace: alias,
+      prompt: [{ type: 'text' as const, text: 'private sender task /private/tmp/source' }],
+      systemPrompt: 'private receiver system', nativeContext: { version: 1 as const, digest: 'e'.repeat(64) },
+      nativeToolPolicy: 'disabled' as const, signal: new AbortController().signal,
+    }
+    let turnId: string
+    try {
+      const connected = client(root)
+      const first = await connected.execute(request)
+      turnId = first.turnId
+      await first.result
+      const expectedInput = {
+        workspace: realpathSync(workspace), prompt: request.prompt, systemPrompt: request.systemPrompt,
+        nativeContext: request.nativeContext, nativeToolPolicy: request.nativeToolPolicy,
+      }
+      expect(readAdmission()[0]?.inputSnapshot).toEqual(expectedInput)
+      const db = new DatabaseSync(join(root, 'state.sqlite'), { readOnly: true })
+      try {
+        expect(db.prepare('SELECT request_hash FROM command_receipts WHERE command_id = ?').get(request.commandId))
+          .toMatchObject({ request_hash: canonicalRequestHash(
+            'codex', expectedInput.workspace, request.prompt, driver.profiles[0]!, undefined, 'legacy', undefined,
+            request.systemPrompt, request.nativeToolPolicy, request.nativeContext,
+          ) })
+      } finally {
+        db.close()
+      }
+      expect((await connected.readEvents(first.sessionId)).events
+        .find(event => event.type === 'turn.accepted')?.data).not.toHaveProperty('inputSnapshot')
+      const replay = await connected.execute(request)
+      expect(replay.turnId).toBe(first.turnId)
+      await replay.result
+      await expect(connected.execute({ ...request, systemPrompt: 'changed system' })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+      expect(readAdmission()).toHaveLength(1)
+      expect(driver.commandIds).toEqual(['private-admission'])
+    } finally {
+      await daemon.close()
+    }
+    const restartedDriver = new RecordedDriver()
+    const restarted = new ResidentDaemon({ root, drivers: [restartedDriver] })
+    await restarted.start()
+    try {
+      const replay = await client(root).execute(request)
+      expect(replay.turnId).toBe(turnId)
+      await replay.result
+      expect(readAdmission()).toHaveLength(1)
+      expect(restartedDriver.commandIds).toEqual([])
+    } finally {
+      await restarted.close()
+    }
   })
 
   it('returns a settled receipt for an identical command and conflicts on a changed request', async () => {

@@ -40,11 +40,11 @@ export class RemoteSyncRejectedError extends Error {
  */
 const EXPLICIT_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 403, 404, 409, 422])
 
-async function refusalText(response: Response): Promise<string> {
+async function errorBodyText(response: Response): Promise<string> {
   try {
     return (await response.text()).slice(0, 500)
   } catch {
-    // The refusal is already known from its status; an unreadable body only loses the explanation.
+    // The status still determines the error classification when its explanation is unreadable.
     return 'no explanation'
   }
 }
@@ -133,12 +133,12 @@ export class RemoteSyncHttpClient {
     if (!response.ok) {
       if (EXPLICIT_REFUSAL_STATUSES.has(response.status)) {
         throw new RemoteSyncRejectedError(
-          `remote operator ${method} refused: HTTP ${String(response.status)}: ${await refusalText(response)}`,
+          `remote operator ${method} refused: HTTP ${String(response.status)}: ${await errorBodyText(response)}`,
           `HTTP_${String(response.status)}`,
         )
       }
       throw new RemoteSyncTransportError(
-        `remote operator ${method} transport failed: HTTP ${String(response.status)}`,
+        `remote operator ${method} transport failed: HTTP ${String(response.status)}: ${await errorBodyText(response)}`,
       )
     }
     let envelope

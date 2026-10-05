@@ -20,17 +20,19 @@ Remote Sync 协议 1.4 保留 snapshot + cursor 投影，并为 cockpit/admin �
 
 远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。`operator.execute` 的上下文信封会在原生物化前重新解析；Server 返回精确的已接受回执，调用方会拒绝缺失、格式错误或不匹配的回执。超大已结算结果返回 `sha256:` 引用；`operator.artifact.read` 会在 Server deadline 内返回最多 8 MiB 的精确不可变 JSON，使调用方能验证远端 digest、校验完整 Resident 结果，并写入自己的本地 CAS。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
 
+Remote Sync Host 会向系统提示词追加确定性的补充内容，包含接收端 checkout 的 `cwd`、仓库身份和 commit。该 cwd 决定原生文件操作使用的目录；发送方路径仍是源宿主上下文，相对读写范围保持不变。Host 保留原始任务、历史路径、上下文信封和 digest。已接受上下文回执只确认原始信封，不确认派生的执行提示词。[Resident 准入](../../physical-operator/resident-operator-local/README.md#protocol-storage-and-recovery)会私有保存已解析的输入。决策见[远程工作区上下文](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md)。
+
 持有 `gouzi` 范围凭据的是主实例，用来连接一只执行成员。Remote Sync RPC 只接受该范围调用 `describe`、`gouzi.hello` 和 `operator.*` 方法；`/api` 桥、snapshot、replica、cluster、设备名册和所有事件 socket 都会拒绝它。该范围的 `operator.execute` 必须带 `gouziGrant`（其 `planHash` 等于该请求的 `gouziRequestHash`），且必须挂载 `ctx.gouziMember` Provider；没有 Provider 时该范围既不能执行也不能 hello。Provider 在物化工作区之前，先按存储的身份、generation 与权威纪元检查授权，并查询幂等账本，因此被拒绝的授权不会产生副作用，重复的执行 ID 返回已存回执。挂载该服务的宿主就是成员宿主：每一个 `operator.execute` 调用方，包括回环属主或 SSH 隧道端点，都必须出示授权。`GouziMemberService` 是 Service Definition，`@deepseek-ai/dsh-host-gouzi-member` 是 Provider。
 
 当 `ctx.orchestrations` 暴露集群权威时，每个经过认证的 description 都可以带有有界只读投影（`nodeId`、term、role、leader id 和 `canSchedule`）。这样，配置了多个 Server 的 Frontend 可以优先连接当前持有多数租约的 Leader，而不会获得选举权威。`orchestration.cluster` 控制能力只向 admin peer 声明，承载 vote、heartbeat、逻辑副本 export 和受 term 约束的 install。生产 peer 应当通过经过认证的回环隧道调用这些控制操作；普通 Frontend bearer 不是集群凭据。
 
 ## 模型体验
 
-无。协议消费层只在浏览器与主机之间搬运已经组合好的消息；这里没有任何内容进入模型请求。
+浏览器连接本身没有模型影响，因为它只搬运已经组合好的消息；远程原生系统提示词补充内容见上述 Remote Sync 章节。
 
 #### KV Cache 影响
 
-无；该包既不组装也不发送提供方请求。
+不直接管理提供方缓存；远程原生系统提示词包含接收端执行 checkout。
 
 ## 已知限制与暂缓事项
 

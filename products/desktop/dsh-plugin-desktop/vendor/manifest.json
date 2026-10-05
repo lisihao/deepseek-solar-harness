@@ -220,6 +220,16 @@
       "name": "Smart Collaboration executable tool bridge, continuity and fresh native model catalog",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "f5d3b30f6dc35ffd49b3b71a0a2833a19c03a8aa"
+    },
+    {
+      "name": "Remote native workspace binding and atomic private admission input",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "1ad29d935d79686061dff05de74192f47d0409dd"
+    },
+    {
+      "name": "Workspace-bound independent kennel navigation and explicit browser session creation face",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "a70f139c9ad2e31c9d390fecf7bfa28933ad1c0f"
     }
   ],
   "sourcePackages": {
@@ -362,10 +372,10 @@
     "dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz": "8e1cfc614f48afa39cb179a60179794f7d5ba0d87ba5153543c506c8bd25c95a",
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "0c1bba99fa07e33e7125a5145d80bdf16a2c50d568a98abc4afc9e437118717b",
     "dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz": "164de9b3819a333e3318dd2a498482a05b4f1934167425ea22eb813ec6fb3a9e",
-    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "54185159076fe2e5dfbda3a12984983c94cec5458657eac3b51e183dba9dd42e",
+    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "0608a7c0ac763afc3bd611d8a8898ca1ac695ea5c7461b1781ecedfd5ed040d4",
     "dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz": "ec1495a2a51b78c64b3cddc8f087640bb1517781972e45926654b5150f5a133e",
     "dsh-packages/deepseek-ai-dsh-client-modules-0.1.0-rc.5.tgz": "d72db746e308de2cc86abe01186d01c687922df641005ea3ba0e70a97862f95a",
-    "dsh-packages/deepseek-ai-dsh-client-runtime-0.1.0-rc.5.tgz": "84438043f436b4946d19010fd4891f6e585156fe2aba163500008095b12f41ba",
+    "dsh-packages/deepseek-ai-dsh-client-runtime-0.1.0-rc.5.tgz": "5106c7958ee3fd5f529df158a2f5f403e1b47ba003074a97a74d043495912590",
     "dsh-packages/deepseek-ai-dsh-client-ui-conversation-0.1.0-rc.5.tgz": "cfd6106f407aec79f70d14e007522ed821eb47d2fa4cd07a112eee5d10946bf2",
     "dsh-packages/deepseek-ai-dsh-client-ui-input-trigger-0.1.0-rc.5.tgz": "3c61a4bffc021a31bd7b8976084e3986c56d6e02abbe1e7e6d6547103e87f8f9",
     "dsh-packages/deepseek-ai-dsh-client-ui-primitives-0.1.0-rc.5.tgz": "a9f7ada0a87751eb6cbb897a6fd8287507e063d5b9d7de9cfda3682ccee3b4e8",
@@ -396,7 +406,7 @@
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "6159d2b78d57268cc5aaf84dff2d33e68f257a44943556554566f22996f00e01",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "975ac7de645f3d5db54cd43ac0cc3b951f8c04cefd9985425e47f9f20e68d27d",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "cc3703d88b98d2ededb706614789825012186e0173ad040f145daa07ff8793cb",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "d1c4668a4f5725346a0de038748419a24eb941c67ea59ef3a7ef1614fb643a7c",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "2cd639964edb5743014fda6c7fe407f59c0e9dea62cc31642f249e3194aec8a4",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "1f11863df52f9a9b2a63b8b2a3549de9f7aa0e57b4a481e406b281c5ad80db45",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "bde64debfa3575338c94e2d05b9efdcf34c25e586f60edf0079dd07b80b3fae8",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "18dd2e23a44c82ba9fa2976d4fe20785ef514e3a5192328c0d21a86edf0366c0",
@@ -404,7 +414,7 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "642f87bc92bfb55d39046a3d43cb6186afe904229b28e03047e0ca72e257490f",
     "dsh-packages/deepseek-ai-dsh-physical-operator-subagent-0.1.0-rc.5.tgz": "9f3e0ee1832d50a8dca771dccde0f436e66981301170e8abbeebe77576982a7d",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "993aa261accaba0cac3616a8fee3cf9b0763533295d51849e7254dd5b20f53d8",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "78c8abf3850e5c1102a518a2a655b59ecaf50ae13993fa30741ca611e3ab0071",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "a6ee14c03083378fe124eccdf39c726b7e382abbc4913b4ab83605472ae0d5b5",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "5113f8bcdb16b1ae62279b8eef9b3160897bc33bfa498bc0687bfd93e4eb44de",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "e3159591d26997979572f15ffa850cd88debdff3fcb0a8e9273fa8bc3a4a986e",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "6947ab672f81971354d22e4e93e00eaafa6dc6afbe3c04464d0836edb8da22aa",
@@ -431,7 +441,7 @@
     "dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz": "074f755f4aeee4dc135c68889414ae996bc0be6ed2a4d04d62049e39b37a4b7f",
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "69437f2282c62d973a672f8f4b9e6c85d37465006fadb0da0d798a53c772ac8d",
     "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "ded58887c9118c02923fb58b1aaf0e1a108ab43df42fe26c94c2430c9cf9e455",
-    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "01eb8cef382fc5b77701ee583a059bc773caa8f81efb7a2dc913f9602f82b8f8",
+    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "e5685349eaec6c4a3af41d405484f2707b55e2651b10c80b677d1059e865c29e",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "4f6c818f5e0b707160284eb8e89c71345113ee716d9c2a783642d81d95b3a5f2",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "dc7db4a3a1f20850664243fe8ef042ac795bf37a598dc04278bba850eb3f06cb",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "c95816cb798217ce6c65606b9a3528e1520d4a76cd4451a826582f1ca21f1ff0",

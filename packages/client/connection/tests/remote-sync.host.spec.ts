@@ -9,7 +9,7 @@ import {
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
 import { RemoteSyncHub, RemoteSyncJournal } from '../src/remote-sync-host.ts'
-import { buildOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
+import { buildOperatorContextEnvelope, materializeOperatorContextEnvelopeNative } from '@deepseek-ai/dsh-system-prompt'
 
 function hostEnvelope(rpcId: string): RpcRequest<HostFrame> {
   return {
@@ -251,6 +251,57 @@ describe('RemoteSyncHub', () => {
     await hub.close()
   })
 
+  it('binds native context to the materialized receiver cwd without changing sender context', async () => {
+    const path = '/srv/receiver/quoted"workspace\ncore'
+    const identity = { version: 1 as const, repository: 'github.com/receiver/project', commit: 'd'.repeat(40) }
+    const execute = vi.fn(async (_request: ResidentExecuteRequest) => ({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2,
+      result: new Promise(() => {}), dispose: async () => undefined,
+    }))
+    const hub = new RemoteSyncHub(api(), 4, undefined, { execute } as never, undefined, () => ({
+      qualification: async () => ({ available: true }),
+      materializeWorkspace: async () => ({ version: 1, identity, path }),
+    }) as never)
+    const contextEnvelope = buildOperatorContextEnvelope({
+      systemText: 'Workspace: /private/tmp/sender/workspace\nRead scopes: src\nWrite scopes: README.md',
+      task: [{ type: 'text', text: 'Inspect /private/tmp/sender/workspace/README.md' }],
+      contexts: [{ name: 'memory', text: 'Previous cwd: /private/tmp/sender/workspace' }],
+      source: { kind: 'taskgraph', runId: 'run-1', nodeId: 'node-1', contextPacketRef: 'sha256:context' },
+    })
+    const originalEnvelope = JSON.stringify(contextEnvelope)
+    const native = materializeOperatorContextEnvelopeNative(contextEnvelope)
+    const supplement = [
+      'Remote execution workspace:',
+      JSON.stringify({ cwd: path, repository: identity.repository, commit: identity.commit }),
+      'The current native execution cwd above is authoritative for this execution. Workspace paths in sender context refer to the source host. Existing relative read and write scopes apply unchanged within this cwd. This supplement does not expand permissions.',
+    ].join('\n')
+    const request = {
+      commandId: 'command-binding', operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      systemPrompt: 'ignored compatibility text', contextEnvelope,
+      workspaceIdentity: { version: 1 as const, repository: 'github.com/sender/project', commit: 'a'.repeat(40) },
+    }
+    try {
+      for (const commandId of ['command-binding', 'command-binding', 'command-continuation']) {
+        const accepted = await hub.operatorExecute({ ...request, commandId })
+        expect(accepted.contextReceipt?.digest).toBe(contextEnvelope.digest)
+        expect(execute.mock.calls.at(-1)?.[0]).toMatchObject({
+          workspace: path, prompt: native.prompt, systemPrompt: `${native.systemPrompt}\n\n${supplement}`,
+          nativeContext: { version: 1, digest: contextEnvelope.digest },
+        })
+        expect(JSON.stringify(contextEnvelope)).toBe(originalEnvelope)
+      }
+      const { contextEnvelope: _envelope, systemPrompt: _systemPrompt, ...withoutSystemPrompt } = request
+      await hub.operatorExecute({ ...withoutSystemPrompt, systemPrompt: 'plain sender system' })
+      expect(execute.mock.calls.at(-1)?.[0]).toMatchObject({ systemPrompt: `plain sender system\n\n${supplement}` })
+      expect(execute.mock.calls.at(-1)?.[0]).not.toHaveProperty('nativeContext')
+      await hub.operatorExecute(withoutSystemPrompt)
+      expect(execute.mock.calls.at(-1)?.[0]).toMatchObject({ systemPrompt: supplement })
+      expect(execute.mock.calls.at(-1)?.[0]).not.toHaveProperty('nativeContext')
+    } finally {
+      await hub.close()
+    }
+  })
+
   it('exposes durable Resident admission and observation only when the control seam is mounted', async () => {
     const provider = {
       operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
@@ -321,8 +372,9 @@ describe('RemoteSyncHub', () => {
       },
     })).resolves.toMatchObject({ sessionId: 'resident-session' })
     expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
-      taskLabel: 'label', systemPrompt: 'system', profile: { model: 'sol' },
+      taskLabel: 'label', profile: { model: 'sol' },
     }))
+    expect(execute.mock.calls.at(-1)?.[0].systemPrompt).toContain('system\n\nRemote execution workspace:')
     const contextEnvelope = buildOperatorContextEnvelope({
       systemText: 'system from envelope',
       task: [{ type: 'text', text: 'task from envelope' }],
@@ -345,9 +397,9 @@ describe('RemoteSyncHub', () => {
     })
     const executed = execute.mock.calls.at(-1)?.[0]
     expect(executed).toMatchObject({
-      systemPrompt: 'system from envelope',
       nativeContext: { version: 1, digest: contextEnvelope.digest },
     })
+    expect(executed?.systemPrompt).toContain('system from envelope\n\nRemote execution workspace:')
     expect(executed?.prompt).toContainEqual({ type: 'text', text: 'task from envelope' })
     await expect(hub.operatorReadArtifact(`sha256:${'a'.repeat(64)}`)).resolves.toEqual({
       ref: `sha256:${'a'.repeat(64)}`, json: '{}',

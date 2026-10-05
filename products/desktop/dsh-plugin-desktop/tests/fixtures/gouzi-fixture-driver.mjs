@@ -1,5 +1,5 @@
-// Keyless Resident product driver for the Gouzi end-to-end test: one turn writes one file into the workspace the
-// member materialized and appends one line to a counter in the member home. It calls no model.
+// Keyless native backend for the real Gouzi process composition. Reading turns resolve their file through the
+// receiver workspace in the model input; other turns write one fixture file. It calls no model.
 import { appendFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -34,8 +34,21 @@ export function createResidentProductDriver({ stateRoot }) {
       request.onRunning(nativeSessionId)
       const safe = String(request.commandId).replace(/[^a-zA-Z0-9]+/gu, '-')
       const reading = JSON.stringify(request.prompt).includes('Read README.md and summarize its contents.')
+      appendFileSync(join(memberHome, 'fixture-inputs.jsonl'), `${JSON.stringify({
+        commandId: request.commandId, workspace: request.workspace, prompt: request.prompt,
+        systemPrompt: request.systemPrompt,
+      })}\n`)
+      let readWorkspace = request.workspace
+      if (reading) {
+        const marker = 'Remote execution workspace:\n'
+        const start = request.systemPrompt?.lastIndexOf(marker) ?? -1
+        if (start < 0) throw new Error('README reader has no receiver workspace in its model input')
+        const binding = JSON.parse(request.systemPrompt.slice(start + marker.length).split('\n')[0])
+        if (binding.cwd !== request.workspace) throw new Error('model workspace differs from execution workspace')
+        readWorkspace = binding.cwd
+      }
       const output = reading
-        ? `README.md:1: ${readFileSync(join(request.workspace, 'README.md'), 'utf8')}Files: ${readdirSync(request.workspace).filter(name => name !== '.git').sort().join(', ')}`
+        ? `README.md:1: ${readFileSync(join(readWorkspace, 'README.md'), 'utf8')}Files: ${readdirSync(readWorkspace).filter(name => name !== '.git').sort().join(', ')}`
         : `wrote ${safe}`
       if (!reading) writeFileSync(join(request.workspace, `executed-${safe}.txt`), `${request.commandId}\n`)
       // One line per executed turn: the command id and the workspace the member materialized for it.

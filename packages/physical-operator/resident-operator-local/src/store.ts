@@ -36,8 +36,9 @@ const MAX_OBSERVATION_NAME_CHARS = 160
 
 /**
  * Bound trace text and remove the small set of credential-shaped values that
- * native products can echo in an otherwise public response. This store never
- * receives prompts, stderr, environment values, or complete tool results.
+ * native products can echo in an otherwise public response. Public observations
+ * exclude complete prompts, stderr, environment values, and complete tool results;
+ * private admission records separately retain the inputs passed to the Driver.
  */
 function scrubObservationPreview(value: string): string {
   return value
@@ -120,6 +121,22 @@ interface CompactReceiptRow {
   error_message: string | null
   resolution: string | null
   updated_at: string
+}
+
+/** Resolved workspace and prompt inputs retained only in the private admission event. */
+export interface ResidentAcceptedInputSnapshot {
+  readonly workspace: string
+  readonly prompt: readonly ContentBlock[]
+  readonly systemPrompt?: string
+  readonly nativeContext?: NativeContext
+  readonly nativeToolPolicy: PhysicalOperatorNativeToolPolicy
+}
+
+/** Remove private admission inputs from every public event projection. */
+function publicEventData(type: string, json: string): Record<string, unknown> {
+  const data = JSON.parse(json) as Record<string, unknown>
+  if (type === 'turn.accepted') delete data.inputSnapshot
+  return data
 }
 
 /** Durable receipt projection returned immediately after admission or replay. */
@@ -537,6 +554,7 @@ export class ResidentStore {
  * @param laneId - caller-owned native-context isolation lane.
  * @param nativeToolPolicy - sealed native product tool authority for this command.
  * @param modelToolBridge - optional DSH-owned native tool descriptor.
+ * @param inputSnapshot - complete private inputs, recorded atomically only for a new admission.
  * @returns accepted or existing receipt projection.
  */
   accept(
@@ -551,6 +569,7 @@ export class ResidentStore {
     laneId = 'legacy',
     nativeToolPolicy: PhysicalOperatorNativeToolPolicy = 'inherit',
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
+    inputSnapshot?: ResidentAcceptedInputSnapshot,
   ): AcceptedTurn {
     return this.transaction(() => {
       if (this.compactReceiptByCommand(commandId) !== undefined) {
@@ -657,6 +676,7 @@ export class ResidentStore {
         taskLabel: taskLabel ?? null,
         profile,
         supersedesCommandId: superseded?.command_id ?? null,
+        ...inputSnapshot === undefined ? {} : { inputSnapshot },
       }, now)
       return {
         sessionId: session.id,
@@ -939,7 +959,7 @@ export class ResidentStore {
         sessionId: ResidentOperatorSessionId(row.session_id),
         type: row.type,
         time: row.time,
-        data: JSON.parse(row.data_json) as Record<string, unknown>,
+        data: publicEventData(row.type, row.data_json),
       })),
       nextSequence: rows.at(-1)?.sequence ?? afterSequence,
     }
@@ -1391,7 +1411,7 @@ export class ResidentStore {
       sessionId: ResidentOperatorSessionId(row.session_id),
       type: row.type,
       time: row.time,
-      data: JSON.parse(row.data_json) as Record<string, unknown>,
+      data: publicEventData(row.type, row.data_json),
     }
   }
 

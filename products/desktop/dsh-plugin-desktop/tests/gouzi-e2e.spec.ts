@@ -5,9 +5,10 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -356,6 +357,43 @@ describe.sequential('Gouzi members as real processes', () => {
     expect(evidence.output).toEqual([{ type: 'text', text: 'README.md:1: gouzi fixture\nFiles: README.md' }])
     expect(executions('gouzi-a').at(-1)?.[1]).toContain(supervisor.homeOf('gouzi-a'))
     expect(commandIds('gouzi-b')).toEqual(otherBefore)
+    const inputLines = readFileSync(join(supervisor.homeOf('gouzi-a'), 'fixture-inputs.jsonl'), 'utf8').trim().split('\n')
+    const input = inputLines.map(line => JSON.parse(line) as {
+      commandId: string; workspace: string; systemPrompt: string; prompt: Array<{ type: string; text?: string }>
+    }).find(value => value.commandId === evidence.executionId)
+    expect(input).toBeDefined()
+    const marker = 'Remote execution workspace:\n'
+    const binding = JSON.parse(input!.systemPrompt.slice(input!.systemPrompt.lastIndexOf(marker) + marker.length).split('\n')[0]!) as {
+      cwd: string; repository: string; commit: string
+    }
+    expect(binding).toEqual({ cwd: input!.workspace, repository: REPOSITORY, commit })
+    const task = input!.prompt.map(block => block.text ?? '').join('\n')
+    expect(task).toContain(`Sender workspace: ${realpathSync(workspace)}`)
+    expect(task).toContain('Use the executor current working directory for filesystem operations.')
+    const nativeDb = new DatabaseSync(join(supervisor.homeOf('gouzi-a'), 'resident-operators', 'state.sqlite'), { readOnly: true })
+    let recorded: { workspace: string; prompt: unknown; systemPrompt: string }
+    try {
+      const events = nativeDb.prepare("SELECT data_json FROM resident_events WHERE type = 'turn.accepted'").all() as Array<{ data_json: string }>
+      const data = events.map(row => JSON.parse(row.data_json) as {
+        commandId: string; inputSnapshot: { workspace: string; prompt: unknown; systemPrompt: string }
+      }).find(value => value.commandId === input!.commandId)
+      expect(data).toBeDefined()
+      recorded = data!.inputSnapshot
+      expect(recorded).toMatchObject({ workspace: input!.workspace, prompt: input!.prompt, systemPrompt: input!.systemPrompt })
+    } finally {
+      nativeDb.close()
+    }
+    // This public transcript projects host-relative facts from the actual native request and private receipt.
+    // Absolute scratch paths and generated run identities are checked above, rather than rewritten for replay.
+    const transcript = {
+      sender: 'TaskGraph sender workspace', receiver: 'member materialized checkout',
+      repository: binding.repository, requestedCommitMatches: binding.commit === commit,
+      nativeCwdMatchesBinding: input!.workspace === binding.cwd,
+      privateInputMatchesDriver: recorded!.systemPrompt === input!.systemPrompt,
+      originalInputContextRetained: task.includes(`Sender workspace: ${realpathSync(workspace)}`),
+      output: evidence.output,
+    }
+    expect(`${JSON.stringify(transcript, null, 2)}\n`).toMatchFileSnapshot('./snapshots/remote-workspace-readme.json')
   }, 240_000)
 
   it('adopts a member through the Host route with a real worker process, runs a TaskGraph on it, and retires it', async () => {

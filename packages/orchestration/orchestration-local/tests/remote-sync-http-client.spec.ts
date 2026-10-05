@@ -46,7 +46,34 @@ describe('RemoteSyncHttpClient HTTP failures', () => {
   it.each([401, 500, 502, 503])('reports HTTP %i as a transport failure because the command may have started', async (status) => {
     const request = vi.fn(async () => new Response('busy', { status }))
     const client = new RemoteSyncHttpClient('http://127.0.0.1:1', undefined, request)
-    await expect(client.operatorExecute(execute)).rejects.toBeInstanceOf(RemoteSyncTransportError)
+    const error = await client.operatorExecute(execute).catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(RemoteSyncTransportError)
+    expect(error).not.toBeInstanceOf(RemoteSyncRejectedError)
+    expect((error as Error).message).toContain(`HTTP ${String(status)}: busy`)
+    expect(request).toHaveBeenCalledOnce()
+  })
+
+  it('retains a bounded HTTP 500 explanation without classifying admission as refused', async () => {
+    const explanation = `receiver workspace missing: ${'x'.repeat(600)}`
+    const request = vi.fn(async () => new Response(explanation, { status: 500 }))
+    const client = new RemoteSyncHttpClient('http://127.0.0.1:1', undefined, request)
+    const error = await client.operatorExecute(execute).catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(RemoteSyncTransportError)
+    expect(error).not.toBeInstanceOf(RemoteSyncRejectedError)
+    expect((error as Error).message.split('HTTP 500: ')[1]).toBe(explanation.slice(0, 500))
+    expect(request).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an unreadable HTTP 500 body as a transport failure with a bounded fallback', async () => {
+    const response = new Response(null, { status: 500 })
+    Object.defineProperty(response, 'text', { value: () => Promise.reject(new Error('stream closed')) })
+    const request = vi.fn(async () => response)
+    const client = new RemoteSyncHttpClient('http://127.0.0.1:1', undefined, request)
+    const error = await client.operatorExecute(execute).catch((cause: unknown) => cause)
+    expect(error).toBeInstanceOf(RemoteSyncTransportError)
+    expect(error).not.toBeInstanceOf(RemoteSyncRejectedError)
+    expect((error as Error).message).toBe('remote operator operator.execute transport failed: HTTP 500: no explanation')
+    expect(request).toHaveBeenCalledOnce()
   })
 
   it('keeps a refusal even when its body cannot be read', async () => {

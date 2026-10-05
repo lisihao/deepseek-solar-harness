@@ -20,17 +20,19 @@ When `ctx.residentOperators` is mounted, the same authenticated channel advertis
 
 A remote caller can inspect qualified native-subscription Providers, submit one durable command, detach immediately, reattach by turn id, read bounded structured progress, and interrupt the matching Session/turn pair. An `operator.execute` context envelope is re-parsed before native materialization; the Server returns an exact accepted receipt and the caller rejects a missing, malformed, or mismatched receipt. Oversized settled results return a `sha256:` reference; `operator.artifact.read` returns at most 8 MiB of exact immutable JSON under a Server deadline so the caller can verify the remote digest, validate the complete Resident result, and persist it in its own local CAS. The Server's Resident daemon remains the sole command-receipt and native-session authority. Raw product transcripts and local Unix model-tool bridge addresses do not cross this boundary; remote model-tool bridge requests are rejected until a separately authenticated routed bridge exists.
 
+The Remote Sync Host appends a deterministic system-prompt supplement containing the receiving checkout's `cwd`, repository identity, and commit. That cwd governs native filesystem operations; sender paths remain source-host context, and relative read/write scopes apply unchanged. The Host preserves the original task, historical paths, context envelope, and digest. The accepted context receipt confirms only that original envelope, not the derived execution prompt. [Resident admission](../../physical-operator/resident-operator-local/README.md#protocol-storage-and-recovery) retains the resolved input privately. See the [remote workspace context decision](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md).
+
 A credential with the `gouzi` scope is what a main instance holds for one execution member. The Remote Sync RPC accepts it only for `describe`, `gouzi.hello`, and the `operator.*` methods; the `/api` bridge, snapshot, replica, cluster, device roster, and every event socket refuse it. `operator.execute` with this scope requires a `gouziGrant` (an execution grant whose `planHash` equals `gouziRequestHash` of the request) and a mounted `ctx.gouziMember` Provider; without the Provider the scope can neither execute nor say hello. The Provider checks the grant against its stored identity, generation, and authority epoch, and consults its idempotency ledger before the workspace is materialized, so a refused grant leaves no side effect and a repeated execution id returns the stored receipt. A host that mounts the service is a member host: every `operator.execute` caller, including a loopback owner or an SSH-tunnel endpoint, must present a grant. `GouziMemberService` is the Service Definition, `@deepseek-ai/dsh-host-gouzi-member` the Provider.
 
 When `ctx.orchestrations` exposes cluster authority, every authenticated description may include a bounded read-only projection (`nodeId`, term, role, leader id, and `canSchedule`). This lets a Frontend with multiple configured Servers prefer the current majority-backed Leader without granting election authority. The `orchestration.cluster` control capability is advertised only to admin peers and carries vote, heartbeat, logical replica export, and term-fenced install. Production peers are expected to call those controls through authenticated loopback tunnels; a public Frontend bearer is not a cluster credential.
 
 ## Model Experience
 
-None, as the wire consumer layer moves already-composed messages between browser and host; nothing here reaches a model request.
+None, as the browser connection only moves already-composed messages; the remote native system-prompt supplement is documented in the Remote Sync section above.
 
 #### KV Cache effect
 
-None; this package neither assembles nor sends a provider request.
+No direct provider-cache management; the remote native system prompt includes the receiving execution checkout.
 
 ## Known Limitations and Deferred Work
 
