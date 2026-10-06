@@ -9291,8 +9291,8 @@ __metadata:
 
 "dsh-codegraph@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-solar.1
-  resolution: "dsh-codegraph@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz::hash=b3055e&locator=deepseek-harness-desktop%40workspace%3A."
-  checksum: 10c0/f8e3b5ce29856182562e0373b258525fa2ce4d3207734a74ae49cf152a14e60f145f00e8610959addc3a61c3f82ea338647ce5be31810537117252929e7f1295
+  resolution: "dsh-codegraph@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz::hash=fa0acf&locator=deepseek-harness-desktop%40workspace%3A."
+  checksum: 10c0/46928a1ffaed4096245d74002af53b3606300d641192f271622d967b0067436134455ae245735f664db9dd87a06b9f3052af2ca0454136b336e9432f6cb16b78
   languageName: node
   linkType: hard
 

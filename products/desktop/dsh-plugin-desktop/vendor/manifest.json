@@ -250,6 +250,11 @@
       "name": "Kennel explicit scoped conversation sending and history reads",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "2bc05c0abe87cf5c05ec25118ce05121ece368ae"
+    },
+    {
+      "name": "Codegraph object-rooted tool input schemas",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "d1b8a01f32f1625637454c0e5b9b32f2a1e7394e"
     }
   ],
   "sourcePackages": {
@@ -467,7 +472,7 @@
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "97c9e6e8ac3698e464f98493d6c13b68be32a0202a6d5119c50d5440b22d6c12",
     "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "9bc580077ae85fcfbe121358a5bab52b7f20ba913e6b0bff533774de26ab5eff",
     "dsh-packages/dsh-better-sidebar-0.15.0-solar.1.tgz": "e5ef31ca74a46a4d7e023fdc5f2dafd37aa458622f0db4824ad0393819e256fc",
-    "dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz": "3e8676c05e214c4f42600efb47fa304f2b6cf58f62ae00788984bc8904d27265",
+    "dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz": "a630eee30376920234619fe3fed5e1f965632016b28d468530cbe5b733209b18",
     "dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz": "ef0859804a4df7b0d7e765d57604874ec4b4747a0681eb721785c194c3fe32c1",
     "dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz": "a969a7819a5a1aada88a9cc3f55a8b069cd016b3f5a04d04459f2919b709b58f",
     "dsh-packages/dsh-synapse-0.4.3.tgz": "3422bc42735db87f9adf486c47a73ae907aba191a862a8984182bf71a05c4a28",
