@@ -240,6 +240,11 @@
       "name": "Kennel chatroom and confirmed directory adoption",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "c4e9286201ecd4478a306e7b926372499406a260"
+    },
+    {
+      "name": "Portable kennel fixtures and complete directory connection coverage",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "5876c53f47c8aa1c55d8cdd7a6397406466304a2"
     }
   ],
   "sourcePackages": {
@@ -382,7 +387,7 @@
     "dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz": "43ade555348981962280cab2e9908c64b834e2a8b2eec0a7aa54534021a53fc8",
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "4eb2b7313bd6c7371e2ff6d88538267d2331a8f4f95c20e2295f599eedc88029",
     "dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz": "2a3d62e25df31e7885b935b89000c008fd6599ab66ce20e17dd32eb7fc3129d0",
-    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "038f6ec8d651a235c7ae21f9e750e8249ea680740f752eb1087945debb26c432",
+    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "82317dcc67ea757cbe60a3b6c3d139757f28e56acddf1304b10e1ba0cae14313",
     "dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz": "81591b3edd03c01e1de0562d0dca0f2f95fedff238fb7e265b9bd3756f9d716c",
     "dsh-packages/deepseek-ai-dsh-client-modules-0.1.0-rc.5.tgz": "9131dc1df333152ff7937355b591d48a500d0a3313435be02849187adb443f07",
     "dsh-packages/deepseek-ai-dsh-client-runtime-0.1.0-rc.5.tgz": "0eed9578e361c1395381ee0bb1fc61d72ce2e9a3d63304c67fba9b90d2070a56",
