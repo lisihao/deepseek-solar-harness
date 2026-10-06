@@ -12,6 +12,8 @@ Status: implemented
 
 [狗窝房间](../../../../packages/orchestration/ui-gouzi/README.md)在用户／总管记录旁持续显示右侧成员与任务面板。消息区只负责记录渲染与独立滚动区域；独立的 `conversation.room.composer` 共享房间草稿与发送对象状态。会话 Root 保留用于 Question、PlanReview、Approval 和 Readonly 的唯一必需 `conversation.composer` 链。会话处于 inert 或模型阻断状态时，房间输入区不接管，让现有 InputBar 保留解除阻断入口。TaskGraph 的 `awaiting_approval` 投影不会凭空创建待处理会话交互。显示筛选与输入框发送对象相互独立。只有明确选择成员，才把稳定成员 id、generation 和标准执行模式写入持久化用户消息；手写显示名称不选择对象。对象查找只使用当前轮次边界之前最新的、`source.kind === 'user'` 的人工 `user/message`。普通人工消息可以清除对象；插件、上下文或工具产生的 user 角色消息不能清除或替换它。TaskGraph 启动时，Host 再次对照注册表成员状态与实际执行目录核对该身份。点名的标准图把每个节点锁定到合格入口，不允许 fallback，并禁用 RLM 和 Autonomous Mode。直接委派不能绕过点名路径。
 
+房间发送和加载旧消息通过 `sessions.scope(id).get('conversation')` 取得消息服务。严格读取保留调用方的会话标记，不要求运行时拥有的 scope 声明服务属性注入。所属插件仍将 `conversation` 声明为必需服务；会话或服务缺失时明确失败。真实 Cordis 服务追踪测试区分这种读取与普通对象 fixture，并验证全局选中聊天变化时仍保留明确的发送目标。
+
 提供方无关的[执行查询](../../../../packages/orchestration/orchestration/README.md)通过[本地协议 7](../../../../packages/orchestration/orchestration-local/README.md)取得实际注册。匹配包含成员 generation 与身份、宿主、属主和端点；最新 catalog 决定可用状态与模型。在线连接状态不足以证明可执行。这些读取不会创建成员、授权或任务。Host 在每次房间回复中包含已校验的轮询间隔；浏览器依据上次成功回复安排读取，不假设 BootGraph 会把 Host 配置传给客户端模块。首次读取失败时没有已确认间隔，等待显式重新读取；后续失败沿用上次成功间隔，并将快照标为过期。
 
 房间任务仅属于严格匹配的 `admission.sourceSessionId`。结果必须有仍被保留的证据引用，以及属于节点当前 attempt 和 capability generation 的终态事件，且事件算子与当前封存执行计划一致。已封存算子属于 Run 持久化的 `admission.gouziRecipient.operatorIds` 时，结果归属在成员换代或退役后仍保留原准入记录中的 `gouziId`。没有该持久绑定时，只有唯一的实际注册关系才允许关联成员。两种路径都不编造封存的成员 generation，因为执行计划没有该字段。权威结果事件时间用于按记录时间与会话消息合并；轮询时间不改变历史顺序。字段缺失、来源不匹配或注册关系不唯一时，省略对应的结果或归属。证据读取要求同一会话接纳的 Run，以及节点保留的引用。输出是任务结果，不是编造的成员自主消息。
