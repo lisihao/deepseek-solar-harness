@@ -135,6 +135,8 @@ dsh plugin --profile demo remove dsh-codegraph
 针对配置的代码库根目录（默认取 dsh 进程当前目录，可用 `root` 参数按次覆盖）查询。
 尚未建索引时先调用 `codegraph_reindex`——只读工具在此之前会返回可读的错误提示。
 
+Node 桥将每个工具的输入声明为根类型为 `object` 的 JSON Schema。查询工具通过 schema 的 `required` 数组要求提供 `symbol`、`module` 或 `query`；各工具声明的 `root`、`limit`、`depth` 和 `force` 均为可选参数。概览和重新索引工具接受空参数对象。
+
 ## 配置文件
 
 `codegraph.json`（项目根目录，`codegraph init` 生成；以下为关键字段示例，`exclude` 默认值共 17 项，此处为节选）：
@@ -212,6 +214,7 @@ codegraph export json -o graph.json   # 结构化数据：files/symbols/calls/im
 
 ```bash
 python -m unittest discover -s tests -t .
+npm test  # Node 桥注册、输入 schema 和 Python CLI 集成
 ```
 
 ## 许可证
