@@ -164,6 +164,14 @@ async function directoryFixture(options: { root?: string; lockRoot?: string; mou
   return { root, dshHome, lockRoot, service }
 }
 
+function directoryReceiptPath(dshHome: string, executionId: string): string {
+  const workspaceRoot = process.platform === 'win32'
+    ? join(dshHome, 'rw')
+    : join(dshHome, 'orchestrations', 'remote-workspaces')
+  const digest = createHash('sha256').update(executionId).digest('hex')
+  return join(workspaceRoot, 'executions', `${digest}.directory.json`)
+}
+
 const directoryIdentity = { version: 1 as const, kind: 'gouzi-project' as const, projectId: 'project' }
 
 describe('registered directory execution', () => {
@@ -255,7 +263,7 @@ describe('registered directory execution', () => {
     const identity = { ...directoryIdentity, subdir: 'child' }
     const workspace = await fixture.service.materializeWorkspace(identity, 'existing')
     const lock = join(fixture.lockRoot, `${createHash('sha256').update(await realpath(fixture.root)).digest('hex')}.json`)
-    const receipt = join(fixture.dshHome, 'orchestrations', 'remote-workspaces', 'executions', `${createHash('sha256').update('existing').digest('hex')}.directory.json`)
+    const receipt = directoryReceiptPath(fixture.dshHome, 'existing')
     const beforeReceipt = await readFile(receipt, 'utf8')
     await expect(fixture.service.qualification()).resolves.toEqual({ available: true })
     const beforeLock = await readFile(lock, 'utf8')
@@ -285,7 +293,7 @@ describe('registered directory execution', () => {
     await writeFile(lock, JSON.stringify({ ...lease, executionId: 'other' }))
     await expect(fixture.service.inspectWorkspace('owned')).rejects.toThrow('conflicting execution')
     await writeFile(lock, lockBytes)
-    const receipt = join(fixture.dshHome, 'orchestrations', 'remote-workspaces', 'executions', `${createHash('sha256').update('owned').digest('hex')}.directory.json`)
+    const receipt = directoryReceiptPath(fixture.dshHome, 'owned')
     const receiptBytes = await readFile(receipt, 'utf8')
     const receiptLease = JSON.parse(receiptBytes) as Record<string, unknown>
     await writeFile(receipt, JSON.stringify({ ...receiptLease, memberId: 'wrong-member' }))
@@ -296,7 +304,7 @@ describe('registered directory execution', () => {
     const configPath = join(fixture.dshHome, 'orchestrations', 'cluster.json')
     const configBytes = await readFile(configPath, 'utf8')
     const replacement = await mkdtemp(join(tmpdir(), 'dsh-inspected-replacement-'))
-    await writeFile(configPath, configBytes.replace(fixture.root, replacement))
+    await writeFile(configPath, configBytes.replace(JSON.stringify(fixture.root), JSON.stringify(replacement)))
     await expect(fixture.service.inspectWorkspace('owned')).rejects.toThrow('conflicting execution')
     await writeFile(configPath, configBytes)
     await expect(fixture.service.inspectWorkspace('owned')).resolves.toMatchObject({ path: await realpath(fixture.root) })

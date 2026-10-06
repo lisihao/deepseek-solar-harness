@@ -519,7 +519,7 @@ describe('ResidentDaemonClient request qualification', () => {
 describe('Resident execute response classification', () => {
   it.each(['disconnect', 'timeout', 'invalid-envelope'] as const)('leaves %s untagged as command refusal', async (failure) => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-resident-response-'))
-    const socketPath = join(root, 'control.sock')
+    const connected = new ResidentDaemonClient({ root, autoStart: false, connectTimeoutMs: 500, pollIntervalMs: 5 })
     const sockets = new Set<import('node:net').Socket>()
     const server = createServer((socket) => {
       sockets.add(socket)
@@ -536,9 +536,8 @@ describe('Resident execute response classification', () => {
       socket.once('close', () => { transport.close(); sockets.delete(socket) })
       transport.start()
     })
-    server.listen(socketPath)
+    server.listen(connected.socketPath)
     await once(server, 'listening')
-    const connected = new ResidentDaemonClient({ root, autoStart: false, connectTimeoutMs: 500, pollIntervalMs: 5 })
     try {
       const error = await connected.execute({
         commandId: 'transport-classification', operatorId: 'codex', workspace: root,

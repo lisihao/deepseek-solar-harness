@@ -1,6 +1,7 @@
 // Real built plugins and HTTP; fixtures supply only external catalog/execution reads.
 import { lstat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
@@ -114,7 +115,7 @@ describe('web e2e: composed kennel room', () => {
       expect(await page.locator('textarea:visible').count()).toBe(1)
       for (const dark of [false, true]) {
         await page.evaluate((value) => { document.body.toggleAttribute('data-ds-dark-theme', value) }, dark)
-        await page.screenshot({ path: '/private/tmp/dsh-chatroom-' + String(width) + '-' + (dark ? 'dark' : 'light') + '.png' })
+        await page.screenshot({ path: join(tmpdir(), 'dsh-chatroom-' + String(width) + '-' + (dark ? 'dark' : 'light') + '.png') })
       }
     }
     await page.setViewportSize({ width: 1680, height: 1000 })
@@ -130,7 +131,7 @@ describe('web e2e: composed kennel room', () => {
       expect(interval).toBeGreaterThanOrEqual(200)
       expect(interval).toBeLessThan(1000)
     }
-    await writeFile('/private/tmp/dsh-chatroom-polling.json', JSON.stringify({ configuredMs: 250, intervalsMs: intervals }, null, 2) + '\n')
+    await writeFile(join(tmpdir(), 'dsh-chatroom-polling.json'), JSON.stringify({ configuredMs: 250, intervalsMs: intervals }, null, 2) + '\n')
   })
   it('filters independently from recipient while preserving the draft', async () => {
     await page.getByRole('button', { name: '点名 · 标准任务', exact: true }).first().click()
@@ -208,7 +209,7 @@ describe('web e2e: composed kennel room', () => {
     expect(rows[2]).toContain('总管')
     expect(rows[2]).toContain('已读取封存结果；请查看证据。')
     await page.evaluate(() => { document.body.removeAttribute('data-ds-dark-theme') })
-    await page.screenshot({ path: '/private/tmp/dsh-chatroom-populated.png' })
+    await page.screenshot({ path: join(tmpdir(), 'dsh-chatroom-populated.png') })
   })
   it('reads exact-attempt output and retained evidence without stealing historical scroll', async () => {
     resultCount = 24

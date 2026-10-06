@@ -195,7 +195,7 @@ export class RemoteSyncHub {
   private readonly stopSources = new AbortController()
   private readonly sourceLoop: Promise<void>
   private readonly socketPumps = new Set<Promise<void>>()
-  private readonly directoryCommands = new Map<string, { hash: string; pending?: Promise<RemoteResidentAcceptedTurn> }>()
+  private readonly directoryCommands = new Map<string, { hash: string; pending: Promise<RemoteResidentAcceptedTurn> }>()
 
   constructor(
     private readonly api: ApiProxy,
@@ -396,13 +396,11 @@ export class RemoteSyncHub {
       const hash = gouziRequestHash(request)
       const previous = this.directoryCommands.get(request.commandId)
       if (previous !== undefined && previous.hash !== hash) throw new ConnectionRpcHttpError(409, 'directory execution command conflicts with its original request')
-      if (previous?.pending !== undefined) return previous.pending
-      const entry: { hash: string; pending?: Promise<RemoteResidentAcceptedTurn> } = previous ?? { hash }
-      this.directoryCommands.set(request.commandId, entry)
+      if (previous !== undefined) return previous.pending
       const pending = this.executeDirectory(request)
-      entry.pending = pending
+      this.directoryCommands.set(request.commandId, { hash, pending })
       try { return await pending } finally {
-        if (this.directoryCommands.get(request.commandId) === entry) this.directoryCommands.delete(request.commandId)
+        this.directoryCommands.delete(request.commandId)
       }
     }
     return this.executeWorkspace(request)
@@ -638,7 +636,7 @@ export class RemoteSyncHub {
     await Promise.allSettled([
       this.sourceLoop,
       ...this.socketPumps,
-      ...[...this.directoryCommands.values()].flatMap(entry => entry.pending === undefined ? [] : [entry.pending]),
+      ...[...this.directoryCommands.values()].map(entry => entry.pending),
     ])
     await new Promise<void>((resolve, reject) => {
       this.sockets.close((error) => { if (error === undefined) resolve(); else reject(error) })

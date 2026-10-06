@@ -2,6 +2,7 @@
 
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
 import {
@@ -10,6 +11,7 @@ import {
 import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentCommandRefusal } from '@deepseek-ai/dsh-resident-operator'
 import { RemoteSyncHub, RemoteSyncJournal } from '../src/remote-sync-host.ts'
+import { RemoteOperatorHostService } from '../src/remote-operator-host.ts'
 import { buildOperatorContextEnvelope, materializeOperatorContextEnvelopeNative } from '@deepseek-ai/dsh-system-prompt'
 
 function hostEnvelope(rpcId: string): RpcRequest<HostFrame> {
@@ -18,6 +20,26 @@ function hostEnvelope(rpcId: string): RpcRequest<HostFrame> {
     payload: { type: 'host/session-status', sessionId: `session-${rpcId}` as never, running: true },
   }
 }
+
+describe('generic RemoteOperatorHostService defaults', () => {
+  it('advertises no Gouzi project and refuses unsupported lease inspection', async () => {
+    class GenericHost extends RemoteOperatorHostService {
+      qualification() { return Promise.resolve({ available: false }) }
+      materializeWorkspace() { return Promise.reject(new Error('no configured workspace')) }
+      renewWorkspace() { return Promise.resolve() }
+      releaseWorkspace() { return Promise.resolve() }
+      readResidentArtifact() { return Promise.reject(new Error('no artifact storage')) }
+    }
+    const ctx = new Context()
+    const fiber = ctx.plugin(GenericHost)
+    await fiber.await()
+    const host = ctx.remoteOperatorHost
+    try {
+      await expect(host.gouziWorkspace()).resolves.toBeUndefined()
+      await expect(host.inspectWorkspace('execution')).rejects.toThrow('remote execution workspace inspection is unsupported')
+    } finally { await fiber.dispose() }
+  })
+})
 
 function muxEnvelope(rpcId: string): RpcRequest<MuxFrame> {
   return {
@@ -395,6 +417,50 @@ describe('RemoteSyncHub', () => {
       expect(leases.has('read-failure')).toBe(true)
       expect(releaseWorkspace).toHaveBeenCalledTimes(2)
       await expect(hub.operatorExecute(request('read-failure'))).rejects.toThrow('indeterminate')
+    } finally { await hub.close() }
+  })
+
+  it.each([['not configured', 'not configured'], [undefined, 'remote execution host is unavailable']])(
+    'refuses an unqualified directory host before any workspace or Resident effect (%s)', async (reason, message) => {
+      const execute = vi.fn()
+      const materializeWorkspace = vi.fn()
+      const renewWorkspace = vi.fn()
+      const releaseWorkspace = vi.fn()
+      const resident = { execute, inspectCommand: async () => undefined }
+      const host = {
+        qualification: async () => ({ available: false, ...reason === undefined ? {} : { reason } }),
+        inspectWorkspace: async () => undefined, materializeWorkspace, renewWorkspace, releaseWorkspace,
+      }
+      const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never)
+      try {
+        await expect(hub.operatorExecute({
+          commandId: 'unqualified-directory', operatorId: 'codex', laneId: 'lane', prompt: [],
+          workspaceIdentity: { version: 1, kind: 'gouzi-project', projectId: 'a'.repeat(64) },
+        })).rejects.toThrow(message)
+        expect(materializeWorkspace).not.toHaveBeenCalled()
+        expect(execute).not.toHaveBeenCalled()
+        expect(renewWorkspace).not.toHaveBeenCalled()
+        expect(releaseWorkspace).not.toHaveBeenCalled()
+      } finally { await hub.close() }
+    },
+  )
+
+  it('uses the receiver project subdirectory as the authoritative prompt cwd', async () => {
+    const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId: 'a'.repeat(64), subdir: 'packages/core' }
+    const cwd = '/srv/user-project/packages/core'
+    const execute = vi.fn(async (_request: ResidentExecuteRequest) => ({
+      sessionId: 'session', turnId: 'turn', stateRevision: 1, dispose: async () => undefined,
+    }))
+    const materializeWorkspace = vi.fn(async () => ({ version: 1, identity, path: cwd }))
+    const resident = { execute, inspectCommand: async () => undefined }
+    const host = { qualification: async () => ({ available: true }), inspectWorkspace: async () => undefined, materializeWorkspace }
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never)
+    try {
+      await hub.operatorExecute({ commandId: 'subdir', operatorId: 'codex', laneId: 'lane', prompt: [], workspaceIdentity: identity })
+      expect(materializeWorkspace).toHaveBeenCalledWith(identity, 'subdir')
+      expect(execute.mock.calls[0]?.[0].workspace).toBe(cwd)
+      expect(execute.mock.calls[0]?.[0].systemPrompt).toContain(JSON.stringify({ cwd, kind: identity.kind, projectId: identity.projectId }))
+      expect(execute.mock.calls[0]?.[0].systemPrompt).toContain('Existing files, including untracked files, are accessible.')
     } finally { await hub.close() }
   })
 
