@@ -1,4 +1,4 @@
-// Real built plugins and HTTP; fixtures supply only external catalog/execution reads.
+// Real built plugins and HTTP; fixtures supply external catalog/execution reads and keyless model responses.
 import { lstat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -11,7 +11,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-user-questions'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type { GouziControl, OrchestrationService } from '@deepseek-ai/dsh-orchestration'
-import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
+import { acknowledgeReloadConnectionLoss, launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage } from './support.ts'
 const PRESETS = fileURLToPath(new URL('./snapshots/kennel-room/presets', import.meta.url))
 const SHIPPED_PRESETS = fileURLToPath(new URL('../../cli/config/agent-presets', import.meta.url))
@@ -249,5 +249,103 @@ describe('web e2e: composed kennel room', () => {
     await expect.poll(() => send.isEnabled(), { timeout: 10_000 }).toBe(true)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
+  })
+})
+
+// Own a replay cursor and Session so the layout/carrier fixtures never consume a model turn.
+describe('web e2e: kennel room real send', () => {
+  it('sends through the kennel Session RPC and retains the replayed conversation after reload', async () => {
+    const prompt = 'Reply exactly KENNEL_ROOM_SEND_OK and stop.'
+    const reply = 'KENNEL_ROOM_SEND_OK'
+    const scaffold = await launchWebScaffold({
+      replayFixture: fileURLToPath(new URL('./snapshots/kennel-room/send.session.jsonl', import.meta.url)),
+      paceMs: 5,
+      agentPresets: { roots: [{ path: SHIPPED_PRESETS, trust: 'system' }, { path: PRESETS, trust: 'system' }], default: 'standard' },
+    })
+    let browser: Browser | undefined
+    let fixtureLink: string | undefined
+    const failures: unknown[] = []
+    try {
+      scaffold.ctx.provide('orchestrations', {
+        gouzi: { list: async () => ({ members: [], hosts: [] }), executionOperators: async () => [] },
+        list: async () => [],
+      } as unknown as OrchestrationService)
+      const moduleLink = join(scaffold.harnessHome, 'profiles/node_modules/@deepseek-ai/dsh-ui-gouzi')
+      try { await lstat(moduleLink) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        await symlink(fileURLToPath(new URL('../../../packages/orchestration/ui-gouzi', import.meta.url)), moduleLink)
+        fixtureLink = moduleLink
+      }
+      await scaffold.ctx.loader.create({ name: '@deepseek-ai/dsh-ui-gouzi', config: { roomPollIntervalMs: 250 } })
+      await scaffold.ctx.loader.await()
+      browser = await chromium.launch()
+      const page = await newEnglishPage(browser)
+      const tripwire = watchConsole(page)
+      await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      await connectFreshWorkspace(page, scaffold.workspaceCwd)
+      const roomRead = page.waitForRequest(request => request.url().includes('/api/gouzi?session_id='))
+      await page.getByRole('button', { name: '狗窝', exact: true }).click()
+      await page.getByRole('heading', { name: '狗窝', exact: true }).waitFor()
+      const roomSession = new URL((await roomRead).url()).searchParams.get('session_id')
+      expect(roomSession).toBeTruthy()
+      const agent = scaffold.ctx.agents.get(SessionId(roomSession!))!
+      expect(agent.session.events.filter(event => event.type === 'agent-preset/selected').at(-1)).toMatchObject({ data: { agentPreset: 'kennel' } })
+      const input = page.getByRole('textbox', { name: '消息', exact: true })
+      await input.fill(prompt)
+      const promptResponse = page.waitForResponse(response => response.url().endsWith('/api/session.prompt'))
+      const settled = scaffold.whenTurnSettled()
+      await page.getByRole('button', { name: '发送', exact: true }).click()
+      const response = await promptResponse
+      expect(response.request().postDataJSON()).toMatchObject({
+        payload: { sessionId: roomSession, mode: 'queue', content: [{ type: 'text', text: prompt }] },
+      })
+      expect(response.status()).toBe(200)
+      expect(await response.json()).toMatchObject({ result: { ok: true, value: { accepted: true } } })
+      expect(await settled).toBe(roomSession)
+      const log = page.getByRole('log')
+      await log.getByText(reply, { exact: true }).waitFor({ timeout: 15_000 })
+      expect(await input.inputValue()).toBe('')
+      const userEvents = agent.session.events.filter(event => event.type === 'user/message' && event.data.source.kind === 'user')
+      expect(userEvents).toHaveLength(1)
+      expect(userEvents[0]).toMatchObject({ data: { content: [{ type: 'text', text: prompt }] } })
+      expect(agent.session.events.filter(event => event.type === 'assistant/message')).toHaveLength(1)
+      expect(await log.locator('article').allTextContents()).toMatchInlineSnapshot(`
+        [
+          "我Reply exactly KENNEL_ROOM_SEND_OK and stop.",
+          "执行记录context · 序号 10",
+          "总管KENNEL_ROOM_SEND_OK",
+        ]
+      `)
+      const warningStart = tripwire.warnings.length
+      const reloadedRoom = page.waitForRequest(request => request.url().includes('/api/gouzi?session_id='))
+      await page.reload({ waitUntil: 'load' })
+      acknowledgeReloadConnectionLoss(tripwire, warningStart)
+      await page.getByRole('heading', { name: '狗窝', exact: true }).waitFor()
+      expect(new URL((await reloadedRoom).url()).searchParams.get('session_id')).toBe(roomSession)
+      await log.getByText(prompt, { exact: true }).waitFor({ timeout: 15_000 })
+      await log.getByText(reply, { exact: true }).waitFor({ timeout: 15_000 })
+      expect(await log.locator('article').allTextContents()).toMatchInlineSnapshot(`
+        [
+          "我Reply exactly KENNEL_ROOM_SEND_OK and stop.",
+          "执行记录context · 序号 10",
+          "总管KENNEL_ROOM_SEND_OK",
+        ]
+      `)
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+    } catch (error) {
+      failures.push(error)
+    } finally {
+      await browser?.close()
+      if (fixtureLink !== undefined) {
+        expect((await lstat(fixtureLink)).isSymbolicLink()).toBe(true)
+        await unlink(fixtureLink)
+      }
+      await scaffold.close().catch((error: unknown) => failures.push(error))
+    }
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'kennel send acceptance failed')
   })
 })

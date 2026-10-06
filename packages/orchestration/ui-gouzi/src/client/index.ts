@@ -47,11 +47,17 @@ export function apply(ctx: ClientContext): void {
     return scope
   }
 
+  function scopedConversation(id: SessionId) {
+    const conversation = liveScope(id).get('conversation')
+    if (conversation === undefined) throw new Error('狗窝会话的消息服务不可用，请重新打开。')
+    return conversation
+  }
+
   function sendScope(id: SessionId) {
-    const scope = liveScope(id)
+    const conversation = scopedConversation(id)
     const block = ctx.conversation.blocks.storeFor(id).getSnapshot()
     if (block) throw new Error(block.reason)
-    return scope
+    return conversation
   }
 
   async function ownedRead<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -95,9 +101,9 @@ export function apply(ctx: ClientContext): void {
           if (!execution || execution.generation !== target.generation) throw new Error('执行实例已变化，请重新点名；原目标已保留。')
           if (!execution.operators.some(o => o.available)) throw new Error('原发送对象没有可用执行入口；目标已保留。')
         }
-        await sendScope(id).conversation.send(encodeKennelMessage(text, target))
+        await sendScope(id).send(encodeKennelMessage(text, target))
       },
-      loadOlder: async () => { await liveScope(id).conversation.loadOlder() },
+      loadOlder: async () => { await scopedConversation(id).loadOlder() },
       readEvidence: async (runId, ref) => {
         liveScope(id)
         const evidence = await ownedRead(signal => readKennelEvidence(connection.request, id, runId, ref, signal))

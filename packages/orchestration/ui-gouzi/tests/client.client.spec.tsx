@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -823,15 +823,30 @@ async function roomRegistration() {
   const missing = new Set<string>()
   const sends: Array<{ sessionId: string; text: string }> = []
   const older = vi.fn(async (_id: string) => {})
-  const scope = (id: string) => missing.has(id) || !views.has(id) ? undefined : {
-    conversation: {
-      send: vi.fn(async (text: string) => { sends.push({ sessionId: id, text }) }),
-      loadOlder: () => older(id),
+  const ok = <T,>(value: T) => ({ rpcId: 'fixture' as never, result: { ok: true as const, value } })
+  const runtimeApi = {
+    sessions: {
+      list: async () => ok({ items: ['a', 'b'].map(sessionId => ({ sessionId, blank: false, running: false, updatedAt: 1, agentPreset: KENNEL_PRESET })) }),
+      history: async () => ok({ events: [], hasMore: false }),
+      models: async () => ok({ current: { provider: 'fixture', model: 'fixture' }, routable: true, groups: [], failures: [] }),
     },
   }
-  const binding = (id: string) => missing.has(id) || !views.has(id) ? undefined : {
-    session: { getSnapshot: () => views.get(id) },
+  const runtime = new SessionRuntime(ctx, runtimeApi as unknown as ConstructorParameters<typeof SessionRuntime>[1], {
+    commands: { list: async () => ({ ok: true, value: [] }), execute: async () => ({ ok: true, value: undefined }) },
+  } as never)
+  await runtime.refresh()
+  const noConversation = new Set<string>()
+  const scope = (id: string) => {
+    if (missing.has(id) || !views.has(id)) return undefined
+    const scoped = runtime.scope(id as SessionId)!
+    return noConversation.has(id) ? scoped.isolate('conversation') : scoped
   }
+  for (const id of views.keys()) {
+    const session = runtime.binding(id as SessionId)!.session
+    const getSnapshot = session.getSnapshot.bind(session)
+    vi.spyOn(session, 'getSnapshot').mockImplementation(() => ({ ...getSnapshot(), removed: views.get(id)!.removed }))
+  }
+  const binding = (id: string) => missing.has(id) || !views.has(id) ? undefined : runtime.binding(id as SessionId)
   const rooms = new Map(['a', 'b'].map(id => [id, registeredRoom(id)]))
   const request = vi.fn(async (input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
     const url = requestUrl(input)
@@ -841,17 +856,60 @@ async function roomRegistration() {
   const workspaces = kennelWorkspaces([{ workspaceId: 'w', sessionIds: ['a', 'b'], updatedAt: 'now' }])
   ctx.provide('connection', { request, api: fakeApi({ ok: true }).api } as never)
   ctx.provide('workspaces', workspaces)
-  ctx.provide('sessions', { ...fake.raw, scope, binding } as never)
+  ctx.set('sessions', { ...fake.raw, scope, binding } as never)
   const blocks = new Map<string, { reason: string }>()
-  ctx.provide('conversation', { blocks: { storeFor: (id: string) => ({ getSnapshot: () => blocks.get(id) }) } } as never)
+  class ScopedConversation extends Service {
+    readonly blocks = { storeFor: (id: string) => ({ getSnapshot: () => blocks.get(id) }) }
+    constructor(owner: Context) { super(owner, 'conversation') }
+    async send(text: string): Promise<void> {
+      const sessionId = runtime.scopeOf(this.ctx)
+      if (sessionId === undefined) throw new Error('fixture send requires a session scope')
+      sends.push({ sessionId, text })
+    }
+    async loadOlder(): Promise<void> {
+      const sessionId = runtime.scopeOf(this.ctx)
+      if (sessionId === undefined) throw new Error('fixture loadOlder requires a session scope')
+      await older(sessionId)
+    }
+  }
+  await ctx.plugin(ScopedConversation).await()
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
   const content = slots.entries('conversation.room.content')[0]!
   const face = (id: string | undefined) => (content.inject as unknown as (id: SessionId | undefined) => import('../src/client/KennelRoom.tsx').KennelRoomInjected)(id as SessionId | undefined)
-  return { ctx, slots, fiber, fake, views, missing, rooms, request, sends, older, content, face, blocks }
+  return { ctx, slots, fiber, fake, views, missing, rooms, request, sends, older, content, face, blocks, runtime, noConversation }
 }
 
 describe('Gouzi client registration', () => {
+  it('sends ordinary text through a real SessionRuntime scope without requiring property injection', async () => {
+    const h = await roomRegistration()
+    try {
+      const scoped = h.runtime.scope('a' as SessionId)!
+      expect(() => scoped.conversation).toThrow('cannot get property "conversation" without inject')
+      expect(scoped.get('conversation')).toBeDefined()
+      const a = h.face('a')
+      h.fake.set({ ...h.fake.raw.list.getSnapshot(), current: 'b' })
+      await a.send({ text: 'ordinary task', recipient: null })
+      expect(h.sends).toEqual([{ sessionId: 'a', text: encodeKennelMessage('ordinary task', null) }])
+      expect(h.request).not.toHaveBeenCalled()
+      await a.loadOlder()
+      expect(h.older).toHaveBeenCalledExactlyOnceWith('a')
+    } finally { await h.fiber.dispose() }
+  })
+
+  it('rejects actions when a live session scope has no conversation service', async () => {
+    const h = await roomRegistration()
+    try {
+      const a = h.face('a')
+      h.noConversation.add('a')
+      await expect(a.send({ text: 'draft', recipient: null })).rejects.toThrow('消息服务不可用')
+      await expect(a.loadOlder()).rejects.toThrow('消息服务不可用')
+      expect(h.sends).toEqual([])
+      expect(h.older).not.toHaveBeenCalled()
+      expect(h.request).not.toHaveBeenCalled()
+    } finally { await h.fiber.dispose() }
+  })
+
   it('registers the sidebar and Settings plus three kennel-only room chains sharing one store and source per session', async () => {
     expect(inject).toEqual(['slots', 'connection', 'workspaces', 'sessions', 'conversation'])
     const h = await roomRegistration()
