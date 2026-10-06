@@ -4857,7 +4857,7 @@ __metadata:
 
 "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::hash=05b8ee&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-ui-gouzi@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz::hash=70932c&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     clsx: "npm:^2.0.0"
@@ -4880,7 +4880,7 @@ __metadata:
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     react: ^18.2.0
     react-dom: ^18.2.0
-  checksum: 10c0/3d25be9526600b3ae8b8a41ae9ac4dc85eb66f5abc11de1094827bcb648d3590b3be43f241f0fff1681d725bf3b9d774feb32295ed2fe56a21133eab82a6c5a4
+  checksum: 10c0/a162b1c43f2ccfebfc76d048791ca082638823304baf24dccd81eeb20058de877576003c90c3958ead3ae355993da4b52c982c75ee9dee13281818c95e619dca
   languageName: node
   linkType: hard
 
@@ -5040,13 +5040,13 @@ __metadata:
 
 "@deepseek-ai/dsh-web-frontend@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-web-frontend@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz::hash=0deb07&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-web-frontend@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz::hash=74eca1&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-client-connection": "npm:^0.1.0-rc.5"
     "@deepseek-ai/dsh-client-web": "npm:^0.1.0-rc.5"
     react: "npm:^18.2.0"
     react-dom: "npm:^18.2.0"
-  checksum: 10c0/af30f75a943f76db76d067383e4c9cebbbe801ef9127655634ac78003ed8d99eca119834d51b106961067cb52634547580cffe6ddc1ae5f78168c6df89c92262
+  checksum: 10c0/8f3adfb1b9366a506923de0e064d6da830348ee56741f80bbafbd5de5a754e3707d3433e849cf8e52363670bd703f6cac948db6b8f018bbe1df0325873f35ce7
   languageName: node
   linkType: hard
 

@@ -245,6 +245,11 @@
       "name": "Portable kennel fixtures and complete directory connection coverage",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "5876c53f47c8aa1c55d8cdd7a6397406466304a2"
+    },
+    {
+      "name": "Kennel explicit scoped conversation sending and history reads",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "2bc05c0abe87cf5c05ec25118ce05121ece368ae"
     }
   ],
   "sourcePackages": {
@@ -456,11 +461,11 @@
     "dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz": "074f755f4aeee4dc135c68889414ae996bc0be6ed2a4d04d62049e39b37a4b7f",
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "531cde167a6d9fd6963491551779945a3fae7cf287858b169980ff7f525d2c20",
     "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "5c6d138cd8147da3ece6d7142c4171d777fd28e95660f4986e19e70f7719dbdd",
-    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "dabf7da95adfd530f60c97484a4650e62033fe9bebc88c74a7f17344d59e612c",
+    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "365c9b18ae5b5e2a3ea20140af040c79a3c6ceee2f67747e3d4ff225e6fae9c5",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "f9ecb9781bd709faa4b3c905b5695917af78436bd5007afc79ddfa5311b1cee6",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "4f2d66548e49d8b1bdfbf72a01b90d171fa69190a6d7c057ed9824a8ef26b852",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "97c9e6e8ac3698e464f98493d6c13b68be32a0202a6d5119c50d5440b22d6c12",
-    "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "f0373ac17de2df76b82b0a59d7e4578a090278783ef3796d8e45d806386d9db2",
+    "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "9bc580077ae85fcfbe121358a5bab52b7f20ba913e6b0bff533774de26ab5eff",
     "dsh-packages/dsh-better-sidebar-0.15.0-solar.1.tgz": "e5ef31ca74a46a4d7e023fdc5f2dafd37aa458622f0db4824ad0393819e256fc",
     "dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz": "3e8676c05e214c4f42600efb47fa304f2b6cf58f62ae00788984bc8904d27265",
     "dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz": "ef0859804a4df7b0d7e765d57604874ec4b4747a0681eb721785c194c3fe32c1",
