@@ -2,6 +2,9 @@
 import { EventEmitter, once } from 'node:events'
 import { createServer, request as httpRequest } from 'node:http'
 import { PassThrough, Readable } from 'node:stream'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
@@ -15,6 +18,7 @@ import type { WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host
 import {
   API_PATH, apply, GouziAdmissionError, GouziMemberService, gouziRequestHash, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH,
   HostConnectionService, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  RemoteOperatorHostService, type RemoteExecutionWorkspaceIdentityV1,
   type HostConnectionHandle,
 } from '../src/index.ts'
 
@@ -449,9 +453,33 @@ describe('connection node half', () => {
   })
 
   it('admits gouzi execution only with a grant the member accepts and replays a stored receipt', async () => {
+    const projectPath = await mkdtemp(join(tmpdir(), 'connection-gouzi-project-'))
+    const projectId = 'b'.repeat(64)
+    await writeFile(join(projectPath, 'untracked.txt'), 'existing user data')
     const accepted = { sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 }
-    const execute = vi.fn(async () => ({ ...accepted, result: new Promise(() => {}), dispose: async () => undefined }))
-    const materializeWorkspace = vi.fn(async (identity: unknown) => ({ version: 1, identity, path: '/srv/work' }))
+    const commandReceipts = new Map<string, unknown>()
+    let failRecordAccepted = false
+    const execute = vi.fn(async (request: { workspace: string; commandId: string }) => {
+      if (request.workspace === projectPath) {
+        expect(await readFile(join(request.workspace, 'untracked.txt'), 'utf8')).toBe('existing user data')
+        await writeFile(join(request.workspace, 'output.txt'), 'resident wrote this')
+        commandReceipts.set(request.commandId, { ...accepted, commandId: request.commandId, state: 'running' })
+      }
+      return { ...accepted, result: new Promise(() => {}), dispose: async () => undefined }
+    })
+    const materializeWorkspace = vi.fn(async (identity: RemoteExecutionWorkspaceIdentityV1) => {
+      if ('kind' in identity && identity.projectId !== projectId) throw new Error('unknown registered project')
+      return { version: 1 as const, identity, path: 'kind' in identity ? projectPath : '/srv/work' }
+    })
+    class ProjectHost extends RemoteOperatorHostService {
+      override async inspectWorkspace() { return undefined }
+      async qualification() { return { available: true } }
+      override async gouziWorkspace() { return { projectId } }
+      materializeWorkspace = materializeWorkspace
+      async renewWorkspace() {}
+      async releaseWorkspace() {}
+      async readResidentArtifact(ref: string) { return { ref, json: '{}' } }
+    }
     const stored = new Map<string, { hash: string; accepted?: unknown }>()
     class FakeMember extends GouziMemberService {
       hello() {
@@ -470,22 +498,21 @@ describe('connection node half', () => {
         if (entry.hash !== hash) throw new GouziAdmissionError('GOUZI_EXECUTION_CONFLICT', 'conflict')
         return entry.accepted === undefined ? { kind: 'new' as const } : { kind: 'replay' as const, accepted: entry.accepted as never }
       }
-      async recordAccepted(executionId: string, receipt: unknown) { stored.get(executionId)!.accepted = receipt }
+      async recordAccepted(executionId: string, receipt: unknown) {
+        if (failRecordAccepted) { failRecordAccepted = false; throw new Error('member ledger write failed') }
+        stored.get(executionId)!.accepted = receipt
+      }
     }
     const withMember = async (member: boolean) => mounted(
       { trustedHosts: ['harness.example'], remoteSync: true, remoteSyncJournalCapacity: 8 },
       remoteSyncApi(),
       (ctx) => {
         ctx.provide('residentOperators', {
-          providers: async () => [], execute, inspectTurn: async () => ({}), readEvents: async () => ({}), interrupt: async () => undefined,
+          inspectCommand: async (commandId: string) => commandReceipts.get(commandId),
+          providers: async () => [], execute, inspectTurn: async () => ({}),
+          readEvents: async () => ({}), interrupt: async () => undefined,
         })
-        ctx.provide('remoteOperatorHost', {
-          qualification: async () => ({ available: true }),
-          materializeWorkspace,
-          renewWorkspace: async () => undefined,
-          releaseWorkspace: async () => undefined,
-          readResidentArtifact: async () => ({}),
-        })
+        ctx.plugin(ProjectHost)
         if (member) ctx.plugin(FakeMember)
       },
     )
@@ -548,6 +575,38 @@ describe('connection node half', () => {
     expect((await call(route, 'operator.execute', { ...request('exec-cockpit'), protocol: REMOTE_SYNC_PROTOCOL }, 'access')).status)
       .toBe(400)
     expect((await call(route, 'operator.execute', body('exec-cockpit'), 'access')).status).toBe(200)
+
+    const directory = (commandId: string, identity: Record<string, unknown> = { version: 1, kind: 'gouzi-project', projectId }) => {
+      const requestBody = { ...request(commandId), workspaceIdentity: identity }
+      return {
+        ...requestBody, protocol: REMOTE_SYNC_PROTOCOL,
+        gouziGrant: grantFor(commandId, { planHash: gouziRequestHash(requestBody as never) }),
+      }
+    }
+    for (const identity of [
+      { version: 1, kind: 'unknown', projectId },
+      { version: 1, kind: 'gouzi-project', projectId, commit: 'a'.repeat(40) },
+      { version: 1, repository: 'github.com/lisihao/project', commit: 'a'.repeat(40), projectId },
+      { version: 1, kind: 'gouzi-project', projectId: 'not-a-project' },
+      ...['../secret', '/secret', 'a\\b', 'a/./b', 'a//b'].map(subdir => ({ version: 1, kind: 'gouzi-project', projectId, subdir })),
+    ]) expect((await call(route, 'operator.execute', directory('invalid-dir', identity))).status).toBe(400)
+    const goodDirectory = directory('exec-directory')
+    expect((await call(route, 'operator.execute', { ...goodDirectory, protocol: { major: 1, minor: 4 } })).status).toBe(409)
+    expect((await call(route, 'operator.execute', {
+      ...goodDirectory, workspaceIdentity: { version: 1, kind: 'gouzi-project', projectId: 'c'.repeat(64) },
+    })).status).toBe(403)
+    const beforeDirectory = execute.mock.calls.length
+    expect((await call(route, 'operator.execute', goodDirectory)).status).toBe(200)
+    expect((await call(route, 'operator.execute', goodDirectory)).status).toBe(200)
+    expect(execute.mock.calls.length).toBe(beforeDirectory + 1)
+    const beforeLostReceipt = execute.mock.calls.length
+    failRecordAccepted = true
+    expect((await call(route, 'operator.execute', directory('ledger-lost'))).status).toBe(500)
+    expect((await call(route, 'operator.execute', directory('ledger-lost'))).status).toBe(200)
+    expect(execute.mock.calls.length).toBe(beforeLostReceipt + 1)
+    expect(await readFile(join(projectPath, 'output.txt'), 'utf8')).toBe('resident wrote this')
+    expect((await call(route, 'operator.execute', directory('unknown-dir', { version: 1, kind: 'gouzi-project', projectId: 'c'.repeat(64) }))).status).toBe(500)
+    expect(execute.mock.calls.length).toBe(beforeLostReceipt + 1)
     await hosted.dispose()
 
     // Without a mounted member gate the scope can neither execute nor say hello.
@@ -558,7 +617,17 @@ describe('connection node half', () => {
     // A host without the gate keeps the ordinary remote-execution path for cockpit callers.
     expect((await call(bareRoute, 'operator.execute', { ...request('exec-3'), protocol: REMOTE_SYNC_PROTOCOL }, 'access')).status)
       .toBe(200)
+    for (const token of ['gouzi-access', 'access', 'admin-access']) {
+      expect((await call(bareRoute, 'operator.execute', directory('bare-dir'), token)).status).toBe(403)
+    }
+    const localDirectory = fakeResponse()
+    await bareRoute.handler(fakePost(
+      { host: '127.0.0.1:3080' }, `${REMOTE_SYNC_RPC_CHANNEL}/operator.execute`,
+      { type: 'client-request', rpcId: 'loopback-directory', method: 'operator.execute', payload: directory('loopback-dir') },
+    ), localDirectory.response)
+    expect(localDirectory.state.status).toBe(403)
     await bare.dispose()
+    await rm(projectPath, { recursive: true, force: true })
   })
 
   it('never grants local-owner authority from a forged loopback Host', async () => {

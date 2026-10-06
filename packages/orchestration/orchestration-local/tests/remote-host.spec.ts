@@ -15,7 +15,8 @@ describe('orchestration-local/remote-host', () => {
   })
 
   it('applies the shared defaults', () => {
-    expect(Config({ dshHome: '/tmp/x' })).toMatchObject({
+    expect(Config({ dshHome: '/tmp/x', directoryLockRoot: '/tmp/shared-locks' })).toMatchObject({
+      directoryLockRoot: '/tmp/shared-locks',
       remoteMaterializationTimeoutMs: 120_000,
       remoteArtifactReadTimeoutMs: 15_000,
       remoteWorkspaceLeaseMs: 24 * 60 * 60_000,

@@ -1,11 +1,15 @@
 /** Member operations on the machine this module runs on: the local host, and the agent an SSH host runs. */
 
+import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, realpathSync } from 'node:fs'
+import { lstat, realpath, stat } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { resolveRepositorySource } from '@deepseek-ai/dsh-orchestration-local'
-import type { GouziFolderListing, GouziProvisionInput } from '@deepseek-ai/dsh-ui-gouzi'
+import { canonicalRemoteRepositoryIdentity } from '@deepseek-ai/dsh-client-connection'
+import type { GouziFolderListing, GouziProjectSource, GouziProvisionInput } from '@deepseek-ai/dsh-ui-gouzi'
 import { GouziSupervisor } from './gouzi-supervisor.ts'
 
 /** Settings of one machine's member operations. */
@@ -36,6 +40,63 @@ export interface LocalGouziStarted {
 /** Upper bound on the subdirectories one listing returns. */
 const BROWSE_ENTRY_LIMIT = 500
 
+const execFileAsync = promisify(execFile)
+
+async function git(source: string, args: readonly string[], timeout: number): Promise<string> {
+  const env: NodeJS.ProcessEnv = { ...process.env, LC_ALL: 'C' }
+  for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CEILING_DIRECTORIES']) delete env[key]
+  const result = await execFileAsync('git', [...args], { cwd: source, env, encoding: 'utf8', timeout, maxBuffer: 1024 * 1024 })
+  return result.stdout.trim()
+}
+
+async function hasGitMarker(source: string): Promise<boolean> {
+  let directory = source
+  for (;;) {
+    try {
+      await lstat(join(directory, '.git'))
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    const parent = dirname(directory)
+    if (parent === directory) return false
+    directory = parent
+  }
+}
+
+async function inspectProject(path: string, timeout: number): Promise<{ project: GouziProjectSource; git: boolean }> {
+  const source = await realpath(resolve(path))
+  if (!(await stat(source)).isDirectory()) throw Object.assign(new Error(`project path is not a directory: ${source}`), { code: 'ENOTDIR' })
+  const marked = await hasGitMarker(source)
+  let initialized = false
+  try {
+    await git(source, ['rev-parse', '--git-dir'], timeout)
+    initialized = true
+  } catch (error) {
+    // Only Git's explicit non-repository result without existing metadata denotes an ordinary directory.
+    const failure = error as { code?: number; stderr?: string }
+    if (marked || failure.code !== 128 || !failure.stderr?.includes('not a git repository')) throw error
+  }
+  let repository: string | undefined
+  if (initialized) {
+    let origin: string | undefined
+    try {
+      origin = await git(source, ['config', '--local', '--get', 'remote.origin.url'], timeout)
+    } catch (error) {
+      // `git config --get` exits 1 when this repository has no origin setting.
+      if ((error as { code?: number }).code !== 1) throw error
+    }
+    if (origin !== undefined) {
+      try {
+        repository = canonicalRemoteRepositoryIdentity(origin)
+      } catch {
+        // A local or noncanonical origin is informational and does not identify this selected directory.
+      }
+    }
+  }
+  return { project: { projectId: createHash('sha256').update(source).digest('hex'), source, ...repository === undefined ? {} : { repository } }, git: initialized }
+}
+
 /** Starts, stops, and inspects members and workspaces on this machine. */
 export class LocalGouziOperations {
   private readonly supervisor: GouziSupervisor
@@ -56,8 +117,24 @@ export class LocalGouziOperations {
     })
   }
 
-  resolveRepository(path: string) {
-    return resolveRepositorySource(path, this.config.gitTimeoutMs)
+  /**
+   * Inspect a selected directory without writing its files or Git metadata.
+   * @param path - selected directory, including a symlink or existing Git subdirectory.
+   * @returns its realpath, stable project id, and optional canonical origin identity.
+   */
+  async resolveRepository(path: string): Promise<GouziProjectSource> {
+    return (await inspectProject(path, this.config.gitTimeoutMs)).project
+  }
+
+  /**
+   * Prepare a confirmed project selection by initializing Git only when needed.
+   * @param path - directory selected for adoption.
+   * @returns the same selected directory identity after successful preparation.
+   */
+  async prepareRepository(path: string): Promise<GouziProjectSource> {
+    const inspected = await inspectProject(path, this.config.gitTimeoutMs)
+    if (!inspected.git) await git(inspected.project.source, ['init', '--', inspected.project.source], this.config.gitTimeoutMs)
+    return (await inspectProject(inspected.project.source, this.config.gitTimeoutMs)).project
   }
 
   async provision(input: GouziProvisionInput): Promise<void> {

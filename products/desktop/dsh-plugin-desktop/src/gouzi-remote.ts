@@ -11,6 +11,7 @@ import type {
   GouziHostInspection,
   GouziHostProjection,
   GouziProcessInfo,
+  GouziProjectSource,
   GouziProvisionInput,
   GouziSshTarget,
 } from '@deepseek-ai/dsh-ui-gouzi'
@@ -153,7 +154,7 @@ export class RemoteGouziHosts {
     const line = output.split('\n').find(value => value.startsWith(GOUZI_AGENT_RESULT_PREFIX))
     if (line === undefined) throw new Error(`${host.label} 上的 DSH Desktop 没有给出结果：${output.trim().slice(0, 200)}`)
     const result = JSON.parse(line.slice(GOUZI_AGENT_RESULT_PREFIX.length)) as GouziAgentResult
-    if (!result.ok) throw new Error(result.message)
+    if (!result.ok) throw Object.assign(new Error(result.message), result.code === undefined ? {} : { code: result.code })
     return result.value
   }
 
@@ -267,13 +268,23 @@ export class RemoteGouziHosts {
   }
 
   /**
-   * Resolve a workspace on a host to its repository identity.
+   * Inspect a selected directory on a host without initializing Git.
    * @param hostId - host id.
    * @param path - absolute path on that host.
-   * @returns the canonical identity and clone source.
+   * @returns the stable project identity, selected realpath, and optional origin identity.
    */
   async resolveRepository(hostId: string, path: string) {
-    return await this.agent(this.host(hostId), `resolve --path ${shellQuote(path)}`) as { repository: string; source: string }
+    return await this.agent(this.host(hostId), `resolve --path ${shellQuote(path)}`) as GouziProjectSource
+  }
+
+  /**
+   * Initialize Git in a selected ordinary directory after adoption is confirmed.
+   * @param hostId - host id.
+   * @param path - selected directory on that host.
+   * @returns the prepared project identity and selected source directory.
+   */
+  async prepareRepository(hostId: string, path: string): Promise<GouziProjectSource> {
+    return await this.agent(this.host(hostId), `prepare --path ${shellQuote(path)}`) as GouziProjectSource
   }
 
   /**

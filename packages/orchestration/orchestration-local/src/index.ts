@@ -82,6 +82,7 @@ export const Config: z<Config> = z.object({
   remoteArtifactMaxBytes: z.number().step(1).min(1_024).max(8 * 1024 * 1024).default(8 * 1024 * 1024),
   remoteWorkspaceLeaseMs: z.number().step(1).min(60_000).max(7 * 24 * 60 * 60_000).default(24 * 60 * 60_000),
   dshHome: z.string(),
+  directoryLockRoot: z.string(),
 })
 /* jscpd:ignore-end */
 
@@ -89,6 +90,7 @@ class LocalOrchestrationService extends OrchestrationService {
   private readonly client: OrchestrationDaemonClient
   override readonly gouzi: GouziControl = {
     list: () => this.client.gouziList(),
+    executionOperators: () => this.client.gouziExecutionOperators(),
     pairHost: host => this.client.gouziPairHost(host),
     create: input => this.client.gouziCreate(input),
     edit: (gouziId, edit) => this.client.gouziEdit(gouziId, edit),

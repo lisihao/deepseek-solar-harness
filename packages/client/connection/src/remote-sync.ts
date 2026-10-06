@@ -22,9 +22,9 @@ export const REMOTE_SYNC_RPC_CHANNEL = '/remote-sync'
 export const REMOTE_SYNC_EVENTS_PATH = '/remote-sync/events'
 
 /** First independently versioned Server/Frontend projection protocol. */
-export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 4 })
+export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 5 })
 
-/** Oldest projection-only minor accepted during a rolling 1.4 deployment. */
+/** Oldest projection-only minor accepted during a rolling 1.5 deployment. */
 export const REMOTE_SYNC_COMPATIBLE_MINOR = 3
 
 /** Negotiated same-major protocol carried by descriptions and snapshots. */
@@ -133,6 +133,8 @@ export interface RemoteResidentProviderStatus {
   readonly protocolHash: string
   readonly models: readonly RemoteResidentModelOption[]
   readonly quotaPools?: readonly RemoteResidentQuotaPool[]
+  /** Persisted default project advertised only by an actual Gouzi member host. */
+  readonly gouziWorkspace?: { readonly gouziId: string; readonly generation: number; readonly projectId: string }
 }
 /* jscpd:ignore-end */
 
@@ -146,6 +148,19 @@ export interface RemoteWorkspaceIdentityV1 {
   /** Optional repository-relative directory used as the execution cwd. */
   readonly subdir?: string
 }
+
+/** Host-registered actual project directory selected for a Gouzi execution. */
+export interface RemoteGouziWorkspaceIdentityV1 {
+  readonly version: 1
+  readonly kind: 'gouzi-project'
+  /** Lowercase SHA-256 identity of a project registered by the receiving host. */
+  readonly projectId: string
+  /** Optional normalized project-relative execution directory. */
+  readonly subdir?: string
+}
+
+/** Receiver workspace selection: immutable Git checkout or registered Gouzi project. */
+export type RemoteExecutionWorkspaceIdentityV1 = RemoteWorkspaceIdentityV1 | RemoteGouziWorkspaceIdentityV1
 
 /**
  * Normalize HTTPS and SSH Git origins to one credential-free host/path identity.
@@ -184,7 +199,7 @@ function canonicalRepositoryParts(host: string, path: string): string {
 export interface RemoteResidentExecuteRequest {
   readonly commandId: string
   readonly operatorId: string
-  readonly workspaceIdentity: RemoteWorkspaceIdentityV1
+  readonly workspaceIdentity: RemoteExecutionWorkspaceIdentityV1
   readonly laneId: string
   readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
@@ -192,7 +207,7 @@ export interface RemoteResidentExecuteRequest {
   /** Exact current-task context; new Servers materialize this instead of the redundant compatibility fields. */
   readonly contextEnvelope?: OperatorContextEnvelopeV1
   readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
-  /** Sealed native product-tool authority. Protocol 1.4 only. */
+  /** Sealed native product-tool authority, introduced in protocol 1.4. */
   readonly nativeToolPolicy?: 'inherit' | 'disabled'
   /**
    * Execution grant for a `gouzi` credential; opaque here and parsed by the Server with `parseGouziGrant`. It is
@@ -624,6 +639,7 @@ export function parseRemoteResidentProviders(value: unknown): RemoteResidentProv
       productVersion: nonEmptyString(record.productVersion, `${label}.productVersion`),
       protocolHash: nonEmptyString(record.protocolHash, `${label}.protocolHash`),
       models,
+      ...(record.gouziWorkspace === undefined ? {} : { gouziWorkspace: gouziWorkspace(record.gouziWorkspace, label) }),
       ...(record.quotaPools === undefined ? {} : {
         quotaPools: arrayValue(record.quotaPools, `${label}.quotaPools`).map((pool, poolIndex) => {
           const poolLabel = `${label}.quotaPools[${poolIndex}]`
@@ -642,6 +658,17 @@ export function parseRemoteResidentProviders(value: unknown): RemoteResidentProv
       }),
     }
   })
+}
+
+function gouziWorkspace(value: unknown, label: string): NonNullable<RemoteResidentProviderStatus['gouziWorkspace']> {
+  const record = objectRecord(value, `${label}.gouziWorkspace`)
+  const projectId = nonEmptyString(record.projectId, `${label}.gouziWorkspace.projectId`)
+  if (!/^[a-f0-9]{64}$/u.test(projectId)) throw new Error(`${label}.gouziWorkspace.projectId must be a lowercase SHA-256 identity`)
+  return {
+    gouziId: nonEmptyString(record.gouziId, `${label}.gouziWorkspace.gouziId`),
+    generation: nonnegativeInteger(record.generation, `${label}.gouziWorkspace.generation`),
+    projectId,
+  }
 }
 
 /**

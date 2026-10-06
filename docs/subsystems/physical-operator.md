@@ -20,6 +20,15 @@ Registration lifetime and execution lifetime are intentionally separate. Removin
 
 Only `completed` is successful. Cancellation, refusal, token exhaustion, and provider failure remain explicit stop reasons or infrastructure rejections. The physical Service Definition does not queue, retry, persist, or roll back work. Resident persistence is isolated behind its own Service Definition and single-writer daemon; protocol v4 remains fail-fast and never auto-replays indeterminate commands.
 
+## Command refusal
+
+```ts public-api
+/** A correlated `turn.execute` error response; it does not prove the command was never accepted. */
+declare class ResidentCommandRefusal extends ResidentOperatorError {
+  constructor(message: string, code: string);
+}
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -151,6 +160,14 @@ abstract inspect(sessionId: string): Promise<ResidentSessionSnapshot>
 abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>
 
 /**
+ * Read a durable turn receipt by command identity without admitting or replaying execution.
+ * Absence is an observation at query time and does not exclude concurrent admission.
+ * @param _commandId - caller-owned durable command identity.
+ * @returns the current turn snapshot, or undefined when no receipt exists; unsupported providers throw.
+ */
+inspectCommand(_commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined>
+
+/**
  * Read a bounded page of structured observation events.
  * @param request - Session identity, exclusive cursor, bound, and optional signal.
  * @returns ordered events and the next exclusive cursor.
@@ -186,7 +203,7 @@ compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:486`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:494`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

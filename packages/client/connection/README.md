@@ -14,17 +14,51 @@ The node half guards every entry under `/api` before bridging or upgrading (`src
 
 ## Remote Sync and stable Session handoff
 
-Remote Sync protocol 1.4 keeps the snapshot-plus-cursor projection and adds authenticated Session handoff and reproducible Resident execution controls for cockpit/admin clients. A Server advertises `session.replicate.read/write` only when `ctx.sessionPersistence` is mounted; the replica catalog contains only complete logs with no open turn. The wire moves the canonical `SessionHeader` and complete event log, while the destination delegates every write decision to `SessionPersistence.replicate`, so retries are idempotent and divergent or live logs fail loudly. This is explicit authority handoff, not continuous dual-write synchronization.
+Remote Sync protocol 1.5 keeps the snapshot-plus-cursor projection and adds authenticated Session handoff and reproducible Resident execution controls for cockpit/admin clients. A Server advertises `session.replicate.read/write` only when `ctx.sessionPersistence` is mounted; the replica catalog contains only complete logs with no open turn. The wire moves the canonical `SessionHeader` and complete event log, while the destination delegates every write decision to `SessionPersistence.replicate`, so retries are idempotent and divergent or live logs fail loudly. This is explicit authority handoff, not continuous dual-write synchronization.
 
-When `ctx.residentOperators` is mounted, the same authenticated channel advertises `operator.read/interrupt`. `operator.execute`, `operator.workspace.materialize`, and `operator.artifact.read` are advertised only to protocol-1.4 clients after a separate `ctx.remoteOperatorHost` Provider proves that local remote execution is enabled and at least one allowlisted repository is materializable. Protocol 1.3 remains projection-compatible during rolling upgrades but cannot submit the new execution DTO or fetch its artifacts. The caller sends a credential-free canonical repository identity, exact clean commit, and optional repository-relative subdirectory rather than its absolute filesystem path. The Host Provider checks its local repository allowlist, creates an immutable Git object cache plus a leased command-isolated writable checkout, and passes only that Server-local checkout to Resident. Repository credentials and configured source locations never enter the wire DTO.
+When `ctx.residentOperators` is mounted, the same authenticated channel advertises `operator.read/interrupt`. `operator.execute`, `operator.workspace.materialize`, and `operator.artifact.read` are advertised only to protocol-1.5 clients after a separate `ctx.remoteOperatorHost` Provider proves that local remote execution is enabled and at least one allowlisted repository or registered Gouzi project is usable. Protocol 1.3 remains projection-compatible during rolling upgrades but cannot submit the new execution DTO or fetch its artifacts. Ordinary Git execution sends a credential-free canonical repository identity, exact clean commit, and optional repository-relative subdirectory rather than the sender's absolute filesystem path. Gouzi directory execution sends `{ version: 1, kind: 'gouzi-project', projectId }` with an optional subdirectory; it carries no commit or configured directory path. The receiving member resolves that id through its persisted project map and executes in the selected real directory. For ordinary Git execution, the Host Provider checks its local repository allowlist, creates an immutable Git object cache plus a leased command-isolated writable checkout, and passes only that Server-local checkout to Resident. Repository credentials and configured source locations never enter the wire DTO.
 
 A remote caller can inspect qualified native-subscription Providers, submit one durable command, detach immediately, reattach by turn id, read bounded structured progress, and interrupt the matching Session/turn pair. An `operator.execute` context envelope is re-parsed before native materialization; the Server returns an exact accepted receipt and the caller rejects a missing, malformed, or mismatched receipt. Oversized settled results return a `sha256:` reference; `operator.artifact.read` returns at most 8 MiB of exact immutable JSON under a Server deadline so the caller can verify the remote digest, validate the complete Resident result, and persist it in its own local CAS. The Server's Resident daemon remains the sole command-receipt and native-session authority. Raw product transcripts and local Unix model-tool bridge addresses do not cross this boundary; remote model-tool bridge requests are rejected until a separately authenticated routed bridge exists.
 
-The Remote Sync Host appends a deterministic system-prompt supplement containing the receiving checkout's `cwd`, repository identity, and commit. That cwd governs native filesystem operations; sender paths remain source-host context, and relative read/write scopes apply unchanged. The Host preserves the original task, historical paths, context envelope, and digest. The accepted context receipt confirms only that original envelope, not the derived execution prompt. [Resident admission](../../physical-operator/resident-operator-local/README.md#protocol-storage-and-recovery) retains the resolved input privately. See the [remote workspace context decision](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md).
+The Remote Sync Host appends a deterministic system-prompt supplement containing the receiving execution directory's `cwd` and workspace identity: repository and commit for ordinary Git execution, or project id for Gouzi directory execution. That cwd governs native filesystem operations; sender paths remain source-host context, and relative read/write scopes apply unchanged. The Host preserves the original task, historical paths, context envelope, and digest. The accepted context receipt confirms only that original envelope, not the derived execution prompt. [Resident admission](../../physical-operator/resident-operator-local/README.md#protocol-storage-and-recovery) retains the resolved input privately. See the [remote workspace context decision](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md).
 
 A credential with the `gouzi` scope is what a main instance holds for one execution member. The Remote Sync RPC accepts it only for `describe`, `gouzi.hello`, and the `operator.*` methods; the `/api` bridge, snapshot, replica, cluster, device roster, and every event socket refuse it. `operator.execute` with this scope requires a `gouziGrant` (an execution grant whose `planHash` equals `gouziRequestHash` of the request) and a mounted `ctx.gouziMember` Provider; without the Provider the scope can neither execute nor say hello. The Provider checks the grant against its stored identity, generation, and authority epoch, and consults its idempotency ledger before the workspace is materialized, so a refused grant leaves no side effect and a repeated execution id returns the stored receipt. A host that mounts the service is a member host: every `operator.execute` caller, including a loopback owner or an SSH-tunnel endpoint, must present a grant. `GouziMemberService` is the Service Definition, `@deepseek-ai/dsh-host-gouzi-member` the Provider.
 
 When `ctx.orchestrations` exposes cluster authority, every authenticated description may include a bounded read-only projection (`nodeId`, term, role, leader id, and `canSchedule`). This lets a Frontend with multiple configured Servers prefer the current majority-backed Leader without granting election authority. The `orchestration.cluster` control capability is advertised only to admin peers and carries vote, heartbeat, logical replica export, and term-fenced install. Production peers are expected to call those controls through authenticated loopback tunnels; a public Frontend bearer is not a cluster credential.
+
+Directory requests with the same command id and request hash share one in-flight admission; a different hash conflicts. Recovery reads the Native command receipt before qualification or workspace acquisition. An existing receipt restores its original turn and current revision, including after member acceptance recording fails or provider qualification becomes unavailable. `inspectWorkspace` reads the durable lease without acquiring or replacing it. A lease without a Native receipt is indeterminate and never triggers another execution. Only a correlated `ResidentCommandRefusal` followed by successful receipt inspection proving absence releases that exact lease; timeout, disconnect, or inspection failure preserves it. Unknown outcomes are not automatically replayed.
+
+## Remote execution workspace identity
+
+```ts type-equiv
+/** Git identity used to reproduce one sender workspace on another Server. */
+interface RemoteWorkspaceIdentityV1 {
+  readonly version: 1
+  /** Canonical host/path identity, for example `github.com/owner/repository`. */
+  readonly repository: string
+  /** Exact clean source commit to materialize. */
+  readonly commit: string
+  /** Optional repository-relative directory used as the execution cwd. */
+  readonly subdir?: string
+}
+```
+
+```ts type-equiv
+/** Host-registered actual project directory selected for a Gouzi execution. */
+interface RemoteGouziWorkspaceIdentityV1 {
+  readonly version: 1
+  readonly kind: 'gouzi-project'
+  /** Lowercase SHA-256 identity of a project registered by the receiving host. */
+  readonly projectId: string
+  /** Optional normalized project-relative execution directory. */
+  readonly subdir?: string
+}
+```
+
+```ts type-equiv
+/** Receiver workspace selection: immutable Git checkout or registered Gouzi project. */
+type RemoteExecutionWorkspaceIdentityV1 = RemoteWorkspaceIdentityV1 | RemoteGouziWorkspaceIdentityV1
+```
 
 ## Model Experience
 

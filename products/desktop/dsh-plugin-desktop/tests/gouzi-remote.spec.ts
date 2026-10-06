@@ -5,7 +5,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -129,18 +129,23 @@ describe.skipIf(!SSHD_AVAILABLE).sequential('Gouzi SSH hosts', { timeout: STEP_T
     expect(installed.trim()).toBe(readFileSync(join(directory, 'id_ed25519.pub'), 'utf8').trim())
   }, 60_000)
 
-  it('browses and resolves repositories on the machine, and explains a path that is not a repository', async () => {
+  it('inspects directories without mutation and prepares plain directories on the remote machine', async () => {
     const listing = await hosts.browse(hostId, scratch)
     expect(listing.entries).toContainEqual({ name: 'PetGoGo', path: expect.stringContaining('PetGoGo'), git: true })
     expect(listing.entries.find(entry => entry.name === 'hosts')?.git).toBe(false)
     expect(await hosts.resolveRepository(hostId, repository)).toMatchObject({ repository: 'github.com/lisihao/PetGoGo' })
-    await expect(hosts.resolveRepository(hostId, hostsRoot)).rejects.toThrow()
+    const plain = await hosts.resolveRepository(hostId, hostsRoot)
+    expect(plain.source).toBe(realpathSync(hostsRoot))
+    expect(existsSync(join(hostsRoot, '.git'))).toBe(false)
+    expect(await hosts.prepareRepository(hostId, hostsRoot)).toEqual(plain)
+    expect(existsSync(join(hostsRoot, '.git'))).toBe(true)
   }, 60_000)
 
   it('starts a real member on the machine, reaches it through the forward, and stops it', async () => {
     await hosts.provision({
       gouziId: 'gouzi-remote-1', ownerId: 'owner-test', hostId, generation: 1, authorityEpoch: 'epoch-test',
-      repositories: [{ repository: 'github.com/lisihao/PetGoGo', source: repository }],
+      projects: [await hosts.resolveRepository(hostId, repository)],
+      defaultProjectId: (await hosts.resolveRepository(hostId, repository)).projectId,
     })
     const started = await hosts.start(hostId, 'gouzi-remote-1')
     expect(started.endpoint).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/u)

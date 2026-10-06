@@ -689,6 +689,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.tools.register(defineTool({
     name: 'physical_operator',
+    delegation: { family: 'physical-operator', actions: ['run'] },
     description:
       'Discover and run deployment-defined physical operators. Use action=list to inspect stable operator ids, '
       + 'live availability, tags, and capacity. Use action=run with one listed operator id and a complete standalone '

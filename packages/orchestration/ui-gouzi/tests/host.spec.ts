@@ -10,7 +10,7 @@ import {
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
   apply, Config, GOUZI_AVATARS, GOUZI_CONTROL_HEADER, GOUZI_DASHBOARD_PATH, GOUZI_ROLE_IDS, gouziPrimaryState,
-  GouziHostService, type GouziHostProjection, type GouziProvisionInput, type GouziSshTarget,
+  GouziHostService, type GouziHostProjection, type GouziProjectSource, type GouziProvisionInput, type GouziSshTarget,
 } from '../src/index.ts'
 
 /** In-memory registry with the semantics the Host depends on: the ten-slot limit and the membership flow. */
@@ -31,6 +31,7 @@ class FakeControl implements GouziControl {
     return next
   }
 
+  executionOperators() { return Promise.resolve([]) }
   list() { return Promise.resolve({ hosts: this.hosts, members: this.members }) }
   pairHost(host: Omit<GouziHostRecord, 'pairedAt'>) {
     this.calls.push('pairHost')
@@ -78,10 +79,14 @@ class FakeHost extends GouziHostService {
   started: Array<[string, string]> = []
   stopped: Array<[string, boolean]> = []
   resolved: Array<[string, string]> = []
+  prepared: Array<[string, string]> = []
+  resolvedProjects = new Map<string, GouziProjectSource>()
+  preparedProjects = new Map<string, GouziProjectSource>()
   sshHosts: GouziHostProjection[] = []
   added: Array<Parameters<GouziHostService['addHost']>[0]> = []
   removed: string[] = []
   failResolve: Error | undefined
+  failPrepare: Error | undefined
   failStart: string | undefined
   failAdd: string | undefined
   treeStopped = true
@@ -115,9 +120,19 @@ class FakeHost extends GouziHostService {
   resolveRepository(hostId: string, path: string) {
     this.resolved.push([hostId, path])
     if (this.failResolve !== undefined) return Promise.reject(this.failResolve)
-    if (path.includes('noorigin')) return Promise.reject(new Error("error: No such remote 'origin'"))
-    if (path.includes('missing')) return Promise.reject(new Error(`${path} is not inside a Git repository`))
-    return Promise.resolve({ repository: `github.com/lisihao/${path.split('/').pop()!}`, source: path })
+    if (path.includes('missing')) return Promise.reject(Object.assign(new Error('missing directory'), { code: 'ENOENT' }))
+    return Promise.resolve(this.resolvedProjects.get(path) ?? this.project(path))
+  }
+  private project(path: string): GouziProjectSource {
+    return {
+      projectId: `project-${path.split('/').pop()!}`, source: path,
+      ...(path.includes('noorigin') || path.includes('ordinary') ? {} : { repository: `github.com/lisihao/${path.split('/').pop()!}` }),
+    }
+  }
+  prepareRepository(hostId: string, path: string) {
+    this.prepared.push([hostId, path])
+    if (this.failPrepare !== undefined) return Promise.reject(this.failPrepare)
+    return Promise.resolve(this.preparedProjects.get(path) ?? this.project(path))
   }
   provision(input: GouziProvisionInput) { this.order.push('provision'); this.provisioned.push(input); return Promise.resolve() }
   async start(hostId: string, gouziId: string) {
@@ -148,8 +163,8 @@ async function mount(options: { host?: boolean } = {}) {
   const ctx = new Context()
   const routes: WebRoute[] = []
   const control = new FakeControl()
-  ctx.provide('webServer', { register: (route: WebRoute) => { routes.push(route); return () => {} } } as never)
-  ctx.provide('orchestrations', { gouzi: control } as never)
+  ctx.provide('webServer', { register: (route: WebRoute) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1) } } } as never)
+  ctx.provide('orchestrations', { gouzi: control, list: () => Promise.resolve([]) } as never)
   ctx.provide('remoteAuth', {
     authenticate: (token: string) => ({
       'admin-token': { deviceId: 'd1', deviceName: 'MacBook', scope: 'admin' },
@@ -167,10 +182,11 @@ async function mount(options: { host?: boolean } = {}) {
     body?: unknown,
     headers: Record<string, string> = {},
     remote = false,
+    query = '',
   ): Promise<Reply> => {
     const request = new PassThrough() as unknown as Parameters<WebRoute['handler']>[0]
     Object.assign(request, {
-      url: GOUZI_DASHBOARD_PATH,
+      url: GOUZI_DASHBOARD_PATH + query,
       method,
       headers: { host: remote ? 'harness.example' : '127.0.0.1:3080', ...headers },
       socket: { remoteAddress: remote ? '203.0.113.9' : '127.0.0.1' },
@@ -192,13 +208,30 @@ async function mount(options: { host?: boolean } = {}) {
     const text = Buffer.concat(chunks).toString()
     return { status: status === 0 ? 200 : status, body: (text.length === 0 ? undefined : JSON.parse(text)) as Body }
   }
-  return { control, host, send, route }
+  return { control, host, send, route, routes, fiber }
 }
 
 const CONTROL = { [GOUZI_CONTROL_HEADER]: '1' }
 const ADOPT = { action: 'adopt', name: ' Mochi ', avatarId: 'corgi', role: 'testing', projects: ['/work/alpha', '/work/beta'] }
 
 describe('Gouzi Host route', () => {
+  it('serves a read-only session room and rejects empty or cross-room evidence queries', async () => {
+    const { control, send } = await mount()
+    const reader = { authorization: 'Bearer pocket-token' }
+    expect(await send('GET', undefined, reader, true, '?session_id=room')).toMatchObject({ status: 200, body: { version: 1, sessionId: 'room', tasks: [], execution: [], dashboard: { canManage: false } } })
+    expect(await send('GET', undefined, reader, true, '?session_id=')).toMatchObject({ status: 400 })
+    expect(await send('GET', undefined, reader, true, '?run_id=run&evidence_ref=ref')).toMatchObject({ status: 400 })
+    expect(await send('GET', undefined, reader, true, '?session_id=room&run_id=run&evidence_ref=ref')).toMatchObject({ status: 404 })
+    expect(control.calls).toEqual([])
+  })
+
+  it('removes the room and dashboard route when disposed', async () => {
+    const { routes, fiber } = await mount()
+    expect(routes).toHaveLength(1)
+    await fiber.dispose()
+    expect(routes).toEqual([])
+  })
+
   it('registers one exact route and pins the wire lists to the orchestration contract', async () => {
     const { route } = await mount()
     expect(route).toMatchObject({ kind: 'exact', path: '/api/gouzi' })
@@ -250,10 +283,10 @@ describe('Gouzi Host route', () => {
     expect(control.hosts).toHaveLength(1)
     expect(host.provisioned).toHaveLength(1)
     expect(host.provisioned[0]).toMatchObject({
-      ownerId: 'owner-test', hostId: 'local', generation: 1,
-      repositories: [
-        { repository: 'github.com/lisihao/alpha', source: '/work/alpha' },
-        { repository: 'github.com/lisihao/beta', source: '/work/beta' },
+      ownerId: 'owner-test', hostId: 'local', generation: 1, defaultProjectId: 'project-alpha',
+      projects: [
+        { projectId: 'project-alpha', repository: 'github.com/lisihao/alpha', source: '/work/alpha' },
+        { projectId: 'project-beta', repository: 'github.com/lisihao/beta', source: '/work/beta' },
       ],
     })
     expect(host.provisioned[0]!.authorityEpoch).toBe(String(control.hosts[0]!.authorityEpoch))
@@ -303,27 +336,82 @@ describe('Gouzi Host route', () => {
 
   it('creates nothing when a project cannot be resolved', async () => {
     const { control, host, send } = await mount()
-    const reply = await send('POST', { ...ADOPT, projects: ['/work/missing'] }, CONTROL)
+    const reply = await send('POST', { ...ADOPT, projects: ['/work/ordinary', '/work/missing'] }, CONTROL)
     expect(reply).toMatchObject({ status: 409, body: { error: 'GOUZI_PROJECT_UNAVAILABLE' } })
-    expect(reply.body.message).toContain('普通目录暂不支持')
+    expect(reply.body.message).toContain('请选择已有目录')
     expect(control.calls).toEqual([])
     expect(host!.order).toEqual([])
+    expect(host!.prepared).toEqual([])
   })
 
   it('checks repositories without pairing, creating, provisioning or starting, and rechecks at adoption', async () => {
     const { control, host, send } = await mount()
-    const projects = ['/work/missing', '/work/noorigin', '/work/alpha']
+    const projects = ['/work/missing', '/work/noorigin', '/work/ordinary']
     expect(await send('POST', { action: 'check-projects', hostId: 'local', projects }, CONTROL)).toMatchObject({ status: 200, body: { projects: [
-      { path: projects[0], usable: false, message: expect.stringContaining('不是 Git 仓库') as unknown },
-      { path: projects[1], usable: false, message: expect.stringContaining('没有 origin') as unknown },
+      { path: projects[0], usable: false, message: expect.stringContaining('目录不存在') as unknown },
+      { path: projects[1], usable: true },
       { path: projects[2], usable: true },
     ] } })
     expect(control.calls).toEqual([])
     expect(host!.order).toEqual([])
-    host!.failResolve = new Error("error: No such remote 'origin'")
+    // Leaving the dialog without sending adopt has no preparation effects.
+    expect(host!.prepared).toEqual([])
+    host!.failResolve = Object.assign(new Error('access denied'), { code: 'EACCES' })
     expect(await send('POST', { ...ADOPT, projects: ['/work/alpha'] }, CONTROL)).toMatchObject({ status: 409, body: { error: 'GOUZI_PROJECT_UNAVAILABLE' } })
     expect(control.calls).toEqual([])
     expect(host!.order).toEqual([])
+    expect(host!.prepared).toEqual([])
+  })
+
+  it('adopts ordinary directories and Git directories without origin using prepared project identities', async () => {
+    const { host, send } = await mount()
+    const projects = ['/work/ordinary', '/work/noorigin']
+    expect((await send('POST', { ...ADOPT, projects }, CONTROL)).status).toBe(200)
+    expect(host!.prepared).toEqual(projects.map(path => ['local', path]))
+    expect(host!.provisioned[0]).toMatchObject({ defaultProjectId: 'project-ordinary', projects: [
+      { projectId: 'project-ordinary', source: '/work/ordinary' },
+      { projectId: 'project-noorigin', source: '/work/noorigin' },
+    ] })
+    expect(host!.provisioned[0]!.projects.every(project => project.repository === undefined)).toBe(true)
+  })
+
+  it('prepares each resolved source once and provisions the prepared result deduplicated by project identity', async () => {
+    const { host, send } = await mount()
+    host!.resolvedProjects.set('/work/alias', { projectId: 'inspection-alias', source: '/work/ordinary' })
+    host!.preparedProjects.set('/work/ordinary', { projectId: 'prepared-project', source: '/work/ordinary' })
+    host!.preparedProjects.set('/work/noorigin', { projectId: 'prepared-project', source: '/work/noorigin' })
+    expect((await send('POST', { ...ADOPT, projects: ['/work/ordinary', '/work/alias', '/work/noorigin'] }, CONTROL)).status).toBe(200)
+    expect(host!.prepared).toEqual([['local', '/work/ordinary'], ['local', '/work/noorigin']])
+    expect(host!.provisioned[0]).toMatchObject({ defaultProjectId: 'prepared-project', projects: [
+      { projectId: 'prepared-project', source: '/work/ordinary' },
+    ] })
+  })
+
+  it('creates no member or host record when directory preparation fails and reports its actual failure', async () => {
+    const { control, host, send } = await mount()
+    host!.failPrepare = new Error('git init exited with status 128')
+    expect(await send('POST', { ...ADOPT, projects: ['/work/ordinary'] }, CONTROL)).toMatchObject({
+      status: 502, body: { error: 'GOUZI_FAILED', message: expect.stringContaining('git init exited with status 128') as unknown },
+    })
+    expect(control.members).toEqual([])
+    expect(control.hosts).toEqual([])
+    expect(control.calls).toEqual([])
+    expect(host!.order).toEqual([])
+  })
+
+  it('reports earlier prepared directories when a later preparation fails without creating a member', async () => {
+    const { control, host, send } = await mount()
+    const prepare = host!.prepareRepository.bind(host)
+    host!.prepareRepository = async (hostId, path) => {
+      if (path === '/work/beta') host!.failPrepare = new Error('git init failed')
+      return prepare(hostId, path)
+    }
+    const failed = await send('POST', ADOPT, CONTROL)
+    expect(failed).toMatchObject({ status: 502, body: { error: 'GOUZI_FAILED' } })
+    expect(failed.body.message).toContain('以下目录已完成准备：/work/alpha')
+    expect(failed.body.message).toContain('git init failed')
+    expect(control.calls).toEqual([])
+    expect(control.members).toEqual([])
   })
 
   it('preserves genuine process failures as failures instead of project usability', async () => {
@@ -337,10 +425,10 @@ describe('Gouzi Host route', () => {
   })
 
   it.each([
-    { error: new Error('Invalid URL') },
-    { error: new Error('remote repository identity must contain a valid host and repository path') },
     { error: Object.assign(new Error('missing directory'), { code: 'ENOENT', syscall: 'realpath' }) },
     { error: Object.assign(new Error('not a directory'), { code: 'ENOTDIR', syscall: 'realpath' }) },
+    { error: Object.assign(new Error('permission denied'), { code: 'EACCES' }) },
+    { error: Object.assign(new Error('operation not permitted'), { code: 'EPERM' }) },
   ])('reports explicit repository and path failures without member effects: $error.message', async ({ error }) => {
     const { control, host, send } = await mount()
     host!.failResolve = error
@@ -386,11 +474,15 @@ describe('Gouzi Host route', () => {
   })
 
   it('explains the ten-member limit and keeps the roster unchanged', async () => {
-    const { control, send } = await mount()
+    const { control, host, send } = await mount()
     for (let index = 0; index < GOUZI_MEMBER_LIMIT; index++) await send('POST', { ...ADOPT, name: `Dog ${String(index)}` }, CONTROL)
+    host!.prepared.length = 0
+    control.calls.length = 0
     const refused = await send('POST', { ...ADOPT, name: 'Eleventh' }, CONTROL)
     expect(refused).toMatchObject({ status: 409, body: { error: 'GOUZI_LIMIT_REACHED' } })
     expect(control.members).toHaveLength(GOUZI_MEMBER_LIMIT)
+    expect(host!.prepared).toEqual([])
+    expect(control.calls).toEqual([])
   })
 
   it('lists the local host first and every SSH host after it', async () => {
@@ -456,7 +548,7 @@ describe('Gouzi Host route', () => {
     expect(reply.status).toBe(200)
     expect(host!.resolved).toEqual([['ssh-1', '/Users/lisihao/project/PetGoGo']])
     expect(control.hosts).toMatchObject([{ hostId: 'ssh-1', label: 'Mac mini', credentialRef: 'GOUZI_HOST_SSH_1' }])
-    expect(host!.provisioned[0]).toMatchObject({ hostId: 'ssh-1', repositories: [{ source: '/Users/lisihao/project/PetGoGo' }] })
+    expect(host!.provisioned[0]).toMatchObject({ hostId: 'ssh-1', projects: [{ source: '/Users/lisihao/project/PetGoGo' }] })
     expect(host!.started).toEqual([['ssh-1', reply.body.gouziId]])
     expect(control.members[0]).toMatchObject({ hostId: 'ssh-1', endpoint: 'http://127.0.0.1:4200/' })
   })

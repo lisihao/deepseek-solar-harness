@@ -99,6 +99,7 @@ flowchart LR
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
   pkg_ui_orchestration["ui-orchestration"]
+  svc_orchestrationRecipients["ctx.orchestrationRecipients<br/>User-selected orchestration recipient resolver"]
   pkg_ui_gouzi["ui-gouzi"]
   svc_gouziHost["ctx.gouziHost<br/>Gouzi member process host"]
   pkg_remote_auth["remote-auth"]
@@ -306,6 +307,7 @@ flowchart LR
   pkg_model_worker --> svc_modelWorkers
   pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_orchestrationRecipients
   pkg_orchestration --> svc_orchestrations
   pkg_orchestration_local --> svc_capabilityCapsules
   pkg_orchestration_local --> svc_contextCompiler
@@ -373,6 +375,7 @@ flowchart LR
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
   pkg_ui_gouzi --> svc_gouziHost
+  pkg_ui_gouzi --> svc_orchestrationRecipients
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
   pkg_web_fetch_http --> svc_web
@@ -428,6 +431,7 @@ flowchart LR
   svc_modelCatalogs --> pkg_physical_operator_chatgpt_web
   svc_modelCatalogs --> pkg_tool_physical_operator
   svc_modelWorkers --> pkg_orchestration_local
+  svc_orchestrationRecipients --> pkg_tool_orchestration
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
@@ -552,6 +556,7 @@ flowchart LR
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
+| `ctx.orchestrationRecipients` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | [`tool-orchestration`](../packages/orchestration/tool-orchestration) | - | Resolves the current human request to an enabled member generation and available execution entries before sealing TaskGraph admission. |
 | `ctx.gouziHost` | `seam` | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | Starts, adopts, and stops execution-member processes on the machine that runs the Server; the Desktop product provides it and the roster only consumes it. |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |

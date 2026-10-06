@@ -36,7 +36,7 @@ import {
   REMOTE_SYNC_COMPATIBLE_MINOR, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
   type RemoteResidentExecuteRequest,
   type RemoteSyncProtocolVersion,
-  type RemoteWorkspaceIdentityV1,
+  type RemoteExecutionWorkspaceIdentityV1,
 } from './remote-sync.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
@@ -80,6 +80,7 @@ export type {
   RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
   RemoteSyncCapability, RemoteSyncClusterProjection, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncProtocolVersion, RemoteSyncResyncRequired, RemoteSyncSnapshot, RemoteWorkspaceIdentityV1,
+  RemoteExecutionWorkspaceIdentityV1, RemoteGouziWorkspaceIdentityV1,
 } from './remote-sync.ts'
 
 /** Stable Cordis plugin name. */
@@ -419,6 +420,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         authCtx.get('residentOperators'),
         () => authCtx.get('orchestrations'),
         () => authCtx.get('remoteOperatorHost'),
+        () => authCtx.get('gouziMember'),
       )
       const removeAuthRpc = connection.rpc.handle(
         REMOTE_AUTH_RPC_CHANNEL,
@@ -515,6 +517,9 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
             // A host that mounts the member gate is a member host: every caller, including a loopback owner or a
             // tunnel endpoint, needs a grant. Without the gate the `gouzi` scope cannot execute at all.
             const member = authCtx.get('gouziMember')
+            if ('kind' in request.workspaceIdentity && member === undefined) {
+              throw new ConnectionRpcHttpError(403, 'registered project execution requires a Gouzi member host')
+            }
             if (member === undefined && access.scope !== 'gouzi') {
               return { ok: true, value: await hub.operatorExecute(request) }
             }
@@ -843,7 +848,7 @@ function requireCurrentRemoteSyncProtocol(value: unknown): void {
     ? { major: REMOTE_SYNC_PROTOCOL.major, minor: REMOTE_SYNC_COMPATIBLE_MINOR }
     : recordPayload(value)
   if (protocol.major !== REMOTE_SYNC_PROTOCOL.major || protocol.minor !== REMOTE_SYNC_PROTOCOL.minor) {
-    throw new ConnectionRpcHttpError(409, 'remote operator execution requires remote sync protocol 1.4')
+    throw new ConnectionRpcHttpError(409, 'remote operator execution requires remote sync protocol 1.5')
   }
 }
 
@@ -890,16 +895,24 @@ function residentNativeToolPolicy(value: unknown): 'inherit' | 'disabled' {
   return value
 }
 
-function remoteWorkspaceIdentity(value: unknown): RemoteWorkspaceIdentityV1 {
+function remoteWorkspaceIdentity(value: unknown): RemoteExecutionWorkspaceIdentityV1 {
   const record = recordPayload(value)
   if (record.version !== 1) throw new ConnectionRpcHttpError(400, 'workspaceIdentity.version must be 1')
+  const subdir = record.subdir === undefined ? undefined : requiredString(record.subdir, 'workspaceIdentity.subdir')
+  if (subdir !== undefined && (subdir.includes('\\') || subdir.startsWith('/') || subdir.split('/').some(segment => segment === '' || segment === '.' || segment === '..'))) {
+    throw new ConnectionRpcHttpError(400, 'workspaceIdentity.subdir must be a normalized project-relative path')
+  }
+  if (record.kind !== undefined) {
+    if (record.kind !== 'gouzi-project') throw new ConnectionRpcHttpError(400, 'workspaceIdentity.kind is invalid')
+    if ('repository' in record || 'commit' in record) throw new ConnectionRpcHttpError(400, 'Gouzi project identity must not contain Git fields')
+    const projectId = requiredString(record.projectId, 'workspaceIdentity.projectId')
+    if (!/^[a-f0-9]{64}$/u.test(projectId)) throw new ConnectionRpcHttpError(400, 'workspaceIdentity.projectId must be a lowercase SHA-256 identity')
+    return { version: 1, kind: 'gouzi-project', projectId, ...subdir === undefined ? {} : { subdir } }
+  }
+  if ('projectId' in record) throw new ConnectionRpcHttpError(400, 'Git identity must not contain projectId')
   const commit = requiredString(record.commit, 'workspaceIdentity.commit')
   if (!/^[a-f0-9]{40}$/u.test(commit)) {
     throw new ConnectionRpcHttpError(400, 'workspaceIdentity.commit must be a lowercase full Git SHA')
-  }
-  const subdir = record.subdir === undefined ? undefined : requiredString(record.subdir, 'workspaceIdentity.subdir')
-  if (subdir !== undefined && (subdir.startsWith('/') || subdir.split('/').some(segment => segment === '' || segment === '.' || segment === '..'))) {
-    throw new ConnectionRpcHttpError(400, 'workspaceIdentity.subdir must be a normalized repository-relative path')
   }
   let repository: string
   try {

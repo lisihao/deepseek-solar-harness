@@ -199,6 +199,10 @@ export function apply(ctx: Context): void {
     children: {
       'conversation.session': { kind: 'single', scope: 'session' },
       'conversation.session.header': { kind: 'single', scope: 'session' },
+      'conversation.room.header': { kind: 'chain', scope: 'session-maybe' },
+      'conversation.room.aside': { kind: 'chain', scope: 'session-maybe' },
+      'conversation.room.content': { kind: 'chain', scope: 'session-maybe' },
+      'conversation.room.composer': { kind: 'chain', scope: 'session-maybe' },
       'conversation.composer': { kind: 'chain', scope: 'session' },
       'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
       'conversation.input.overlay': { kind: 'list', scope: 'session' },

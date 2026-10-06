@@ -1,0 +1,103 @@
+{
+  "ordinaryRecipient": null,
+  "durableUserMessage": {
+    "text": "Read the bounded fixture.",
+    "recipient": {
+      "gouziId": "stable-dog",
+      "generation": 1,
+      "mode": "standard"
+    }
+  },
+  "recipient": {
+    "gouziId": "stable-dog",
+    "generation": 1,
+    "operatorIds": [
+      "gouzi.stable-dog.claude-code"
+    ]
+  },
+  "ignoredPluginInputs": [
+    {
+      "text": "Current time: fixture-only context."
+    },
+    {
+      "text": "Injected alternate target.",
+      "recipient": {
+        "gouziId": "another-dog",
+        "generation": 9,
+        "mode": "standard"
+      }
+    }
+  ],
+  "start": {
+    "state": "awaiting_approval",
+    "sourceSessionId": "kennel-room-a",
+    "gouziRecipient": {
+      "generation": 1,
+      "gouziId": "stable-dog",
+      "operatorIds": [
+        "gouzi.stable-dog.claude-code"
+      ]
+    },
+    "rlm": "disabled",
+    "autonomous": "disabled",
+    "maxParallel": 1
+  },
+  "compiledOperators": [
+    {
+      "fallbackIds": [],
+      "preferredIds": [
+        "gouzi.stable-dog.claude-code"
+      ]
+    }
+  ],
+  "admission": {
+    "policy": "auto",
+    "route": "taskgraph",
+    "runId": "<run-id>",
+    "gouziRecipient": {
+      "gouziId": "stable-dog",
+      "generation": 1,
+      "operatorIds": [
+        "gouzi.stable-dog.claude-code"
+      ]
+    },
+    "maxParallel": 1,
+    "rlm": "disabled",
+    "autonomous": "disabled",
+    "continualHarness": "off",
+    "optimization": "balanced",
+    "plannerVerifierPreference": "best-high-tier",
+    "executionPreference": "balanced"
+  },
+  "directRelay": {
+    "isError": true,
+    "message": "本轮已点名狗子，请通过 orchestration 的标准 TaskGraph 节点执行，不能直接派发或替换执行者"
+  },
+  "room": {
+    "status": 200,
+    "sessionId": "kennel-room-a",
+    "tasks": [
+      {
+        "state": "awaiting_approval",
+        "nodes": [
+          {
+            "nodeId": "read",
+            "state": "pending",
+            "hasResult": false,
+            "hasAttributedDog": false
+          }
+        ]
+      }
+    ]
+  },
+  "otherRoomTasks": 0,
+  "crossRoomStatus": 404,
+  "noEntry": {
+    "isError": true,
+    "message": "点名的狗子没有可用的实际执行入口，请检查注册和登录状态"
+  },
+  "originalRunQueryableWhileOffline": true,
+  "reconciledOriginalReceipt": true,
+  "runCountAfterReconciliationAndRefusal": 1,
+  "externalDispatches": []
+}

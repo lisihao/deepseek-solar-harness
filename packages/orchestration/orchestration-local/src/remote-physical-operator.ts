@@ -17,6 +17,7 @@ import {
   type RemoteResidentExecuteRequest,
   type RemoteResidentProviderStatus,
   type RemoteResidentTurnSnapshot,
+  type RemoteExecutionWorkspaceIdentityV1,
 } from '@deepseek-ai/dsh-client-connection'
 import type { GouziExecutionGrant } from '@deepseek-ai/dsh-orchestration'
 import { residentProgressPage } from '@deepseek-ai/dsh-resident-operator'
@@ -46,10 +47,11 @@ export interface RemotePhysicalOperatorGouzi {
    * Seal one attempt as an execution grant. Runs once per `start`, with the exact request that will be sent.
    * @param plan - the Resident execution request without a grant.
    * @param start - the Provider start request that carries the execution id.
+   * @param workspace - freshly read member project and generation binding, required for directory execution.
    * @returns the grant the member verifies before any side effect.
    * @throws PhysicalOperatorError - when the member cannot be granted this attempt.
    */
-  readonly issue: (plan: RemoteResidentExecuteRequest, start: PhysicalOperatorProviderStartRequest) => GouziExecutionGrant
+  readonly issue: (plan: RemoteResidentExecuteRequest, start: PhysicalOperatorProviderStartRequest, workspace?: RemoteResidentProviderStatus['gouziWorkspace']) => GouziExecutionGrant
 }
 
 /** One independently addressable DSH Server execution member. */
@@ -162,19 +164,45 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         'OPERATOR_MODE_UNSUPPORTED',
       )
     }
-    const workspace = request.parent.session.header.cwd
-    if (workspace === undefined) {
-      throw new PhysicalOperatorError('remote physical operator requires a workspace', 'WORKSPACE_INVALID')
+    let workspaceIdentity: RemoteExecutionWorkspaceIdentityV1
+    let gouziWorkspace: RemoteResidentProviderStatus['gouziWorkspace']
+    if (this.server.gouzi !== undefined) {
+      let current: RemoteResidentProviderStatus | undefined
+      try {
+        current = (await this.client.operatorProviders(request.signal))
+          .find(value => value.operatorId === this.provider.operatorId)
+      } catch (cause) {
+        throw new PhysicalOperatorError(
+          `Gouzi project qualification failed on ${this.server.label}: ${renderError(cause)}`,
+          'OPERATOR_UNAVAILABLE', { cause },
+        )
+      }
+      gouziWorkspace = current?.gouziWorkspace
+      if (current?.available !== true
+        || (gouziWorkspace !== undefined && gouziWorkspace.gouziId !== this.server.gouzi.gouziId)) {
+        throw new PhysicalOperatorError(
+          `Gouzi ${this.server.label} has no qualified registered project`,
+          'WORKSPACE_INVALID',
+        )
+      }
+      this.provider = current
     }
-    let workspaceIdentity
-    try {
-      workspaceIdentity = await identifyRemoteWorkspace(workspace, WORKSPACE_IDENTITY_TIMEOUT_MS)
-    } catch (cause) {
-      throw new PhysicalOperatorError(
-        `remote physical operator cannot reproduce workspace: ${renderError(cause)}`,
-        'WORKSPACE_INVALID',
-        { cause },
-      )
+    if (gouziWorkspace !== undefined) {
+      workspaceIdentity = { version: 1, kind: 'gouzi-project', projectId: gouziWorkspace.projectId }
+    } else {
+      // A member provisioned with the existing Git allowlist retains exact-commit execution.
+      const workspace = request.parent.session.header.cwd
+      if (workspace === undefined) {
+        throw new PhysicalOperatorError('remote physical operator requires a workspace', 'WORKSPACE_INVALID')
+      }
+      try {
+        workspaceIdentity = await identifyRemoteWorkspace(workspace, WORKSPACE_IDENTITY_TIMEOUT_MS)
+      } catch (cause) {
+        throw new PhysicalOperatorError(
+          `remote physical operator cannot reproduce workspace: ${renderError(cause)}`,
+          'WORKSPACE_INVALID', { cause },
+        )
+      }
     }
     const plan: RemoteResidentExecuteRequest = {
       commandId: String(request.executionId),
@@ -188,7 +216,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
     }
-    const gouziGrant = this.server.gouzi?.issue(plan, request)
+    const gouziGrant = this.server.gouzi?.issue(plan, request, gouziWorkspace)
     let accepted: RemoteResidentAcceptedTurn
     try {
       accepted = await this.client.operatorExecute(

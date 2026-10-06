@@ -112,7 +112,7 @@ function RolePicker({ value, onChange }: { value: GouziRoleId; onChange: (next: 
 
 const WIZARD_STEPS = ['头像', '名字', '住处', '角色与项目', '确认'] as const
 
-/** Local projects are selectable only after the Host resolves their Git repository and origin. */
+/** Local directories are selectable after a read-only Host check confirms that they exist and are accessible. */
 function ProjectPicker({ request, folders, picked, onPick, selected, onChange, onValidity }: {
   request: BrowserRequest
   folders: GouziFolders
@@ -197,7 +197,7 @@ function ProjectPicker({ request, folders, picked, onPick, selected, onChange, o
   return (
     <div className={css.field}>
       <span>它可以处理的项目（在运行 DSH 的这台机器上）</span>
-      <p className={css.hint}>当前需要带有效 origin 的 Git 仓库，普通目录暂不支持。</p>
+      <p className={css.hint}>请选择现有且可访问的目录，不要求已有 Git 仓库或 origin。选择和检查目录不会初始化 Git。</p>
       {suggestions.length > 0
         ? (
           <ul className={css.projectList}>
@@ -252,6 +252,7 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
     paths.length > 0 && (hostId !== GOUZI_LOCAL_HOST_ID || projectsValid), true,
   ]
   const hostLabel = hosts.find(host => host.hostId === hostId)?.label ?? ''
+  const defaultProject = paths[0]
   const adopt = async (): Promise<void> => {
     setPending(true)
     setError(undefined)
@@ -304,14 +305,18 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
         </>
       )}
       {step === 4 && (
-        <dl className={css.summary}>
-          <div><GouziAvatarImage avatarId={avatarId} size={64} /></div>
-          <div><dt>名字</dt><dd>{trimmed}</dd></div>
-          <div><dt>住处</dt><dd>{hostLabel}</dd></div>
-          <div><dt>角色</dt><dd>{GOUZI_ROLE_COPY[role].label}</dd></div>
-          <div><dt>项目</dt><dd>{paths.map(basename).join('、')}</dd></div>
-          <div><dt>名额</dt><dd>领养后 {used + 1} / {limit}</dd></div>
-        </dl>
+        <>
+          <dl className={css.summary}>
+            <div><GouziAvatarImage avatarId={avatarId} size={64} /></div>
+            <div><dt>名字</dt><dd>{trimmed}</dd></div>
+            <div><dt>住处</dt><dd>{hostLabel}</dd></div>
+            <div><dt>角色</dt><dd>{GOUZI_ROLE_COPY[role].label}</dd></div>
+            <div><dt>默认项目</dt><dd>{defaultProject === undefined ? '尚未选择' : basename(defaultProject)}</dd></div>
+            <div><dt>其它项目</dt><dd>{paths.slice(1).map(basename).join('、') || '无'}</dd></div>
+            <div><dt>名额</dt><dd>领养后 {used + 1} / {limit}</dd></div>
+          </dl>
+          <p className={css.hint}>如果所选目录还不是 Git 仓库，确认领养时会初始化 Git；现有文件不会自动提交。</p>
+        </>
       )}
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
       <footer className={css.wizardActions}>

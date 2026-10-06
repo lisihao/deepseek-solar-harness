@@ -16,6 +16,8 @@ import type {
 } from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
+  ResidentCommandRefusal,
+  type ResidentOperatorCommandId,
   ResidentOperatorSessionId,
   ResidentOperatorTurnId,
   RESIDENT_PROTOCOL_VERSION,
@@ -42,6 +44,7 @@ const REQUIRED_METHODS = Object.freeze([
   'session.inspect',
   'turn.execute',
   'turn.inspect',
+  'command.inspect',
   'turn.interrupt',
   'turn.resolve_indeterminate',
   'session.compact',
@@ -329,6 +332,21 @@ export class ResidentDaemonClient {
   inspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
     return this.request('turn.inspect', { turn_id: turnId })
   }
+
+  /**
+   * Read a durable command's turn receipt without execution or replay.
+   * @param commandId - caller-owned durable command identity.
+   * @returns the snapshot, or undefined for a successful query with no current receipt.
+   */
+  async inspectCommand(commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined> {
+    const snapshot = await this.request<unknown>('command.inspect', { command_id: commandId })
+    if (snapshot === null) return undefined
+    if (typeof snapshot !== 'object' || !('commandId' in snapshot) || snapshot.commandId !== commandId) {
+      throw new ResidentOperatorError('resident daemon returned an invalid command receipt', 'INVALID_RESULT')
+    }
+    return snapshot as ResidentTurnSnapshot
+  }
+
 
   /**
    * Admit or replay one durable command and poll its result.
@@ -763,7 +781,8 @@ export class ResidentDaemonClient {
     }
     if (!Array.isArray(response.methods)
       || !response.methods.every(method => typeof method === 'string')
-      || REQUIRED_METHODS.some(method => !response.methods.includes(method))) {
+      || REQUIRED_METHODS.some(method => !(isKnownPredecessor && method === 'command.inspect')
+        && !response.methods.includes(method))) {
       throw new ResidentOperatorError('resident daemon upgrade handshake does not support the required method set', 'PROTOCOL_MISMATCH')
     }
   }
@@ -845,7 +864,9 @@ export class ResidentDaemonClient {
       try {
         await this.handshakeOnTransport(transport)
         handshakeComplete = true
-        return unwrapWire(await transport.request(method, params, signal)) as T
+        return unwrapWire(await transport.request(method, params, signal), method === 'turn.execute'
+          ? (message, code) => new ResidentCommandRefusal(message, code)
+          : undefined) as T
       } catch (error) {
         if (!handshakeComplete) throw markHandshakeFailure(error, daemonPid)
         throw error

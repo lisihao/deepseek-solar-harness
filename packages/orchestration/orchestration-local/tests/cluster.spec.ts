@@ -129,6 +129,33 @@ describe('orchestration cluster config', () => {
   })
 })
 
+describe('registered directory cluster configuration', () => {
+  it('accepts directory-only execution and validates project IDs, paths and default selection', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-project-cluster-'))
+    const projects = [{ projectId: 'project', source: '/plain/directory' }]
+    const write = (remoteExecution: unknown) => {
+      writeFileSync(join(root, 'cluster.json'), JSON.stringify({
+        version: 1, nodeId: 'a', members: [{ id: 'a', label: 'A', endpoint: 'http://a.example', remoteExecution }],
+      }))
+    }
+    write({ enabled: true, repositories: [], projects, defaultProjectId: 'project' })
+    expect(readOrchestrationClusterConfig(root)?.members[0]?.remoteExecution).toEqual({
+      enabled: true, repositories: [], projects, defaultProjectId: 'project',
+    })
+    for (const config of [
+      { enabled: true, repositories: [], projects: [] },
+      { enabled: true, repositories: [], projects, defaultProjectId: 'missing' },
+      { enabled: true, repositories: [], projects: [...projects, ...projects] },
+      { enabled: true, repositories: [], projects: [{ projectId: ' project ', source: '/plain/directory' }] },
+      { enabled: true, repositories: [], projects: [{ projectId: 'project', source: 'relative/directory' }] },
+      { enabled: true, repositories: [], projects: {} },
+    ]) {
+      write(config)
+      expect(() => readOrchestrationClusterConfig(root)).toThrow()
+    }
+  })
+})
+
 describe('orchestration cluster persistence', () => {
   it('persists term/vote independently from the monotonic data commit index', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-orchestration-cluster-store-'))

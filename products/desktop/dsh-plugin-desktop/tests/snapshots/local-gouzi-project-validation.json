@@ -1,48 +1,107 @@
 {
   "candidates": [
     {
-      "fixture": "ordinary-directory",
-      "usable": false,
-      "refusalExplained": true
+      "fixture": "ordinary-nonempty",
+      "usable": true
+    },
+    {
+      "fixture": "ordinary-empty",
+      "usable": true
+    },
+    {
+      "fixture": "git-unborn",
+      "usable": true
     },
     {
       "fixture": "git-without-origin",
-      "usable": false,
-      "refusalExplained": true
-    },
-    {
-      "fixture": "git-with-origin",
       "usable": true
     },
     {
-      "fixture": "repository-subdirectory",
+      "fixture": "dirty-repository-subdirectory",
       "usable": true
+    },
+    {
+      "fixture": "missing-directory",
+      "usable": false
+    },
+    {
+      "fixture": "regular-file",
+      "usable": false
     }
   ],
+  "readOnlyCheck": {
+    "projectsUnchanged": true,
+    "ordinaryGitCreated": false,
+    "membersUnchanged": true,
+    "prepareCalls": 0,
+    "provisionCalls": 0,
+    "startCalls": 0
+  },
   "rejected": [
     {
-      "fixture": "ordinary-directory",
-      "status": 409,
+      "fixture": "missing-directory",
       "error": "GOUZI_PROJECT_UNAVAILABLE"
     },
     {
-      "fixture": "git-without-origin",
-      "status": 409,
+      "fixture": "regular-file",
       "error": "GOUZI_PROJECT_UNAVAILABLE"
     }
   ],
-  "invalidAdoption": {
-    "membersUnchanged": true,
-    "slotsUnchanged": true,
-    "pairedHostsUnchanged": true,
-    "provisionCalls": 0,
-    "startCalls": 0,
-    "projectsUnchanged": true
-  },
-  "validAdoption": {
-    "workerStarted": true,
-    "taskGraphState": "completed",
-    "retired": true,
-    "slotReleased": true
-  }
+  "adoptedProjects": [
+    {
+      "fixture": "ordinary-nonempty",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "ordinary-empty",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "git-unborn",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "git-without-origin",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "dirty-repository-subdirectory",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    }
+  ]
 }

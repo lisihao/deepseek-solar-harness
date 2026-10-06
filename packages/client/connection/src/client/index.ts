@@ -40,6 +40,7 @@ export type {
   RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
   RemoteSyncCapability, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncResyncRequired, RemoteSyncSnapshot, RemoteWorkspaceIdentityV1,
+  RemoteExecutionWorkspaceIdentityV1, RemoteGouziWorkspaceIdentityV1,
 } from '../remote-sync.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'

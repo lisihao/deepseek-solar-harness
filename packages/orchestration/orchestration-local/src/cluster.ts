@@ -33,10 +33,18 @@ export interface OrchestrationClusterMember {
   readonly id: string
   readonly label: string
   readonly endpoint: string
-  /** Optional remote execution capacity and Server-local Git source allowlist. */
+  /** Optional remote execution capacity and Server-local source registrations. */
   readonly remoteExecution?: {
     readonly enabled: boolean
     readonly pollIntervalMs?: number
+    /** Registered directories owned by this Server; repository metadata is optional. */
+    readonly projects?: readonly {
+      readonly projectId: string
+      readonly source: string
+      readonly repository?: string
+    }[]
+    /** Registered directory selected for Gouzi execution by default. */
+    readonly defaultProjectId?: string
     readonly repositories: readonly {
       readonly repository: string
       /** Server-local checkout path or credential-free Git URL; never sent over Remote Sync. */
@@ -172,8 +180,27 @@ function parseRemoteExecution(
   const config = object(value, label)
   if (typeof config.enabled !== 'boolean') throw new Error(`${label}.enabled must be boolean`)
   if (!Array.isArray(config.repositories)) throw new Error(`${label}.repositories must be an array`)
-  if (config.enabled && config.repositories.length === 0) {
-    throw new Error(`${label}.repositories must not be empty when remote execution is enabled`)
+  if (config.projects !== undefined && !Array.isArray(config.projects)) throw new Error(`${label}.projects must be an array`)
+  const projectIds = new Set<string>()
+  const projects = (config.projects as unknown[] | undefined)?.map((entry, index) => {
+    const projectLabel = `${label}.projects[${String(index)}]`
+    const project = object(entry, projectLabel)
+    const projectId = nonBlank(project.projectId, `${projectLabel}.projectId`)
+    if (projectIds.has(projectId)) throw new Error(`${label} contains duplicate projectId "${projectId}"`)
+    projectIds.add(projectId)
+    const source = nonBlank(project.source, `${projectLabel}.source`)
+    if (!isAbsolute(source)) throw new Error(`${projectLabel}.source must be an absolute local path`)
+    const repository = project.repository === undefined ? undefined
+      : canonicalRemoteRepositoryIdentity(nonBlank(project.repository, `${projectLabel}.repository`))
+    return { projectId, source, ...repository === undefined ? {} : { repository } }
+  })
+  const defaultProjectId = config.defaultProjectId === undefined ? undefined
+    : nonBlank(config.defaultProjectId, `${label}.defaultProjectId`)
+  if (defaultProjectId !== undefined && !projectIds.has(defaultProjectId)) {
+    throw new Error(`${label}.defaultProjectId must identify a registered project`)
+  }
+  if (config.enabled && config.repositories.length === 0 && (projects?.length ?? 0) === 0) {
+    throw new Error(`${label} must contain repositories or projects when remote execution is enabled`)
   }
   const identities = new Set<string>()
   const repositories = config.repositories.map((entry, index) => {
@@ -210,6 +237,8 @@ function parseRemoteExecution(
     enabled: config.enabled,
     ...pollIntervalMs === undefined ? {} : { pollIntervalMs: Number(pollIntervalMs) },
     repositories,
+    ...projects === undefined ? {} : { projects },
+    ...defaultProjectId === undefined ? {} : { defaultProjectId },
   }
 }
 

@@ -14,6 +14,7 @@
     { "path": "../capability-capsule" },
     { "path": "../../physical-operator/physical-operator" },
     { "path": "../../prompt/task-template" },
+    { "path": "../../core/session" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

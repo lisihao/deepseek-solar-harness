@@ -8,6 +8,7 @@ import {
   RpcId, type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
+import { ResidentCommandRefusal } from '@deepseek-ai/dsh-resident-operator'
 import { RemoteSyncHub, RemoteSyncJournal } from '../src/remote-sync-host.ts'
 import { buildOperatorContextEnvelope, materializeOperatorContextEnvelopeNative } from '@deepseek-ai/dsh-system-prompt'
 
@@ -259,7 +260,7 @@ describe('RemoteSyncHub', () => {
       result: new Promise(() => {}), dispose: async () => undefined,
     }))
     const hub = new RemoteSyncHub(api(), 4, undefined, { execute } as never, undefined, () => ({
-      qualification: async () => ({ available: true }),
+      inspectWorkspace: async () => undefined, gouziWorkspace: async () => undefined, qualification: async () => ({ available: true }),
       materializeWorkspace: async () => ({ version: 1, identity, path }),
     }) as never)
     const contextEnvelope = buildOperatorContextEnvelope({
@@ -302,6 +303,129 @@ describe('RemoteSyncHub', () => {
     }
   })
 
+  it('advertises a persisted project only with the actual member and supplements its directory execution', async () => {
+    const provider = { operatorId: 'codex' }
+    const projectId = 'a'.repeat(64)
+    const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId }
+    const execute = vi.fn(async (_request: ResidentExecuteRequest) => ({
+      sessionId: 's', turnId: 't', stateRevision: 1, dispose: async () => undefined,
+    }))
+    const resident = { providers: async () => [provider], execute, inspectCommand: async () => undefined }
+    const host = {
+      inspectWorkspace: async () => undefined, gouziWorkspace: async () => ({ projectId }),
+      qualification: async () => ({ available: true }),
+      materializeWorkspace: async () => ({ version: 1, identity, path: '/srv/user-project' }),
+    }
+    const member = { hello: () => ({ gouziId: 'gouzi-1', generation: 2 }) }
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never, () => member as never)
+    expect(await hub.operatorProviders()).toEqual([{ ...provider, gouziWorkspace: { gouziId: 'gouzi-1', generation: 2, projectId } }])
+    await hub.operatorExecute({ commandId: 'c', operatorId: 'codex', laneId: 'l', prompt: [], workspaceIdentity: identity })
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      workspace: '/srv/user-project',
+    }))
+    expect(execute.mock.calls[0]?.[0].systemPrompt).toContain('Existing files, including untracked files, are accessible.')
+    const bare = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never)
+    expect(await bare.operatorProviders()).toEqual([provider])
+    const generic = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined,
+      () => ({ ...host, inspectWorkspace: async () => undefined, gouziWorkspace: async () => undefined }) as never, () => member as never)
+    expect(await generic.operatorProviders()).toEqual([provider])
+    await Promise.all([hub.close(), bare.close(), generic.close()])
+  })
+
+  it('reconciles directory receipts and retains leases for unknown failures', async () => {
+    const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId: 'a'.repeat(64) }
+    const workspace = { version: 1 as const, identity, path: '/srv/project' }
+    const leases = new Set<string>()
+    let receipt: unknown
+    let failure: Error | undefined
+    let acceptBeforeFailure = false
+    const snapshot = (commandId: string) => ({ commandId, sessionId: 'session', turnId: 'turn', state: 'running', stateRevision: 2 })
+    const execute = vi.fn(async (request: ResidentExecuteRequest) => {
+      if (acceptBeforeFailure) receipt = snapshot(String(request.commandId))
+      if (failure !== undefined) throw failure
+      receipt = snapshot(String(request.commandId))
+      return { ...snapshot(String(request.commandId)), dispose: async () => undefined }
+    })
+    const qualification = vi.fn(async () => ({ available: true }))
+    const releaseWorkspace = vi.fn(async (commandId: string) => { leases.delete(commandId) })
+    const host = {
+      qualification, gouziWorkspace: async () => ({ projectId: identity.projectId }),
+      inspectWorkspace: async (commandId: string) => leases.has(commandId) ? workspace : undefined,
+      materializeWorkspace: async (_identity: unknown, commandId: string) => {
+        if (leases.size > 0) throw new Error('project busy')
+        leases.add(commandId)
+        return workspace
+      },
+      renewWorkspace: vi.fn(async () => undefined), releaseWorkspace,
+    }
+    const resident = { execute, inspectCommand: vi.fn(async () => receipt) }
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never)
+    const request = (commandId: string) => ({ commandId, operatorId: 'codex', laneId: 'lane', prompt: [], workspaceIdentity: identity })
+    try {
+      failure = new ResidentCommandRefusal('product refused', 'SESSION_UNAVAILABLE')
+      await expect(hub.operatorExecute(request('refused'))).rejects.toMatchObject({ status: 409 })
+      expect(leases.size).toBe(0)
+      failure = new Error('transport timeout')
+      await expect(hub.operatorExecute(request('unknown'))).rejects.toThrow('transport timeout')
+      expect(leases.has('unknown')).toBe(true)
+      await expect(hub.operatorExecute(request('unknown'))).rejects.toThrow('indeterminate')
+      await expect(hub.operatorExecute(request('different'))).rejects.toThrow('project busy')
+      expect(execute).toHaveBeenCalledTimes(2)
+      expect(releaseWorkspace).toHaveBeenCalledTimes(1)
+      receipt = snapshot('unknown')
+      qualification.mockResolvedValue({ available: false })
+      await expect(hub.operatorExecute(request('unknown'))).resolves.toEqual({ sessionId: 'session', turnId: 'turn', stateRevision: 2 })
+      expect(execute).toHaveBeenCalledTimes(2)
+      expect(qualification).toHaveBeenCalledTimes(3)
+      receipt = undefined
+      leases.clear()
+      qualification.mockResolvedValue({ available: true })
+      acceptBeforeFailure = true
+      await expect(hub.operatorExecute(request('accepted-before-timeout'))).resolves.toMatchObject({ turnId: 'turn' })
+      expect(leases.has('accepted-before-timeout')).toBe(true)
+      expect(releaseWorkspace).toHaveBeenCalledTimes(1)
+      receipt = { ...snapshot('accepted-before-timeout'), state: 'settled' }
+      await expect(hub.operatorExecute(request('accepted-before-timeout'))).resolves.toMatchObject({ turnId: 'turn' })
+      expect(leases.size).toBe(0)
+      expect(releaseWorkspace).toHaveBeenCalledTimes(2)
+      acceptBeforeFailure = false
+      receipt = undefined
+      resident.inspectCommand.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('receipt query failed'))
+      await expect(hub.operatorExecute(request('read-failure'))).rejects.toThrow('receipt query failed')
+      expect(leases.has('read-failure')).toBe(true)
+      expect(releaseWorkspace).toHaveBeenCalledTimes(2)
+      await expect(hub.operatorExecute(request('read-failure'))).rejects.toThrow('indeterminate')
+    } finally { await hub.close() }
+  })
+
+  it('joins concurrent directory commands, rejects conflicting requests, and drains admission on close', async () => {
+    const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId: 'a'.repeat(64) }
+    let accept!: () => void
+    const barrier = new Promise<void>((resolve) => { accept = resolve })
+    const execute = vi.fn(async () => {
+      await barrier
+      return { sessionId: 'session', turnId: 'turn', stateRevision: 1, dispose: async () => undefined }
+    })
+    const materializeWorkspace = vi.fn(async () => ({ version: 1, identity, path: '/srv/project' }))
+    const host = { inspectWorkspace: async () => undefined, qualification: async () => ({ available: true }), materializeWorkspace }
+    const resident = { execute, inspectCommand: async () => undefined }
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never)
+    const request = { commandId: 'command', operatorId: 'codex', laneId: 'lane', prompt: [], workspaceIdentity: identity }
+    const first = hub.operatorExecute(request)
+    const second = hub.operatorExecute(request)
+    await expect(hub.operatorExecute({ ...request, laneId: 'different' })).rejects.toMatchObject({ status: 409 })
+    let closed = false
+    const closing = hub.close().then(() => { closed = true })
+    await Promise.resolve()
+    expect(closed).toBe(false)
+    accept()
+    expect(await first).toEqual(await second)
+    await closing
+    expect(materializeWorkspace).toHaveBeenCalledOnce()
+    expect(execute).toHaveBeenCalledOnce()
+    await expect(hub.operatorExecute(request)).rejects.toThrow('closed')
+  })
+
   it('exposes durable Resident admission and observation only when the control seam is mounted', async () => {
     const provider = {
       operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
@@ -331,6 +455,7 @@ describe('RemoteSyncHub', () => {
     const releaseWorkspace = vi.fn(async () => undefined)
     const readResidentArtifact = vi.fn(async (ref: string) => ({ ref, json: '{}' }))
     const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => ({
+      inspectWorkspace: async () => undefined, gouziWorkspace: async () => undefined,
       qualification, materializeWorkspace, renewWorkspace, releaseWorkspace, readResidentArtifact,
     }) as never)
     const adminDescription = await hub.describe(new AbortController().signal, 'admin')
@@ -424,10 +549,12 @@ describe('RemoteSyncHub', () => {
 
   it('keeps an unqualified local execution host read-only instead of falsely advertising execute', async () => {
     const resident = {
-      providers: async () => [], execute: vi.fn(), inspectTurn: vi.fn(), readEvents: vi.fn(), interrupt: vi.fn(),
+      inspectCommand: async () => undefined, providers: async () => [], execute: vi.fn(),
+      inspectTurn: vi.fn(), readEvents: vi.fn(), interrupt: vi.fn(),
     }
     const qualification = vi.fn(async () => ({ available: false, reason: 'no repository can be materialized' }))
     const hub = new RemoteSyncHub(api(), 4, undefined, resident, undefined, () => ({
+      inspectWorkspace: async () => undefined, gouziWorkspace: async () => undefined,
       qualification,
       materializeWorkspace: vi.fn(), renewWorkspace: vi.fn(), releaseWorkspace: vi.fn(), readResidentArtifact: vi.fn(),
     }))
@@ -444,13 +571,13 @@ describe('RemoteSyncHub', () => {
 
   it('uses the default qualification error and fails loudly without the workspace host seam', async () => {
     const resident = {
-      providers: async () => [], execute: vi.fn(), inspectTurn: vi.fn(async () => ({
+      inspectCommand: async () => undefined, providers: async () => [], execute: vi.fn(), inspectTurn: vi.fn(async () => ({
         commandId: 'command-1', sessionId: 'session-1', turnId: 'turn-1', state: 'running',
         stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
       })), readEvents: vi.fn(), interrupt: vi.fn(),
     }
     const unavailable = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => ({
-      qualification: async () => ({ available: false }),
+      inspectWorkspace: async () => undefined, gouziWorkspace: async () => undefined, qualification: async () => ({ available: false }),
       materializeWorkspace: vi.fn(), renewWorkspace: vi.fn(), releaseWorkspace: vi.fn(), readResidentArtifact: vi.fn(),
     }))
     await expect(unavailable.operatorExecute({
@@ -526,7 +653,7 @@ describe('RemoteSyncHub', () => {
 
     const standalone = new RemoteSyncHub(api(), 4)
     await expect(standalone.replicaList()).rejects.toThrow('replication is unavailable')
-    expect(() => standalone.operatorProviders()).toThrow('Resident execution is unavailable')
+    await expect(standalone.operatorProviders()).rejects.toThrow('Resident execution is unavailable')
     expect(() => standalone.clusterStatus()).toThrow('cluster control is unavailable')
     await standalone.close()
   })

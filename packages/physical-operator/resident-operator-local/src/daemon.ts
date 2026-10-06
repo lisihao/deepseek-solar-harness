@@ -51,6 +51,7 @@ export const RESIDENT_METHODS = Object.freeze([
   'session.inspect',
   'turn.execute',
   'turn.inspect',
+  'command.inspect',
   'turn.interrupt',
   'turn.resolve_indeterminate',
   'session.compact',
@@ -452,6 +453,8 @@ export class ResidentDaemon {
         return this.store.inspectSession(stringParam(params, 'session_id'))
       case 'turn.execute':
         return this.execute(params)
+      case 'command.inspect':
+        return this.store.inspectCommand(ResidentOperatorCommandId(stringParam(params, 'command_id'))) ?? null
       case 'turn.inspect':
         return this.store.inspectTurn(stringParam(params, 'turn_id'))
       case 'turn.interrupt': {

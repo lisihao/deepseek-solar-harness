@@ -20,6 +20,15 @@ Resident Provider 资格审查还会发布 Claude Code 与 Codex 的实时原生
 
 只有 `completed` 表示成功。取消、拒绝、token 耗尽与 Provider 失败会保留为明确停止原因或基础设施 rejection。Physical Service Definition 不负责排队、重试、持久化或回滚；Resident 持久化隔离在独立 Service Definition 与单写 daemon 后。协议 v4 仍为快速失败，且永不自动重放 indeterminate command。
 
+## 命令拒绝
+
+```ts public-api
+/** A correlated `turn.execute` error response; it does not prove the command was never accepted. */
+declare class ResidentCommandRefusal extends ResidentOperatorError {
+  constructor(message: string, code: string);
+}
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -151,6 +160,14 @@ abstract inspect(sessionId: string): Promise<ResidentSessionSnapshot>
 abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>
 
 /**
+ * Read a durable turn receipt by command identity without admitting or replaying execution.
+ * Absence is an observation at query time and does not exclude concurrent admission.
+ * @param _commandId - caller-owned durable command identity.
+ * @returns the current turn snapshot, or undefined when no receipt exists; unsupported providers throw.
+ */
+inspectCommand(_commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined>
+
+/**
  * Read a bounded page of structured observation events.
  * @param request - Session identity, exclusive cursor, bound, and optional signal.
  * @returns ordered events and the next exclusive cursor.
@@ -186,7 +203,7 @@ compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:486`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:494`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import ResidentOperatorService, {
+  type ResidentOperatorCommandId,
   type ResidentEventPage,
   type ResidentEventReadRequest,
   type ResidentCompactRequest,
@@ -176,6 +177,11 @@ class LocalResidentOperatorService extends ResidentOperatorService {
   inspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
     return this.client.inspectTurn(turnId)
   }
+
+  override inspectCommand(commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined> {
+    return this.client.inspectCommand(commandId)
+  }
+
 
   readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage> {
     return this.client.readEvents(

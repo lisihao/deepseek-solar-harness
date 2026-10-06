@@ -5,13 +5,16 @@
     "outDir": "lib/types",
     "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
   },
-  "files": ["src/index.ts", "src/invariant.ts", "src/contracts.ts", "src/host-service.ts"],
+  "files": ["src/index.ts", "src/invariant.ts", "src/contracts.ts", "src/host-service.ts", "src/recipient.ts", "src/recipient-message.ts", "src/room.ts"],
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../host/remote-auth" },
     { "path": "../../host/webserver" },
     { "path": "../orchestration" },
+    { "path": "../../core/session" },
+    { "path": "../../physical-operator/physical-operator" },
+    { "path": "../../core/tools" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

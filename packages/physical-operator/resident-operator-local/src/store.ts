@@ -861,6 +861,19 @@ export class ResidentStore {
   }
 
   /**
+   * Read a durable turn receipt without admitting or replaying the command.
+   * @param commandId - caller-owned durable command identity.
+   * @returns its current turn snapshot, or undefined when no turn receipt exists at query time.
+   */
+  inspectCommand(commandId: ResidentOperatorCommandId): ResidentTurnSnapshot | undefined {
+    const receipt = this.receiptByCommand(commandId)
+    if (receipt === undefined && this.compactReceiptByCommand(commandId) !== undefined) {
+      throw new ResidentOperatorError(`command ${commandId} belongs to a Session compaction`, 'COMMAND_CONFLICT')
+    }
+    return receipt === undefined ? undefined : this.inspectTurn(receipt.turn_id)
+  }
+
+  /**
    * Read one receipt by turn identity.
    * @param turnId - daemon-generated turn identity.
    * @returns current receipt projection.

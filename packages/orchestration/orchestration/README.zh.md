@@ -10,7 +10,9 @@
 
 RLM 节点可以选择启用与 Prime 兼容的 Autonomous Mode。Graph 或 Run 准入选择 `disabled | auto | enabled`；解析后的 continuation、token、耗时与宿主质量门禁策略经过内容寻址，并封存进该 Attempt 的 `NodeExecutionPlanV1`。Autonomous Mode 是单个节点内部的宿主续接策略，不是 Goal，也不是另一套 Scheduler。它默认保持禁用。
 
-`gouzi` 模块定义把长期执行成员与这个唯一权威联系起来的记录：成员记录及其三个相互独立的状态维度、十只成员的上限（只有已归档的成员才离开计数）、封存的执行授权、幂等的执行回执、能力快照，以及交接与经验提案的形状。它还定义了 `GouziControl`，即 Provider 通过可选的 `OrchestrationService.gouzi` 暴露的注册表操作（列出、配对宿主、创建、修改、设置 membership、设置端点、归档）；被拒绝的第十一只成员以 `GOUZI_LIMIT_REACHED` 失败。该模块只含类型和上限，不启动进程，也不调度任何工作。设计见[狗子 Agent Note](../../../.agents/notes/proposed/architecture/2026-10-03-dsh-gouzi-execution-members.md)。
+`gouzi` 模块定义把长期执行成员与这个唯一权威联系起来的记录：成员记录及其三个相互独立的状态维度、十只成员的上限（只有已归档的成员才离开计数）、封存的执行授权、幂等的执行回执、能力快照，以及交接与经验提案的形状。它还定义了 `GouziControl`，即 Provider 通过可选的 `OrchestrationService.gouzi` 暴露的注册表操作（列出、查询执行算子、配对宿主、创建、修改、设置 membership、设置端点、归档）；被拒绝的第十一只成员以 `GOUZI_LIMIT_REACHED` 失败。该模块只含类型和上限，不启动进程，也不调度任何工作。设计见[狗子 Agent Note](../../../.agents/notes/proposed/architecture/2026-10-03-dsh-gouzi-execution-members.md)。
+
+`GouziControl.executionOperators()` 区分注册表成员、连接状态与实际执行注册。Provider 返回当前成员 generation，以及经重新检查的完整注册算子 id、可用状态、不可用原因和模型列表；缺失或过期的注册不携带算子。这项读取不启动进程，不修改注册表或调度状态。可选的对象解析器确认点名用户消息中记录的成员身份与 generation，并向面向模型的[编排 Consumer](../tool-orchestration/README.md)返回合格算子 id；[房间投影](../ui-gouzi/README.md)负责会话筛选和结果展示。
 
 ## Model Experience
 

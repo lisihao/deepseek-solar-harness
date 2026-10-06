@@ -967,15 +967,22 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the directory and its subdirectories.',
       },
       {
-        signature: 'abstract resolveRepository(hostId: string, path: string): Promise<{ readonly repository: string; readonly source: string }>',
-        description: 'Resolve a workspace on a host to the repository identity a member may materialize.',
-        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'absolute path on that host, inside a Git repository.' }],
-        returns: 'the canonical repository identity and the path to clone from.',
-        throws: ['Error - when the path is not inside a Git repository with a usable remote.'],
+        signature: 'abstract resolveRepository(hostId: string, path: string): Promise<GouziProjectSource>',
+        description: 'Inspect an existing directory without changing it and resolve its host-local project identity.',
+        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'absolute directory path on that host; Git and ordinary directories are accepted.' }],
+        returns: 'the project identity, selected real directory path, and optional canonical Git origin.',
+        throws: ['Error - when the directory is missing, inaccessible, or cannot be inspected.'],
+      },
+      {
+        signature: 'abstract prepareRepository(hostId: string, path: string): Promise<GouziProjectSource>',
+        description: 'Prepare a confirmed adoption directory, initializing Git only when it is not already in a repository. Existing project files are preserved; an origin remote is not required. Call only after all selected directories pass read-only inspection and a member slot is available.',
+        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'resolved source directory selected for adoption.' }],
+        returns: 'the project identity, selected real directory path, and optional canonical Git origin.',
+        throws: ['Error - when directory inspection or Git initialization fails.'],
       },
       {
         signature: 'abstract provision(input: GouziProvisionInput): Promise<void>',
-        description: 'Create the member\'s home, identity, and repository allowlist on its host. Idempotent for the same identity.',
+        description: 'Create the member\'s home, identity, and project allowlist on its host. Idempotent for the same identity.',
         parameters: [{ name: 'input', description: 'identity and allowlist; `hostId` selects the machine.' }],
       },
       {
@@ -1263,6 +1270,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Dispatch a sealed worker request to its selected Provider.',
         parameters: [{ name: 'request', description: 'Selected worker, model, sealed prompt, and optional RLM plan.' }],
         returns: 'The bounded model output and usage metadata.',
+      },
+    ],
+  },
+  {
+    key: 'orchestrationRecipients',
+    summary: 'Resolves only the current logical turn\'s explicit user selection.',
+    description: 'Resolves only the current logical turn\'s explicit user selection.',
+    methods: [
+      {
+        signature: 'resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined>',
+        description: 'Confirm the selected member and its available execution entries.',
+        parameters: [{ name: 'events', description: 'ordered durable Session events.' }],
+        returns: 'confirmed recipient, or undefined when none was selected.',
       },
     ],
   },
@@ -1593,6 +1613,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the durable receipt and bounded result for one turn after caller reconnect.',
         parameters: [{ name: 'turnId', description: 'opaque turn identity from execution, a Session snapshot, or an event.' }],
         returns: 'the current receipt state, result reference, and terminal result when available.',
+      },
+      {
+        signature: 'inspectCommand(_commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined>',
+        description: 'Read a durable turn receipt by command identity without admitting or replaying execution. Absence is an observation at query time and does not exclude concurrent admission.',
+        parameters: [{ name: '_commandId', description: 'caller-owned durable command identity.' }],
+        returns: 'the current turn snapshot, or undefined when no receipt exists; unsupported providers throw.',
       },
       {
         signature: 'abstract readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage>',
@@ -4759,7 +4785,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziControl',
-    declaration: 'export interface GouziControl {\n    list(): Promise<{\n        readonly hosts: readonly GouziHostRecord[];\n        readonly members: readonly GouziMemberView[];\n    }>;\n    pairHost(host: Omit<GouziHostRecord, \'pairedAt\'>): Promise<GouziHostRecord>;\n    create(input: GouziCreateInput): Promise<GouziMemberView>;\n    edit(gouziId: GouziId, edit: GouziMemberEdit): Promise<GouziMemberView>;\n    setMembership(gouziId: GouziId, membership: Exclude<GouziMembership, \'archived\'>): Promise<GouziMemberView>;\n    setEndpoint(gouziId: GouziId, endpoint: string): Promise<GouziMemberView>;\n    archive(gouziId: GouziId, evidence: GouziArchiveEvidence): Promise<GouziMemberView>;\n}',
+    declaration: 'export interface GouziControl {\n    list(): Promise<{\n        readonly hosts: readonly GouziHostRecord[];\n        readonly members: readonly GouziMemberView[];\n    }>;\n    executionOperators(): Promise<readonly {\n        readonly gouziId: GouziId;\n        readonly generation: number;\n        readonly operators: readonly GouziOperatorCapability[];\n    }[]>;\n    pairHost(host: Omit<GouziHostRecord, \'pairedAt\'>): Promise<GouziHostRecord>;\n    create(input: GouziCreateInput): Promise<GouziMemberView>;\n    edit(gouziId: GouziId, edit: GouziMemberEdit): Promise<GouziMemberView>;\n    setMembership(gouziId: GouziId, membership: Exclude<GouziMembership, \'archived\'>): Promise<GouziMemberView>;\n    setEndpoint(gouziId: GouziId, endpoint: string): Promise<GouziMemberView>;\n    archive(gouziId: GouziId, evidence: GouziArchiveEvidence): Promise<GouziMemberView>;\n}',
   },
   {
     name: 'GouziCreateInput',
@@ -4802,6 +4828,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GouziMemberView extends GouziRecord {\n    readonly connection: GouziConnection;\n    readonly activity: GouziActivity;\n    readonly grantDeadlineMs: number;\n    readonly endpoint?: string;\n}',
   },
   {
+    name: 'GouziOperatorCapability',
+    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n}',
+  },
+  {
     name: 'GouziOwnerId',
     declaration: 'export type GouziOwnerId = Branded<\'GouziOwnerId\'>;',
   },
@@ -4810,8 +4840,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GouziProcessInfo {\n    readonly endpoint: string;\n    readonly pid: number;\n    readonly incarnation: number;\n}',
   },
   {
+    name: 'GouziProjectSource',
+    declaration: 'export interface GouziProjectSource {\n    readonly projectId: string;\n    readonly source: string;\n    readonly repository?: string;\n}',
+  },
+  {
     name: 'GouziProvisionInput',
-    declaration: 'export interface GouziProvisionInput {\n    readonly gouziId: string;\n    readonly ownerId: string;\n    readonly hostId: string;\n    readonly generation: number;\n    readonly authorityEpoch: string;\n    readonly repositories: readonly {\n        readonly repository: string;\n        readonly source: string;\n    }[];\n}',
+    declaration: 'export interface GouziProvisionInput {\n    readonly gouziId: string;\n    readonly ownerId: string;\n    readonly hostId: string;\n    readonly generation: number;\n    readonly authorityEpoch: string;\n    readonly projects: readonly GouziProjectSource[];\n    readonly defaultProjectId: string;\n}',
   },
   {
     name: 'GouziRecord',
@@ -5331,7 +5365,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationAdmissionTraceV1',
-    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly gouziRecipient?: OrchestrationGouziRecipientV1;\n    readonly sourceSessionId: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
   },
   {
     name: 'OrchestrationArtifactRef',
@@ -5404,6 +5438,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OrchestrationEventReadRequest',
     declaration: 'export interface OrchestrationEventReadRequest {\n    readonly runId: OrchestrationRunId;\n    readonly afterSequence?: number;\n    readonly limit?: number;\n}',
+  },
+  {
+    name: 'OrchestrationGouziRecipientV1',
+    declaration: 'export interface OrchestrationGouziRecipientV1 {\n    readonly gouziId: GouziId;\n    readonly generation: number;\n    readonly operatorIds: readonly PhysicalOperatorId[];\n}',
   },
   {
     name: 'OrchestrationIndeterminateRequest',
@@ -6983,7 +7021,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolDefinition',
-    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
+    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly delegation?: {\n        readonly family: \'physical-operator\' | \'subagent\';\n        readonly actions?: readonly string[];\n    };\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
   },
   {
     name: 'ToolDispatchExecution',
@@ -6995,7 +7033,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolExecution',
-    declaration: 'export interface ToolExecution extends ToolExecutionInput {\n    readonly rootCallId: CallId;\n    readonly token: ToolExecutionToken;\n}',
+    declaration: 'export interface ToolExecution extends ToolExecutionInput {\n    readonly delegation?: ToolDefinition[\'delegation\'];\n    readonly rootCallId: CallId;\n    readonly token: ToolExecutionToken;\n}',
   },
   {
     name: 'ToolExecutionFailure',

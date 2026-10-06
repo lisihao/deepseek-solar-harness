@@ -7,9 +7,11 @@ import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import {
   ResidentOperatorError,
+  ResidentCommandRefusal,
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
 } from '@deepseek-ai/dsh-resident-operator'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { ResidentDaemonClient, waitForDaemonSocketRelease } from '../src/client.ts'
 import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
 
@@ -22,6 +24,7 @@ const REQUIRED_METHODS = [
   'session.inspect',
   'turn.execute',
   'turn.inspect',
+  'command.inspect',
   'turn.interrupt',
   'turn.resolve_indeterminate',
   'session.compact',
@@ -50,6 +53,7 @@ function mockV5Handshake(params: Record<string, unknown>, daemonInstanceId: stri
   }
   return {
     ...mockHandshake(),
+    methods: REQUIRED_METHODS.filter(method => method !== 'command.inspect'),
     protocolVersion: V5_PROTOCOL_VERSION,
     stateSchemaVersion: V5_STATE_SCHEMA_VERSION,
     daemonInstanceId,
@@ -506,6 +510,47 @@ describe('ResidentDaemonClient request qualification', () => {
         secondHandshakeCalls: 1,
       })
     } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+
+describe('Resident execute response classification', () => {
+  it.each(['disconnect', 'timeout', 'invalid-envelope'] as const)('leaves %s untagged as command refusal', async (failure) => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-resident-response-'))
+    const socketPath = join(root, 'control.sock')
+    const sockets = new Set<import('node:net').Socket>()
+    const server = createServer((socket) => {
+      sockets.add(socket)
+      const transport = new JsonRpcLineTransport(socket, socket)
+      transport.onRequest(async (method) => {
+        if (method === 'system.handshake') return { ok: true, value: mockHandshake() }
+        if (method === 'turn.execute') {
+          if (failure === 'invalid-envelope') return { ok: false, error: {} }
+          if (failure === 'disconnect') socket.destroy()
+          return new Promise<never>(() => {})
+        }
+        return { ok: true, value: null }
+      })
+      socket.once('close', () => { transport.close(); sockets.delete(socket) })
+      transport.start()
+    })
+    server.listen(socketPath)
+    await once(server, 'listening')
+    const connected = new ResidentDaemonClient({ root, autoStart: false, connectTimeoutMs: 500, pollIntervalMs: 5 })
+    try {
+      const error = await connected.execute({
+        commandId: 'transport-classification', operatorId: 'codex', workspace: root,
+        prompt: [{ type: 'text', text: 'no execution response' }],
+        signal: AbortSignal.timeout(100),
+      }).catch((error: unknown) => error)
+      expect(error).toBeInstanceOf(Error)
+      expect(error).not.toBeInstanceOf(ResidentCommandRefusal)
+      if (failure === 'invalid-envelope') expect(error).toMatchObject({ code: 'INVALID_RESULT' })
+    } finally {
+      for (const socket of sockets) socket.destroy()
+      await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
       rmSync(root, { recursive: true, force: true })
     }
   })

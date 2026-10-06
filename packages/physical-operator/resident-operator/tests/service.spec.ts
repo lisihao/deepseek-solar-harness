@@ -23,6 +23,14 @@ class MinimalResidentOperators extends ResidentOperatorService {
 }
 
 describe('resident operator Service Definition', () => {
+  it('rejects command inspection unless a Provider implements it', () => {
+    const service = new MinimalResidentOperators(new Context())
+    expect(() => service.inspectCommand(ResidentOperatorCommandId('unobserved'))).toThrow(expect.objectContaining({
+      code: 'PROTOCOL_MISMATCH',
+      message: 'Resident Provider does not support command inspection',
+    }))
+  })
+
   it('rejects native CLI runtime management unless a Provider implements it', () => {
     const service = new MinimalResidentOperators(new Context())
     expect(() => service.cliRuntimes()).toThrow(ResidentOperatorError)

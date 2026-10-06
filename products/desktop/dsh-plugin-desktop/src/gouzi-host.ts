@@ -106,6 +106,10 @@ export class LocalGouziHost extends GouziHostService {
     return hostId === GOUZI_LOCAL_HOST_ID ? this.local.resolveRepository(path) : this.remote.resolveRepository(hostId, path)
   }
 
+  prepareRepository(hostId: string, path: string) {
+    return hostId === GOUZI_LOCAL_HOST_ID ? this.local.prepareRepository(path) : this.remote.prepareRepository(hostId, path)
+  }
+
   async provision(input: GouziProvisionInput): Promise<void> {
     if (input.hostId === GOUZI_LOCAL_HOST_ID) await this.local.provision(input)
     else await this.remote.provision(input)

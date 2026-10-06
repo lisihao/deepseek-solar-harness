@@ -25,7 +25,7 @@ import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
 import type { OrchestrationClusterPeerTransport } from '../src/cluster.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
-import { OrchestrationStore } from '../src/store.ts'
+import { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from '../src/store.ts'
 import type { RemotePhysicalOperatorServer } from '../src/remote-physical-operator.ts'
 
 const cleanup: Array<() => Promise<void>> = []
@@ -710,7 +710,183 @@ describe('orchestration daemon', () => {
     ]))
   })
 
-  it('registers an enabled Gouzi member from the store, sends a sealed grant, and tracks its state', async () => {
+  it('enforces fixed Gouzi recipients through compile JSON and start without dispatch or fallback', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-recipient-'))
+    const root = join(home, 'orchestrations')
+    const registry = new OrchestrationStore(root)
+    registry.gouzi.pairHost({ hostId: GouziHostId('host-1'), label: 'Host', authorityEpoch: GouziAuthorityEpoch('epoch-1'), credentialRef: 'HOST_TOKEN' })
+    registry.gouzi.create({ gouziId: GouziId('dog'), ownerId: GouziOwnerId('owner'), hostId: GouziHostId('host-1'), name: 'Dog', avatarId: 'shiba', role: 'development', grantDeadlineMs: 60_000 })
+    registry.gouzi.setMembership(GouziId('dog'), 'enabled')
+    registry.gouzi.setEndpoint(GouziId('dog'), 'http://127.0.0.1:13301')
+    const provider = {
+      product: 'codex', displayName: 'Native', description: 'Native', tags: ['coding'], maxConcurrency: 1,
+      injectionBoundaries: [], available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
+      models: [{ model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Worker', supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true }],
+    }
+    const calls: string[] = []
+    let disappear = false
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      calls.push(call.method)
+      if (call.method !== 'operator.providers') throw new Error(`unexpected side effect ${call.method}`)
+      const value = disappear ? [] : ['codex', 'claude'].map(operatorId => ({ ...provider, operatorId }))
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }))
+    const local = new FakeResidentClient()
+    const daemon = createDaemon(root, home, local, 60_000)
+    await daemon.start()
+    cleanup.push(async () => { registry.close(); await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const ids = ['gouzi.dog.codex', 'gouzi.dog.claude']
+    const admission = {
+      policy: 'direct' as const, route: 'taskgraph' as const, sourceSessionId: 'source', rlm: 'disabled' as const,
+      autonomous: 'disabled' as const, optimization: 'quality' as const,
+      gouziRecipient: { gouziId: GouziId('dog'), generation: 1, operatorIds: ids as never },
+    }
+    const fixed = {
+      ...graph(home),
+      nodes: graph(home).nodes.map(node => ({ ...node, operator: { ...node.operator, preferredIds: ids, fallbackIds: [] } })),
+    }
+    const request = { intent: { request: 'Fixed recipient fixture.' }, graph: fixed, admission }
+    for (const operator of [undefined, { preferredIds: [] }, { preferredIds: 'gouzi.dog.codex' }, { preferredIds: ['codex'] }, { preferredIds: ids, fallbackIds: ['codex'] }]) {
+      await expect(client.compile({ ...request, graph: { ...fixed, nodes: fixed.nodes.map(node => ({ ...node, operator })) } } as never)).rejects.toThrow('selected Gouzi execution entries')
+    }
+    for (const gouziRecipient of [null, { ...admission.gouziRecipient, operatorIds: [] }, { ...admission.gouziRecipient, generation: '1' }]) {
+      await expect(client.compile({ ...request, admission: { ...admission, gouziRecipient } } as never)).rejects.toThrow('admission is invalid')
+    }
+    for (const malformed of [{ ...admission, policy: 'unknown' }, { ...admission, runtimeContext: { version: 1, sections: [null] } }]) {
+      await expect(client.compile({ ...request, admission: malformed } as never)).rejects.toThrow('admission is invalid')
+    }
+    for (const gouziRecipient of [{ ...admission.gouziRecipient, generation: 2 }, { ...admission.gouziRecipient, gouziId: GouziId('other') }, { ...admission.gouziRecipient, operatorIds: [...ids, 'gouzi.dog.fake'] }]) {
+      await expect(client.compile({ ...request, admission: { ...admission, gouziRecipient } } as never)).rejects.toThrow('unavailable')
+    }
+    await expect(client.compile({ ...request, admission: { ...admission, rlm: 'auto' } })).rejects.toThrow('Standard execution')
+    await expect(client.compile({ ...request, graph: { ...fixed, nodes: fixed.nodes.map(node => ({ ...node, rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 1, maxTurns: 1 } })) } })).rejects.toThrow('Standard execution')
+    provider.available = false
+    await expect(client.compile(request)).rejects.toThrow('unavailable')
+    provider.available = true
+    const compilation = await client.compile(request)
+    expect(compilation.admission).toEqual(admission)
+    expect(compilation.graph).toEqual({ ...fixed, workspace: await realpath(home) })
+    expect(compilation.graph.maxParallel).toBe(fixed.maxParallel)
+    const approvalCompilation = await client.compile({ ...request, graph: { ...fixed, risk: 'medium' } })
+    const started = await client.start({ compilationId: approvalCompilation.compilationId, commandId: 'fixed-start' })
+    expect(started).toMatchObject({ state: 'awaiting_approval', admission })
+    provider.available = false
+    await expect(startCompilation(client, compilation.compilationId)).rejects.toThrow('unavailable')
+    provider.available = true
+    disappear = true
+    await expect(startCompilation(client, compilation.compilationId)).rejects.toThrow('unavailable')
+    disappear = false
+    registry.db.prepare('UPDATE gouzi_members SET generation = 2 WHERE gouzi_id = ?').run('dog')
+    await expect(startCompilation(client, compilation.compilationId)).rejects.toThrow('unavailable')
+    registry.db.prepare('UPDATE gouzi_members SET generation = 1 WHERE gouzi_id = ?').run('dog')
+    await client.gouziSetMembership('dog', 'retiring')
+    await expect(startCompilation(client, compilation.compilationId)).rejects.toThrow('unavailable')
+    expect(await client.start({ compilationId: approvalCompilation.compilationId, commandId: 'fixed-start' })).toEqual(started)
+    expect(registry.listRuns()).toHaveLength(1)
+    expect(local.requests).toEqual([])
+    expect(new Set(calls)).toEqual(new Set(['operator.providers']))
+  })
+
+  it('queries registered Gouzi execution entries freshly without changing member state or dispatching', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-catalog-'))
+    const root = join(home, 'orchestrations')
+    const registry = new OrchestrationStore(root)
+    registry.gouzi.pairHost({
+      hostId: GouziHostId('host-1'), label: 'Pilot host',
+      authorityEpoch: GouziAuthorityEpoch('epoch-9'), credentialRef: 'GOUZI_HOST_1_TOKEN',
+    })
+    for (const index of [1, 2, 3, 4]) {
+      registry.gouzi.create({
+        gouziId: GouziId(`gouzi-${String(index)}`), ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
+        name: `Dog ${String(index)}`, avatarId: 'shiba', role: 'development', grantDeadlineMs: 600_000,
+      })
+    }
+    registry.gouzi.setMembership(GouziId('gouzi-1'), 'enabled')
+    registry.gouzi.setEndpoint(GouziId('gouzi-1'), 'http://127.0.0.1:13301')
+    for (const index of [2, 3, 4]) registry.gouzi.setMembership(GouziId(`gouzi-${String(index)}`), 'enabled')
+    registry.gouzi.setMembership(GouziId('gouzi-3'), 'retiring')
+    registry.gouzi.setMembership(GouziId('gouzi-4'), 'retiring')
+    registry.gouzi.archive(GouziId('gouzi-4'), {
+      credentialsRevoked: true, workSettled: true, processTreeStopped: true,
+    })
+    registry.close()
+
+    const local = new FakeResidentClient()
+    const methods: string[] = []
+    let unreachable = false
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Member Codex',
+      tags: ['coding'], maxConcurrency: 1, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', description: 'Fast worker',
+        supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true,
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string; payload: Record<string, unknown> }
+      let value: unknown
+      methods.push(call.method)
+      if (unreachable) throw new Error('member host unreachable')
+      if (call.method === 'operator.providers') value = [{ ...provider, operatorId: 'claude', product: 'claude' }]
+      else throw new Error(`unexpected read-only query call ${call.method}`)
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }))
+    const daemon = createDaemon(root, home, local, 60_000)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const legacySocket = createConnection(daemon.socketPath)
+    await once(legacySocket, 'connect')
+    const legacyTransport = new JsonRpcLineTransport(legacySocket, legacySocket)
+    legacyTransport.start()
+    try {
+      expect(await legacyTransport.request('system.handshake', {
+        protocol_version: 6, state_schema_version: ORCHESTRATION_STATE_SCHEMA_VERSION,
+      })).toMatchObject({ ok: false, error: { code: 'ORCHESTRATION_VERSION_MISMATCH' } })
+    } finally {
+      legacyTransport.close()
+      legacySocket.destroy()
+    }
+    const watcher = new OrchestrationStore(root)
+    cleanup.push(async () => { watcher.close() })
+    const before = await client.gouziList()
+    const commitIndex = watcher.commitIndex()
+    const events = watcher.db.prepare('SELECT COUNT(*) AS count FROM orchestration_events').get()
+    const entries = await client.gouziExecutionOperators()
+    expect(entries).toEqual([
+      { gouziId: 'gouzi-1', generation: 1, operators: [{
+        operatorId: 'gouzi.gouzi-1.claude', available: true, models: ['gpt-5.6-luna'],
+      }] },
+      { gouziId: 'gouzi-2', generation: 1, operators: [] },
+    ])
+    provider.available = false
+    Object.assign(provider, { unavailableReason: 'native login missing' })
+    provider.models[0]!.model = 'fresh-model'
+    expect((await client.gouziExecutionOperators())[0]?.operators).toEqual([{
+      operatorId: 'gouzi.gouzi-1.claude', available: false,
+      unavailableReason: 'native login missing', models: ['fresh-model'],
+    }])
+    unreachable = true
+    const unavailable = (await client.gouziExecutionOperators())[0]?.operators[0]
+    expect(unavailable?.available).toBe(false)
+    expect(unavailable?.unavailableReason).toContain('operator.providers transport failed')
+    expect(await client.gouziList()).toEqual(before)
+    expect(watcher.commitIndex()).toBe(commitIndex)
+    expect(watcher.db.prepare('SELECT COUNT(*) AS count FROM orchestration_events').get()).toEqual(events)
+    expect(new Set(methods)).toEqual(new Set(['operator.providers']))
+    expect(local.requests).toHaveLength(0)
+    watcher.db.prepare('UPDATE gouzi_members SET generation = 2 WHERE gouzi_id = ?').run('gouzi-1')
+    expect((await client.gouziExecutionOperators())[0]).toEqual({ gouziId: 'gouzi-1', generation: 2, operators: [] })
+    await client.gouziSetMembership('gouzi-1', 'retiring')
+    expect(await client.gouziExecutionOperators()).toEqual([{ gouziId: 'gouzi-2', generation: 1, operators: [] }])
+  })
+
+  it.each([false, true])('registers an enabled Gouzi member, sends a sealed grant, and tracks its state (fixed recipient: %s)', async (bound) => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-daemon-'))
     const root = join(home, 'orchestrations')
     const registry = new OrchestrationStore(root)
@@ -786,6 +962,7 @@ describe('orchestration daemon', () => {
       intent: { request: 'Analyze the fixture on a member.' },
       admission: {
         policy: 'auto', route: 'taskgraph', sourceSessionId: 'gouzi-read-only',
+        ...bound ? { gouziRecipient: { gouziId: GouziId('gouzi-1'), generation: 1, operatorIds: ['gouzi.gouzi-1.codex'] as never } } : {},
         rlm: 'disabled', continualHarness: 'off', optimization: 'economy',
       },
       graph: {

@@ -145,6 +145,35 @@ describe('two starts of the same member', () => {
   }, 30_000)
 })
 
+describe('host execution metadata alongside member homes', () => {
+  it('starts a second member after locks exist and still counts real members against the active limit', async () => {
+    home('a')
+    home('b')
+    home('c')
+    const members = supervisor('ready', {}, { activeLimit: 2, readyTimeoutMs: 5_000 })
+    try {
+      const first = await members.start('a')
+      spawned.add(first.pid)
+      mkdirSync(join(root, '.execution-locks'))
+      const second = await members.start('b')
+      spawned.add(second.pid)
+      expect(first.pid).not.toBe(second.pid)
+      expect(spawnCount).toBe(2)
+      await expect(members.start('c')).rejects.toBeInstanceOf(GouziActiveLimitError)
+      expect(spawnCount).toBe(2)
+      expect(spawnedPids('c')).toEqual([])
+      await members.stop('a')
+      const third = await members.start('c')
+      spawned.add(third.pid)
+      expect(spawnCount).toBe(3)
+    } finally {
+      await members.stop('a')
+      await members.stop('b')
+      await members.stop('c')
+    }
+  }, 30_000)
+})
+
 describe('stopping a member', () => {
   it('escalates past an ignored SIGTERM and returns only after the process is gone', async () => {
     home('a')

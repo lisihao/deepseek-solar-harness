@@ -1,6 +1,6 @@
-// Resident conversation skeleton. Hero chrome, composer positioning, the
-// chain, AND the composer bar (session-maybe slot) stay mounted across
-// no-session/session transitions — the bar renders inert via owner props.
+// Resident conversation layout. Optional header, content, and composer
+// contributions share the current summary; the mandatory interaction chain
+// retains authority over the single composer seat.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
@@ -22,7 +22,9 @@ export function ConversationRoot({
   const session = useSession(s => s)
   const inputState = useInput(s => s)
   const cwd = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.cwd)
-  const summaryBlank = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId]?.blank)
+  const summary = useSessions(s => sessionId === undefined ? undefined : s.byId[sessionId])
+  const summaryBlank = summary?.blank
+  const roomOwner = { agentPreset: summary?.agentPreset, blank: summaryBlank ?? false }
   const workspaces = useWorkspaces(s => s)
   // A plugin this package cannot import (ui-model-selection) says this session cannot
   // send; its reason is already localized by whoever raised it.
@@ -167,10 +169,13 @@ export function ConversationRoot({
   )
 
   const phase = settling ? 'settling' : hero ? 'hero' : 'active'
+  const composerFallback = renderSlotChain('conversation.room.composer', {
+    ...roomOwner, inert, blocked: blocked ? composerBlock : undefined,
+  }, { fallback: composerBar })
   const composer = renderSlotChain(
     'conversation.composer',
     { interactions: pending, session },
-    { fallback: composerBar, overlay: true },
+    { fallback: composerFallback, overlay: true },
   )
 
   // Sticky wraps the whole chain output (fallback + elected overlay), not
@@ -185,10 +190,23 @@ export function ConversationRoot({
 
   return (
     <div className={css.root} data-phase={phase}>
-      {renderSlot('conversation.session.header', {})}
-      <div className={css.scrollBody} data-conversation-scroll="">
-        {renderSlot('conversation.session', {})}
-        {composerSeat}
+      <div className={css.roomHeader} data-conversation-room-header="">
+        {renderSlotChain('conversation.room.header', roomOwner, {
+          fallback: renderSlot('conversation.session.header', {}),
+        })}
+      </div>
+      <div className={css.roomBody}>
+        <div className={css.roomMain} data-conversation-room-main="">
+          <div className={css.scrollBody} data-conversation-scroll="">
+            {renderSlotChain('conversation.room.content', roomOwner, {
+              fallback: renderSlot('conversation.session', {}),
+            })}
+            {composerSeat}
+          </div>
+        </div>
+        <aside className={css.roomAside} data-conversation-room-aside="">
+          {renderSlotChain('conversation.room.aside', roomOwner, { fallback: null })}
+        </aside>
       </div>
     </div>
   )

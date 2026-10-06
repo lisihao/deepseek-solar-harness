@@ -22,6 +22,7 @@ import {
   GOUZI_DASHBOARD_PATH,
   GOUZI_LOCAL_HOST_ID,
   GOUZI_ROLE_IDS,
+  GOUZI_ROOM_POLL_INTERVAL_SCHEMA,
   gouziPrimaryState,
   type GouziAvatar,
   type GouziControlRequest,
@@ -33,21 +34,27 @@ import {
   type GouziMemberProjection,
   type GouziProjectsCheck,
 } from './contracts.ts'
+import { gouziRoom, gouziRoomEvidence } from './room.ts'
 import './host-service.ts'
+import type { GouziProjectSource } from './host-service.ts'
+import { GouziRecipientResolver, installKennelRecipientGuard } from './recipient.ts'
 
 export * from './contracts.ts'
-export { GouziHostService, type GouziProcessInfo, type GouziProvisionInput, type GouziSshTarget } from './host-service.ts'
+export { GouziHostService, type GouziProcessInfo, type GouziProjectSource, type GouziProvisionInput, type GouziSshTarget } from './host-service.ts'
 
 export const name = 'ui-gouzi'
 export const inject = ['orchestrations', 'webServer']
 
 /** Gouzi plugin configuration. */
 export interface Config {
+  /** Browser room read interval in integer milliseconds. */
+  readonly roomPollIntervalMs?: number
   /** How long after issue an execution grant may start work, in milliseconds. */
   readonly grantDeadlineMs?: number
 }
 
 export const Config: z<Config> = z.object({
+  roomPollIntervalMs: GOUZI_ROOM_POLL_INTERVAL_SCHEMA,
   grantDeadlineMs: z.number().step(1).min(60_000).max(24 * 60 * 60_000).default(2 * 60 * 60_000),
 })
 
@@ -265,16 +272,14 @@ class GouziRefusal extends Error {
 }
 
 function projectUnavailable(path: string, error: unknown): GouziRefusal | undefined {
-  const message = error instanceof Error ? error.message : String(error)
-  const detail = error as { code?: unknown; syscall?: unknown; killed?: unknown; signal?: unknown } | undefined
+  const detail = error as { code?: unknown; killed?: unknown; signal?: unknown } | undefined
   if (detail?.killed === true || detail?.signal != null) return undefined
   let reason: string | undefined
-  if (/not (?:inside |a )?(?:a )?git repository/iu.test(message)) reason = '这个目录不是 Git 仓库'
-  else if (/No such remote ['"]?origin/iu.test(message)) reason = '这个 Git 仓库没有 origin 远程地址'
-  else if (/remote repository identity must|Invalid URL/u.test(message)) reason = '这个 Git 仓库的 origin 远程地址无效'
-  else if ((detail?.code === 'ENOENT' || detail?.code === 'ENOTDIR') && detail.syscall === 'realpath') reason = '这个项目目录不存在或不是目录'
+  if (detail?.code === 'ENOENT') reason = '这个目录不存在，请选择已有目录'
+  else if (detail?.code === 'ENOTDIR') reason = '这个路径不是目录，请选择目录'
+  else if (detail?.code === 'EACCES' || detail?.code === 'EPERM') reason = '没有权限访问这个目录，请检查目录权限后重试'
   if (reason === undefined) return undefined
-  return new GouziRefusal('GOUZI_PROJECT_UNAVAILABLE', `${path}：${reason}。当前需要带有效 origin 的 Git 仓库，普通目录暂不支持。`)
+  return new GouziRefusal('GOUZI_PROJECT_UNAVAILABLE', `${path}：${reason}。`)
 }
 
 async function resolveProject(host: ReturnType<typeof requireHost>, hostId: string, path: string) {
@@ -308,8 +313,26 @@ async function adopt(ctx: Context, control: GouziControl, request: Extract<Gouzi
   const known = (await projectHosts(ctx)).find(value => value.hostId === hostId)
   if (known === undefined) throw new GouziInputError(`unknown host ${hostId}`)
   const resolved = await Promise.all(request.projects.map(path => resolveProject(host, hostId, path)))
-  const repositories = [...new Map(resolved.map(value => [value.repository, value])).values()]
   const listing = await control.list()
+  if (listing.members.filter(member => countsTowardGouziLimit(member.membership)).length >= GOUZI_MEMBER_LIMIT) {
+    throw new GouziRefusal('GOUZI_LIMIT_REACHED', `最多只能收养 ${String(GOUZI_MEMBER_LIMIT)} 只狗子，请先退役一只后重试`)
+  }
+  const prepared: GouziProjectSource[] = []
+  for (const project of new Map(resolved.map(value => [value.source, value])).values()) {
+    try {
+      prepared.push(await host.prepareRepository(hostId, project.source))
+    } catch (error) {
+      const failure = projectUnavailable(project.source, error)
+      const message = failure?.message ?? `${project.source}：${error instanceof Error ? error.message : String(error)}`
+      const completed = prepared.length === 0 ? '' : `以下目录已完成准备：${prepared.map(value => value.source).join('、')}。`
+      const detail = `${message}${message.endsWith('。') ? '' : '。'}${completed}尚未创建狗子，未占用名额。`
+      throw failure === undefined ? new Error(detail) : new GouziRefusal(failure.code, detail)
+    }
+  }
+  const uniqueProjects = new Map<string, GouziProjectSource>()
+  for (const project of prepared) if (!uniqueProjects.has(project.projectId)) uniqueProjects.set(project.projectId, project)
+  // parseControl requires at least one project; successful preparation and deduplication preserve one.
+  const projects = [...uniqueProjects.values()] as [GouziProjectSource, ...GouziProjectSource[]]
   const pilot = listing.hosts.find(value => String(value.hostId) === hostId)
     ?? await control.pairHost({
       hostId: GouziHostId(hostId),
@@ -334,7 +357,8 @@ async function adopt(ctx: Context, control: GouziControl, request: Extract<Gouzi
       hostId: String(pilot.hostId),
       generation: created.generation,
       authorityEpoch: String(pilot.authorityEpoch),
-      repositories,
+      projects,
+      defaultProjectId: projects[0].projectId,
     })
     const process = await host.start(String(pilot.hostId), String(gouziId))
     await control.setEndpoint(gouziId, process.endpoint)
@@ -462,7 +486,10 @@ function failure(error: unknown): Reply {
  * @param config - grant lifetime given to every new member.
  */
 export function apply(ctx: Context, config: Config = {}): void {
+  new GouziRecipientResolver(ctx)
+  installKennelRecipientGuard(ctx)
   const grantDeadlineMs = config.grantDeadlineMs ?? 2 * 60 * 60_000
+  const roomPollIntervalMs = GOUZI_ROOM_POLL_INTERVAL_SCHEMA(config.roomPollIntervalMs)
   // Adoption changes the member count and starts a process; two requests must not interleave.
   let queue: Promise<unknown> = Promise.resolve()
 
@@ -476,7 +503,27 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
     const control = ctx.orchestrations.gouzi
     if (control === undefined) return refusal(503, 'GOUZI_UNAVAILABLE', '当前编排服务不管理狗子')
-    if (request.method === 'GET') return { status: 200, body: await dashboard(ctx, control, authority) }
+    if (request.method === 'GET') {
+      const query = new URL(request.url ?? GOUZI_DASHBOARD_PATH, 'http://localhost').searchParams
+      const sessionId = query.get('session_id')
+      const evidenceRef = query.get('evidence_ref')
+      const runId = query.get('run_id')
+      if (sessionId === null && evidenceRef === null && runId === null) {
+        return { status: 200, body: await dashboard(ctx, control, authority) }
+      }
+      if (sessionId === null || sessionId.trim().length === 0) throw new GouziInputError('session_id must be a non-empty string')
+      if (evidenceRef !== null || runId !== null) {
+        if (evidenceRef === null || evidenceRef.trim().length === 0 || runId === null || runId.trim().length === 0) {
+          throw new GouziInputError('evidence_ref and run_id must be non-empty strings')
+        }
+        const artifact = await gouziRoomEvidence(ctx.orchestrations, sessionId, runId, evidenceRef)
+        return artifact === undefined ? refusal(404, 'GOUZI_EVIDENCE_NOT_FOUND', '这个会话没有保留该证据') : { status: 200, body: artifact }
+      }
+      return {
+        status: 200,
+        body: await gouziRoom(ctx.orchestrations, control, sessionId, await dashboard(ctx, control, authority), roomPollIntervalMs),
+      }
+    }
     if (request.method !== 'POST') return 'method-not-allowed'
     if (request.headers[GOUZI_CONTROL_HEADER] !== '1') return refusal(403, 'CONTROL_HEADER_REQUIRED', '缺少控制头')
     if (!canManage(authority)) return refusal(403, 'REMOTE_SCOPE_FORBIDDEN', '这个设备只能查看')

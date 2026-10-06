@@ -70,6 +70,8 @@ import {
   GouziAuthorityEpoch,
   GouziHostId,
   GouziId,
+  type GouziControl,
+  type GouziMemberView,
   GouziOwnerId,
   OrchestrationArtifactRef,
   OrchestrationError,
@@ -79,6 +81,7 @@ import {
   type GouziAvatarId,
   type GouziMembership,
   type GouziRole,
+  type LogicalTaskGraphV1,
   type NodeExecutionPlanV1,
   type OrchestrationBlocker,
   type OrchestrationAdmissionTraceV1,
@@ -164,7 +167,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 6
+export const ORCHESTRATION_PROTOCOL_VERSION = 7
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -186,6 +189,7 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'cluster.export',
   'cluster.install',
   'gouzi.list',
+  'gouzi.execution_operators',
   'gouzi.pair_host',
   'gouzi.create',
   'gouzi.edit',
@@ -959,6 +963,49 @@ function taskGraphContextEnvelope(
   })
 }
 
+/** Validate collaboration trace fields at the daemon JSON ingress without discarding them. */
+function validateAdmissionWire(value: unknown): asserts value is OrchestrationAdmissionTraceV1 | undefined {
+  if (value === undefined) return
+  const fail = (): never => { throw new OrchestrationError('orchestration admission is invalid', 'GRAPH_INVALID') }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail()
+  const admission = value as Record<string, unknown>
+  if (!['auto', 'direct', 'codex', 'claude-code'].includes(String(admission.policy))
+    || admission.route !== 'taskgraph' || typeof admission.sourceSessionId !== 'string'
+    || admission.sourceSessionId.trim().length === 0) fail()
+  const choices: Record<string, readonly string[]> = {
+    rlm: ['auto', 'enabled', 'disabled'], autonomous: ['auto', 'enabled', 'disabled'],
+    continualHarness: ['auto', 'off', 'session', 'workspace', 'global'],
+    optimization: ['balanced', 'quality', 'speed', 'economy'],
+    plannerVerifierPreference: ['codex-sol', 'claude-frontier', 'best-high-tier'],
+    executionPreference: ['luna-first', 'claude-sonnet', 'balanced'],
+  }
+  for (const [key, allowed] of Object.entries(choices)) {
+    if (admission[key] !== undefined && (typeof admission[key] !== 'string' || !allowed.includes(admission[key]))) fail()
+  }
+  const runtime = admission.runtimeContext
+  if (runtime !== undefined) {
+    if (runtime === null || typeof runtime !== 'object' || Array.isArray(runtime)) fail()
+    const fields = runtime as Record<string, unknown>
+    if (fields.version !== 1 || typeof fields.sourceSessionId !== 'string'
+      || typeof fields.contextSnapshotMessageId !== 'string' || !Array.isArray(fields.sections)) fail()
+    for (const section of fields.sections as unknown[]) {
+      if (section === null || typeof section !== 'object' || Array.isArray(section)) fail()
+      const fields = section as Record<string, unknown>
+      if (typeof fields.name !== 'string' || typeof fields.text !== 'string') fail()
+    }
+  }
+  const recipient = admission.gouziRecipient
+  if (recipient !== undefined) {
+    if (recipient === null || typeof recipient !== 'object' || Array.isArray(recipient)) fail()
+    const fields = recipient as Record<string, unknown>
+    if (typeof fields.gouziId !== 'string' || fields.gouziId.trim() !== fields.gouziId || fields.gouziId.length === 0
+      || !Number.isSafeInteger(fields.generation) || Number(fields.generation) < 1
+      || !Array.isArray(fields.operatorIds) || fields.operatorIds.length === 0
+      || fields.operatorIds.some(id => typeof id !== 'string' || id.length === 0 || id.trim() !== id)
+      || new Set(fields.operatorIds).size !== fields.operatorIds.length) fail()
+  }
+}
+
 /** Reject a session strategy that would silently promote Standard to RLM. */
 function validateAdmissionStrategy(admission: OrchestrationAdmissionTraceV1 | undefined): void {
   if (admission?.rlm === 'disabled' && admission.autonomous === 'enabled') {
@@ -1184,6 +1231,8 @@ export class OrchestrationDaemon {
   private readonly rlmProgressSources = new Map<string, PhysicalProgressSource[]>()
   private readonly remoteOperatorRegistrations = new Map<string, {
     readonly signature: string
+    readonly member?: GouziMemberView
+    readonly operatorIds: readonly string[]
     readonly dispose: readonly (() => Promise<void>)[]
   }>()
   private remoteOperatorRefreshAt = 0
@@ -1360,7 +1409,12 @@ export class OrchestrationDaemon {
   private async dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
       case 'system.handshake': return this.handshake(params)
-      case 'orchestration.compile': this.requireClusterLeader(); return this.compile(params.request as never)
+      case 'orchestration.compile': {
+        this.requireClusterLeader()
+        const request = params.request as Parameters<Context['orchestrations']['compile']>[0]
+        validateAdmissionWire((params.request as { readonly admission?: unknown } | undefined)?.admission)
+        return this.compile(request)
+      }
       case 'orchestration.start': {
         this.requireClusterLeader()
         return this.startRun({
@@ -1389,6 +1443,7 @@ export class OrchestrationDaemon {
       case 'cluster.heartbeat': return this.expectCluster().heartbeat(params.request as OrchestrationClusterHeartbeatRequest)
       case 'cluster.export': this.requireClusterLeader(); return this.store.exportClusterReplica()
       case 'cluster.install': return this.installClusterReplica(params.request as OrchestrationClusterInstallRequest)
+      case 'gouzi.execution_operators': return this.gouziExecutionOperators()
       case 'gouzi.list': return { hosts: this.store.gouzi.listHosts(), members: this.store.gouzi.list() }
       case 'gouzi.pair_host': {
         this.requireClusterLeader()
@@ -1476,10 +1531,40 @@ export class OrchestrationDaemon {
     }
   }
 
+  private async validateGouziRecipient(
+    admission: OrchestrationAdmissionTraceV1 | undefined,
+    graph: LogicalTaskGraphV1,
+  ): Promise<void> {
+    const recipient = admission?.gouziRecipient
+    if (recipient === undefined) return
+    for (const node of graph.nodes) {
+      const preferred = node.operator?.preferredIds
+      if (!Array.isArray(preferred) || preferred.length === 0
+        || preferred.some((id: string) => !recipient.operatorIds.includes(PhysicalOperatorId(id)))
+        || (node.operator?.fallbackIds?.length ?? 0) !== 0) {
+        throw new OrchestrationError(`node ${node.id} must use only the selected Gouzi execution entries without fallback`, 'GRAPH_INVALID')
+      }
+      if ((node.rlm?.mode ?? admission?.rlm ?? 'auto') !== 'disabled'
+        || (node.autonomous?.mode ?? admission?.autonomous ?? 'disabled') !== 'disabled') {
+        throw new OrchestrationError(
+          'fixed Gouzi recipients currently support Standard execution with RLM and Autonomous disabled only',
+          'GRAPH_INVALID',
+        )
+      }
+    }
+    const entries = await this.gouziExecutionOperators()
+    const member = entries.find(value => value.gouziId === recipient.gouziId && value.generation === recipient.generation)
+    if (member === undefined
+      || recipient.operatorIds.some(id => !member.operators.some(operator => operator.operatorId === id && operator.available))) {
+      throw new OrchestrationError('selected Gouzi generation or execution entry is unavailable', 'RUN_STATE_CONFLICT')
+    }
+  }
+
   private async compile(request: Parameters<Context['orchestrations']['compile']>[0]): Promise<OrchestrationCompilationV1> {
     validateGraph(request.graph)
     validateAdmissionRuntimeContext(request.admission)
     validateAdmissionStrategy(request.admission)
+    await this.validateGouziRecipient(request.admission, request.graph)
     const workspace = await realpath(request.graph.workspace).catch(() => {
       throw new OrchestrationError(`graph workspace does not exist: ${request.graph.workspace}`, 'GRAPH_INVALID')
     })
@@ -1488,6 +1573,7 @@ export class OrchestrationDaemon {
       await this.worktrees.verifyRepository(workspace, graph.baseSha as string)
     }
     const intent = await this.ctx.intentCompiler.compile(structuredClone(request.intent))
+    await this.validateGouziRecipient(request.admission, graph)
     const intentRef = this.store.putArtifact(intent)
     const requirementRef = request.requirement === undefined ? undefined : this.store.putArtifact(request.requirement)
     const graphRef = this.store.putArtifact(graph)
@@ -1516,7 +1602,11 @@ export class OrchestrationDaemon {
     return compilation
   }
 
-  private startRun(request: OrchestrationStartRequest): OrchestrationRunSnapshot {
+  private async startRun(request: OrchestrationStartRequest): Promise<OrchestrationRunSnapshot> {
+    if (this.store.commandReceipt(request.commandId) === undefined) {
+      const compilation = this.store.getCompilation(request.compilationId)
+      await this.validateGouziRecipient(compilation.admission, compilation.graph)
+    }
     return this.withCommandReceipt(
       'orchestration.start',
       request,
@@ -1846,10 +1936,10 @@ export class OrchestrationDaemon {
   }
 
   private async refreshRemoteOperators(initial: boolean): Promise<void> {
-    let servers: readonly RemotePhysicalOperatorServer[]
+    let registrations: readonly { readonly server: RemotePhysicalOperatorServer; readonly member?: GouziMemberView }[]
     try {
-      servers = [
-        ...this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root),
+      registrations = [
+        ...(this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root)).map(server => ({ server })),
         ...await this.gouziServers(),
       ]
     } catch (error) {
@@ -1858,14 +1948,14 @@ export class OrchestrationDaemon {
       this.remoteOperatorRefreshAt = Date.now() + 5_000
       return
     }
-    const desired = new Map(servers.map(server => [server.id, server] as const))
+    const desired = new Map(registrations.map(({ server }) => [server.id, server] as const))
     for (const [serverId, registration] of this.remoteOperatorRegistrations) {
       if (desired.has(serverId)) continue
       await Promise.allSettled(registration.dispose.map(dispose => dispose()))
       this.remoteOperatorRegistrations.delete(serverId)
     }
-    for (const server of servers) {
-      const signature = JSON.stringify(server)
+    for (const { server, member } of registrations) {
+      const signature = JSON.stringify([server, member?.generation, member?.hostId])
       const existing = this.remoteOperatorRegistrations.get(server.id)
       if (existing?.signature === signature) continue
       try {
@@ -1875,7 +1965,10 @@ export class OrchestrationDaemon {
           this.remoteOperatorRegistrations.delete(server.id)
         }
         const dispose = operators.map(operator => this.ctx.physicalOperators.registerOperator(operator))
-        this.remoteOperatorRegistrations.set(server.id, { signature, dispose })
+        this.remoteOperatorRegistrations.set(server.id, {
+          signature, dispose, operatorIds: operators.map(operator => String(operator.descriptor.id)),
+          ...member === undefined ? {} : { member },
+        })
         this.observeGouzi(server, 'online')
       } catch (error) {
         this.ctx.logger.warn(
@@ -1887,20 +1980,61 @@ export class OrchestrationDaemon {
     this.remoteOperatorRefreshAt = Date.now() + 5_000
   }
 
+  private async gouziExecutionOperators(): ReturnType<GouziControl['executionOperators']> {
+    const registrations = [...this.remoteOperatorRegistrations.entries()]
+    const catalogs = await this.ctx.physicalOperators.residentCatalogs()
+    return this.store.gouzi.list().filter(member => member.membership === 'enabled').map((member) => {
+      const operatorIds = new Set(registrations.flatMap(([serverId, registration]) => {
+        const registered = registration.member
+        return this.remoteOperatorRegistrations.get(serverId) === registration
+          && registered?.gouziId === member.gouziId
+          && registered.generation === member.generation
+          && registered.hostId === member.hostId
+          && registered.ownerId === member.ownerId
+          && registered.endpoint === member.endpoint
+          ? registration.operatorIds : []
+      }))
+      return {
+        gouziId: member.gouziId,
+        generation: member.generation,
+        operators: catalogs.filter(catalog => operatorIds.has(String(catalog.operatorId))).map(catalog => ({
+          operatorId: String(catalog.operatorId),
+          available: catalog.available,
+          ...catalog.unavailableReason === undefined ? {} : { unavailableReason: catalog.unavailableReason },
+          models: catalog.models.map(model => model.model),
+        })),
+      }
+    })
+  }
+
   /** Enabled Gouzi members as remote Servers; a member whose credential cannot be read is skipped with a warning. */
-  private async gouziServers(): Promise<RemotePhysicalOperatorServer[]> {
-    const servers: RemotePhysicalOperatorServer[] = []
+  private async gouziServers(): Promise<Array<{ readonly server: RemotePhysicalOperatorServer; readonly member: GouziMemberView }>> {
+    const servers: Array<{ readonly server: RemotePhysicalOperatorServer; readonly member: GouziMemberView }> = []
     for (const member of this.store.gouzi.list()) {
       if (member.membership !== 'enabled' || member.endpoint === undefined) continue
       const host = this.store.gouzi.getHost(member.hostId)
       if (host === undefined) continue
       try {
         const resolved = await this.ctx.get('credentials')?.resolve(credentialRef(host.credentialRef))
-        servers.push(gouziOperatorServer({
-          store: this.store,
-          gouziId: member.gouziId,
-          ...resolved === undefined ? {} : { accessToken: resolved.value },
-        }))
+        servers.push({
+          member,
+          server: gouziOperatorServer({
+            store: this.store,
+            gouziId: member.gouziId,
+            validateRecipientOperator: (operatorId, generation) => {
+              const registration = this.remoteOperatorRegistrations.get(`gouzi-${String(member.gouziId)}`)
+              const registered = registration?.member
+              const current = this.store.gouzi.read(member.gouziId)
+              return registered !== undefined && current !== undefined
+                && registered.gouziId === current.gouziId
+                && registered.generation === generation && registered.generation === current.generation
+                && registered.hostId === current.hostId && registered.ownerId === current.ownerId
+                && registered.endpoint === current.endpoint && registration?.operatorIds.includes(operatorId) === true
+                && this.ctx.physicalOperators.getOperator(operatorId)?.availability().available === true
+            },
+            ...resolved === undefined ? {} : { accessToken: resolved.value },
+          }),
+        })
       } catch (error) {
         this.ctx.logger.warn(`gouzi "${member.name}" skipped: ${error instanceof Error ? error.message : String(error)}`)
       }

@@ -3,10 +3,11 @@
 // hero (blank session) and active phases — same textarea DOM node, machine-
 // owned draft, and the hero workspace picker (switching = retargetWorkspace).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
 import {
-  createSnapshotStore, EMPTY_CHAT_SNAPSHOT, EMPTY_CONVERSATION_VIEWS,
+  createSnapshotStore, EMPTY_CHAT_SNAPSHOT, EMPTY_CONVERSATION_VIEWS, PendingWait,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   ConversationSnapshot, SessionId, SessionListState, WorkspaceId, WorkspaceListState, WorkspaceView,
@@ -25,8 +26,14 @@ import { HeroShell } from '../src/client/skeleton/EmptyHero.tsx'
 import { InputBar } from '../src/client/skeleton/InputBar.tsx'
 import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
 import type {
-  ComposerBarOwnerProps,
+  ComposerBarOwnerProps, ConversationRoomComposerOwnerProps, ConversationRoomOwnerProps,
 } from '../src/client/contract/slots.ts'
+import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import { RpcId } from '@deepseek-ai/dsh-client-connection/client'
+import { SlotTestRuntime, stubSettingsScope, usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
+import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+import { apply, inject } from '../src/client/apply.ts'
+import { apply as applyQuestions, inject as injectQuestions } from '@deepseek-ai/dsh-client-ui-user-questions/client'
 import type { ViewTab } from '../src/client/contract/views.ts'
 
 /** Machine-backed wiring over a sink spy. */
@@ -91,6 +98,16 @@ function mount(
     overlayTakeover?: boolean
     /** The session list summary's `blank` flag — independent of the snapshot's. */
     summaryBlank?: boolean
+    /** Summary preset selected by optional chrome contributions. */
+    agentPreset?: string
+    /** Mimic a selector-routed contribution for the test preset. */
+    roomChrome?: boolean
+    /** Elect standalone content instead of the ordinary transcript and composer. */
+    roomContent?: boolean
+    /** Elect the optional composer body beneath the mandatory takeover chain. */
+    roomComposer?: boolean
+    /** Start without a current session while retaining the resident shell. */
+    noSession?: boolean
     /** Drop the session's summary row entirely (a session the list has not caught up with). */
     omitSummaryRow?: boolean
     /** Classify the selected child as a subagent instead of an ordinary fork. */
@@ -106,6 +123,7 @@ function mount(
   const childRow = {
     id: SID, displayTitle: 'Child', parentId: root, cwd: '/projects/one',
     running: false, blank: options.summaryBlank ?? false, updatedAt: 2,
+    ...(options.agentPreset === undefined ? {} : { agentPreset: options.agentPreset }),
     ...(options.summaryOrigin === undefined ? {} : { origin: options.summaryOrigin }),
   }
   const listed = options.omitSummaryRow !== true
@@ -222,8 +240,27 @@ function mount(
     }
     return <div data-testid={`view-${opts?.only ?? key}`} />
   }) as ConversationRootProps['renderSlot']
-  const renderSlotChain = ((_key, _owner, opts) => (
-    options.overlayTakeover === true
+  const roomOwners: { key: string; owner: unknown }[] = []
+  const renderSlotChain = ((key: string, owner: { agentPreset?: string }, opts?: { fallback?: ReactNode }) => {
+    if (key === 'conversation.room.composer') {
+      roomOwners.push({ key, owner })
+      return options.roomComposer === true && owner.agentPreset === 'test-room'
+        ? <div>Room composer</div>
+        : (opts?.fallback ?? null)
+    }
+    if (key === 'conversation.room.content') {
+      roomOwners.push({ key, owner })
+      return options.roomContent === true && owner.agentPreset === 'test-room'
+        ? <div>Room content</div>
+        : (opts?.fallback ?? null)
+    }
+    if (key === 'conversation.room.header' || key === 'conversation.room.aside') {
+      roomOwners.push({ key, owner })
+      return options.roomChrome === true && owner.agentPreset === 'test-room'
+        ? <div data-testid={key}>{key === 'conversation.room.header' ? 'Room header' : 'Room aside'}</div>
+        : (opts?.fallback ?? null)
+    }
+    return options.overlayTakeover === true
       ? (
         <>
           <div data-chain-overlay-fallback="conversation.composer" style={{ display: 'none' }}>
@@ -233,9 +270,9 @@ function mount(
         </>
       )
       : (opts?.fallback ?? null)
-  )) as ConversationRootProps['renderSlotChain']
+  }) as ConversationRootProps['renderSlotChain']
   const props: ConversationRootProps = {
-    sessionId: SID,
+    sessionId: options.noSession === true ? undefined : SID,
     SessionProvider: ({ children }) => children(SID),
     useSession,
     useSessions: bindSnapshotSelector(sessions),
@@ -251,9 +288,12 @@ function mount(
   }
   const view = render(<ConversationRoot {...props} />)
   return {
-    view, chat, sink, retargetWorkspace, session, slotCalls, seatOwners, open,
+    view, chat, sink, retargetWorkspace, session, sessions, slotCalls, seatOwners, roomOwners, open,
     pickerOwner: () => pickerOwner,
-    rerender: () => { view.rerender(<ConversationRoot {...props} />) },
+    rerender: (nextSessionId = SID) => {
+      props.sessionId = nextSessionId
+      view.rerender(<ConversationRoot {...props} />)
+    },
   }
 }
 
@@ -266,6 +306,83 @@ describe('Hero chrome', () => {
 })
 
 describe('ConversationRoot resident composer', () => {
+  it.each([true, false])('keeps optional room chrome outside the scrollport when blank=%s', (blank) => {
+    const b = mount(conversationSnapshot({ composerPhase: blank ? 'blank' : 'active', blank }),
+      undefined, undefined, { summaryBlank: blank, agentPreset: 'test-room', roomChrome: true })
+    const scroll = b.view.container.querySelector('[data-conversation-scroll]')
+    const header = b.view.getByText('Room header')
+    const aside = b.view.getByText('Room aside')
+    expect(scroll?.contains(header)).toBe(false)
+    expect(scroll?.contains(aside)).toBe(false)
+    expect(scroll?.contains(b.view.getByRole('textbox'))).toBe(true)
+    expect(b.view.container.querySelectorAll('[data-conversation-scroll]')).toHaveLength(1)
+    expect(b.roomOwners.at(-1)?.owner).toEqual({ agentPreset: 'test-room', blank })
+    expect(b.view.queryByRole('tab', { name: 'Chat' })).toBeNull()
+  })
+
+  it.each([true, false])('elects room content and composer while retaining the common scrollport when blank=%s', (blank) => {
+    const b = mount(conversationSnapshot({ composerPhase: blank ? 'blank' : 'active', blank }),
+      undefined, undefined, {
+        summaryBlank: blank, agentPreset: 'test-room', roomChrome: true, roomContent: true, roomComposer: true,
+      })
+    expect(b.view.getByText('Room content')).toBeTruthy()
+    expect(b.view.getByText('Room header')).toBeTruthy()
+    expect(b.view.getByText('Room aside')).toBeTruthy()
+    expect(b.view.queryByRole('textbox')).toBeNull()
+    expect(b.view.queryByRole('tab', { name: 'Chat' })).toBeNull()
+    expect(b.view.queryByTestId('view-chat')).toBeNull()
+    expect(b.view.getByText('Room composer')).toBeTruthy()
+    expect(b.view.container.querySelectorAll('[data-conversation-scroll]')).toHaveLength(1)
+    expect(b.view.container.querySelectorAll('[data-composer-seat]')).toHaveLength(1)
+    expect(b.roomOwners.find(call => call.key === 'conversation.room.content')?.owner)
+      .toEqual({ agentPreset: 'test-room', blank })
+  })
+
+  it('dispatches the input block to the custom composer without changing its reason', () => {
+    const b = mount(conversationSnapshot(), undefined, undefined, {
+      agentPreset: 'test-room', roomComposer: true, composerBlock: { reason: 'select a model first' },
+    })
+    expect(b.roomOwners.find(call => call.key === 'conversation.room.composer')?.owner).toEqual({
+      agentPreset: 'test-room', blank: false, inert: false, blocked: { reason: 'select a model first' },
+    })
+    expect(b.view.getByText('Room composer')).toBeTruthy()
+  })
+
+  it('dispatches absent summary facts without a current session', () => {
+    const b = mount(conversationSnapshot(), undefined, undefined, { noSession: true, roomChrome: true, roomContent: true })
+    expect(b.roomOwners.at(-1)?.owner).toEqual({ agentPreset: undefined, blank: false })
+    expect(b.view.queryByText('Room aside')).toBeNull()
+    expect((b.view.getByRole('textbox') as HTMLTextAreaElement).readOnly).toBe(true)
+  })
+
+  it('leaves optional room regions empty when contributions decline', () => {
+    const b = mount(conversationSnapshot(), undefined, undefined,
+      { agentPreset: 'ordinary', roomChrome: true, roomContent: true })
+    expect(b.view.queryByText('Room header')).toBeNull()
+    expect(b.view.queryByText('Room aside')).toBeNull()
+    expect(b.view.container.querySelector('[data-conversation-room-aside]')?.childNodes).toHaveLength(0)
+    expect(b.view.getByRole('textbox')).toBeTruthy()
+  })
+
+  it('dispatches the selected summary facts when switching sessions', () => {
+    const b = mount(conversationSnapshot(), undefined, undefined,
+      { agentPreset: 'test-room', roomChrome: true })
+    const nextId = sid('next')
+    act(() => {
+      const state = b.sessions.getSnapshot()
+      b.sessions.set({ ...state, current: nextId, ids: [...state.ids, nextId], byId: {
+        ...state.byId, [nextId]: {
+          id: nextId, displayTitle: 'Next', running: false, blank: true,
+          agentPreset: 'ordinary', updatedAt: 3,
+        },
+      } })
+    })
+    b.rerender(nextId)
+    expect(b.roomOwners.at(-1)?.owner).toEqual({ agentPreset: 'ordinary', blank: true })
+    expect(b.view.queryByText('Room aside')).toBeNull()
+    b.rerender(sid('unlisted'))
+    expect(b.roomOwners.at(-1)?.owner).toEqual({ agentPreset: undefined, blank: false })
+  })
   it('renders the composer inert with the blocker\u2019s own reason', () => {
     const b = mount(conversationSnapshot(), undefined, undefined, {
       composerBlock: { reason: 'select a model first' },
@@ -494,5 +611,107 @@ describe('ConversationRoot resident composer', () => {
     }))
     expect(b.view.getByRole('alert').textContent).toContain('Message send failed (offline)')
     expect(b.view.queryByRole('button', { name: 'Retry' })).toBeNull()
+  })
+})
+
+
+usePinnedBrowserLanguages('zh-CN')
+
+function RoomLayoutRoot({ renderSlot }: PropsRenderSlots<'conversation' | 'details'>) {
+  return <>{renderSlot('conversation', {})}</>
+}
+
+/** Real slot outlets plus the production conversation and question plugins. */
+async function roomLayoutBench(room: boolean) {
+  const runtime = await SlotTestRuntime.create()
+  runtime.provide('connection', { api: { settings: {} }, isLoopback: false })
+  runtime.provide('remote', { $on: () => () => {} })
+  runtime.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
+  runtime.provide('layout', { openDetails: vi.fn(), closeDetails: vi.fn() })
+  const locale = new LocaleRuntime(runtime.ctx)
+  runtime.provide('locale', locale)
+  runtime.slots.installLocale(locale)
+  runtime.ctx.effect(() => locale.register('common', { zh: commonZh, en: commonEn }), 'layout fixture: common copy')
+  await runtime.sessions.add({
+    id: SID,
+    summary: { title: 'Ordinary session', displayTitle: 'Ordinary session', cwd: '/proj',
+      agentPreset: room ? 'test-room' : 'ordinary' },
+    snapshot: { nodes: [] },
+  })
+  await runtime.root.declare({
+    conversation: { kind: 'single', scope: 'session-maybe' },
+    details: { kind: 'single', scope: 'session' },
+  }, RoomLayoutRoot)
+  await runtime.mount({ inject: [...inject], apply })
+  await runtime.mount({ inject: [...injectQuestions], apply: applyQuestions })
+  await runtime.mount({ inject: ['slots'], apply: (ctx: ClientContext) => {
+    const select = (owner: ConversationRoomOwnerProps) => owner.agentPreset === 'test-room' ? owner : null
+    ctx.slots.register({ name: 'conversation.room.header', select }, () => <div>Room header</div>)
+    ctx.slots.register({ name: 'conversation.room.content', select }, () => (
+      <section data-conversation-scroll-owner="">Room history</section>
+    ))
+    ctx.slots.register({ name: 'conversation.room.aside', select }, () => <div>Room roster</div>)
+    ctx.slots.register({ name: 'conversation.room.composer',
+      select: (owner: ConversationRoomComposerOwnerProps) => select(owner),
+    }, ({ inert, blocked }: ConversationRoomComposerOwnerProps) => (
+      <textarea aria-label="Room draft" defaultValue="preserved draft" disabled={inert || blocked !== undefined} />
+    ))
+  } })
+  const view = runtime.renderRoot()
+  return { runtime, view }
+}
+
+describe('room layout through real slot composition', () => {
+  it('declining room contributions retains the ordinary header and composer', async () => {
+    const b = await roomLayoutBench(false)
+    expect(b.view.getByRole('button', { name: 'Ordinary session' })).toBeTruthy()
+    expect(b.view.container.querySelector('[data-slot="conversation.session"]')?.childNodes.length).toBeGreaterThan(0)
+    expect(b.view.getByRole('textbox')).toBeTruthy()
+    expect(b.view.queryByText('Room roster')).toBeNull()
+    expect(b.view.container.querySelector('[data-conversation-room-aside] > [data-slot]')?.childNodes).toHaveLength(0)
+    expect(b.view.container.querySelectorAll('[data-conversation-scroll]')).toHaveLength(1)
+    expect(b.view.container.querySelectorAll('[data-composer-seat]')).toHaveLength(1)
+    await b.runtime.dispose()
+  })
+
+  it.each([false, true])('keeps history and roster while question intent plan-review=%s wins over approval and restores the room composer', async (planReview) => {
+    const b = await roomLayoutBench(true)
+    const roomDraft = b.view.getByRole('textbox', { name: 'Room draft' })
+    expect(b.view.queryByRole('button', { name: 'Ordinary session' })).toBeNull()
+    const respondQuestion = vi.fn(async () => ({ accepted: true as const }))
+    const respondApproval = vi.fn(async () => ({ accepted: true as const }))
+    const question = new PendingWait('question', RpcId('layout-question'), SID, {
+      questions: [{ id: 'choice', question: 'Choose next action',
+        options: [{ label: 'Proceed' }, { label: 'Pause' }],
+        ...(planReview ? { detail: 'Review this plan', intent: { kind: 'plan-review' as const, approve: 'Proceed' } } : {}),
+      }],
+    }, respondQuestion)
+    const approval = new PendingWait('approval', RpcId('layout-approval'), SID,
+      { approvalId: 'layout-approval', toolName: 'bash', reason: 'Approve command' } as PendingWait<'approval'>['payload'], respondApproval)
+    await b.runtime.sessions.updateSnapshot(SID, (draft) => { draft.pending = [approval, question] })
+    expect(b.view.getByText('Room history')).toBeTruthy()
+    expect(b.view.getByText('Room roster')).toBeTruthy()
+    expect(b.view.getByText(planReview ? 'Review this plan' : 'Choose next action')).toBeTruthy()
+    expect(b.view.queryByText('Approve command')).toBeNull()
+    expect(b.view.queryByRole('textbox', { name: 'Room draft' })).toBeNull()
+    if (planReview) {
+      fireEvent.click(b.view.getByRole('button', { name: '确认执行' }))
+    } else {
+      fireEvent.click(b.view.getByRole('radio', { name: 'Proceed' }))
+      fireEvent.click(b.view.getByRole('button', { name: '提交' }))
+    }
+    await waitFor(() => { expect(respondQuestion).toHaveBeenCalledTimes(1) })
+    await b.runtime.sessions.updateSnapshot(SID, (draft) => { draft.pending = [approval] })
+    expect(b.view.getByText('Approve command')).toBeTruthy()
+    expect(b.view.getByText('Room history')).toBeTruthy()
+    expect(b.view.getByText('Room roster')).toBeTruthy()
+    fireEvent.click(b.view.getByRole('button', { name: '允许一次' }))
+    await waitFor(() => { expect(respondApproval).toHaveBeenCalledTimes(1) })
+    await b.runtime.sessions.updateSnapshot(SID, (draft) => { draft.pending = [] })
+    expect(b.view.getByRole('textbox', { name: 'Room draft' })).toBe(roomDraft)
+    expect((roomDraft as HTMLTextAreaElement).value).toBe('preserved draft')
+    expect((roomDraft as HTMLTextAreaElement).disabled).toBe(false)
+    expect(b.view.container.querySelectorAll('[data-composer-seat]')).toHaveLength(1)
+    await b.runtime.dispose()
   })
 })
