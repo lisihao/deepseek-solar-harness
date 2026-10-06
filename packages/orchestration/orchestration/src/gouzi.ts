@@ -101,6 +101,7 @@ export interface GouziRecord {
 
 /** One operator a Gouzi can use, as the host last observed it. */
 export interface GouziOperatorCapability {
+  /** Full registered execution identity, including the native provider suffix for a remote Gouzi. */
   readonly operatorId: string
   readonly available: boolean
   /** Why the operator cannot run, such as a missing login. */
@@ -281,6 +282,17 @@ export interface GouziCreateInput {
 export interface GouziControl {
   /** @returns every paired host and every member, archived ones included. */
   list(): Promise<{ readonly hosts: readonly GouziHostRecord[]; readonly members: readonly GouziMemberView[] }>
+  /**
+   * Read enabled members' registered execution entries with fresh provider availability and model checks. Connection
+   * status alone does not qualify an entry; absent or stale-generation registrations produce an empty operator list.
+   * This query neither starts members nor changes membership, grants, or task scheduling.
+   * @returns current member generations and full registered operator IDs, availability reasons, and native models.
+   */
+  executionOperators(): Promise<readonly {
+    readonly gouziId: GouziId
+    readonly generation: number
+    readonly operators: readonly GouziOperatorCapability[]
+  }[]>
   /**
    * Record a newly paired host.
    * @param host - identity, accepted authority epoch, and credential reference.

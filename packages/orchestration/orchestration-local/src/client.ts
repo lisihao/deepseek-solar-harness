@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import {
   OrchestrationError,
   type GouziArchiveEvidence,
+  type GouziControl,
   type GouziHostRecord,
   type GouziMemberView,
   type OrchestrationArtifactRef,
@@ -184,6 +185,14 @@ export class OrchestrationDaemonClient {
    */
   proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt> {
     return this.request('capability.propose_update', { request })
+  }
+
+  /**
+   * Query enabled members' registered execution entries without starting members or scheduling work.
+   * @returns actual execution IDs with freshly checked provider capabilities and current member generations.
+   */
+  gouziExecutionOperators(): ReturnType<GouziControl['executionOperators']> {
+    return this.request('gouzi.execution_operators', {})
   }
 
   /**

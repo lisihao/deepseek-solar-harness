@@ -422,6 +422,8 @@ interface ProductProfileOptions {
   adapter: ProductHostAdapter
   /** Compose a Gouzi execution member: no scheduler, cluster election, or TaskGraph daemon. */
   gouziWorker?: boolean
+  /** Shared execution lock directory explicitly passed by the member supervisor. */
+  gouziDirectoryLockRoot?: string
 }
 
 /** Rows that schedule, vote, or present TaskGraph runs; a Gouzi member never mounts them. */
@@ -691,7 +693,7 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
       ...GOUZI_WORKER_DISABLED_ROW_IDS.filter(id => present.has(id)).map(id => ({ id, disabled: true })),
       {
         insert: [
-          { id: 'orchestration-remote-host', name: GOUZI_REMOTE_HOST_PACKAGE, config: { dshHome: home } },
+          { id: 'orchestration-remote-host', name: GOUZI_REMOTE_HOST_PACKAGE, config: { dshHome: home, directoryLockRoot: options.gouziDirectoryLockRoot } },
           { id: 'gouzi-member', name: GOUZI_MEMBER_PACKAGE, config: { stateRoot: home } },
         ],
       },
@@ -841,15 +843,21 @@ export function prepareProductServerProfile(
  * @param home - the member's own harness home; it is also the member state root.
  * @param telemetryDisabled - inherited DSH telemetry opt-out value.
  * @param platform - native platform selecting launcher-owned safety overlays.
+ * @param directoryLockRoot - host-common execution lock directory supplied by the supervisor.
  * @returns root config, profile metadata, and ordered patches.
  */
 export function prepareGouziWorkerProfile(
   home: string,
   telemetryDisabled: string | undefined = process.env.DSH_TELEMETRY_DISABLED,
   platform: NodeJS.Platform = process.platform,
+  directoryLockRoot: string | undefined = process.env.DSH_GOUZI_DIRECTORY_LOCK_ROOT,
 ): PreparedProductServerProfile {
+  if (directoryLockRoot === undefined || directoryLockRoot.length === 0) {
+    throw new Error(`${BIN_NAME}: Gouzi worker requires a supervisor-provided directory lock root`)
+  }
   return prepareProductProfile({
     telemetryDisabled, home, platform, profileName: PRODUCT_SERVER_PROFILE_NAME, adapter: 'server', gouziWorker: true,
+    gouziDirectoryLockRoot: directoryLockRoot,
   })
 }
 

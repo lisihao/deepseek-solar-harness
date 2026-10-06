@@ -89,6 +89,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   permissionPresets: 'permission-presets.md',
   physicalOperators: 'physical-operator.md',
   orchestrations: 'orchestration.md',
+  orchestrationRecipients: 'orchestration.md',
   gouziHost: 'orchestration.md',
   remoteAuth: 'credentials.md',
   residentOperators: 'physical-operator.md',
@@ -308,6 +309,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   OrchestrationEventPage: 'orchestration.md',
   OrchestrationEventReadRequest: 'orchestration.md',
   OrchestrationIndeterminateRequest: 'orchestration.md',
+  OrchestrationGouziRecipientV1: 'orchestration.md',
   OrchestrationRunId: 'orchestration.md',
   OrchestrationRunSnapshot: 'orchestration.md',
   OrchestrationStartRequest: 'orchestration.md',
@@ -707,6 +709,7 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   GouziProvisionInput: 'member provisioning input is owned by packages/orchestration/ui-gouzi/src/host-service.ts',
+  GouziProjectSource: 'selected project directory identity is documented in packages/orchestration/ui-gouzi/README.md and declared in src/host-service.ts',
   GouziSshTarget: 'SSH machine address is owned by packages/orchestration/ui-gouzi/src/host-service.ts',
   GouziHostProjection: 'host projection is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
   GouziHostInspection: 'host key inspection is owned by packages/orchestration/ui-gouzi/src/contracts.ts',

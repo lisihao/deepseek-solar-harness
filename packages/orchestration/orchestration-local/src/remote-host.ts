@@ -1,5 +1,5 @@
 /**
- * Mounts only the Server-local remote execution host. A Gouzi member uses it to materialize exact-commit
+ * Mounts only the Server-local remote execution host. A Gouzi member uses it to admit registered directories or materialize exact-commit
  * workspaces without a TaskGraph daemon, scheduler, or cluster election.
  * @module @deepseek-ai/dsh-orchestration-local/remote-host
  */
@@ -15,6 +15,8 @@ export const name = 'orchestration-remote-host'
 export interface RemoteHostConfig {
   /** Optional DSH home; defaults to the ordinary harness-owned location. */
   readonly dshHome?: string
+  /** Absolute lock metadata root shared by all Gouzi members on this host. */
+  readonly directoryLockRoot?: string
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -27,6 +29,7 @@ export interface RemoteHostConfig {
 
 export const Config: z<RemoteHostConfig> = z.object({
   dshHome: z.string(),
+  directoryLockRoot: z.string(),
   remoteMaterializationTimeoutMs: z.number().step(1).min(1_000).max(15 * 60_000).default(120_000),
   remoteArtifactReadTimeoutMs: z.number().step(1).min(100).max(60_000).default(15_000),
   remoteArtifactMaxBytes: z.number().step(1).min(1_024).max(8 * 1024 * 1024).default(8 * 1024 * 1024),
@@ -39,7 +42,7 @@ export const Config: z<RemoteHostConfig> = z.object({
  * @param config - resolved remote execution host configuration.
  */
 export function apply(ctx: Context, config: RemoteHostConfig): void {
-  mountRemoteOperatorHost(ctx, config as Required<Omit<RemoteHostConfig, 'dshHome'>> & Pick<RemoteHostConfig, 'dshHome'>)
+  mountRemoteOperatorHost(ctx, config as Required<Omit<RemoteHostConfig, 'dshHome' | 'directoryLockRoot'>> & Pick<RemoteHostConfig, 'dshHome' | 'directoryLockRoot'>)
 }
 
 /**
@@ -49,10 +52,11 @@ export function apply(ctx: Context, config: RemoteHostConfig): void {
  */
 export function mountRemoteOperatorHost(
   ctx: Context,
-  config: Required<Omit<RemoteHostConfig, 'dshHome'>> & Pick<RemoteHostConfig, 'dshHome'>,
+  config: Required<Omit<RemoteHostConfig, 'dshHome' | 'directoryLockRoot'>> & Pick<RemoteHostConfig, 'dshHome' | 'directoryLockRoot'>,
 ): void {
   new LocalRemoteOperatorHostService(ctx, {
     dshHome: resolveDshHome(config.dshHome),
+    ...config.directoryLockRoot === undefined ? {} : { directoryLockRoot: config.directoryLockRoot },
     timeoutMs: config.remoteMaterializationTimeoutMs,
     artifactReadTimeoutMs: config.remoteArtifactReadTimeoutMs,
     artifactMaxBytes: config.remoteArtifactMaxBytes,

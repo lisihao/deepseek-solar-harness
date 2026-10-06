@@ -727,6 +727,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   route: 'taskgraph'
   runId: string
   maxParallel: number
+  gouziRecipient?: OrchestrationGouziRecipientV1
   rlm: RlmExecutionMode
   autonomous: RlmAutonomousMode
   continualHarness: ContinualHarnessMode
@@ -736,7 +737,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:44`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -747,7 +748,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:56`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:58`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 

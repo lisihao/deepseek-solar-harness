@@ -1,4 +1,4 @@
-/** Project chooser for an SSH host: browse its folders and tick the Git repositories the member may use. */
+/** Project chooser for an SSH host: browse existing directories and select the paths the member may use. */
 import { useCallback, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import type { GouziFolderListing } from '../contracts.ts'
@@ -6,7 +6,11 @@ import { callGouzi, type BrowserRequest } from './api.ts'
 import { messageOf } from './HostStep.tsx'
 import css from './GouziPanel.module.css'
 
-/** Browse `hostId` from its login directory; `selected` holds absolute paths on that host. */
+/**
+ * Browse directories without requiring Git metadata or an origin remote.
+ * @param props - authenticated reader, host identity, selected absolute paths, and selection callback.
+ * @returns current-directory and child-directory choices.
+ */
 export function RemoteFolderPicker({ request, hostId, selected, onChange }: {
   request: BrowserRequest
   hostId: string
@@ -33,21 +37,23 @@ export function RemoteFolderPicker({ request, hostId, selected, onChange }: {
   }
   return (
     <div className={css.field}>
-      <span>在这台机器上选择项目（要是 Git 仓库）</span>
+      <span>在这台机器上选择现有目录</span>
       {listing !== undefined && (
         <div className={css.pathBar}>
           <button type="button" className={css.link} disabled={loading || listing.parent === undefined} onClick={() => { void open(listing.parent) }}>上一级</button>
           <code title={listing.path}>{listing.path}</code>
         </div>
       )}
+      {listing !== undefined && <label className={clsx(css.folderRow, selected.includes(listing.path) && css.chosen)}>
+        <input type="checkbox" aria-label="选择当前目录" disabled={loading} checked={selected.includes(listing.path)} onChange={() => { toggle(listing.path) }} />
+        <span>选择当前目录</span>
+      </label>}
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
       {listing !== undefined && listing.entries.length === 0 && <p className={css.hint}>这里没有子文件夹。</p>}
       <ul className={css.projectList}>
         {listing?.entries.map(entry => (
           <li key={entry.path} className={clsx(css.folderRow, selected.includes(entry.path) && css.chosen)}>
-            {entry.git
-              ? <input type="checkbox" aria-label={`选择 ${entry.name}`} checked={selected.includes(entry.path)} onChange={() => { toggle(entry.path) }} />
-              : <span className={css.folderSpacer} aria-hidden="true" />}
+            <input type="checkbox" aria-label={`选择 ${entry.name}`} disabled={loading} checked={selected.includes(entry.path)} onChange={() => { toggle(entry.path) }} />
             <button type="button" className={css.link} disabled={loading} onClick={() => { void open(entry.path) }}>{entry.name}</button>
             {entry.git && <span className={css.gitBadge}>Git</span>}
           </li>

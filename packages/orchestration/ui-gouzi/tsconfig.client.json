@@ -4,7 +4,9 @@
     "rootDir": "src",
     "outDir": "lib/types",
     "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo",
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "files": [
     "src/client/api.ts",
@@ -12,21 +14,41 @@
     "src/client/GouziPanel.tsx",
     "src/client/HostStep.tsx",
     "src/client/index.ts",
-    "src/client/KennelHero.tsx",
     "src/client/kennel.ts",
     "src/client/KennelEntry.tsx",
     "src/client/RemoteFolderPicker.tsx",
+    "src/client/KennelRoom.tsx",
+    "src/client/room-source.ts",
+    "src/client/room-store.ts",
+    "src/client/room-api.ts",
+    "src/recipient-message.ts",
     "src/contracts.ts",
     "src/css-modules.d.ts"
   ],
   "references": [
-    { "path": "../../../vendor/cordis" },
-    { "path": "../../api/remotes/tsconfig.client.json" },
-    { "path": "../../client/connection/tsconfig.client.json" },
-    { "path": "../../client/runtime" },
-    { "path": "../../client/ui-conversation" },
-    { "path": "../../client/ui-primitives" },
-    { "path": "../../client/ui-sidebar" },
-    { "path": "../../client/ui-slots" }
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../api/remotes/tsconfig.client.json"
+    },
+    {
+      "path": "../../client/connection/tsconfig.client.json"
+    },
+    {
+      "path": "../../client/runtime"
+    },
+    {
+      "path": "../../client/ui-conversation"
+    },
+    {
+      "path": "../../client/ui-primitives"
+    },
+    {
+      "path": "../../client/ui-sidebar"
+    },
+    {
+      "path": "../../client/ui-slots"
+    }
   ]
 }

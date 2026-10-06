@@ -1,0 +1,107 @@
+{
+  "candidates": [
+    {
+      "fixture": "ordinary-nonempty",
+      "usable": true
+    },
+    {
+      "fixture": "ordinary-empty",
+      "usable": true
+    },
+    {
+      "fixture": "git-unborn",
+      "usable": true
+    },
+    {
+      "fixture": "git-without-origin",
+      "usable": true
+    },
+    {
+      "fixture": "dirty-repository-subdirectory",
+      "usable": true
+    },
+    {
+      "fixture": "missing-directory",
+      "usable": false
+    },
+    {
+      "fixture": "regular-file",
+      "usable": false
+    }
+  ],
+  "readOnlyCheck": {
+    "projectsUnchanged": true,
+    "ordinaryGitCreated": false,
+    "membersUnchanged": true,
+    "prepareCalls": 0,
+    "provisionCalls": 0,
+    "startCalls": 0
+  },
+  "rejected": [
+    {
+      "fixture": "missing-directory",
+      "error": "GOUZI_PROJECT_UNAVAILABLE"
+    },
+    {
+      "fixture": "regular-file",
+      "error": "GOUZI_PROJECT_UNAVAILABLE"
+    }
+  ],
+  "adoptedProjects": [
+    {
+      "fixture": "ordinary-nonempty",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "ordinary-empty",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "git-unborn",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "git-without-origin",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    },
+    {
+      "fixture": "dirty-repository-subdirectory",
+      "selectedDefaultPreserved": true,
+      "workerStarted": true,
+      "taskGraphState": "completed",
+      "nativeCwdMatchesSelected": true,
+      "originalRead": true,
+      "resultInSelectedDirectory": true,
+      "retired": true,
+      "slotReleased": true
+    }
+  ]
+}

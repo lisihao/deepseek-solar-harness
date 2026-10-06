@@ -7,18 +7,25 @@ import {
   type GouziId,
   type NodeExecutionPlanV1,
 } from '@deepseek-ai/dsh-orchestration'
-import { gouziRequestHash, type RemoteResidentExecuteRequest } from '@deepseek-ai/dsh-client-connection'
+import { gouziRequestHash, type RemoteResidentExecuteRequest, type RemoteResidentProviderStatus } from '@deepseek-ai/dsh-client-connection'
 import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type { RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
 import type { OrchestrationStore } from './store.ts'
 
 /** What the grant issuer reads from the main instance's store. */
-export type GouziGrantStore = Pick<OrchestrationStore, 'attemptByExecutionId' | 'readArtifact' | 'gouzi'>
+export type GouziGrantStore = Pick<OrchestrationStore, 'attemptByExecutionId' | 'readArtifact' | 'getRun' | 'gouzi'>
 
 /** Inputs for projecting one member. */
 export interface GouziOperatorOptions {
   readonly store: GouziGrantStore
   readonly gouziId: GouziId
+  /**
+   * Confirm the member generation still owns this registered, available execution entry at grant issuance.
+   * @param operatorId - full registered Physical Operator identity.
+   * @param generation - sealed recipient generation.
+   * @returns whether the current member registration still owns the available entry.
+   */
+  readonly validateRecipientOperator?: (operatorId: string, generation: number) => boolean
   /** Device credential of the member host; absent for a loopback or tunnel endpoint that needs none. */
   readonly accessToken?: string
   /** Settlement polling interval of the remote operator. */
@@ -61,11 +68,20 @@ export function gouziOperatorServer(options: GouziOperatorOptions): RemotePhysic
     ...options.pollIntervalMs === undefined ? {} : { pollIntervalMs: options.pollIntervalMs },
     gouzi: {
       gouziId: String(gouziId),
-      issue(plan: RemoteResidentExecuteRequest): GouziExecutionGrant {
+      issue(plan: RemoteResidentExecuteRequest, _start, workspace?: RemoteResidentProviderStatus['gouziWorkspace']): GouziExecutionGrant {
         const current = store.gouzi.read(gouziId)
         const currentHost = current === undefined ? undefined : store.gouzi.getHost(current.hostId)
         if (current === undefined || currentHost === undefined || current.membership !== 'enabled') {
           throw new PhysicalOperatorError(`gouzi ${String(gouziId)} is not enabled`, 'OPERATOR_UNAVAILABLE')
+        }
+        if ('kind' in plan.workspaceIdentity) {
+          if (workspace === undefined || workspace.gouziId !== String(gouziId)
+            || workspace.generation !== current.generation
+            || workspace.projectId !== plan.workspaceIdentity.projectId) {
+            throw new PhysicalOperatorError(
+              'selected Gouzi project or generation is unavailable at grant issuance', 'OPERATOR_UNAVAILABLE',
+            )
+          }
         }
         const attempt = store.attemptByExecutionId(plan.commandId)
         if (attempt === undefined) {
@@ -75,6 +91,17 @@ export function gouziOperatorServer(options: GouziOperatorOptions): RemotePhysic
           )
         }
         const nodePlan = store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+        const recipient = store.getRun(attempt.runId).snapshot.admission?.gouziRecipient
+        if (recipient !== undefined) {
+          const operatorId = `gouzi.${String(gouziId)}.${plan.operatorId}`
+          if (recipient.gouziId !== gouziId || recipient.generation !== current.generation
+            || member.generation !== current.generation || member.hostId !== current.hostId
+            || member.ownerId !== current.ownerId || member.endpoint !== current.endpoint
+            || nodePlan.operatorPlan.operatorId !== operatorId || !recipient.operatorIds.some(id => String(id) === operatorId)
+            || options.validateRecipientOperator?.(operatorId, recipient.generation) !== true) {
+            throw new PhysicalOperatorError('selected Gouzi generation or execution entry is unavailable at grant issuance', 'OPERATOR_UNAVAILABLE')
+          }
+        }
         const deadline = new Date(now() + current.grantDeadlineMs).toISOString()
         return {
           runId: OrchestrationRunId(attempt.runId),

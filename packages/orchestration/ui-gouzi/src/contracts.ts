@@ -5,6 +5,11 @@
  * @module @deepseek-ai/dsh-ui-gouzi/contracts
  */
 
+import z from '@deepseek-ai/schemastery'
+
+/** Room read interval: integer milliseconds, including the schema's deployment default. */
+export const GOUZI_ROOM_POLL_INTERVAL_SCHEMA = z.number().step(1).min(250).max(60_000).default(2_000)
+
 /** Same-origin Host route of the Gouzi projection and controls. */
 export const GOUZI_DASHBOARD_PATH = '/api/gouzi'
 
@@ -128,6 +133,14 @@ export interface GouziFolderListing {
   readonly entries: readonly { readonly name: string; readonly path: string; readonly git: boolean }[]
 }
 
+/** Side-effect-free repository checks for the requested paths, in request order. */
+export interface GouziProjectsCheck {
+  readonly projects: readonly (
+    | { readonly path: string; readonly usable: true }
+    | { readonly path: string; readonly usable: false; readonly message: string }
+  )[]
+}
+
 /** Everything the panel renders. */
 export interface GouziDashboardV1 {
   readonly version: 1
@@ -157,6 +170,7 @@ export type GouziControlRequest =
     /** Absolute paths, on that machine, of the Git workspaces the member may work on. */
     readonly projects: readonly string[]
   }
+  | { readonly action: 'check-projects'; readonly hostId: string; readonly projects: readonly string[] }
   | { readonly action: 'host-inspect'; readonly address: string; readonly port: number; readonly user: string }
   | {
     readonly action: 'host-add'
@@ -186,4 +200,61 @@ export type GouziControlRequest =
 export interface GouziErrorV1 {
   readonly error: string
   readonly message: string
+}
+
+/** Current terminal task output attributed to the operator sealed for this attempt. */
+export interface GouziRoomResultV1 {
+  /** ISO timestamp of the authoritative result event, not the polling time. */
+  readonly time: string
+  readonly sequence: number
+  readonly evidenceRef: string
+  readonly outputPreview: string
+  readonly accepted: boolean
+  readonly operatorId: string
+}
+
+/** Current scheduler node; unknown lifecycle strings remain visible unchanged. */
+export interface GouziRoomNodeV1 {
+  readonly nodeId: string
+  readonly title: string
+  readonly state: string
+  readonly attempt: number
+  readonly capabilityGeneration: number
+  readonly operatorId?: string
+  readonly gouziId?: string
+  readonly evidenceRefs: readonly string[]
+  readonly executionPlanRef?: string
+  readonly result?: GouziRoomResultV1
+}
+
+/** Task admitted by this exact source session. */
+export interface GouziRoomTaskV1 {
+  readonly runId: string
+  readonly title: string
+  readonly state: string
+  readonly revision: number
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly nodes: readonly GouziRoomNodeV1[]
+}
+
+/** Read-only session room: roster, actual execution registrations, and admitted tasks. */
+export interface GouziRoomSnapshotV1 {
+  /** Validated Host read interval; the browser schedules only from this reply. */
+  readonly roomPollIntervalMs: number
+  readonly version: 1
+  readonly sessionId: string
+  readonly generatedAt: string
+  readonly dashboard: GouziDashboardV1
+  readonly execution: readonly {
+    readonly gouziId: string
+    readonly generation: number
+    readonly operators: readonly {
+      readonly operatorId: string
+      readonly available: boolean
+      readonly models: readonly string[]
+      readonly unavailableReason?: string
+    }[]
+  }[]
+  readonly tasks: readonly GouziRoomTaskV1[]
 }

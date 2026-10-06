@@ -1,8 +1,7 @@
 {
   "sender": "TaskGraph sender workspace",
-  "receiver": "member materialized checkout",
-  "repository": "github.com/lisihao/gouzi-fixture",
-  "requestedCommitMatches": true,
+  "receiver": "member selected directory",
+  "registeredProjectMatchesBinding": true,
   "nativeCwdMatchesBinding": true,
   "privateInputMatchesDriver": true,
   "originalInputContextRetained": true,

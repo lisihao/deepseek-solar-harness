@@ -725,6 +725,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
   route: 'taskgraph'
   runId: string
   maxParallel: number
+  gouziRecipient?: OrchestrationGouziRecipientV1
   rlm: RlmExecutionMode
   autonomous: RlmAutonomousMode
   continualHarness: ContinualHarnessMode
@@ -734,7 +735,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 }
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:44`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -745,7 +746,7 @@ Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../package
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:56`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:58`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 

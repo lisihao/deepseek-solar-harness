@@ -25,6 +25,51 @@
   --dsh-composer-dock-inset: 8px;
 }
 
+.roomHeader {
+  flex: none;
+  min-width: 0;
+}
+
+.roomBody {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.roomMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.roomAside {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+}
+
+/* Slot outlets keep a display:contents anchor even when every selector declines. */
+.roomHeader:empty,
+.roomAside:empty,
+.roomHeader:has(> :global([data-slot]):empty),
+.roomAside:has(> :global([data-slot]):empty) {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .roomBody {
+    flex-direction: column;
+  }
+
+  .roomAside {
+    flex: none;
+    max-width: 100%;
+  }
+}
+
 .header {
   position: relative;
   flex: none;
@@ -223,6 +268,7 @@
 }
 
 .scrollBody {
+  min-width: 0;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -285,7 +331,7 @@
   scrollbar-gutter: auto;
 }
 
-.scrollBody:has([data-conversation-composer-overlay]) > :global([data-slot='conversation.session']) > .viewArea {
+.scrollBody:has([data-conversation-composer-overlay]) > :global([data-slot='conversation.room.content']) > :global([data-slot='conversation.session']) > .viewArea {
   flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
@@ -362,4 +408,23 @@
    mounted but invisible so no wrong layout flashes before the phase lands. */
 .root[data-phase='settling'] .composerSeat {
   visibility: hidden;
+}
+
+/* A content contributor explicitly owns its internal scrollport. The outlet
+   anchor is display:contents, so its marked root shares the composer's flex column. */
+.scrollBody:has(> :global([data-slot='conversation.room.content']) > :global([data-conversation-scroll-owner])) {
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+
+.scrollBody > :global([data-slot='conversation.room.content']) > :global([data-conversation-scroll-owner]) {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.scrollBody:has(> :global([data-slot='conversation.room.content']) > :global([data-conversation-scroll-owner])) > .composerSeat {
+  position: static;
+  flex: none;
+  background: none;
 }

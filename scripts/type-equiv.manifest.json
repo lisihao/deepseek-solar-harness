@@ -1929,6 +1929,47 @@
       "doc": "docs/subsystems/feedback.md",
       "symbol": "MessageFeedbackDeleteResult",
       "source": "packages/feedback/message-feedback/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/orchestration.md",
+      "symbol": "OrchestrationGouziRecipientV1",
+      "source": "packages/orchestration/orchestration/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/orchestration.md",
+      "symbol": "OrchestrationAdmissionTraceV1",
+      "source": "packages/orchestration/orchestration/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/orchestration.md",
+      "symbol": "OrchestrationRecipientResolver",
+      "source": "packages/orchestration/orchestration/src/recipient-resolver.ts"
+    },
+    {
+      "doc": "packages/orchestration/ui-gouzi/README.md",
+      "symbol": "GouziProjectSource",
+      "source": "packages/orchestration/ui-gouzi/src/host-service.ts"
+    },
+    {
+      "doc": "packages/client/connection/README.md",
+      "symbol": "RemoteWorkspaceIdentityV1",
+      "source": "packages/client/connection/src/remote-sync.ts"
+    },
+    {
+      "doc": "packages/client/connection/README.md",
+      "symbol": "RemoteGouziWorkspaceIdentityV1",
+      "source": "packages/client/connection/src/remote-sync.ts"
+    },
+    {
+      "doc": "packages/client/connection/README.md",
+      "symbol": "RemoteExecutionWorkspaceIdentityV1",
+      "source": "packages/client/connection/src/remote-sync.ts"
+    },
+    {
+      "doc": "docs/subsystems/physical-operator.md",
+      "symbol": "ResidentCommandRefusal",
+      "source": "packages/physical-operator/resident-operator/src/index.ts",
+      "projection": "public-api"
     }
   ]
 }

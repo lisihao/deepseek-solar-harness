@@ -26,6 +26,7 @@
     "@deepseek-ai/dsh-model-allocation": "workspace:^",
     "@deepseek-ai/dsh-rlm-strategy": "workspace:^",
     "@deepseek-ai/dsh-physical-operator": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-task-template": "workspace:^"
   },
   "devDependencies": {
@@ -39,6 +40,7 @@
     "@deepseek-ai/dsh-model-allocation": "workspace:^",
     "@deepseek-ai/dsh-rlm-strategy": "workspace:^",
     "@deepseek-ai/dsh-physical-operator": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-task-template": "workspace:^"
   }
 }

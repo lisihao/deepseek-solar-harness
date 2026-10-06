@@ -14,7 +14,7 @@ Scheduler 会在 Graph 的 `maxParallel` 上限内启动彼此独立的节点，
 
 可选的版本化 `cluster.json` 同时持有固定 Product Server 成员表与远程 Resident 容量。启用了 `remoteExecution` 的成员会以 `remote.<member>.<operator>` 投影到同一个物理算子能力 seam；它的仓库允许列表把不含凭据的 `host/path` 身份映射到 Server 本地 checkout 路径或 Git URL。某个成员资格检查失败时只会把该成员标为不可用，不会阻塞健康的本地或远程 Provider。只有当集群中没有成员定义 `remoteExecution` 时才继续读取旧 `remote-operators.json`；同时定义两个目录会被拒绝，避免容量目录与选举成员表漂移。
 
-每次远程 Attempt 都会从发送端的干净 Git 工作区派生仓库身份、精确 HEAD 与可选子目录。接收 Server 在 `<DSH_HOME>/orchestrations/remote-workspaces/cache` 保存不可变 Git 对象，并在 `executions` 下为每个 execution id 建立独立、带租约的可写 checkout；因此同 commit 的并行 Attempt 无法看到彼此的 tracked 或 untracked 修改。终态检查会删除 settled checkout，running 或 indeterminate receipt 会续租，过期租约会被回收。Server 绝不解释发送端的绝对路径。超大 Resident 结果按远端 `sha256:` 引用在明确的字节／时间上限内取回，针对精确 JSON 字节验证 digest，校验为完整的提供方无关结果，再写入并读回调度 Leader 的本地 Orchestration CAS。内联与传输结果均保留原 execution id、持久 command Receipt、Server 亲和性和 generation fencing。
+每次普通远程 Attempt 都会从发送端的干净 Git 工作区派生仓库身份、精确 HEAD 与可选子目录。接收 Server 在 `<DSH_HOME>/orchestrations/remote-workspaces/cache` 保存不可变 Git 对象，并在 `executions` 下为每个 execution id 建立独立、带租约的可写 checkout；因此同 commit 的并行 Attempt 无法看到彼此的 tracked 或 untracked 修改。终态检查会删除 settled checkout，running 或 indeterminate receipt 会续租，过期租约会被回收。Server 绝不解释发送端的绝对路径。超大 Resident 结果按远端 `sha256:` 引用在明确的字节／时间上限内取回，针对精确 JSON 字节验证 digest，校验为完整的提供方无关结果，再写入并读回调度 Leader 的本地 Orchestration CAS。内联与传输结果均保留原 execution id、持久 command Receipt、Server 亲和性和 generation fencing。
 
 TaskGraph 节点提示词将上下文路径标为 `Sender workspace`，并指示原生执行器以当前工作目录解析文件操作和相对范围。这不改变列出的权限或任务验收。接收端 Host 通过 [Remote Sync 执行上下文](../../client/connection/README.md#remote-sync-and-stable-session-handoff)提供精确的 checkout 身份；[Agent Note](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md)记录保留发送方文本的原因。
 
@@ -32,13 +32,17 @@ TaskGraph 节点提示词将上下文路径标为 `Sender workspace`，并指示
 
 只有节点策略列出了返回的错误码且仍有 Attempt 预算时，自动重试才会创建新 Attempt。Resident 响应流断开会成为可重试的 `RUNTIME_UNAVAILABLE`；原生产品明确报告额度用尽时归类为 `QUOTA_EXHAUSTED`。允许额度重试时，下一个 Attempt 在重新密封前会排除已耗尽的 quota pool（没有 pool 身份时排除精确 offer）。格式错误的结果与不确定 command 绝不会自动重放。正常关闭 daemon 会先禁止新 Scheduler tick，并等待当前 tick 完成后再释放状态；脱离调用方的 tick 若失败，会记录日志并持久化为有界 `scheduler-fatal.json` 诊断。随后 daemon 会在报告关闭完成前结束已接受的控制连接，因此被替换的 build 不会存活在拒绝连接的 socket 后面。
 
-Attempt 运行时，daemon 会将有界 Resident 进度阶段复制到编排事件流。结算会把完整算子结果保留在 Evidence 产物中，并向终态事件添加有界的面向用户输出预览。协议版本 4 包含经 digest 校验的 `artifact.read`、schema-v3 持久 Autonomous 状态和 term-fenced 集群控制方法，因此经过认证的投影可以按需读取已保留的 Evidence 结果，而不把提示词、私有推理、终端屏幕或产品本地 transcript 复制进事件流。
+Attempt 运行时，daemon 会将有界 Resident 进度阶段复制到编排事件流。结算会把完整算子结果保留在 Evidence 产物中，并向终态事件添加有界的面向用户输出预览。协议版本 7 包含经 digest 校验的 `artifact.read`、持久 Autonomous 状态和 term-fenced 集群控制方法，因此经过认证的投影可以按需读取已保留的 Evidence 结果，而不把提示词、私有推理、终端屏幕或产品本地 transcript 复制进事件流。
 
 Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStore.gouzi`（`GouziRegistry`）写入。host 记录保存它接受的权威纪元和凭据条目名称；凭据本身从不存入 SQLite。成员记录保存其进程监听的端点，因为同一宿主上的多个成员监听不同端口；进程每次启动都会用 `setEndpoint` 替换它，没有端点的成员不会被注册为算子。成员从 `provisioning` 开始，经过 `enabled` 与 `retiring`，只有 `archive` 才会离开十只的计数，而 `archive` 需要凭据已撤销、在途工作已结算和进程树已停止。`connection` 与 `activity` 和 `membership` 并列保存，各自独立变化。创建是一个立即事务，会统计所有未归档成员，所以第十一次创建以 `GOUZI_LIMIT_REACHED` 失败。这两张表不属于集群副本；被提升的 follower 需要重新配对宿主。Schema 5 是单向迁移：旧程序会拒绝打开该数据库。
 
 `gouziOperatorServer` 把已注册且已启用的成员投影为远端 Server，其算子地址为 `gouzi.<gouziId>.<operatorId>`。对每一次 attempt，它读取成员、其宿主以及该 attempt 封存的节点执行计划，并签发 `GouziExecutionGrant`：run、node、attempt、执行 ID、generation、权威纪元、来自计划的读、写与 effect 范围、截止时间，以及等于随后所发请求的 `gouziRequestHash` 的 `planHash`。它拒绝未 `enabled` 的成员，也拒绝不是顶层 TaskGraph attempt 的执行 ID，所以成员不会运行 RLM 子任务或 Auto-Refine 阶段。第一版不支持在主实例不可达时运行，所以 `offlineUntil` 等于 `deadline`；截止时间是成员自己的 `grantDeadlineMs`（60 秒到 24 小时，创建时设定）。每次远端刷新时，daemon 会注册每个 `enabled` 成员，并按宿主的 `credentialRef` 从 `ctx.credentials` 读取宿主凭据（回环或隧道端点不需要凭据），把 `connection` 记为 `online` 或 `unreachable`，并在该成员有 attempt 处于 accepted 或 running 时把 `activity` 记为 `working`。
 
-`./remote-host` 入口只挂载远端执行宿主服务，所以狗子成员无需 TaskGraph daemon、调度器或集群选举，也能物化精确提交的工作区。
+`GouziControl.executionOperators()` 使用协议 7 的只读查询 `gouzi.execution_operators`。只有成员身份、generation、宿主、属主与端点仍匹配时，它才将已启用的注册表成员关联到实际远程注册，再读取最新 Resident catalog 中的完整算子 id、可用状态、原因和模型。缺少注册或注册已过期时，算子列表为空；仅有 `connection: online` 不能证明执行入口可用。查询不会启动成员，也不改变 membership、授权或调度状态。[狗窝房间](../ui-gouzi/README.md)使用这些数据展示状态并接纳点名的标准 TaskGraph。编译和启动会对照当前目录校验 `admission.gouziRecipient`：每个节点只能使用已接纳的算子 id，不能使用 fallback、RLM 或 Autonomous Mode。对象不可用或 generation 改变时会失败，不会改选其他路由。
+
+`./remote-host` 入口只挂载远端执行宿主服务，所以狗子成员无需 TaskGraph daemon、调度器或集群选举，也能在已注册目录执行。持久化的 `remoteExecution.projects` 将不透明项目 ID 映射到确切选中的 Server 本地目录，`defaultProjectId` 选择初始项目。`gouzi-project` 工作区身份发送项目 ID，不发送源宿主路径，也不伪造 commit；可选 origin 信息不授予目录访问权。执行要求挂载成员 service，并提供与成员身份、generation 和请求 hash 匹配的授权。直接目录执行保留未跟踪文件、尚无提交的仓库和没有 origin 的仓库。共享目录锁和执行回执位于选中项目之外；结算只释放执行元数据，不删除项目文件。冲突或未解决的命令会阻止复用，未知结果不会自动重试。见[目录领养决策](../../../.agents/notes/implemented/feature/2026-10-06-gouzi-directory-adoption.md)。
+
+配置了项目的狗子成员使用持久化的默认项目及确切选中的真实目录。仅配置 repositories 的成员使用干净精确提交的 Git 物化；两种模式都检查授权和成员 generation。目录资格检查核对配置与目录可用性，不把目录当前忙碌当成资格失败。持久化租约检查只读；已知原生回执允许恢复原 turn，存在租约但没有原生回执则保持 indeterminate。目录锁仅在结算得到证明，或关联的命令拒绝后成功查询确认没有回执时释放；未解决结果保留锁，不重放。
 
 ## Model Experience
 
@@ -57,5 +61,5 @@ Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStor
 - RLM 只在一个已封存节点内进行有界递归；它是执行策略，不是另一个产品或全局 Scheduler；如果崩溃后无法证明复合执行的终态，就会进入 indeterminate，绝不自动重放。
 - Autonomous Mode 需要显式选择，当前使用宿主 shell 质量门禁；未配置门禁时，它不会自行猜测任务专属的结束条件。
 - 基础 Bundle 不内置生产 Skill 目录。部署必须显式安装可信 Skill Provider 插件；缺少 Provider 的受管条目仍可见，但状态为不可用。
-- 远程物化目前要求干净且已经提交的 Git 工作区、已配置的 origin，以及每台执行 Server 上包含锁定 commit 的允许 source。未提交的发送端修改、凭据传输、任意绝对路径映射和可变共享 worktree 都明确不支持。
+- 普通远程 Git 物化要求干净且已经提交的 Git 工作区、已配置的 origin，以及每台执行 Server 上包含锁定 commit 的允许 source。未提交的发送端修改、凭据传输、任意绝对路径映射和可变共享 worktree 都明确不支持。
 - 首发集群成员表是固定配置。成员变化与增量副本需要未来显式升级协议；两成员集群失去任意一个成员后无法继续调度，因为它不再拥有多数派。

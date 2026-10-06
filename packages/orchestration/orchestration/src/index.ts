@@ -21,9 +21,10 @@ import type {
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
 import { HarnessError, type ContentBlock, type ContextSnapshotSection } from '@deepseek-ai/dsh-llm'
-import type { GouziControl } from './gouzi.ts'
+import type { GouziControl, GouziId } from './gouzi.ts'
 import type {
   PhysicalOperatorExecutionId,
+  PhysicalOperatorId,
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorStopReason,
@@ -277,10 +278,19 @@ export interface OrchestrationRuntimeContextV1 {
   readonly sections: readonly ContextSnapshotSection[]
 }
 
+/** User-selected stable member, its selection generation, and Host-confirmed actual execution entries. */
+export interface OrchestrationGouziRecipientV1 {
+  readonly gouziId: GouziId
+  readonly generation: number
+  readonly operatorIds: readonly PhysicalOperatorId[]
+}
+
 /** User-selected collaboration policy and route captured before TaskGraph compilation. */
 export interface OrchestrationAdmissionTraceV1 {
   readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code'
   readonly route: 'taskgraph'
+  /** Fixed recipient; every graph node must use only these actual member execution entries. */
+  readonly gouziRecipient?: OrchestrationGouziRecipientV1
   readonly sourceSessionId: string
   /** Current-request dynamic contexts captured before crossing into the daemon. */
   readonly runtimeContext?: OrchestrationRuntimeContextV1
@@ -766,3 +776,5 @@ export abstract class OrchestrationService extends Service {
 export type { CapabilityBindingPlanV1, ContextPacketV1 }
 export * from './gouzi.ts'
 export default OrchestrationService
+
+export type { OrchestrationRecipientResolver } from './recipient-resolver.ts'

@@ -329,6 +329,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer.',
   },
   {
+    key: 'orchestrationRecipients',
+    pkg: 'orchestration',
+    title: 'User-selected orchestration recipient resolver',
+    mode: 'seam',
+    implementations: ['ui-gouzi'],
+    consumers: ['tool-orchestration'],
+    note: 'Resolves the current human request to an enabled member generation and available execution entries before sealing TaskGraph admission.',
+  },
+  {
     key: 'gouziHost',
     pkg: 'ui-gouzi',
     title: 'Gouzi member process host',

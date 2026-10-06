@@ -12,7 +12,7 @@ import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
 
 const snapshot = {
-  protocol: { major: 1, minor: 4 },
+  protocol: { major: 1, minor: 5 },
   deploymentId: 'deployment-1',
   cursor: { deploymentId: 'deployment-1', sequence: 7 },
   capturedAt: '2026-08-23T08:00:00.000Z',
@@ -77,7 +77,7 @@ afterEach(() => {
 describe('Remote Sync wire parsing', () => {
   it('accepts an authenticated Server description and rejects unknown capabilities', () => {
     const description = {
-      protocol: { major: 1, minor: 4 },
+      protocol: { major: 1, minor: 5 },
       deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 },
       describedAt: '2026-08-23T08:00:00.000Z',
@@ -111,7 +111,7 @@ describe('Remote Sync wire parsing', () => {
         result: {
           ok: true,
           value: {
-            protocol: { major: 1, minor: 4 },
+            protocol: { major: 1, minor: 5 },
             deploymentId: 'deployment-1',
             cursor: { deploymentId: 'deployment-1', sequence: 7 },
             describedAt: '2026-08-23T08:00:00.000Z',
@@ -128,7 +128,7 @@ describe('Remote Sync wire parsing', () => {
     expect(seenUrl).toBe('https://server.example/remote-sync/describe')
     expect(seenUrl).not.toContain('short-lived')
     expect(seenAuthorization).toBe('Bearer short-lived')
-    expect(seenPayload).toEqual({ protocol: { major: 1, minor: 4 } })
+    expect(seenPayload).toEqual({ protocol: { major: 1, minor: 5 } })
   })
 
   it('lists, reads, and applies complete Session replicas over the same authenticated channel', async () => {
@@ -229,9 +229,9 @@ describe('Remote Sync wire parsing', () => {
       'operator.events', 'operator.interrupt',
     ])
     expect(payloads.get('operator.execute')).toMatchObject({
-      protocol: { major: 1, minor: 4 }, nativeToolPolicy: 'disabled',
+      protocol: { major: 1, minor: 5 }, nativeToolPolicy: 'disabled',
     })
-    expect(payloads.get('operator.artifact.read')).toMatchObject({ protocol: { major: 1, minor: 4 } })
+    expect(payloads.get('operator.artifact.read')).toMatchObject({ protocol: { major: 1, minor: 5 } })
   })
 
   it('validates every remote replication and Resident wire variant', () => {
@@ -321,6 +321,11 @@ describe('Remote Sync wire parsing', () => {
         { poolId: 'claude-secondary' },
       ],
     }])
+    const gouziWorkspace = { gouziId: 'gouzi-1', generation: 2, projectId: 'a'.repeat(64) }
+    expect(parseRemoteResidentProviders([{ ...provider, gouziWorkspace }])[0]?.gouziWorkspace).toEqual(gouziWorkspace)
+    for (const invalid of [{ ...gouziWorkspace, projectId: 'bad' }, { ...gouziWorkspace, generation: -1 }]) {
+      expect(() => parseRemoteResidentProviders([{ ...provider, gouziWorkspace: invalid }])).toThrow()
+    }
 
     const baseTurn = {
       commandId: 'command-1', turnId: 'turn-1', sessionId: 'session-1',
@@ -459,7 +464,7 @@ describe('Remote Sync wire parsing', () => {
 
   it('rejects malformed descriptions, cursors, snapshots, and scalar fields', () => {
     const description = {
-      protocol: { major: 1, minor: 4 }, deploymentId: 'deployment-1',
+      protocol: { major: 1, minor: 5 }, deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 }, describedAt: snapshot.capturedAt,
       scope: 'cockpit', capabilities: ['session.read'], host: snapshot.host,
     }

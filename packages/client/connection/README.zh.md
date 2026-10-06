@@ -14,17 +14,51 @@ node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-r
 
 ## Remote Sync 与稳定 Session 交接
 
-Remote Sync 协议 1.4 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 Session 交接与可复现的 Resident 执行控制。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`；副本目录只包含没有开放回合的完整日志。线路传输正典 `SessionHeader` 与完整事件日志，目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。这是显式权威交接，不是持续双写同步。
+Remote Sync 协议 1.5 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 Session 交接与可复现的 Resident 执行控制。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`；副本目录只包含没有开放回合的完整日志。线路传输正典 `SessionHeader` 与完整事件日志，目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。这是显式权威交接，不是持续双写同步。
 
-挂载 `ctx.residentOperators` 后，同一认证通道会声明 `operator.read/interrupt`。只有协议 1.4 客户端、独立 `ctx.remoteOperatorHost` Provider 已完成资格审查、本节点启用远程执行且至少一个允许仓库可物化时，才会声明 `operator.execute`、`operator.workspace.materialize` 与 `operator.artifact.read`。协议 1.3 在滚动升级期间仍可读取投影，但不能提交新的执行 DTO 或读取其产物。调用方发送不含凭据的规范仓库身份、精确干净 commit 与可选仓库相对子目录，而不是自身绝对文件路径。Host Provider 会核验本地仓库允许列表，建立不可写 Git 对象缓存和按 command 隔离且带租约的可写 checkout，并且只把这个 Server 本地 checkout 交给 Resident。仓库凭据和配置的 source 位置都不会进入线路 DTO。
+挂载 `ctx.residentOperators` 后，同一认证通道会声明 `operator.read/interrupt`。只有协议 1.5 客户端、独立 `ctx.remoteOperatorHost` Provider 已完成资格审查、本节点启用远程执行且至少一个允许仓库或已注册狗子项目可用时，才会声明 `operator.execute`、`operator.workspace.materialize` 与 `operator.artifact.read`。协议 1.3 在滚动升级期间仍可读取投影，但不能提交新的执行 DTO 或读取其产物。普通 Git 执行发送不含凭据的规范仓库身份、精确干净 commit 与可选仓库相对子目录，而不是发送端绝对文件路径。狗子目录执行发送 `{ version: 1, kind: 'gouzi-project', projectId }` 和可选子目录，不携带 commit 或配置的目录路径。接收成员通过持久化项目映射解析该 ID，并在选中的真实目录执行。对于普通 Git 执行，Host Provider 会核验本地仓库允许列表，建立不可写 Git 对象缓存和按 command 隔离且带租约的可写 checkout，并且只把这个 Server 本地 checkout 交给 Resident。仓库凭据和配置的 source 位置都不会进入线路 DTO。
 
 远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。`operator.execute` 的上下文信封会在原生物化前重新解析；Server 返回精确的已接受回执，调用方会拒绝缺失、格式错误或不匹配的回执。超大已结算结果返回 `sha256:` 引用；`operator.artifact.read` 会在 Server deadline 内返回最多 8 MiB 的精确不可变 JSON，使调用方能验证远端 digest、校验完整 Resident 结果，并写入自己的本地 CAS。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
 
-Remote Sync Host 会向系统提示词追加确定性的补充内容，包含接收端 checkout 的 `cwd`、仓库身份和 commit。该 cwd 决定原生文件操作使用的目录；发送方路径仍是源宿主上下文，相对读写范围保持不变。Host 保留原始任务、历史路径、上下文信封和 digest。已接受上下文回执只确认原始信封，不确认派生的执行提示词。[Resident 准入](../../physical-operator/resident-operator-local/README.md#protocol-storage-and-recovery)会私有保存已解析的输入。决策见[远程工作区上下文](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md)。
+Remote Sync Host 会向系统提示词追加确定性的补充内容，包含接收端执行目录的 `cwd` 与工作区身份：普通 Git 执行使用仓库和 commit，狗子目录执行使用项目 ID。该 cwd 决定原生文件操作使用的目录；发送方路径仍是源宿主上下文，相对读写范围保持不变。Host 保留原始任务、历史路径、上下文信封和 digest。已接受上下文回执只确认原始信封，不确认派生的执行提示词。[Resident 准入](../../physical-operator/resident-operator-local/README.md#protocol-storage-and-recovery)会私有保存已解析的输入。决策见[远程工作区上下文](../../../.agents/notes/implemented/bug-fix/2026-10-04-remote-native-workspace-context.md)。
 
 持有 `gouzi` 范围凭据的是主实例，用来连接一只执行成员。Remote Sync RPC 只接受该范围调用 `describe`、`gouzi.hello` 和 `operator.*` 方法；`/api` 桥、snapshot、replica、cluster、设备名册和所有事件 socket 都会拒绝它。该范围的 `operator.execute` 必须带 `gouziGrant`（其 `planHash` 等于该请求的 `gouziRequestHash`），且必须挂载 `ctx.gouziMember` Provider；没有 Provider 时该范围既不能执行也不能 hello。Provider 在物化工作区之前，先按存储的身份、generation 与权威纪元检查授权，并查询幂等账本，因此被拒绝的授权不会产生副作用，重复的执行 ID 返回已存回执。挂载该服务的宿主就是成员宿主：每一个 `operator.execute` 调用方，包括回环属主或 SSH 隧道端点，都必须出示授权。`GouziMemberService` 是 Service Definition，`@deepseek-ai/dsh-host-gouzi-member` 是 Provider。
 
 当 `ctx.orchestrations` 暴露集群权威时，每个经过认证的 description 都可以带有有界只读投影（`nodeId`、term、role、leader id 和 `canSchedule`）。这样，配置了多个 Server 的 Frontend 可以优先连接当前持有多数租约的 Leader，而不会获得选举权威。`orchestration.cluster` 控制能力只向 admin peer 声明，承载 vote、heartbeat、逻辑副本 export 和受 term 约束的 install。生产 peer 应当通过经过认证的回环隧道调用这些控制操作；普通 Frontend bearer 不是集群凭据。
+
+目录请求的 command ID 与请求 hash 相同时，共用一次进行中的准入；hash 不同则冲突。恢复在资格检查或工作区获取之前读取原生命令回执。存在回执时恢复原 turn 与当前 revision，包括成员记录接受状态失败或 Provider 资格变为不可用之后。`inspectWorkspace` 读取持久化租约，不获取或替换租约。存在租约但没有原生回执时，结果为 indeterminate，不会触发再次执行。只有关联的 `ResidentCommandRefusal` 后成功检查回执并确认不存在，才释放该确切租约；超时、断线或检查失败均保留租约。未知结果不自动重放。
+
+## 远程执行工作区身份
+
+```ts type-equiv
+/** Git identity used to reproduce one sender workspace on another Server. */
+interface RemoteWorkspaceIdentityV1 {
+  readonly version: 1
+  /** Canonical host/path identity, for example `github.com/owner/repository`. */
+  readonly repository: string
+  /** Exact clean source commit to materialize. */
+  readonly commit: string
+  /** Optional repository-relative directory used as the execution cwd. */
+  readonly subdir?: string
+}
+```
+
+```ts type-equiv
+/** Host-registered actual project directory selected for a Gouzi execution. */
+interface RemoteGouziWorkspaceIdentityV1 {
+  readonly version: 1
+  readonly kind: 'gouzi-project'
+  /** Lowercase SHA-256 identity of a project registered by the receiving host. */
+  readonly projectId: string
+  /** Optional normalized project-relative execution directory. */
+  readonly subdir?: string
+}
+```
+
+```ts type-equiv
+/** Receiver workspace selection: immutable Git checkout or registered Gouzi project. */
+type RemoteExecutionWorkspaceIdentityV1 = RemoteWorkspaceIdentityV1 | RemoteGouziWorkspaceIdentityV1
+```
 
 ## 模型体验
 

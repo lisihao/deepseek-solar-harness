@@ -1,4 +1,4 @@
-/** Server-local Git materialization and immutable Resident artifact Provider. */
+/** Server-local workspace admission and immutable Resident artifact Provider. */
 
 import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
@@ -13,6 +13,8 @@ import {
   type RemoteOperatorHostQualification,
   type RemoteResidentArtifactDocument,
   type RemoteWorkspaceIdentityV1,
+  type RemoteExecutionWorkspaceIdentityV1,
+  type RemoteGouziWorkspaceIdentityV1,
 } from '@deepseek-ai/dsh-client-connection'
 import { readOrchestrationClusterConfig, type OrchestrationClusterMember } from './cluster.ts'
 
@@ -23,13 +25,22 @@ const QUALIFICATION_TTL_MS = 30_000
 interface WorkspaceLeaseV1 {
   readonly version: 1
   readonly executionId: string
-  readonly identity: RemoteWorkspaceIdentityV1
+  readonly identity: RemoteExecutionWorkspaceIdentityV1
   readonly leaseUntil: number
 }
 
-/** Runtime bounds for one Server-local Git materialization. */
+interface DirectoryWorkspaceLeaseV1 extends WorkspaceLeaseV1 {
+  readonly identity: RemoteGouziWorkspaceIdentityV1
+  readonly memberId: string
+  readonly root: string
+  readonly path: string
+}
+
+/** Runtime bounds for Server-local workspace materialization. */
 export interface LocalRemoteOperatorHostOptions {
   readonly dshHome: string
+  /** Absolute metadata root shared by every member on this host; required for directory executions. */
+  readonly directoryLockRoot?: string
   readonly timeoutMs: number
   readonly artifactReadTimeoutMs: number
   readonly artifactMaxBytes: number
@@ -84,7 +95,7 @@ export async function resolveRepositorySource(
   return { repository: canonicalRemoteRepositoryIdentity(origin), source: root }
 }
 
-/** Host Provider backed by immutable Git caches and per-command writable checkouts. */
+/** Host Provider for isolated Git checkouts and locked registered project directories. */
 export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   private readonly cacheMaterializations = new Map<string, Promise<string>>()
   private readonly orchestrationRoot: string
@@ -95,6 +106,9 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
 
   constructor(ctx: Context, private readonly options: LocalRemoteOperatorHostOptions) {
     super(ctx)
+    if (options.directoryLockRoot !== undefined && !isAbsolute(options.directoryLockRoot)) {
+      throw new Error('directoryLockRoot must be an absolute path')
+    }
     this.orchestrationRoot = join(options.dshHome, 'orchestrations')
     // Git materialization creates object paths below the cache and checkout.
     // Keep cluster configuration at its established location, but use a short
@@ -108,7 +122,8 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   }
 
   async qualification(): Promise<RemoteOperatorHostQualification> {
-    if (this.qualificationCache !== undefined && this.qualificationCache.expiresAt > Date.now()) {
+    if (this.ctx.get('gouziMember') === undefined
+      && this.qualificationCache !== undefined && this.qualificationCache.expiresAt > Date.now()) {
       return this.qualificationCache.value
     }
     let value: RemoteOperatorHostQualification
@@ -116,6 +131,11 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
       const member = this.localMember()
       const failures: string[] = []
       let available = false
+      if ((member.remoteExecution?.projects?.length ?? 0) > 0) {
+        const workspace = await this.gouziWorkspace()
+        if (workspace === undefined) throw new Error('Gouzi default project is not configured')
+        available = true
+      }
       for (const repository of member.remoteExecution?.repositories ?? []) {
         try {
           if (isAbsolute(repository.source)) {
@@ -141,13 +161,40 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
     return value
   }
 
+  override async gouziWorkspace(): Promise<{ readonly projectId: string } | undefined> {
+    const member = this.localMember()
+    const projectId = member.remoteExecution?.defaultProjectId
+    if (projectId === undefined) {
+      if ((member.remoteExecution?.projects?.length ?? 0) > 0) throw new Error('Gouzi default project is not configured')
+      return undefined
+    }
+    const { root } = await this.registeredDirectory({ version: 1, kind: 'gouzi-project', projectId }, member)
+    this.directoryLockPath(root)
+    return { projectId }
+  }
+
+  override async inspectWorkspace(executionId: string): Promise<RemoteMaterializedWorkspaceV1 | undefined> {
+    if (executionId.length === 0 || executionId.trim() !== executionId) {
+      throw new Error('remote workspace executionId must be a non-blank trimmed string')
+    }
+    const lease = await this.directoryLease(executionId)
+    if (lease === undefined) return undefined
+    const selected = await this.registeredDirectory(lease.identity, this.localMember())
+    this.expectDirectoryLease(lease, { ...lease, ...selected })
+    const lock = await this.readDirectoryLease(this.directoryLockPath(selected.root))
+    this.expectDirectoryLease(lock, lease)
+    return { version: 1, identity: lease.identity, path: selected.path }
+  }
+
   async materializeWorkspace(
-    identity: RemoteWorkspaceIdentityV1,
+    identity: RemoteExecutionWorkspaceIdentityV1,
     executionId: string,
   ): Promise<RemoteMaterializedWorkspaceV1> {
     if (executionId.length === 0 || executionId.trim() !== executionId) {
       throw new Error('remote workspace executionId must be a non-blank trimmed string')
     }
+    if ('kind' in identity) return this.materializeDirectory(identity, executionId)
+    if (await this.directoryLease(executionId) !== undefined) throw new Error('remote workspace execution identity conflicts with directory command')
     const normalized = normalizeIdentity(identity)
     const member = this.localMember()
     const source = member.remoteExecution?.repositories
@@ -201,6 +248,16 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   }
 
   async renewWorkspace(executionId: string): Promise<void> {
+    const directoryLease = await this.directoryLease(executionId)
+    if (directoryLease !== undefined) {
+      await this.withDirectoryAdmission(async () => {
+        const lockPath = this.directoryLockPath(directoryLease.root)
+        const lock = await this.readDirectoryLease(lockPath)
+        this.expectDirectoryLease(lock, directoryLease)
+        await this.writeLease(lockPath, { ...lock, leaseUntil: Date.now() + this.options.workspaceLeaseMs })
+      })
+      return
+    }
     const directory = join(this.executionRoot, sha256(executionId))
     const leasePath = join(directory, 'lease.json')
     if (!await exists(leasePath)) return
@@ -210,6 +267,19 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   }
 
   async releaseWorkspace(executionId: string): Promise<void> {
+    const lease = await this.directoryLease(executionId)
+    if (lease !== undefined) {
+      await this.withDirectoryAdmission(async () => {
+        const lockPath = this.directoryLockPath(lease.root)
+        if (await exists(lockPath)) {
+          const lock = await this.readDirectoryLease(lockPath)
+          this.expectDirectoryLease(lock, lease)
+          await rm(lockPath)
+        }
+        await rm(this.directoryReceiptPath(executionId))
+      })
+      return
+    }
     await rm(join(this.executionRoot, sha256(executionId)), { recursive: true, force: true })
   }
 
@@ -241,6 +311,130 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
       throw new Error(`remote execution is not enabled for local cluster member ${cluster.nodeId}`)
     }
     return member
+  }
+
+  private async registeredDirectory(
+    identity: RemoteGouziWorkspaceIdentityV1,
+    member: OrchestrationClusterMember,
+  ): Promise<{ root: string; path: string }> {
+    if (this.ctx.get('gouziMember') === undefined) throw new Error('directory execution requires a mounted Gouzi member')
+    if (identity.projectId.length === 0 || identity.projectId.trim() !== identity.projectId) {
+      throw new Error('remote workspace projectId must be a non-blank trimmed string')
+    }
+    const project = member.remoteExecution?.projects?.find(value => value.projectId === identity.projectId)
+    if (project === undefined) throw new Error(`remote project "${identity.projectId}" is not registered on Server ${member.id}`)
+    const root = await realpath(project.source)
+    if (!(await stat(root)).isDirectory()) throw new Error('registered project source is not a directory')
+    const subdir = normalizeDirectorySubdir(identity.subdir)
+    const path = subdir === undefined ? root : await containedDirectory(root, subdir)
+    return { root, path }
+  }
+
+  private directoryLockPath(root: string): string {
+    const lockRoot = this.options.directoryLockRoot
+    if (lockRoot === undefined || !isAbsolute(lockRoot)) {
+      throw new Error('directory execution requires an absolute shared directoryLockRoot')
+    }
+    return join(lockRoot, `${sha256(root)}.json`)
+  }
+
+  private directoryReceiptPath(executionId: string): string {
+    return join(this.executionRoot, `${sha256(executionId)}.directory.json`)
+  }
+
+  private async directoryLease(executionId: string): Promise<DirectoryWorkspaceLeaseV1 | undefined> {
+    const receipt = this.directoryReceiptPath(executionId)
+    if (!await exists(receipt)) return undefined
+    const lease = await this.readDirectoryLease(receipt)
+    if (lease.executionId !== executionId || lease.memberId !== this.localMember().id) {
+      throw new Error('directory workspace lease identity mismatch')
+    }
+    return lease
+  }
+
+  private async readDirectoryLease(path: string): Promise<DirectoryWorkspaceLeaseV1> {
+    const lease = await this.readLease(path)
+    const directory = lease as Partial<DirectoryWorkspaceLeaseV1>
+    const rawIdentity: unknown = lease.identity
+    if (rawIdentity === null || typeof rawIdentity !== 'object' || Array.isArray(rawIdentity)) {
+      throw new Error('invalid directory workspace lease')
+    }
+    const identity = rawIdentity as Record<string, unknown>
+    if (identity.kind !== 'gouzi-project'
+      || identity.version !== 1 || typeof identity.projectId !== 'string'
+      || identity.projectId.length === 0 || identity.projectId.trim() !== identity.projectId
+      || (identity.subdir !== undefined && typeof identity.subdir !== 'string')
+      || !Number.isSafeInteger(lease.leaseUntil) || lease.leaseUntil < 0
+      || typeof directory.memberId !== 'string' || typeof directory.root !== 'string'
+      || !isAbsolute(directory.root) || typeof directory.path !== 'string' || !isAbsolute(directory.path)) {
+      throw new Error('invalid directory workspace lease')
+    }
+    normalizeDirectorySubdir(identity.subdir)
+    return directory as DirectoryWorkspaceLeaseV1
+  }
+
+  private expectDirectoryLease(actual: DirectoryWorkspaceLeaseV1, expected: DirectoryWorkspaceLeaseV1): void {
+    if (actual.memberId !== expected.memberId || actual.executionId !== expected.executionId
+      || actual.root !== expected.root || actual.path !== expected.path
+      || canonicalIdentity(actual.identity) !== canonicalIdentity(expected.identity)) {
+      throw new Error('directory workspace is locked by a conflicting execution')
+    }
+  }
+
+  private async materializeDirectory(
+    identity: RemoteGouziWorkspaceIdentityV1,
+    executionId: string,
+  ): Promise<RemoteMaterializedWorkspaceV1> {
+    const member = this.localMember()
+    const subdir = normalizeDirectorySubdir(identity.subdir)
+    const normalized: RemoteGouziWorkspaceIdentityV1 = {
+      version: 1, kind: 'gouzi-project', projectId: identity.projectId,
+      ...subdir === undefined ? {} : { subdir },
+    }
+    const { root, path } = await this.registeredDirectory(normalized, member)
+    const lockPath = this.directoryLockPath(root)
+    await prepareMetadataDirectory(dirname(lockPath), root)
+    await prepareMetadataDirectory(this.executionRoot, root)
+    if (await exists(join(this.executionRoot, sha256(executionId)))) {
+      throw new Error('remote workspace execution identity conflicts with Git command')
+    }
+    const lease: DirectoryWorkspaceLeaseV1 = {
+      version: 1, executionId, identity: normalized, memberId: member.id, root, path,
+      leaseUntil: Date.now() + this.options.workspaceLeaseMs,
+    }
+    await this.withDirectoryAdmission(async () => {
+      for (const entry of await readdir(dirname(lockPath), { withFileTypes: true })) {
+        if (!entry.name.endsWith('.json')) continue
+        const existing = await this.readDirectoryLease(join(dirname(lockPath), entry.name))
+        if (!directoriesOverlap(existing.root, root)) continue
+        this.expectDirectoryLease(existing, lease)
+        // Expiry cannot prove that the original Resident command has stopped.
+        if (existing.leaseUntil <= Date.now()) throw new Error('directory workspace has an expired unresolved execution lock')
+      }
+      const receipt = await this.directoryLease(executionId)
+      if (receipt !== undefined) this.expectDirectoryLease(receipt, lease)
+      await this.writeLease(this.directoryReceiptPath(executionId), lease)
+      // A failed lock write never removes an older owner's metadata.
+      await this.writeLease(lockPath, lease)
+    })
+    return { version: 1, identity: normalized, path }
+  }
+
+  private async withDirectoryAdmission<T>(operation: () => Promise<T>): Promise<T> {
+    const guard = join(dirname(this.directoryLockPath('/')), '.admission')
+    try {
+      await writeFile(guard, `${randomUUID()}\n`, { flag: 'wx', mode: 0o600 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error('directory workspace admission is busy or unresolved')
+      }
+      throw error
+    }
+    try {
+      return await operation()
+    } finally {
+      await rm(guard)
+    }
   }
 
   private async materializeCache(repository: string, source: string, commit: string): Promise<string> {
@@ -335,6 +529,29 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   }
 }
 
+function directoriesOverlap(first: string, second: string): boolean {
+  const contains = (parent: string, child: string): boolean => {
+    const path = relative(parent, child)
+    return path === '' || (!path.startsWith(`..${sep}`) && path !== '..' && !isAbsolute(path))
+  }
+  return contains(first, second) || contains(second, first)
+}
+
+async function prepareMetadataDirectory(path: string, projectRoot: string): Promise<void> {
+  let ancestor = resolve(path)
+  const suffix: string[] = []
+  while (!await exists(ancestor)) {
+    suffix.unshift(relative(dirname(ancestor), ancestor))
+    ancestor = dirname(ancestor)
+  }
+  const target = resolve(await realpath(ancestor), ...suffix)
+  const child = relative(projectRoot, target)
+  if (child === '' || (!child.startsWith(`..${sep}`) && child !== '..' && !isAbsolute(child))) {
+    throw new Error('directory execution metadata must be outside the registered project')
+  }
+  await mkdir(path, { recursive: true, mode: 0o700 })
+}
+
 async function git(args: readonly string[], cwd: string | undefined, timeoutMs: number): Promise<string> {
   const { stdout } = await execFileAsync('git', [...args], {
     ...cwd === undefined ? {} : { cwd },
@@ -350,8 +567,15 @@ function normalizeIdentity(identity: RemoteWorkspaceIdentityV1): RemoteWorkspace
   return { version: 1, repository, commit: identity.commit, ...subdir === undefined ? {} : { subdir } }
 }
 
-function canonicalIdentity(identity: RemoteWorkspaceIdentityV1): string {
-  return JSON.stringify(normalizeIdentity(identity))
+function canonicalIdentity(identity: RemoteExecutionWorkspaceIdentityV1): string {
+  return JSON.stringify('kind' in identity
+    ? { version: 1, kind: 'gouzi-project', projectId: identity.projectId, ...identity.subdir === undefined ? {} : { subdir: normalizeDirectorySubdir(identity.subdir) } }
+    : normalizeIdentity(identity))
+}
+
+function normalizeDirectorySubdir(value: string | undefined): string | undefined {
+  if (value?.includes('\\') === true) throw new Error('remote workspace subdir must use forward slashes')
+  return normalizeSubdir(value)
 }
 
 function normalizeSubdir(value: string | undefined): string | undefined {

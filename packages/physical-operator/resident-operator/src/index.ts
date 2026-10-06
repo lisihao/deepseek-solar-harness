@@ -482,6 +482,14 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/** A correlated `turn.execute` error response; it does not prove the command was never accepted. */
+export class ResidentCommandRefusal extends ResidentOperatorError {
+  constructor(message: string, code: string) {
+    super(message, code)
+    this.name = 'ResidentCommandRefusal'
+  }
+}
+
 /** Abstract provider-neutral resident session/control surface. */
 export abstract class ResidentOperatorService extends Service {
   constructor(ctx: Context) {
@@ -556,6 +564,16 @@ export abstract class ResidentOperatorService extends Service {
    * @returns the current receipt state, result reference, and terminal result when available.
    */
   abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>
+
+  /**
+   * Read a durable turn receipt by command identity without admitting or replaying execution.
+   * Absence is an observation at query time and does not exclude concurrent admission.
+   * @param _commandId - caller-owned durable command identity.
+   * @returns the current turn snapshot, or undefined when no receipt exists; unsupported providers throw.
+   */
+  inspectCommand(_commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined> {
+    throw new ResidentOperatorError('Resident Provider does not support command inspection', 'PROTOCOL_MISMATCH')
+  }
 
   /**
    * Read a bounded page of structured observation events.

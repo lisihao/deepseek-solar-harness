@@ -413,6 +413,9 @@ importers:
       '@deepseek-ai/dsh-cmdline':
         specifier: workspace:^
         version: link:../../packages/boot/cmdline
+      '@deepseek-ai/dsh-orchestration':
+        specifier: workspace:^
+        version: link:../../packages/orchestration/orchestration
       '@deepseek-ai/dsh-pwsh-local':
         specifier: workspace:^
         version: link:../../packages/shell/pwsh-local
@@ -545,6 +548,9 @@ importers:
       '@deepseek-ai/dsh-host-apiproxy':
         specifier: workspace:*
         version: link:../packages/host/apiproxy
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:*
+        version: link:../packages/host/webserver
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:*
         version: link:../packages/runtime-diagnostics/invariants
@@ -806,6 +812,9 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: workspace:*
         version: link:../packages/core/tools
+      '@deepseek-ai/dsh-ui-gouzi':
+        specifier: workspace:*
+        version: link:../packages/orchestration/ui-gouzi
       '@deepseek-ai/dsh-user-approval':
         specifier: workspace:*
         version: link:../packages/interaction/user-approval
@@ -2185,6 +2194,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:^
         version: link:../ui-slots
+      '@deepseek-ai/dsh-client-ui-user-questions':
+        specifier: workspace:^
+        version: link:../ui-user-questions
       '@deepseek-ai/dsh-commands':
         specifier: workspace:^
         version: link:../../interaction/commands
@@ -6338,6 +6350,9 @@ importers:
       '@deepseek-ai/dsh-rlm-strategy':
         specifier: workspace:^
         version: link:../rlm-strategy
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
       '@deepseek-ai/dsh-task-template':
         specifier: workspace:^
         version: link:../../prompt/task-template
@@ -6733,6 +6748,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:^
         version: link:../../client/ui-slots
+      '@deepseek-ai/dsh-client-web-react':
+        specifier: workspace:^
+        version: link:../../client/web-react
       '@deepseek-ai/dsh-host-remote-auth':
         specifier: workspace:^
         version: link:../../host/remote-auth
@@ -6745,6 +6763,15 @@ importers:
       '@deepseek-ai/dsh-orchestration':
         specifier: workspace:^
         version: link:../orchestration
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
       '@testing-library/react':
         specifier: ^16.1.0
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)

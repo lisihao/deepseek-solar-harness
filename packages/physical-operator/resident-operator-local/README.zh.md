@@ -12,6 +12,8 @@ JSON-RPC 2.0 通过仅属主可访问的 Unix socket 以 NDJSON 传输。协议 
 
 业务请求继续使用严格的协议 v14/state schema v6 握手。初次握手返回完整 peer 响应时，退休会复用已观测的 peer 身份。相邻的 schema5 peer 若对初次 schema6 握手不返回响应，退休才会进行一次范围受限的兼容性探测，并且只会在 peer 身份和 PID 与 authority 记录匹配后发送 shutdown。无法确认或不匹配的 peer 都返回 `PROTOCOL_MISMATCH`；shutdown 仍会优雅排空，不会 kill PID 或丢弃活动工作。
 
+必需方法集包含 `command.inspect`，协议仍为 v14，state schema 仍为 v6。检查无需原生产品资格审查或执行，直接读取命令回执。缺少该能力的 v14/schema6 daemon 会以 `PROTOCOL_MISMATCH` 拒绝握手；此情况不会扩大自动退休规则。在已授权的 MacBook 安装中替换它，要求先明确识别由属主控制的 idle daemon，再重启。既有的已观测 peer 退休检查和相邻 v14/schema5 兼容方法集保持不变。
+
 原生压缩只会在 Session 为 idle 且调用方 state revision 完全一致时准入。Claude Code 恢复同一个 Agent SDK Session，发送原生 `/compact`，并可携带指导语；Codex 恢复同一个非临时 app-server thread 后调用 `thread/compact/start`，由于该方法没有 instructions 字段，Codex 会明确拒绝非空指导语。daemon 会在调用产品前写入 accepted Receipt；相同已结算命令返回缓存结果，内容变化时报冲突，accepted/running 阶段崩溃或传输终态不明时进入 `COMMAND_INDETERMINATE`。再次压缩前必须显式处置，daemon 绝不会自动重放外部产品副作用。持久 Receipt 与事件只记录 canonical request hash 及是否提供指导语，不保存指导语正文。
 
 工具桥既可以密封忠实 RLM 专用的 `typescript_repl` 表面，也可以密封当前 Agent 面向模型的完整 DSH 工具目录。RLM 专用工具桥可以使用 `disabled`；`inherit` 与 `dsh-tools-authoritative` 保留各自的通用工具桥规则。Claude Code 通过进程内 Agent SDK MCP server 接收；Codex 通过 app-server 的 `thread/start.dynamicTools` 与 `item/tool/call` 接收。通用调用回到拥有该会话的 DSH Host，经普通 Tool Runtime 执行，因此保留 scope、guard、approval、事件日志和插件归属。每个原生调用身份以外层 Resident command 划分命名空间；Host 在 DSH Session 中保存 request-hash Receipt，因此产品重连后重复同一调用会返回同一结果，而不会再次产生副作用。调用方提供的 lane 会把 RLM 原生 thread 与普通 Resident 对话隔离；后续 Codex turn 会恢复创建时已经固定动态工具表面的 thread。拥有相同规范请求的活动 command 可以刷新工具桥端点；只有 `dsh-tools-authoritative` 需要先由新属主通过 `tool.describe`，而 `inherit` 与 `disabled` 保留无需 `tool.describe` 的仅调用工具桥兼容性。每次新的工具调用都会读取当前端点，进行中的调用绝不会重试，结果丢失时仍按 indeterminate 处理。

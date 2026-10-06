@@ -454,7 +454,7 @@ export interface ConnectionConfig {
 }
 ```
 
-Source: [`packages/client/connection/src/index.ts:109`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:110`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -1804,6 +1804,8 @@ export interface Config extends RemoteHostConfig {
 export interface RemoteHostConfig {
   /** Optional DSH home; defaults to the ordinary harness-owned location. */
   readonly dshHome?: string
+  /** Absolute lock metadata root shared by all Gouzi members on this host. */
+  readonly directoryLockRoot?: string
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -2115,7 +2117,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/physical-operator/resident-operator-local/src/index.ts:55`](../packages/physical-operator/resident-operator-local/src/index.ts)
+Source: [`packages/physical-operator/resident-operator-local/src/index.ts:56`](../packages/physical-operator/resident-operator-local/src/index.ts)
 
 <a id="deepseek-aidsh-rlm-runtime-local"></a>
 
@@ -3567,7 +3569,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'code' | 'both'
 ```
 
-Source: [`packages/core/tools/src/index.ts:656`](../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:664`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -3594,12 +3596,14 @@ Requires: `orchestrations` · `webServer`
 ```ts config-catalog
 /** Gouzi plugin configuration. */
 export interface Config {
+  /** Browser room read interval in integer milliseconds. */
+  readonly roomPollIntervalMs?: number
   /** How long after issue an execution grant may start work, in milliseconds. */
   readonly grantDeadlineMs?: number
 }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/index.ts:44`](../packages/orchestration/ui-gouzi/src/index.ts)
+Source: [`packages/orchestration/ui-gouzi/src/index.ts:49`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

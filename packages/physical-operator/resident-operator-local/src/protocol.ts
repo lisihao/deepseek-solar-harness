@@ -42,16 +42,25 @@ export function wireFailure(error: unknown): WireFailure {
 /**
  * Validate and unwrap one daemon response envelope.
  * @param value - unknown JSON-RPC method result.
+ * @param responseError - optional constructor for a correlated, validated method error response.
  * @returns the successful payload as unknown for caller-owned decoding.
  */
-export function unwrapWire(value: unknown): unknown {
+export function unwrapWire(
+  value: unknown,
+  responseError?: (message: string, code: string) => ResidentOperatorError,
+): unknown {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new ResidentOperatorError('resident daemon returned an invalid response', 'INVALID_RESULT')
   }
-  const result = value as Partial<WireResult<unknown>>
+  const result = value as Record<string, unknown>
   if (result.ok === true && 'value' in result) return result.value
-  if (result.ok === false && result.error !== undefined) {
-    throw new ResidentOperatorError(result.error.message, result.error.code)
+  const error = result.error
+  if (result.ok === false && error !== null && typeof error === 'object'
+    && 'message' in error && typeof error.message === 'string'
+    && 'code' in error && typeof error.code === 'string') {
+    throw responseError === undefined
+      ? new ResidentOperatorError(error.message, error.code)
+      : responseError(error.message, error.code)
   }
   throw new ResidentOperatorError('resident daemon returned an invalid response envelope', 'INVALID_RESULT')
 }

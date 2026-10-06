@@ -1,12 +1,12 @@
 /** Host-local execution facilities consumed by authenticated Remote Sync. */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { RemoteResidentArtifactDocument, RemoteWorkspaceIdentityV1 } from './remote-sync.ts'
+import type { RemoteResidentArtifactDocument, RemoteExecutionWorkspaceIdentityV1 } from './remote-sync.ts'
 
-/** Server-local result of resolving and materializing one immutable Git workspace. */
+/** Server-local result of resolving an execution workspace. */
 export interface RemoteMaterializedWorkspaceV1 {
   readonly version: 1
-  readonly identity: RemoteWorkspaceIdentityV1
+  readonly identity: RemoteExecutionWorkspaceIdentityV1
   /** Absolute Server-local cwd; this value is never returned over Remote Sync. */
   readonly path: string
 }
@@ -40,13 +40,31 @@ export abstract class RemoteOperatorHostService extends Service {
   abstract qualification(): Promise<RemoteOperatorHostQualification>
 
   /**
-   * Resolve an allowed repository identity and materialize its exact commit.
-   * @param identity - immutable repository, commit, and optional subdirectory.
-   * @param executionId - idempotent physical execution identity owning the isolated workspace lease.
+   * Read the persisted default project for this Gouzi host.
+   * @returns the registered project identity, or undefined on a generic host.
+   */
+  gouziWorkspace(): Promise<{ projectId: string } | undefined> {
+    return Promise.resolve(undefined)
+  }
+
+  /**
+   * Inspect a previously acquired execution lease without acquiring or replacing it.
+   * @param _executionId - physical execution identity owning the workspace.
+   * @returns its workspace, or undefined when no lease exists.
+   * @throws Error - when this generic host does not implement lease inspection.
+   */
+  inspectWorkspace(_executionId: string): Promise<RemoteMaterializedWorkspaceV1 | undefined> {
+    return Promise.reject(new Error('remote execution workspace inspection is unsupported'))
+  }
+
+  /**
+   * Resolve an allowed Git commit or a registered Gouzi project directory.
+   * @param identity - receiving-host workspace selection and optional subdirectory.
+   * @param executionId - idempotent physical execution identity owning the workspace lease.
    * @returns a Server-local execution cwd.
    */
   abstract materializeWorkspace(
-    identity: RemoteWorkspaceIdentityV1,
+    identity: RemoteExecutionWorkspaceIdentityV1,
     executionId: string,
   ): Promise<RemoteMaterializedWorkspaceV1>
 
@@ -57,7 +75,7 @@ export abstract class RemoteOperatorHostService extends Service {
   abstract renewWorkspace(executionId: string): Promise<void>
 
   /**
-   * Release one proven-settled execution workspace without touching the immutable object cache.
+   * Release one settled execution lease; registered project files remain on disk.
    * @param executionId - physical execution identity owning the workspace.
    */
   abstract releaseWorkspace(executionId: string): Promise<void>

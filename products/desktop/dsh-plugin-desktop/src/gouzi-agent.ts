@@ -6,11 +6,11 @@
 
 import { join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import type { GouziFolderListing, GouziProvisionInput } from '@deepseek-ai/dsh-ui-gouzi'
+import type { GouziFolderListing, GouziProjectSource, GouziProvisionInput } from '@deepseek-ai/dsh-ui-gouzi'
 import { LocalGouziOperations, type LocalGouziConfig, type LocalGouziStarted } from './gouzi-local.ts'
 
 /** Wire version of the agent protocol; a main instance refuses an agent that reports another. */
-export const GOUZI_AGENT_PROTOCOL = 1
+export const GOUZI_AGENT_PROTOCOL = 2
 
 /** Prefix of the result line. The login shell may print banners before it, so a reader searches for this prefix. */
 export const GOUZI_AGENT_RESULT_PREFIX = 'DSH-GOUZI-AGENT '
@@ -30,7 +30,7 @@ export interface GouziAgentProbe {
 /** Result line of one invocation. */
 export type GouziAgentResult =
   | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly message: string }
+  | { readonly ok: false; readonly message: string; readonly code?: string }
 
 /** What the agent needs from its host process. */
 export interface GouziAgentEnvironment {
@@ -42,7 +42,8 @@ export interface GouziAgentEnvironment {
 
 /** The operations the agent calls; a test may substitute a recording implementation. */
 export interface LocalGouziOperationsLike {
-  resolveRepository(path: string): Promise<{ readonly repository: string; readonly source: string }>
+  resolveRepository(path: string): Promise<GouziProjectSource>
+  prepareRepository(path: string): Promise<GouziProjectSource>
   provision(input: GouziProvisionInput): Promise<void>
   start(gouziId: string): Promise<LocalGouziStarted>
   stop(gouziId: string, options?: { readonly reclaimResident?: boolean }): Promise<{ readonly processTreeStopped: boolean }>
@@ -94,6 +95,7 @@ export async function runGouziAgent(
         home: environment.home,
       } satisfies GouziAgentProbe
     case 'resolve': return environment.operations.resolveRepository(requireOption(flags, '--path'))
+    case 'prepare': return environment.operations.prepareRepository(requireOption(flags, '--path'))
     case 'browse': return environment.operations.browse(optionalOption(flags, '--path'))
     case 'provision': {
       await environment.operations.provision(JSON.parse(stdin) as GouziProvisionInput)
@@ -153,7 +155,8 @@ export async function main(
     })
     result = { ok: true, value }
   } catch (cause) {
-    result = { ok: false, message: cause instanceof Error ? cause.message : String(cause) }
+    const code = cause instanceof Error ? (cause as NodeJS.ErrnoException).code : undefined
+    result = { ok: false, message: cause instanceof Error ? cause.message : String(cause), ...typeof code === 'string' ? { code } : {} }
   }
   write(`${GOUZI_AGENT_RESULT_PREFIX}${JSON.stringify(result)}\n`)
 }

@@ -4,7 +4,7 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
 import { createCodexRlmToolHandler } from '../src/drivers.ts'
@@ -18,6 +18,8 @@ import type {
 } from '@deepseek-ai/dsh-resident-operator'
 import {
   ResidentOperatorError,
+  ResidentCommandRefusal,
+  ResidentOperatorCommandId,
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -584,6 +586,109 @@ function client(root: string): ResidentDaemonClient {
 }
 
 describe('ResidentDaemon', () => {
+  it('inspects durable commands read-only through the daemon before and after settlement', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new BlockingDriver()
+    const execute = vi.spyOn(driver, 'execute')
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const commandId = ResidentOperatorCommandId('receipt-inspection')
+    try {
+      await expect(connected.inspectCommand(commandId)).resolves.toBeUndefined()
+      await expect(qualifiedRawRequest(daemon.socketPath, 'command.inspect', { command_id: commandId })).resolves.toBeNull()
+      expect(await connected.list()).toEqual([])
+      expect(execute).not.toHaveBeenCalled()
+      const turn = await connected.execute({
+        commandId, operatorId: 'codex', workspace,
+        prompt: [{ type: 'text', text: 'inspect receipt' }], signal: new AbortController().signal,
+      })
+      const before = await connected.inspectTurn(turn.turnId)
+      const sessions = await connected.list()
+      const events = await connected.readEvents(turn.sessionId)
+      expect(await connected.inspectCommand(commandId)).toEqual(before)
+      await expect(connected.execute({
+        commandId, operatorId: 'codex', workspace,
+        prompt: [{ type: 'text', text: 'conflicting replay' }], signal: new AbortController().signal,
+      })).rejects.toBeInstanceOf(ResidentCommandRefusal)
+      expect(await connected.inspectCommand(commandId)).toEqual(before)
+      expect(await connected.list()).toEqual(sessions)
+      expect(await connected.readEvents(turn.sessionId)).toEqual(events)
+      expect(execute).toHaveBeenCalledTimes(1)
+      await connected.interrupt(turn.sessionId, turn.turnId)
+      await turn.result.catch(() => {})
+      const settled = await connected.inspectTurn(turn.turnId)
+      expect(settled.state).toBe('settled')
+      expect(await connected.inspectCommand(commandId)).toEqual(settled)
+      expect(execute).toHaveBeenCalledTimes(1)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('tags a correlated execute refusal but leaves lookup and local failures untagged', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new MemoryDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const commandId = ResidentOperatorCommandId('refused-command')
+    try {
+      await expect(connected.execute({
+        commandId, operatorId: 'missing-provider', workspace,
+        prompt: [{ type: 'text', text: 'never admitted' }], signal: new AbortController().signal,
+      })).rejects.toBeInstanceOf(ResidentCommandRefusal)
+      await expect(connected.inspectCommand(commandId)).resolves.toBeUndefined()
+      const lookupError = await connected.inspectTurn('missing-turn').catch((error: unknown) => error)
+      expect(lookupError).toBeInstanceOf(ResidentOperatorError)
+      expect(lookupError).not.toBeInstanceOf(ResidentCommandRefusal)
+      const localError = await connected.execute({
+        commandId, operatorId: 'codex', workspace: join(root, 'missing-workspace'),
+        prompt: [{ type: 'text', text: 'never sent' }], signal: new AbortController().signal,
+      }).catch((error: unknown) => error)
+      expect(localError).not.toBeInstanceOf(ResidentCommandRefusal)
+      expect(driver.commandIds).toEqual([])
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('does not tag an aborted execute RPC as refusal or treat concurrent absent lookup as final', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    await connected.ready()
+    driver.beginBlocking()
+    const signal = new AbortController()
+    const commandId = ResidentOperatorCommandId('delayed-admission')
+    const pending = connected.execute({
+      commandId, operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'admission continues after caller detaches' }], signal: signal.signal,
+    }).catch((error: unknown) => error)
+    try {
+      await driver.blockingQualificationEntered
+      await expect(connected.inspectCommand(commandId)).resolves.toBeUndefined()
+      signal.abort(new Error('caller stopped awaiting admission'))
+      const error = await pending
+      expect(error).toBeInstanceOf(Error)
+      expect(error).not.toBeInstanceOf(ResidentCommandRefusal)
+      driver.releaseQualification()
+      await expect.poll(async () => (await connected.inspectCommand(commandId))?.state).toBe('settled')
+      expect(driver.commandIds).toEqual([commandId])
+    } finally {
+      driver.releaseQualification()
+      await daemon.close()
+    }
+  })
+
   it('starts one Claude login only after read-only qualification proves auth is required', async () => {
     const root = temporaryRoot()
     const driver = new AuthRequiredClaudeDriver()
@@ -897,6 +1002,9 @@ describe('ResidentDaemon', () => {
       instructions: 'retain architecture decisions',
     }
     const compacted = await connected.compact(request)
+    await expect(connected.inspectCommand(ResidentOperatorCommandId(request.commandId))).rejects.toMatchObject({
+      code: 'COMMAND_CONFLICT',
+    })
     expect(compacted).toMatchObject({
       nativeSessionId: 'native-1',
       session: {

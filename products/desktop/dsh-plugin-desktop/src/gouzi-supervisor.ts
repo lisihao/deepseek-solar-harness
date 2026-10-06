@@ -5,8 +5,12 @@ import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writ
 import { DatabaseSync } from 'node:sqlite'
 import { join, resolve } from 'node:path'
 import { provisionGouziIdentity } from '@deepseek-ai/dsh-host-gouzi-member'
+import type { GouziProjectSource } from '@deepseek-ai/dsh-ui-gouzi'
 import { GOUZI_MEMBER_LIMIT } from '@deepseek-ai/dsh-orchestration'
 import { GOUZI_WORKER_FILE, type GouziWorkerReady } from './gouzi-worker.ts'
+
+/** Shared execution metadata owned by the host, rather than a member home. */
+const DIRECTORY_LOCK_ROOT_NAME = '.execution-locks'
 
 /** Command that starts one member whose home is the given directory. */
 export interface GouziWorkerCommand {
@@ -37,8 +41,10 @@ export interface GouziProvisioning {
   readonly hostId: string
   readonly generation: number
   readonly authorityEpoch: string
-  /** Repositories the member may materialize: canonical identity and clone source. */
-  readonly repositories: readonly { readonly repository: string; readonly source: string }[]
+  /** Selected directories in which the member may execute. */
+  readonly projects: readonly GouziProjectSource[]
+  /** Project used when execution does not select another project. */
+  readonly defaultProjectId: string
 }
 
 /** More members are running on this host than the configured limit allows. */
@@ -118,8 +124,8 @@ export class GouziSupervisor {
   }
 
   /**
-   * Create a member's home with its identity and repository allowlist. Idempotent for the same identity.
-   * @param input - identity and allowed repositories.
+   * Create a member's home with its identity and project allowlist. Idempotent for the same identity.
+   * @param input - identity and allowed projects.
    * @returns the member home.
    */
   async provision(input: GouziProvisioning): Promise<string> {
@@ -132,7 +138,7 @@ export class GouziSupervisor {
       generation: input.generation,
       authorityEpoch: input.authorityEpoch,
     })
-    // The remote execution host reads its repository allowlist from the member entry of cluster.json.
+    // The remote execution host reads its project allowlist from the member entry of cluster.json.
     writeFileSync(join(home, 'orchestrations', 'cluster.json'), `${JSON.stringify({
       version: 1,
       nodeId: input.gouziId,
@@ -140,7 +146,7 @@ export class GouziSupervisor {
         id: input.gouziId,
         label: input.gouziId,
         endpoint: 'http://127.0.0.1:1',
-        remoteExecution: { enabled: true, repositories: input.repositories },
+        remoteExecution: { enabled: true, repositories: [], projects: input.projects, defaultProjectId: input.defaultProjectId },
       }],
     }, null, 2)}\n`, { mode: 0o600 })
     return home
@@ -198,7 +204,7 @@ export class GouziSupervisor {
         cwd: home,
         detached: true,
         stdio: ['ignore', log, log],
-        env: { ...process.env, ...env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: process.env.DSH_TELEMETRY_DISABLED ?? '1' },
+        env: { ...process.env, ...env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: process.env.DSH_TELEMETRY_DISABLED ?? '1', DSH_GOUZI_DIRECTORY_LOCK_ROOT: join(this.options.membersRoot, DIRECTORY_LOCK_ROOT_NAME) },
       })
     } finally {
       closeSync(log)
@@ -267,7 +273,9 @@ export class GouziSupervisor {
 
   private knownMembers(): string[] {
     try {
-      return readdirSync(resolve(this.options.membersRoot), { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name)
+      return readdirSync(resolve(this.options.membersRoot), { withFileTypes: true })
+        .filter(entry => entry.isDirectory() && entry.name !== DIRECTORY_LOCK_ROOT_NAME)
+        .map(entry => entry.name)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
       throw error

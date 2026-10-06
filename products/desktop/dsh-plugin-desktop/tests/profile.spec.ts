@@ -162,7 +162,7 @@ describe('desktop profile composition', () => {
   it('composes a Gouzi member without any scheduler row and gates its connection on the member service', () => {
     const home = temporaryHome()
     const server = composeEntries([prepareProductServerProfile(undefined, home, 'darwin').patches])
-    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin').patches])
+    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin', join(home, 'shared-execution-locks')).patches])
     const workerById = new Map(worker.map(row => [row.id, row] as const))
 
     for (const id of GOUZI_WORKER_DISABLED_ROW_IDS) {
@@ -171,7 +171,7 @@ describe('desktop profile composition', () => {
     }
     expect(workerById.get('orchestration-remote-host')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-orchestration-local/remote-host',
-      config: { dshHome: home },
+      config: { dshHome: home, directoryLockRoot: join(home, 'shared-execution-locks') },
     }))
     expect(workerById.get('gouzi-member')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-host-gouzi-member',
@@ -184,6 +184,10 @@ describe('desktop profile composition', () => {
     // The ordinary Product Server keeps waiting for the orchestration service and has no member gate.
     expect(server.find(row => row.id === 'gouzi-member')).toBeUndefined()
     expect(server.find(row => row.id === 'connection')?.inject).toContain('orchestrations')
+  })
+
+  it('refuses a Gouzi worker profile without its supervisor-owned shared lock root', () => {
+    expect(() => prepareGouziWorkerProfile(temporaryHome(), undefined, 'darwin', '')).toThrow('directory lock root')
   })
 
   it('mounts the local Gouzi host on Desktop and Product Server but never inside a member', () => {
@@ -203,7 +207,7 @@ describe('desktop profile composition', () => {
     expect(composeEntries([ids]).find(row => row.id === 'ui-gouzi')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-ui-gouzi',
     }))
-    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin').patches])
+    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin', join(home, 'shared-execution-locks')).patches])
     expect(worker.find(row => row.id === 'gouzi-host')).toBeUndefined()
     expect(worker.find(row => row.id === 'ui-gouzi')?.disabled).toBe(true)
     // The owner identity differs between two installations.

@@ -9,9 +9,9 @@ import type { SessionPersistence, SessionReplica, SessionReplicationResult } fro
 import type {
   ResidentEventPage,
   ResidentOperatorService,
-  ResidentProviderStatus,
   ResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-resident-operator'
+import { ResidentCommandRefusal, ResidentOperatorCommandId } from '@deepseek-ai/dsh-resident-operator'
 import type {
   OrchestrationClusterHeartbeatRequest,
   OrchestrationClusterHeartbeatResponse,
@@ -36,11 +36,14 @@ import {
   type RemoteSessionReplicaSummary,
   type RemoteResidentAcceptedTurn,
   type RemoteResidentExecuteRequest,
+  type RemoteResidentProviderStatus,
   type RemoteResidentArtifactDocument,
   type RemoteSyncProtocolVersion,
 } from './remote-sync.ts'
 import type { RemoteMaterializedWorkspaceV1, RemoteOperatorHostService } from './remote-operator-host.ts'
 import type { RemoteDeviceScope } from './remote-auth-wire.ts'
+import { gouziRequestHash, type GouziMemberService } from './gouzi-member.ts'
+import { ConnectionRpcHttpError } from './rpc-host.ts'
 import {
   materializeOperatorContextEnvelopeNative,
   receiveOperatorContextEnvelope,
@@ -192,20 +195,22 @@ export class RemoteSyncHub {
   private readonly stopSources = new AbortController()
   private readonly sourceLoop: Promise<void>
   private readonly socketPumps = new Set<Promise<void>>()
+  private readonly directoryCommands = new Map<string, { hash: string; pending: Promise<RemoteResidentAcceptedTurn> }>()
 
   constructor(
     private readonly api: ApiProxy,
     capacity: number,
     private readonly persistence?: Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'>,
-    private readonly resident?: Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'>,
+    private readonly resident?: Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectCommand' | 'inspectTurn' | 'readEvents' | 'interrupt'>,
     private readonly orchestration?: () => Pick<
       OrchestrationService,
       'clusterStatus' | 'clusterRequestVote' | 'clusterHeartbeat' | 'clusterExportReplica' | 'clusterInstallReplica'
     > | undefined,
     private readonly remoteOperatorHost?: () => Pick<
       RemoteOperatorHostService,
-      'qualification' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
+      'qualification' | 'gouziWorkspace' | 'inspectWorkspace' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
     > | undefined,
+    private readonly gouziMember?: () => Pick<GouziMemberService, 'hello'> | undefined,
   ) {
     this.journal = new RemoteSyncJournal(capacity)
     this.sourceLoop = this.runSources()
@@ -367,8 +372,15 @@ export class RemoteSyncHub {
    * List native-subscription capacity without exposing remote product credentials.
    * @returns the current Resident Provider catalog.
    */
-  operatorProviders(): Promise<ResidentProviderStatus[]> {
-    return this.expectResident().providers()
+  async operatorProviders(): Promise<RemoteResidentProviderStatus[]> {
+    const providers = await this.expectResident().providers()
+    const member = this.gouziMember?.()
+    const host = this.remoteOperatorHost?.()
+    if (member === undefined || host === undefined) return providers
+    const workspace = await host.gouziWorkspace()
+    if (workspace === undefined) return providers
+    const { gouziId, generation } = member.hello()
+    return providers.map(provider => ({ ...provider, gouziWorkspace: { gouziId, generation, projectId: workspace.projectId } }))
   }
 
   /**
@@ -379,10 +391,62 @@ export class RemoteSyncHub {
   async operatorExecute(
     request: RemoteResidentExecuteRequest,
   ): Promise<RemoteResidentAcceptedTurn> {
+    if ('kind' in request.workspaceIdentity) {
+      if (this.stopSources.signal.aborted) throw new Error('remote sync host is closed')
+      const hash = gouziRequestHash(request)
+      const previous = this.directoryCommands.get(request.commandId)
+      if (previous !== undefined && previous.hash !== hash) throw new ConnectionRpcHttpError(409, 'directory execution command conflicts with its original request')
+      if (previous !== undefined) return previous.pending
+      const pending = this.executeDirectory(request)
+      this.directoryCommands.set(request.commandId, { hash, pending })
+      try { return await pending } finally {
+        this.directoryCommands.delete(request.commandId)
+      }
+    }
+    return this.executeWorkspace(request)
+  }
+
+  private async executeDirectory(request: RemoteResidentExecuteRequest): Promise<RemoteResidentAcceptedTurn> {
+    const resident = this.expectResident()
     const host = this.expectRemoteOperatorHost()
+    const commandId = ResidentOperatorCommandId(request.commandId)
+    const existing = await resident.inspectCommand(commandId)
+    if (existing !== undefined) {
+      await this.observeWorkspace(existing)
+      return this.acceptedReceipt(request, existing)
+    }
+    if (await host.inspectWorkspace(request.commandId) !== undefined) {
+      throw new Error('directory execution is indeterminate: workspace lease exists without a Native command receipt')
+    }
     const qualification = await host.qualification()
     if (!qualification.available) throw new Error(qualification.reason ?? 'remote execution host is unavailable')
-    const materializedWorkspace = await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
+    const workspace = await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
+    try {
+      return await this.executeWorkspace(request, workspace)
+    } catch (error) {
+      const receipt = await resident.inspectCommand(commandId)
+      if (receipt !== undefined) {
+        await this.observeWorkspace(receipt)
+        return this.acceptedReceipt(request, receipt)
+      }
+      if (error instanceof ResidentCommandRefusal) {
+        await host.releaseWorkspace(request.commandId)
+        throw new ConnectionRpcHttpError(409, `Native command refused before acceptance: ${error.message}`)
+      }
+      throw error
+    }
+  }
+
+  private async executeWorkspace(
+    request: RemoteResidentExecuteRequest,
+    existingWorkspace?: RemoteMaterializedWorkspaceV1,
+  ): Promise<RemoteResidentAcceptedTurn> {
+    const host = this.expectRemoteOperatorHost()
+    if (existingWorkspace === undefined) {
+      const qualification = await host.qualification()
+      if (!qualification.available) throw new Error(qualification.reason ?? 'remote execution host is unavailable')
+    }
+    const materializedWorkspace = existingWorkspace ?? await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
     const {
       commandId, operatorId, laneId, taskLabel, prompt, systemPrompt,
       contextEnvelope, profile, nativeToolPolicy,
@@ -409,7 +473,17 @@ export class RemoteSyncHub {
       ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
       signal: new AbortController().signal,
     })
-    const accepted = {
+    const accepted = this.acceptedReceipt(request, turn)
+    await turn.dispose()
+    return accepted
+  }
+
+  private acceptedReceipt(
+    request: RemoteResidentExecuteRequest,
+    turn: Pick<ResidentTurnSnapshot, 'sessionId' | 'turnId' | 'stateRevision'>,
+  ): RemoteResidentAcceptedTurn {
+    const { contextEnvelope, operatorId } = request
+    return {
       sessionId: String(turn.sessionId),
       turnId: String(turn.turnId),
       stateRevision: turn.stateRevision,
@@ -421,8 +495,6 @@ export class RemoteSyncHub {
         ),
       },
     }
-    await turn.dispose()
-    return accepted
   }
 
   /**
@@ -442,12 +514,16 @@ export class RemoteSyncHub {
    */
   async operatorInspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
     const turn = await this.expectResident().inspectTurn(turnId)
+    await this.observeWorkspace(turn)
+    return turn
+  }
+
+  private async observeWorkspace(turn: ResidentTurnSnapshot): Promise<void> {
     const host = this.remoteOperatorHost?.()
     if (host !== undefined) {
       if (turn.state === 'settled') await host.releaseWorkspace(String(turn.commandId))
       else await host.renewWorkspace(String(turn.commandId))
     }
-    return turn
   }
 
   /**
@@ -557,7 +633,11 @@ export class RemoteSyncHub {
   async close(): Promise<void> {
     this.stopSources.abort()
     for (const socket of this.sockets.clients) socket.terminate()
-    await Promise.allSettled([this.sourceLoop, ...this.socketPumps])
+    await Promise.allSettled([
+      this.sourceLoop,
+      ...this.socketPumps,
+      ...[...this.directoryCommands.values()].map(entry => entry.pending),
+    ])
     await new Promise<void>((resolve, reject) => {
       this.sockets.close((error) => { if (error === undefined) resolve(); else reject(error) })
     })
@@ -572,22 +652,27 @@ export class RemoteSyncHub {
     systemPrompt: string | undefined,
     workspace: RemoteMaterializedWorkspaceV1,
   ): string {
+    const identity = workspace.identity
+    const directory = 'kind' in identity
     const supplement = [
       'Remote execution workspace:',
-      JSON.stringify({ cwd: workspace.path, repository: workspace.identity.repository, commit: workspace.identity.commit }),
+      JSON.stringify(directory
+        ? { cwd: workspace.path, kind: identity.kind, projectId: identity.projectId }
+        : { cwd: workspace.path, repository: identity.repository, commit: identity.commit }),
+      ...directory ? ['Execution uses the selected actual project directory. Existing files, including untracked files, are accessible. Releasing the execution lease does not delete user project files.'] : [],
       'The current native execution cwd above is authoritative for this execution. Workspace paths in sender context refer to the source host. Existing relative read and write scopes apply unchanged within this cwd. This supplement does not expand permissions.',
     ].join('\n')
     return systemPrompt === undefined ? supplement : `${systemPrompt}\n\n${supplement}`
   }
 
-  private expectResident(): Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'> {
+  private expectResident(): Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectCommand' | 'inspectTurn' | 'readEvents' | 'interrupt'> {
     if (this.resident === undefined) throw new Error('remote Resident execution is unavailable')
     return this.resident
   }
 
   private expectRemoteOperatorHost(): Pick<
     RemoteOperatorHostService,
-    'qualification' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
+    'qualification' | 'gouziWorkspace' | 'inspectWorkspace' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
   > {
     const service = this.remoteOperatorHost?.()
     if (service === undefined) throw new Error('remote operator workspace and artifact host is unavailable')

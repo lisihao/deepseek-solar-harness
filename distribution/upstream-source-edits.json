@@ -122,6 +122,26 @@
       "kind": "migration-debt",
       "note": "feat: ship dual-mode workbench orchestration"
     },
+    "packages/client/ui-conversation/src/client/apply.ts": {
+      "kind": "seam",
+      "note": "Expose optional room slots while preserving the existing composer priority and ordinary conversation behavior."
+    },
+    "packages/client/ui-conversation/src/client/contract/slots.ts": {
+      "kind": "seam",
+      "note": "Define optional header, content, aside, and composer slots for plugin-owned conversation rooms."
+    },
+    "packages/client/ui-conversation/src/client/index.ts": {
+      "kind": "seam",
+      "note": "Export the room-slot types through the existing conversation client API."
+    },
+    "packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css": {
+      "kind": "seam",
+      "note": "Lay out an optional room and preserve ordinary trajectory geometry and scroll ownership."
+    },
+    "packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx": {
+      "kind": "seam",
+      "note": "Render plugin-owned room slots and delegate to the existing question, approval, and default composer paths."
+    },
     "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx": {
       "kind": "backport",
       "note": "feat(desktop): backport selected official behaviors"
@@ -276,7 +296,11 @@
     },
     "packages/core/tools/src/index.ts": {
       "kind": "migration-debt",
-      "note": "fix(tools): carry code mode contract into Desktop 2.9.1; fix(prompt): preserve generated SDK template literals"
+      "note": "fix(tools): carry code mode contract into Desktop 2.9.1; fix(prompt): preserve generated SDK template literals; expose captured delegation metadata and monotonic execution guards for plugin-owned recipient policy"
+    },
+    "packages/core/tools/src/schema.ts": {
+      "kind": "seam",
+      "note": "Expose captured owner-registered delegation metadata on ToolExecution without adding it to model tool arguments."
     },
     "packages/extensions/cordis-client-runner/src/client/index.ts": {
       "kind": "migration-debt",
@@ -438,6 +462,14 @@
       "kind": "migration-debt",
       "note": "feat(orchestration): account native RLM usage; feat: require subscription auth for physical operators"
     },
+    "packages/subagent/tool-subagent-control/src/index.ts": {
+      "kind": "seam",
+      "note": "Tag dispatching control actions with owner-registered subagent delegation metadata for tool guards."
+    },
+    "packages/subagent/tool-subagent/src/index.ts": {
+      "kind": "seam",
+      "note": "Tag the subagent dispatch tool with owner-registered delegation metadata for tool guards."
+    },
     "packages/terminal/terminal-bash/src/sanitize.ts": {
       "kind": "migration-debt",
       "note": "feat: unify MacBook DSH baseline and deliver Desktop 3.16.0"
@@ -453,6 +485,10 @@
     "packages/typert/generator/src/cordis-catalog.ts": {
       "kind": "migration-debt",
       "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/typert/generator/src/emitter.ts": {
+      "kind": "seam",
+      "note": "Preserve canonical declaration text for single exported interfaces at the model-to-runtime catalog seam; retain structural rendering for merged, private, and class declarations."
     },
     "packages/util/atomic-write/src/index.ts": {
       "kind": "migration-debt",

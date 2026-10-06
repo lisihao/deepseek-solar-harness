@@ -222,6 +222,12 @@ export interface ToolOutputDefinition {
 
 /** A registered tool: its schema plus the execution function. */
 export interface ToolDefinition extends ToolSchema {
+  /** Internal dispatcher identity; absent actions means every call delegates execution. Never model-visible. */
+  readonly delegation?: {
+    readonly family: 'physical-operator' | 'subagent'
+    /** Only these action values delegate when this list is present. */
+    readonly actions?: readonly string[]
+  }
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
@@ -379,6 +385,8 @@ export interface CodeDispatchLog {
  * observers run.
  */
 export interface ToolExecution extends ToolExecutionInput {
+  /** Internal dispatcher identity captured with this execution's actual definition; never model-visible or durable. */
+  readonly delegation?: ToolDefinition['delegation']
   /** Root model-requested call, resolved for every root and nested execution. */
   readonly rootCallId: CallId
   /** Registry-assigned identity shared with nested calls only as their opaque `parent` token. */
@@ -761,8 +769,9 @@ interface ToolAskResolution {
   readonly approvalCancelled: boolean
 }
 
-/** Caller cancellation and dispatch state kept outside the around-wrapper view. */
+/** Captured tool definition, caller cancellation, and dispatch state kept outside the around-wrapper view. */
 interface ToolCancellationState {
+  readonly definition: ToolDefinition | undefined
   readonly callerSignal: AbortSignal
   bodyInvoked: boolean
 }
@@ -1401,6 +1410,7 @@ export class ToolRuntime extends Service {
       rootCallId,
       name,
       signal,
+      ...visible?.delegation === undefined ? {} : { delegation: visible.delegation },
       ...agent !== undefined ? { agent } : {},
       ...parent !== undefined ? { parent } : {},
       deferContext(context: UserMessage): void {
@@ -1432,6 +1442,7 @@ export class ToolRuntime extends Service {
       this.deferredContexts.set(execution, deferredContexts)
       this.contentFinalizers.set(execution, finalizerFor())
       this.cancellationStates.set(execution, {
+        definition: visible,
         callerSignal: signal,
         bodyInvoked: false,
       })
@@ -1559,7 +1570,7 @@ export class ToolRuntime extends Service {
     exec.signal = signal
     try {
       const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
-      if (!tool) throw new ToolNotFoundError(exec.name)
+      if (!tool || tool !== state.definition) throw new ToolNotFoundError(exec.name)
       state.bodyInvoked = true
       const returned = await tool.execute(exec.arguments, exec)
       const result = this.createSuccessResult(exec, tool, returned)

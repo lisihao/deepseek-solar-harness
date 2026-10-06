@@ -10,6 +10,13 @@ export interface GouziSshTarget {
   readonly user: string
 }
 
+/** A selected directory and its stable host-local identity; Git origin is optional metadata. */
+export interface GouziProjectSource {
+  readonly projectId: string
+  readonly source: string
+  readonly repository?: string
+}
+
 /** Identity and workspace allowlist a member is created with. */
 export interface GouziProvisionInput {
   readonly gouziId: string
@@ -17,8 +24,10 @@ export interface GouziProvisionInput {
   readonly hostId: string
   readonly generation: number
   readonly authorityEpoch: string
-  /** Repositories the member may materialize: canonical identity and clone source. */
-  readonly repositories: readonly { readonly repository: string; readonly source: string }[]
+  /** Existing project directories the member may work in on this host. */
+  readonly projects: readonly GouziProjectSource[]
+  /** Persisted initial working directory, chosen from `projects`. */
+  readonly defaultProjectId: string
 }
 
 /** Facts about a running member process. */
@@ -88,16 +97,27 @@ export abstract class GouziHostService extends Service {
   abstract browse(hostId: string, path?: string): Promise<GouziFolderListing>
 
   /**
-   * Resolve a workspace on a host to the repository identity a member may materialize.
+   * Inspect an existing directory without changing it and resolve its host-local project identity.
    * @param hostId - host id.
-   * @param path - absolute path on that host, inside a Git repository.
-   * @returns the canonical repository identity and the path to clone from.
-   * @throws Error - when the path is not inside a Git repository with a usable remote.
+   * @param path - absolute directory path on that host; Git and ordinary directories are accepted.
+   * @returns the project identity, selected real directory path, and optional canonical Git origin.
+   * @throws Error - when the directory is missing, inaccessible, or cannot be inspected.
    */
-  abstract resolveRepository(hostId: string, path: string): Promise<{ readonly repository: string; readonly source: string }>
+  abstract resolveRepository(hostId: string, path: string): Promise<GouziProjectSource>
 
   /**
-   * Create the member's home, identity, and repository allowlist on its host. Idempotent for the same identity.
+   * Prepare a confirmed adoption directory, initializing Git only when it is not already in a repository.
+   * Existing project files are preserved; an origin remote is not required. Call only after all selected
+   * directories pass read-only inspection and a member slot is available.
+   * @param hostId - host id.
+   * @param path - resolved source directory selected for adoption.
+   * @returns the project identity, selected real directory path, and optional canonical Git origin.
+   * @throws Error - when directory inspection or Git initialization fails.
+   */
+  abstract prepareRepository(hostId: string, path: string): Promise<GouziProjectSource>
+
+  /**
+   * Create the member's home, identity, and project allowlist on its host. Idempotent for the same identity.
    * @param input - identity and allowlist; `hostId` selects the machine.
    */
   abstract provision(input: GouziProvisionInput): Promise<void>

@@ -6,6 +6,7 @@ import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import {
   OrchestrationRunId,
   type LogicalTaskGraphV1,
+  type OrchestrationGouziRecipientV1,
   type OrchestrationRuntimeContextV1,
   type RlmAutonomousMode,
   type OrchestrationRunSnapshot,
@@ -45,6 +46,7 @@ declare module '@deepseek-ai/dsh-session/types' {
       route: 'taskgraph'
       runId: string
       maxParallel: number
+      gouziRecipient?: OrchestrationGouziRecipientV1
       rlm: RlmExecutionMode
       autonomous: RlmAutonomousMode
       continualHarness: ContinualHarnessMode
@@ -94,7 +96,7 @@ export const orchestrationGraphGuidance = 'Complete LogicalTaskGraphV1 JSON; req
   + 'and set task, scopes, effects, capabilities, acceptance and risk to the actual authorized work. '
   + 'Use node.task, capabilityRequirements, capabilityBudget, contextPolicy, effectBudget, readScopes, writeScopes, '
   + 'approvedSecretRefs and retryPolicy; prompt, capabilities, scope, context and retry are not their field names. '
-  + 'For a named Gouzi, add node.operator={"preferredIds":["gouzi.<actual-member-id>.codex"]}; '
+  + 'The Host pins a confirmed kennel recipient to actual execution entries. Use standard TaskGraph nodes, never replace the executor or infer IDs from names. Keep role, scopes, effects, budget and parallelism tied to the user task. '
   + 'Gouzi ids route through this tool only, including single-node read-only work. '
   + 'GRAPH_INVALID means repair the reported graph field and resubmit compilation; it does not establish an offline member '
   + 'and is not a reason to call physical_operator with a Gouzi id. '
@@ -264,10 +266,18 @@ export function apply(ctx: Context): void {
         return jsonObject({ kind: 'inspect', run: bounded(await ctx.orchestrations.inspect(OrchestrationRunId(args.run_id))) })
       }
       if (args.objective === undefined || args.objective.trim().length === 0) throw new Error('objective is required for action=start')
-      const graph = parseGraph(args.graph_json)
+      const inputGraph = parseGraph(args.graph_json)
       const agent = exec.agent
+      const gouziRecipient = agent === undefined ? undefined : await ctx.get('orchestrationRecipients')?.resolve(agent.session.events)
+      const graph = gouziRecipient === undefined ? inputGraph : {
+        ...inputGraph,
+        nodes: inputGraph.nodes.map(node => ({
+          ...node, operator: { ...node.operator, preferredIds: gouziRecipient.operatorIds, fallbackIds: [] },
+        })),
+      }
       const policy = agent === undefined ? 'auto' : collaborationPolicy(agent.session.events)
-      const preferences = agent === undefined ? DEFAULT_PREFERENCES : foldOrchestrationPreferences(agent.session.events)
+      const selectedPreferences = agent === undefined ? DEFAULT_PREFERENCES : foldOrchestrationPreferences(agent.session.events)
+      const preferences = gouziRecipient === undefined ? selectedPreferences : { ...selectedPreferences, rlm: 'disabled' as const, autonomous: 'disabled' as const }
       const runtimeContext = agent === undefined ? undefined : runtimeContextSnapshot(agent)
       const compilation = await ctx.orchestrations.compile({
         intent: { request: args.objective },
@@ -276,6 +286,7 @@ export function apply(ctx: Context): void {
           admission: {
             policy,
             route: 'taskgraph',
+            ...gouziRecipient === undefined ? {} : { gouziRecipient },
             sourceSessionId: String(agent.id),
             ...runtimeContext === undefined ? {} : { runtimeContext },
             ...preferences,
@@ -290,6 +301,7 @@ export function apply(ctx: Context): void {
         policy,
         route: 'taskgraph',
         runId: String(run.runId),
+        ...gouziRecipient === undefined ? {} : { gouziRecipient },
         maxParallel: graph.maxParallel,
         ...preferences,
       }, { ignorable: true })

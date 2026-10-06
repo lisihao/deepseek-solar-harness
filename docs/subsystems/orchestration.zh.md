@@ -38,6 +38,60 @@ Round 投影按角色独立，而不是全有或全无。已结算的 proposer �
 
 本契约细化了 [原生使用 TaskGraph 的智能协作](../../.agents/notes/implemented/feature/2026-08-20-taskgraph-smart-collaboration.md) 中的 model-allocation fallback 说明：其中与 Provider 无关的偏好和硬锁定行为保持不变，而 fallback 现在必须显式准入并持久化来源。权威契约位于 [`model-allocation`](../../packages/orchestration/model-allocation/src/index.ts)、[`orchestration`](../../packages/orchestration/orchestration/src/index.ts) 和 [`debate`](../../packages/orchestration/debate/src/types.ts)。
 
+## 固定狗子接收者
+
+`OrchestrationRecipientResolver` 只从按序保存的 durable Session 事件中解析当前逻辑 turn 的显式用户选择。Host 确认所选成员仍存在、已启用且 generation 与选择时相同，再查询 `GouziControl.executionOperators()`，获取经过新鲜资格检查的已注册入口。`operatorIds` 包含该查询返回的完整实际执行 ID，绝不根据成员名或固定的原生 Provider 后缀推断 ID。查询后，解析器再次确认 membership 和 generation；所选成员缺失、换代、未启用或不可用时会失败，不会改选其他成员。
+
+`OrchestrationAdmissionTraceV1.gouziRecipient` 将确认后的成员身份、选择时的 generation 和执行 ID 带入编译。每个 Graph 节点都固定使用这些入口，不允许 fallback。固定接收者支持关闭 RLM 和 Autonomous 的 Standard 执行。daemon 在编译时和新 Run 启动前验证 Graph 限制、当前 generation 与可用性；派发时也会拒绝已经不匹配的成员或注册入口。这项选择不会增加 scope、effect、模型许可或并行容量。
+
+源码：[`orchestration/src/index.ts`](../../packages/orchestration/orchestration/src/index.ts) · [`orchestration/src/recipient-resolver.ts`](../../packages/orchestration/orchestration/src/recipient-resolver.ts) · [`ui-gouzi/src/recipient.ts`](../../packages/orchestration/ui-gouzi/src/recipient.ts)
+
+```ts type-equiv
+/** User-selected stable member, its selection generation, and Host-confirmed actual execution entries. */
+interface OrchestrationGouziRecipientV1 {
+  readonly gouziId: GouziId
+  readonly generation: number
+  readonly operatorIds: readonly PhysicalOperatorId[]
+}
+```
+
+```ts type-equiv
+/** User-selected collaboration policy and route captured before TaskGraph compilation. */
+interface OrchestrationAdmissionTraceV1 {
+  readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code'
+  readonly route: 'taskgraph'
+  /** Fixed recipient; every graph node must use only these actual member execution entries. */
+  readonly gouziRecipient?: OrchestrationGouziRecipientV1
+  readonly sourceSessionId: string
+  /** Current-request dynamic contexts captured before crossing into the daemon. */
+  readonly runtimeContext?: OrchestrationRuntimeContextV1
+  /** Independent user/system choice; RLM is a node strategy, not an operator. */
+  readonly rlm?: RlmExecutionMode
+  /** Autonomous continuation is independent from Goal and reuses the same RLM/TaskGraph authority. */
+  readonly autonomous?: RlmAutonomousMode
+  /** Continuous Harness can be disabled, scoped to this Session, or scoped to a workspace. */
+  readonly continualHarness?: ContinualHarnessMode
+  /** Global quality/cost/throughput preference consumed by the allocation Provider. */
+  readonly optimization?: ModelAllocationObjective
+  /** Prefer Codex Sol for high-tier planning/verification, or choose the best qualified high-tier offer. */
+  readonly plannerVerifierPreference?: PlannerVerifierPreference
+  /** Prefer Codex Luna for execution leaves when qualified, or use ordinary balanced scoring. */
+  readonly executionPreference?: ExecutionModelPreference
+}
+```
+
+```ts type-equiv
+/** Resolves only the current logical turn's explicit user selection. */
+interface OrchestrationRecipientResolver {
+  /**
+   * Confirm the selected member and its available execution entries.
+   * @param events - ordered durable Session events.
+   * @returns confirmed recipient, or undefined when none was selected.
+   */
+  resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined>
+}
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -316,16 +370,27 @@ abstract removeHost(hostId: string): Promise<void>
 abstract browse(hostId: string, path?: string): Promise<GouziFolderListing>
 
 /**
- * Resolve a workspace on a host to the repository identity a member may materialize.
+ * Inspect an existing directory without changing it and resolve its host-local project identity.
  * @param hostId - host id.
- * @param path - absolute path on that host, inside a Git repository.
- * @returns the canonical repository identity and the path to clone from.
- * @throws Error - when the path is not inside a Git repository with a usable remote.
+ * @param path - absolute directory path on that host; Git and ordinary directories are accepted.
+ * @returns the project identity, selected real directory path, and optional canonical Git origin.
+ * @throws Error - when the directory is missing, inaccessible, or cannot be inspected.
  */
-abstract resolveRepository(hostId: string, path: string): Promise<{ readonly repository: string; readonly source: string }>
+abstract resolveRepository(hostId: string, path: string): Promise<GouziProjectSource>
 
 /**
- * Create the member's home, identity, and repository allowlist on its host. Idempotent for the same identity.
+ * Prepare a confirmed adoption directory, initializing Git only when it is not already in a repository.
+ * Existing project files are preserved; an origin remote is not required. Call only after all selected
+ * directories pass read-only inspection and a member slot is available.
+ * @param hostId - host id.
+ * @param path - resolved source directory selected for adoption.
+ * @returns the project identity, selected real directory path, and optional canonical Git origin.
+ * @throws Error - when directory inspection or Git initialization fails.
+ */
+abstract prepareRepository(hostId: string, path: string): Promise<GouziProjectSource>
+
+/**
+ * Create the member's home, identity, and project allowlist on its host. Idempotent for the same identity.
  * @param input - identity and allowlist; `hostId` selects the machine.
  */
 abstract provision(input: GouziProvisionInput): Promise<void>
@@ -348,7 +413,7 @@ abstract start(hostId: string, gouziId: string): Promise<GouziProcessInfo>
 abstract stop( hostId: string, gouziId: string, options?: { readonly reclaimResident?: boolean }, ): Promise<{ readonly processTreeStopped: boolean }>
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/host-service.ts:41`](../../packages/orchestration/ui-gouzi/src/host-service.ts)
+Source: [`packages/orchestration/ui-gouzi/src/host-service.ts:50`](../../packages/orchestration/ui-gouzi/src/host-service.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
@@ -415,6 +480,25 @@ execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 ```
 
 Source: [`packages/orchestration/model-worker/src/index.ts:61`](../../packages/orchestration/model-worker/src/index.ts)
+
+<a id="ctxorchestrationrecipients--orchestrationrecipientresolver"></a>
+
+### `ctx.orchestrationRecipients` — `OrchestrationRecipientResolver`
+
+Resolves only the current logical turn's explicit user selection.
+
+```ts cordis-catalog
+/**
+ * Confirm the selected member and its available execution entries.
+ * @param events - ordered durable Session events.
+ * @returns confirmed recipient, or undefined when none was selected.
+ */
+resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined>
+```
+
+Types: [SessionEvent](session.md)
+
+Source: [`packages/orchestration/orchestration/src/recipient-resolver.ts:6`](../../packages/orchestration/orchestration/src/recipient-resolver.ts)
 
 <a id="ctxorchestrations--orchestrationservice-abstract-seam"></a>
 
@@ -533,7 +617,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:660`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:670`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
+import { useState } from 'react'
 import { Context } from '@deepseek-ai/cordis'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionRuntime, SlotRegistry, WorkspaceRuntime } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KennelHero, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
+import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
 import type { GouziFolders } from '../src/client/index.ts'
-import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection } from '../src/contracts.ts'
+import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection, type GouziRoomSnapshotV1 } from '../src/contracts.ts'
 
+import { decodeKennelMessage, encodeKennelMessage } from '../src/recipient-message.ts'
+import { RemoteFolderPicker } from '../src/client/RemoteFolderPicker.tsx'
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 const LOCAL_HOST = { hostId: 'local', label: '这台 Mac', kind: 'local' } as const
@@ -28,13 +31,18 @@ function dashboard(members: GouziMemberProjection[], patch: Partial<GouziDashboa
 }
 
 /** A fetch whose GET returns the current roster and whose POST records the body and applies `reply`. */
-function fakeRequest(state: { roster: GouziDashboardV1; reply?: (body: Record<string, unknown>) => Response }) {
+function fakeRequest(state: {
+  roster: GouziDashboardV1
+  reply?: (body: Record<string, unknown>) => Response
+  checkReply?: (body: Record<string, unknown>) => Response | Promise<Response>
+}) {
   const posts: Array<{ body: Record<string, unknown>; header: string | null }> = []
   const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     void input
     if (init?.method === 'POST') {
       const body = JSON.parse(init.body as string) as Record<string, unknown>
       posts.push({ body, header: new Headers(init.headers).get(GOUZI_CONTROL_HEADER) })
+      if (body.action === 'check-projects') return await state.checkReply?.(body) ?? Response.json({ projects: (body.projects as string[]).map(path => ({ path, usable: true })) })
       return state.reply?.(body) ?? Response.json(member())
     }
     return Response.json(state.roster)
@@ -121,7 +129,7 @@ describe('Gouzi sidebar entry and roster', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: /测试/ }))
     expect(screen.queryByRole('textbox')).toBeNull()
-    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
     expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', false)
     fireEvent.click(screen.getByRole('checkbox', { name: /beta/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: /alpha/ }))
@@ -130,8 +138,8 @@ describe('Gouzi sidebar entry and roster', () => {
 
     expect(screen.getByText('领养后 1 / 10')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
-    await waitFor(() => { expect(harness.posts).toHaveLength(1) })
-    expect(harness.posts[0]).toEqual({
+    await waitFor(() => { expect(harness.posts.filter(post => post.body.action === 'adopt')).toHaveLength(1) })
+    expect(harness.posts.find(post => post.body.action === 'adopt')).toEqual({
       header: '1',
       body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', hostId: 'local', projects: ['/work/beta', '/work/alpha'] },
     })
@@ -141,7 +149,7 @@ describe('Gouzi sidebar entry and roster', () => {
   it('preselects the newest project when no recent workspace is known and blocks next when none is selected', async () => {
     const harness = fakeRequest({ roster: dashboard([]) })
     await openProjectStep(harness, fakeFolders([ALPHA, BETA]).folders)
-    expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', true) })
     fireEvent.click(screen.getByRole('checkbox', { name: /beta/ }))
     expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
   })
@@ -157,15 +165,144 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
     await waitFor(() => { expect(pickDirectory).toHaveBeenCalledTimes(1) })
     expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(harness.posts.filter(post => post.body.action === 'adopt')).toEqual([])
 
     fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
-    expect(await screen.findByRole('checkbox', { name: /picked/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /picked/ })).toHaveProperty('checked', true) })
     fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
     await waitFor(() => { expect(pickDirectory).toHaveBeenCalledTimes(3) })
     expect(screen.getAllByRole('checkbox')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
-    await waitFor(() => { expect(harness.posts[0]!.body.projects).toEqual(['/work/picked']) })
+    await waitFor(() => { expect(harness.posts.find(post => post.body.action === 'adopt')?.body.projects).toEqual(['/work/picked']) })
+  })
+
+  it.each([{ items: [] }, { items: [ALPHA] }])('keeps a native-picked project after returning from confirmation with history $items', async ({ items }) => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    await openProjectStep(harness, fakeFolders(items, async () => '/work/outside').folders)
+    if (items.length > 0) {
+      await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
+      fireEvent.click(screen.getByRole('checkbox', { name: /alpha/ }))
+    }
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /outside/ })).toHaveProperty('checked', true) })
+    await waitFor(() => { expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', false) })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByText('outside')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /outside/ })).toHaveProperty('checked', true) })
+    await waitFor(() => { expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', false) })
+    if (items.length > 0) expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '领养' }))
+    await waitFor(() => { expect(harness.posts.find(post => post.body.action === 'adopt')?.body.projects).toEqual(['/work/outside']) })
+  })
+
+  it('accepts accessible plain and no-origin project check results and shows the persisted default before adoption', async () => {
+    const plain = { ...ALPHA, workspaceId: 'plain', path: '/work/plain', title: 'plain' }
+    const noOrigin = { ...BETA, workspaceId: 'no-origin', path: '/work/no-origin', title: 'no-origin' }
+    const harness = fakeRequest({ roster: dashboard([]), checkReply: body => Response.json({
+      projects: (body.projects as string[]).map(path => ({ path, usable: true })),
+    }) })
+    await openProjectStep(harness, fakeFolders([plain, noOrigin], async () => null, 'plain').folders)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /plain/ })).toHaveProperty('checked', true) })
+    fireEvent.click(screen.getByRole('checkbox', { name: /no-origin/ }))
+    expect(screen.getByText(/不要求已有 Git 仓库或 origin/)).toBeTruthy()
+    expect(harness.posts.every(post => post.body.action === 'check-projects')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    const defaultRow = screen.getByText('默认项目').parentElement!
+    const remainingRow = screen.getByText('其它项目').parentElement!
+    expect(within(defaultRow).getByText('plain')).toBeTruthy()
+    expect(within(remainingRow).getByText('no-origin')).toBeTruthy()
+    expect(screen.getByText('如果所选目录还不是 Git 仓库，确认领养时会初始化 Git；现有文件不会自动提交。')).toBeTruthy()
+    expect(harness.posts.filter(post => post.body.action === 'adopt')).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: '领养' }))
+    await waitFor(() => { expect(harness.posts.find(post => post.body.action === 'adopt')?.body.projects).toEqual(['/work/plain', '/work/no-origin']) })
+  })
+
+  it('selects an arbitrary plain native directory but does not adopt when the confirmation is cancelled', async () => {
+    const harness = fakeRequest({ roster: dashboard([]) })
+    await openProjectStep(harness, fakeFolders([], async () => '/outside/plain').folders)
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /plain/ })).toHaveProperty('checked', true) })
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByText(/确认领养时会初始化 Git/)).toBeTruthy()
+    for (let step = 0; step < 4; step++) fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('领养一只狗子')).toBe(null)
+    expect(harness.posts.some(post => post.body.action === 'check-projects')).toBe(true)
+    expect(harness.posts.filter(post => post.body.action === 'adopt')).toEqual([])
+  })
+
+  it('checks candidates before selecting and refuses inaccessible directories', async () => {
+    let finish!: (response: Response) => void
+    const harness = fakeRequest({ roster: dashboard([]), checkReply: (body) => {
+      if ((body.projects as string[]).includes('/work/plain')) return Response.json({ projects: (body.projects as string[]).map(path => path === '/work/plain'
+        ? { path, usable: false, message: '目录不可访问' } : { path, usable: true }) })
+      return new Promise<Response>((resolve) => { finish = resolve })
+    } })
+    await openProjectStep(harness, fakeFolders([ALPHA, BETA], async () => '/work/plain', 'w1').folders)
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+    finish(Response.json({ projects: [{ path: BETA.path, usable: true }, { path: ALPHA.path, usable: false, message: '目录不存在' }] }))
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', true) })
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('disabled', true)
+    expect(screen.getByText('目录不存在')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    await screen.findByText('目录不可访问')
+    expect(screen.getByRole('checkbox', { name: /plain/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('checkbox', { name: /plain/ })).toHaveProperty('disabled', true)
+    expect(harness.posts.filter(post => post.body.action === 'adopt')).toEqual([])
+  })
+
+  it('keeps next disabled on a failed project check and ignores a check that finishes after leaving the step', async () => {
+    let finish!: (response: Response) => void
+    let count = 0
+    const harness = fakeRequest({ roster: dashboard([]), checkReply: () => {
+      if (++count === 1) return Response.json({ error: 'GOUZI_FAILED', message: 'Directory inspection timed out' }, { status: 502 })
+      return new Promise<Response>((resolve) => { finish = resolve })
+    } })
+    await openProjectStep(harness, fakeFolders([ALPHA]).folders)
+    expect((await screen.findByRole('alert')).textContent).toContain('Directory inspection timed out')
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    finish(Response.json({ projects: [{ path: ALPHA.path, usable: true }] }))
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+  })
+
+  it.each([
+    { projects: [{ path: ALPHA.path, usable: false, message: '目录不存在' }] },
+    { projects: [{ path: '/wrong/path', usable: true }] },
+    { projects: [{ path: ALPHA.path, usable: false }] },
+    {},
+  ])('does not select an unavailable or malformed check result %j', async (reply) => {
+    const harness = fakeRequest({ roster: dashboard([]), checkReply: () => Response.json(reply) })
+    await openProjectStep(harness, fakeFolders([ALPHA]).folders)
+    if ('projects' in reply && reply.projects?.[0]?.usable === false && 'message' in reply.projects[0]) {
+      await screen.findByText('目录不存在')
+    } else await screen.findByRole('alert')
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', false)
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
+  })
+
+  it('ignores a native folder pick that completes after leaving the project step', async () => {
+    let picked!: (path: string) => void
+    const harness = fakeRequest({ roster: dashboard([]) })
+    const { folders } = fakeFolders([], () => new Promise<string>((resolve) => { picked = resolve }))
+    await openProjectStep(harness, folders)
+    fireEvent.click(screen.getByRole('button', { name: '选择文件夹…' }))
+    fireEvent.click(screen.getByRole('button', { name: '上一步' }))
+    picked('/work/late')
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    await waitFor(() => { expect(screen.queryByRole('checkbox')).toBeNull() })
+    expect(harness.posts.filter(post => post.body.action === 'check-projects')).toEqual([])
+    expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
   })
 
   it('shows why the folder picker failed without losing the wizard', async () => {
@@ -187,6 +324,7 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Mochi' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    await waitFor(() => { expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', false) })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
     expect((await screen.findByRole('alert')).textContent).toContain('端口被占用')
@@ -271,6 +409,29 @@ describe('Gouzi sidebar entry and roster', () => {
   })
 })
 
+describe('Gouzi remote directory picker', () => {
+  it('allows the filesystem root and every child directory independently of the Git badge', async () => {
+    const harness = fakeRequest({ roster: dashboard([]), reply: () => Response.json({
+      path: '/', entries: [{ name: 'plain', path: '/plain', git: false }, { name: 'repository', path: '/repository', git: true }],
+    }) })
+    function Picker() {
+      const [selected, setSelected] = useState<readonly string[]>([])
+      return <RemoteFolderPicker request={harness.request} hostId="ssh-1" selected={selected} onChange={setSelected} />
+    }
+    render(<Picker />)
+    const current = await screen.findByRole('checkbox', { name: '选择当前目录' })
+    expect(screen.getByRole('button', { name: '上一级' })).toHaveProperty('disabled', true)
+    fireEvent.click(current)
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 plain' }))
+    expect(current).toHaveProperty('checked', true)
+    expect(screen.getByRole('checkbox', { name: '选择 plain' })).toHaveProperty('checked', true)
+    expect(screen.getByRole('checkbox', { name: '选择 repository' })).toBeTruthy()
+    expect(screen.getByText('Git')).toBeTruthy()
+    expect(screen.getByLabelText('已选择的项目').textContent).toContain('/plain')
+    expect(harness.posts.every(post => post.body.action === 'browse')).toBe(true)
+  })
+})
+
 describe('Gouzi remote hosts in the adoption wizard', () => {
   const FINGERPRINT = 'SHA256:abc123'
 
@@ -346,7 +507,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
     expect(screen.getByLabelText(/登录密码/)).toHaveProperty('value', 'pw')
   })
 
-  it('browses the remote machine, only offers Git folders, and adopts onto it with the remote paths', async () => {
+  it('browses the remote machine and adopts with both Git and plain directory paths', async () => {
     const harness = fakeRequest({ roster: dashboard([], { hosts: [LOCAL_HOST, MINI_HOST] }), reply: remoteReply() })
     render(<GouziManager request={harness.request} folders={fakeFolders([ALPHA]).folders} />)
     fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
@@ -359,16 +520,18 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
     expect(screen.queryByRole('checkbox', { name: /alpha/ })).toBeNull()
     fireEvent.click(await screen.findByRole('button', { name: 'project' }))
     expect(await screen.findByRole('checkbox', { name: '选择 PetGoGo' })).toBeTruthy()
-    expect(screen.queryByRole('checkbox', { name: '选择 notes' })).toBeNull()
+    expect(screen.getByRole('checkbox', { name: '选择 notes' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '下一步' })).toHaveProperty('disabled', true)
     fireEvent.click(screen.getByRole('checkbox', { name: '选择 PetGoGo' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 notes' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择当前目录' }))
     expect(screen.getByLabelText('已选择的项目').textContent).toContain('/Users/lisihao/project/PetGoGo')
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     expect(screen.getByText('Mac mini')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
     await waitFor(() => { expect(harness.posts.at(-1)!.body.action).toBe('adopt') })
     expect(harness.posts.at(-1)!.body).toEqual({
-      action: 'adopt', name: 'Pixel', avatarId: 'shiba', role: 'development', hostId: 'ssh-1', projects: ['/Users/lisihao/project/PetGoGo'],
+      action: 'adopt', name: 'Pixel', avatarId: 'shiba', role: 'development', hostId: 'ssh-1', projects: ['/Users/lisihao/project/PetGoGo', '/Users/lisihao/project/notes', '/Users/lisihao/project'],
     })
   })
 
@@ -384,7 +547,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
-    expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true)
+    await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
     fireEvent.click(screen.getByRole('button', { name: '上一步' }))
     fireEvent.click(screen.getByRole('radio', { name: /Mac mini/ }))
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
@@ -463,54 +626,6 @@ function fakeApi(result: unknown) {
   const select = vi.fn(async () => ({ result }))
   return { api: { agentPresets: { select } } as never, select }
 }
-
-describe('the kennel welcome card', () => {
-  const kennelSession = { ids: ['k'], byId: { k: { id: 'k', blank: true, updatedAt: 1, agentPreset: KENNEL_PRESET } }, current: 'k' }
-
-  it('introduces the enabled dogs, where they live and what they are doing, on a blank kennel session', async () => {
-    const harness = fakeRequest({
-      roster: dashboard([
-        member({ name: 'Mochi', hostLabel: 'Mac mini' }),
-        member({ gouziId: 'g2', name: 'Pixel', role: 'research', state: 'working', activity: 'working' }),
-        member({ gouziId: 'g3', name: 'Gone', membership: 'retiring', state: 'retiring' }),
-      ]),
-    })
-    render(<KennelHero request={harness.request} sessions={fakeSessions(kennelSession).sessions} />)
-    const card = await screen.findByRole('region', { name: '狗窝' })
-    expect(await within(card).findByText('Mochi')).toBeTruthy()
-    expect(within(card).getByText('Pixel')).toBeTruthy()
-    expect(within(card).queryByText('Gone')).toBeNull()
-    expect(card.textContent).toContain('住在 Mac mini')
-    expect(card.textContent).toContain('工作中')
-    expect(card.textContent).toContain('@名字')
-    expect(card.textContent).toContain('这个会话用的是「狗窝」预设')
-  })
-
-  it('invites the user to adopt when there are no dogs', async () => {
-    const harness = fakeRequest({ roster: dashboard([]) })
-    render(<KennelHero request={harness.request} sessions={fakeSessions(kennelSession).sessions} />)
-    expect((await screen.findByRole('region', { name: '狗窝' })).textContent).toContain('设置 → 狗子 领养')
-  })
-
-  it.each([
-    ['another preset', { ids: ['s'], byId: { s: { id: 's', blank: true, updatedAt: 1, agentPreset: 'standard' } }, current: 's' }],
-    ['a session with no preset', { ids: ['s'], byId: { s: { id: 's', blank: true, updatedAt: 1 } }, current: 's' }],
-    ['no current session', { ids: [], byId: {}, current: undefined }],
-  ])('renders nothing for %s', async (_label, state) => {
-    const harness = fakeRequest({ roster: dashboard([member()]) })
-    const { container } = render(<KennelHero request={harness.request} sessions={fakeSessions(state).sessions} />)
-    await waitFor(() => { expect(harness.calls).toHaveBeenCalled() })
-    expect(container.textContent).toBe('')
-  })
-
-  it('goes away once the kennel session has history', async () => {
-    const harness = fakeRequest({ roster: dashboard([member()]) })
-    const started = { ids: ['k'], byId: { k: { id: 'k', blank: false, updatedAt: 2, agentPreset: KENNEL_PRESET } }, current: 'k' }
-    const { container } = render(<KennelHero request={harness.request} sessions={fakeSessions(started).sessions} />)
-    await waitFor(() => { expect(harness.calls).toHaveBeenCalled() })
-    expect(container.textContent).toBe('')
-  })
-})
 
 describe('openKennel', () => {
   const workspace = (workspaceId: string, sessionIds: string[], updatedAt = '2026-10-01') => ({ workspaceId, sessionIds, updatedAt })
@@ -671,52 +786,282 @@ describe('openKennel with the real client runtime', () => {
   })
 })
 
-describe('Gouzi client registration', () => {
-  it('registers the kennel row in the sidebar and the management page in Settings', async () => {
-    expect(inject).toEqual(['slots', 'connection', 'workspaces', 'sessions'])
-    const ctx = new Context()
-    await ctx.plugin(SlotRegistry).await()
-    const slots = ctx.get('slots') as SlotRegistry
-    slots.register({
-      name: 'root',
-      children: {
-        'sidebar.footer.action': { kind: 'list', scope: 'root' },
-        'settings.section': { kind: 'list', scope: 'root' },
-        'conversation.input.dock': { kind: 'list', scope: 'session' },
-      },
-    } as never, () => null)
-    const fetchStub = vi.fn()
-    const workspaces = kennelWorkspaces([{ workspaceId: 'w1', sessionIds: ['k'], updatedAt: '2026-10-01' }])
-    const fake = fakeSessions({ ids: ['k'], byId: { k: { id: 'k', blank: false, updatedAt: 1, agentPreset: KENNEL_PRESET } } })
-    ctx.provide('connection', { request: fetchStub, api: fakeApi({ ok: true }).api } as never)
-    ctx.provide('workspaces', workspaces)
-    ctx.provide('sessions', fake.sessions)
-    const fiber = ctx.plugin({ inject: [...inject], apply })
-    await fiber.await()
 
-    const sidebar = slots.entries('sidebar.footer.action')
+function registeredRoom(sessionId: string): GouziRoomSnapshotV1 {
+  return {
+    version: 1, sessionId, roomPollIntervalMs: 2_000, generatedAt: '2026-10-06T00:00:00.000Z',
+    dashboard: dashboard([member()]),
+    execution: [{ gouziId: 'g1', generation: 1, operators: [{ operatorId: 'real.operator', available: true, models: [] }] }],
+    tasks: [],
+  }
+}
+
+function requestUrl(input: string | URL | Request): URL {
+  return input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url, 'http://localhost')
+}
+
+async function roomRegistration() {
+  const ctx = new Context()
+  await ctx.plugin(SlotRegistry).await()
+  const slots = ctx.get('slots') as SlotRegistry
+  slots.register({
+    name: 'root', children: {
+      'sidebar.footer.action': { kind: 'list', scope: 'root' },
+      'settings.section': { kind: 'list', scope: 'root' },
+      'conversation.input.dock': { kind: 'list', scope: 'session' },
+      'conversation.room.header': { kind: 'chain', scope: 'session-maybe' },
+      'conversation.room.content': { kind: 'chain', scope: 'session-maybe' },
+      'conversation.room.aside': { kind: 'chain', scope: 'session-maybe' },
+      'conversation.room.composer': { kind: 'chain', scope: 'session-maybe' },
+    },
+  } as never, () => null)
+  const fake = fakeSessions({ ids: ['a', 'b'], byId: {
+    a: { id: 'a', blank: false, updatedAt: 1, agentPreset: KENNEL_PRESET },
+    b: { id: 'b', blank: false, updatedAt: 1, agentPreset: KENNEL_PRESET },
+  }, current: 'a' })
+  const views = new Map(['a', 'b'].map(id => [id, { removed: false }]))
+  const missing = new Set<string>()
+  const sends: Array<{ sessionId: string; text: string }> = []
+  const older = vi.fn(async (_id: string) => {})
+  const scope = (id: string) => missing.has(id) || !views.has(id) ? undefined : {
+    conversation: {
+      send: vi.fn(async (text: string) => { sends.push({ sessionId: id, text }) }),
+      loadOlder: () => older(id),
+    },
+  }
+  const binding = (id: string) => missing.has(id) || !views.has(id) ? undefined : {
+    session: { getSnapshot: () => views.get(id) },
+  }
+  const rooms = new Map(['a', 'b'].map(id => [id, registeredRoom(id)]))
+  const request = vi.fn(async (input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
+    const url = requestUrl(input)
+    if (url.searchParams.has('evidence_ref')) return Response.json({ actualEvidence: url.searchParams.get('evidence_ref') })
+    return Response.json(rooms.get(url.searchParams.get('session_id') ?? 'a'))
+  })
+  const workspaces = kennelWorkspaces([{ workspaceId: 'w', sessionIds: ['a', 'b'], updatedAt: 'now' }])
+  ctx.provide('connection', { request, api: fakeApi({ ok: true }).api } as never)
+  ctx.provide('workspaces', workspaces)
+  ctx.provide('sessions', { ...fake.raw, scope, binding } as never)
+  const blocks = new Map<string, { reason: string }>()
+  ctx.provide('conversation', { blocks: { storeFor: (id: string) => ({ getSnapshot: () => blocks.get(id) }) } } as never)
+  const fiber = ctx.plugin({ inject: [...inject], apply })
+  await fiber.await()
+  const content = slots.entries('conversation.room.content')[0]!
+  const face = (id: string | undefined) => (content.inject as unknown as (id: SessionId | undefined) => import('../src/client/KennelRoom.tsx').KennelRoomInjected)(id as SessionId | undefined)
+  return { ctx, slots, fiber, fake, views, missing, rooms, request, sends, older, content, face, blocks }
+}
+
+describe('Gouzi client registration', () => {
+  it('registers the sidebar and Settings plus three kennel-only room chains sharing one store and source per session', async () => {
+    expect(inject).toEqual(['slots', 'connection', 'workspaces', 'sessions', 'conversation'])
+    const h = await roomRegistration()
+    const sidebar = h.slots.entries('sidebar.footer.action')
     expect(sidebar.map(entry => [entry.options.id, entry.options.order])).toEqual([['kennel', 90]])
     const row = (sidebar[0]!.inject as () => { request: unknown; open: () => Promise<void> })()
-    expect(row.request).toBe(fetchStub)
-    await row.open()
-    expect(fake.raw.open).toHaveBeenCalledWith('k')
-
-    const settings = slots.entries('settings.section')
+    expect(row.request).toBe(h.request)
+    await row.open(); expect(h.fake.raw.open).toHaveBeenCalledWith('a')
+    const settings = h.slots.entries('settings.section')
     expect(settings.map(entry => [entry.options.id, entry.options.order])).toEqual([['gouzi', 38]])
     expect((settings[0]!.options.label as () => string)()).toBe('狗子')
-    const page = (settings[0]!.inject as () => { request: unknown; folders: unknown })()
-    expect(page.request).toBe(fetchStub)
-    expect(page.folders).toBe(workspaces)
+    expect(h.slots.entries('conversation.input.dock')).toEqual([])
+    for (const key of ['conversation.room.header', 'conversation.room.content', 'conversation.room.aside', 'conversation.room.composer'] as const) {
+      const entry = h.slots.entries(key)[0]!
+      expect(entry.store).toBe(h.content.store)
+      const select = entry.select as unknown as (owner: {
+        agentPreset: string | undefined
+        blank: boolean
+        inert?: boolean
+        blocked?: { reason: string }
+      }) => unknown
+      expect(select({ agentPreset: KENNEL_PRESET, blank: true })).toBe(true)
+      expect(select({ agentPreset: KENNEL_PRESET, blank: false })).toBe(true)
+      expect(select({ agentPreset: 'standard', blank: false })).toBe(null)
+      expect(select({ agentPreset: undefined, blank: true })).toBe(null)
+      const injected = (entry.inject as unknown as (id: SessionId) => import('../src/client/KennelRoom.tsx').KennelRoomInjected)('a' as SessionId)
+      expect(injected.hooks.room).toBe(h.face('a').hooks.room)
+      expect(Object.keys(injected).sort()).toEqual(['hooks', 'loadOlder', 'readEvidence', 'reload', 'send'])
+    }
+    expect(h.face('a').hooks.room).not.toBe(h.face('b').hooks.room)
+    const handle = h.content.store as ReturnType<typeof import('../src/client/room-store.ts').createKennelRoomStore>
+    const storeA = handle.create('a'); const storeB = handle.create('b')
+    storeA.actions.draft('draft a'); storeA.actions.recipient({ gouziId: 'g1', generation: 1, mode: 'standard' })
+    expect(storeB.getSnapshot()).toMatchObject({ draft: '', recipient: null })
+    await h.fiber.dispose()
+    for (const key of ['sidebar.footer.action', 'settings.section', 'conversation.room.header', 'conversation.room.content', 'conversation.room.aside', 'conversation.room.composer'] as const) {
+      expect(h.slots.entries(key)).toEqual([])
+    }
+  })
 
-    const dock = slots.entries('conversation.input.dock')
-    expect(dock.map(entry => [entry.options.id, entry.options.order])).toEqual([['kennel', 5]])
-    const card = (dock[0]!.inject as () => { request: unknown; sessions: unknown })()
-    expect(card.request).toBe(fetchStub)
-    expect(card.sessions).toBe(fake.sessions)
+  it('declines the composer while core input is inert or model-blocked and rechecks late blocks before sending', async () => {
+    const h = await roomRegistration()
+    const entry = h.slots.entries('conversation.room.composer')[0]!
+    const select = entry.select as unknown as (owner: {
+      agentPreset: string
+      blank: boolean
+      inert: boolean
+      blocked: { reason: string } | undefined
+    }) => unknown
+    expect(select({ agentPreset: KENNEL_PRESET, blank: true, inert: true, blocked: undefined })).toBe(null)
+    expect(select({ agentPreset: KENNEL_PRESET, blank: true, inert: false, blocked: { reason: 'model blocked' } })).toBe(null)
+    const a = h.face('a')
+    h.blocks.set('a', { reason: '请选择模型' })
+    await expect(a.send({ text: 'prompt', recipient: null })).rejects.toThrow('请选择模型')
+    expect(h.request).not.toHaveBeenCalled()
+    h.blocks.delete('a')
+    const reply = deferred<Response>()
+    h.request.mockImplementation(() => reply.promise)
+    const sending = a.send({ text: 'targeted prompt', recipient: { gouziId: 'g1', generation: 1, mode: 'standard' } })
+    h.blocks.set('a', { reason: '模型已不可用' })
+    reply.resolve(Response.json(registeredRoom('a')))
+    await expect(sending).rejects.toThrow('模型已不可用')
+    expect(h.sends).toEqual([])
+    await h.fiber.dispose()
+  })
 
-    await fiber.dispose()
-    expect(slots.entries('sidebar.footer.action')).toEqual([])
-    expect(slots.entries('settings.section')).toEqual([])
-    expect(slots.entries('conversation.input.dock')).toEqual([])
+  it('observes one source per session while sharing the same session source across all room slots', async () => {
+    const h = await roomRegistration()
+    const a = h.face('a').hooks.room
+    const b = h.face('b').hooks.room
+    expect(h.request).not.toHaveBeenCalled()
+    const stopA = a.subscribe(vi.fn())
+    const stopASecond = h.face('a').hooks.room.subscribe(vi.fn())
+    const stopB = b.subscribe(vi.fn())
+    await waitFor(() => { expect(a.getSnapshot().room?.sessionId).toBe('a'); expect(b.getSnapshot().room?.sessionId).toBe('b') })
+    expect(h.request).toHaveBeenCalledTimes(2)
+    expect(h.request.mock.calls.map(call => requestUrl(call[0]).searchParams.get('session_id')).sort()).toEqual(['a', 'b'])
+    stopA(); stopASecond(); stopB()
+    await h.fiber.dispose()
+  })
+
+  it('exposes an explicit reload of the same observed session source after the first read fails', async () => {
+    const h = await roomRegistration(); const a = h.face('a')
+    h.request.mockRejectedValueOnce(new Error('first read lost'))
+    const stop = a.hooks.room.subscribe(vi.fn())
+    await waitFor(() => { expect(a.hooks.room.getSnapshot().error).toBe('first read lost') })
+    h.rooms.set('a', { ...registeredRoom('a'), roomPollIntervalMs: 250 })
+    await a.reload()
+    expect(a.hooks.room.getSnapshot()).toMatchObject({ stale: false, error: null, room: { sessionId: 'a', roomPollIntervalMs: 250 } })
+    expect(h.request).toHaveBeenCalledTimes(2)
+    stop(); await h.fiber.dispose()
+    await expect(a.reload()).rejects.toThrow('聊天室已卸载')
+  })
+
+  it('rechecks the actual target and sends only to the injected source session, independent of selected session and management permission', async () => {
+    const h = await roomRegistration()
+    const a = h.face('a')
+    const fresh = registeredRoom('a')
+    h.rooms.set('a', { ...fresh, dashboard: { ...fresh.dashboard, canManage: false, members: fresh.dashboard.members.map(m => ({ ...m, connection: 'unreachable' })) } })
+    h.fake.set({ ...h.fake.raw.list.getSnapshot(), current: 'b' })
+    await a.send({ text: 'bounded task', recipient: { gouziId: 'g1', generation: 1, mode: 'standard' } })
+    expect(h.sends).toHaveLength(1)
+    expect(h.sends[0]!.sessionId).toBe('a')
+    expect(decodeKennelMessage(h.sends[0]!.text)).toEqual({ text: 'bounded task', recipient: { gouziId: 'g1', generation: 1, mode: 'standard' } })
+    const query = requestUrl(h.request.mock.calls[0]![0])
+    expect(query.searchParams.get('session_id')).toBe('a')
+    await a.loadOlder(); expect(h.older).toHaveBeenCalledExactlyOnceWith('a')
+    expect(await a.readEvidence('run/real', 'evidence/real')).toEqual({ actualEvidence: 'evidence/real' })
+    const evidence = requestUrl(h.request.mock.calls[1]![0])
+    expect([...evidence.searchParams.entries()]).toEqual([['session_id', 'a'], ['run_id', 'run/real'], ['evidence_ref', 'evidence/real']])
+    await h.fiber.dispose()
+  })
+
+  it.each(['disabled', 'generation', 'unavailable', 'missing', 'read-error'])('rejects fresh %s without forwarding or changing the target', async (failure) => {
+    const h = await roomRegistration(); const a = h.face('a')
+    const fresh = registeredRoom('a')
+    if (failure === 'disabled') h.rooms.set('a', { ...fresh, dashboard: { ...fresh.dashboard, members: fresh.dashboard.members.map(m => ({ ...m, membership: 'archived' })) } })
+    if (failure === 'generation') h.rooms.set('a', { ...fresh, execution: fresh.execution.map(e => ({ ...e, generation: 2 })) })
+    if (failure === 'unavailable') h.rooms.set('a', { ...fresh, execution: fresh.execution.map(e => ({ ...e, operators: e.operators.map(o => ({ ...o, available: false })) })) })
+    if (failure === 'missing') h.rooms.set('a', { ...fresh, execution: [] })
+    if (failure === 'read-error') h.request.mockRejectedValue(new Error('fresh read lost'))
+    const recipient = { gouziId: 'g1', generation: 1, mode: 'standard' } as const
+    await expect(a.send({ text: 'original task', recipient })).rejects.toThrow()
+    expect(recipient).toEqual({ gouziId: 'g1', generation: 1, mode: 'standard' })
+    expect(h.sends).toEqual([])
+    expect(h.request).toHaveBeenCalledOnce()
+    await h.fiber.dispose()
+  })
+
+  it('fails clearly when a scope disappears or is removed, including after a fresh read', async () => {
+    const h = await roomRegistration(); const a = h.face('a')
+    expect(() => h.face(undefined)).toThrow('狗窝会话尚未创建')
+    h.missing.add('a')
+    await expect(a.send({ text: 'draft', recipient: null })).rejects.toThrow('会话已不存在')
+    await expect(a.loadOlder()).rejects.toThrow('会话已不存在')
+    h.missing.delete('a'); h.views.get('a')!.removed = true
+    await expect(a.readEvidence('r', 'e')).rejects.toThrow('会话已移除')
+    h.views.get('a')!.removed = false
+    const reply = deferred<Response>()
+    h.request.mockImplementation(() => reply.promise)
+    const sending = a.send({ text: 'draft', recipient: { gouziId: 'g1', generation: 1, mode: 'standard' } })
+    h.views.get('a')!.removed = true
+    reply.resolve(Response.json(registeredRoom('a')))
+    await expect(sending).rejects.toThrow('会话已移除')
+    expect(h.sends).toEqual([])
+    await h.fiber.dispose()
+  })
+
+  it('waits for source quiescence on unload and fences late replies and captured actions', async () => {
+    const h = await roomRegistration(); const a = h.face('a')
+    const reply = deferred<Response>()
+    h.request.mockImplementation(() => reply.promise)
+    const listener = vi.fn()
+    a.hooks.room.subscribe(listener)
+    await waitFor(() => { expect(h.request).toHaveBeenCalledOnce() })
+    const signal = h.request.mock.calls[0]![1]!.signal!
+    let settled = false
+    const disposal = h.fiber.dispose().then(() => { settled = true })
+    await waitFor(() => { expect(signal.aborted).toBe(true) })
+    expect(settled).toBe(false)
+    const notifications = listener.mock.calls.length
+    reply.resolve(Response.json(registeredRoom('a')))
+    await disposal
+    expect(listener).toHaveBeenCalledTimes(notifications)
+    expect(a.hooks.room.getSnapshot().room).toBe(null)
+    await expect(a.send({ text: 'late draft', recipient: null })).rejects.toThrow('聊天室已卸载')
+    await expect(a.loadOlder()).rejects.toThrow('聊天室已卸载')
+    expect(h.sends).toEqual([])
+  })
+
+  it('aborts and awaits owned evidence reads on unload without delivering a late reply into another selected session', async () => {
+    const h = await roomRegistration(); const a = h.face('a')
+    const reply = deferred<Response>()
+    h.request.mockImplementation(() => reply.promise)
+    const reading = a.readEvidence('run/a', 'ref/a')
+    const caught = expect(reading).rejects.toThrow('聊天室已卸载')
+    const signal = h.request.mock.calls[0]![1]!.signal!
+    h.fake.set({ ...h.fake.raw.list.getSnapshot(), current: 'b' })
+    let settled = false
+    const disposal = h.fiber.dispose().then(() => { settled = true })
+    await waitFor(() => { expect(signal.aborted).toBe(true) })
+    expect(settled).toBe(false)
+    reply.resolve(Response.json({ actualEvidence: 'belongs to a' }))
+    await caught; await disposal
+    expect(h.sends).toEqual([])
+    expect(requestUrl(h.request.mock.calls[0]![0]).searchParams.get('session_id')).toBe('a')
+  })
+
+  it('aborts and awaits a fresh send preflight on unload without submitting its late result', async () => {
+    const h = await roomRegistration(); const a = h.face('a')
+    const reply = deferred<Response>()
+    h.request.mockImplementation(() => reply.promise)
+    const sending = a.send({ text: 'late task', recipient: { gouziId: 'g1', generation: 1, mode: 'standard' } })
+    const caught = expect(sending).rejects.toThrow('聊天室已卸载')
+    const signal = h.request.mock.calls[0]![1]!.signal!
+    let settled = false
+    const disposal = h.fiber.dispose().then(() => { settled = true })
+    await waitFor(() => { expect(signal.aborted).toBe(true) })
+    expect(settled).toBe(false)
+    reply.resolve(Response.json(registeredRoom('a')))
+    await caught; await disposal
+    expect(h.sends).toEqual([])
+  })
+
+  it('escapes copied recipient metadata when submitting ordinary text to the manager', async () => {
+    const h = await roomRegistration()
+    const quoted = encodeKennelMessage('quoted task', { gouziId: 'g1', generation: 1, mode: 'standard' })
+    await h.face('a').send({ text: quoted, recipient: null })
+    expect(decodeKennelMessage(h.sends[0]!.text)).toEqual({ text: quoted })
+    expect(h.request).not.toHaveBeenCalled()
+    await h.fiber.dispose()
   })
 })
