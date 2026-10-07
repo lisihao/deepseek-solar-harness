@@ -1,10 +1,11 @@
 // Real built plugins and HTTP; fixtures supply external catalog/execution reads and keyless model responses.
-import { lstat, symlink, unlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
+import { transform } from 'lightningcss'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -15,6 +16,8 @@ import { acknowledgeReloadConnectionLoss, launchWebScaffold, watchConsole, type 
 import { connectFreshWorkspace, newEnglishPage } from './support.ts'
 const PRESETS = fileURLToPath(new URL('./snapshots/kennel-room/presets', import.meta.url))
 const SHIPPED_PRESETS = fileURLToPath(new URL('../../cli/config/agent-presets', import.meta.url))
+const BLUE_FANTASY = fileURLToPath(new URL('../../../plugins/managed/web-ui/packages/skins/blue-fantasy', import.meta.url))
+const BLUE_FANTASY_ID = '@linxin666/dsh-client-ui-skin-blue-fantasy'
 const members = ['g1', 'g2'].map((gouziId, i) => ({
   gouziId, name: '同名', avatarId: 'shiba', role: 'development', hostId: 'h' + String(i),
   membership: 'enabled', connection: 'online', activity: 'resting', createdAt: '2026-10-01T00:00:00Z', generation: 1,
@@ -254,20 +257,21 @@ describe('web e2e: composed kennel room', () => {
 
 // Own a replay cursor and Session so the layout/carrier fixtures never consume a model turn.
 describe('web e2e: kennel room real send', () => {
-  it('sends through the kennel Session RPC and retains the replayed conversation after reload', async () => {
+  it('contains Blue Fantasy frost through a real kennel send and retains usable controls after reload', async () => {
     const prompt = 'Reply exactly KENNEL_ROOM_SEND_OK and stop.'
     const reply = 'KENNEL_ROOM_SEND_OK'
     const scaffold = await launchWebScaffold({
       replayFixture: fileURLToPath(new URL('./snapshots/kennel-room/send.session.jsonl', import.meta.url)),
-      paceMs: 5,
+      paceMs: 2000,
       agentPresets: { roots: [{ path: SHIPPED_PRESETS, trust: 'system' }, { path: PRESETS, trust: 'system' }], default: 'standard' },
     })
     let browser: Browser | undefined
     let fixtureLink: string | undefined
+    let skinLink: string | undefined
     const failures: unknown[] = []
     try {
       scaffold.ctx.provide('orchestrations', {
-        gouzi: { list: async () => ({ members: [], hosts: [] }), executionOperators: async () => [] },
+        gouzi: { list: async () => ({ members, hosts: [{ hostId: 'h0', label: '机器0' }, { hostId: 'h1', label: '机器1' }] }), executionOperators: async () => execution },
         list: async () => [],
       } as unknown as OrchestrationService)
       const moduleLink = join(scaffold.harnessHome, 'profiles/node_modules/@deepseek-ai/dsh-ui-gouzi')
@@ -278,12 +282,30 @@ describe('web e2e: kennel room real send', () => {
         fixtureLink = moduleLink
       }
       await scaffold.ctx.loader.create({ name: '@deepseek-ai/dsh-ui-gouzi', config: { roomPollIntervalMs: 250 } })
+      const skinModuleLink = join(scaffold.harnessHome, 'profiles/node_modules', BLUE_FANTASY_ID)
+      try { await lstat(skinModuleLink) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        await mkdir(join(scaffold.harnessHome, 'profiles/node_modules/@linxin666'), { recursive: true })
+        await symlink(BLUE_FANTASY, skinModuleLink)
+        skinLink = skinModuleLink
+      }
+      await scaffold.ctx.loader.create({ name: BLUE_FANTASY_ID })
       await scaffold.ctx.loader.await()
       browser = await chromium.launch()
       const page = await newEnglishPage(browser)
       const tripwire = watchConsole(page)
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      await page.waitForSelector('body[data-dsh-blue-fantasy]')
+      // Match the skin's shared clientBundle CSS transform to reject stale
+      // built skin assets; the real Loader owns the injected stylesheet.
+      const skinCss = transform({
+        filename: 'packages/skins/blue-fantasy/src/client/blue-fantasy.module.css',
+        code: await readFile(join(BLUE_FANTASY, 'src/client/blue-fantasy.module.css')),
+        cssModules: { pattern: '[hash]_[local]' }, minify: true,
+      }).code.toString()
+      expect(await page.locator(`style[data-plugin-css="${BLUE_FANTASY_ID}/blue-fantasy.module.css"]`).textContent()).toBe(skinCss)
       await connectFreshWorkspace(page, scaffold.workspaceCwd)
       const roomRead = page.waitForRequest(request => request.url().includes('/api/gouzi?session_id='))
       await page.getByRole('button', { name: '狗窝', exact: true }).click()
@@ -293,6 +315,44 @@ describe('web e2e: kennel room real send', () => {
       const agent = scaffold.ctx.agents.get(SessionId(roomSession!))!
       expect(agent.session.events.filter(event => event.type === 'agent-preset/selected').at(-1)).toMatchObject({ data: { agentPreset: 'kennel' } })
       const input = page.getByRole('textbox', { name: '消息', exact: true })
+      const seat = page.locator('[class*="composerSeat"]')
+      expect(await seat.evaluate(el => getComputedStyle(el, '::before').content)).toBe('none')
+      const assertLocalFrost = async (): Promise<void> => {
+        const geometry = await seat.evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          const pseudo = getComputedStyle(el, '::before')
+          return { x: box.x, y: box.y, width: box.width, height: box.height,
+            pseudoWidth: parseFloat(pseudo.width), pseudoHeight: parseFloat(pseudo.height),
+            content: pseudo.content, position: pseudo.position, inset: pseudo.inset,
+            pointerEvents: pseudo.pointerEvents, blur: pseudo.backdropFilter }
+        })
+        expect(geometry.content).toBe('""')
+        expect(geometry.position).toBe('absolute')
+        expect(geometry.inset).toBe('0px')
+        expect(geometry.pointerEvents).toBe('none')
+        expect(geometry.blur).toBe('blur(6px)')
+        expect(geometry.pseudoWidth).toBeCloseTo(geometry.width, 0)
+        expect(geometry.pseudoHeight).toBeCloseTo(geometry.height, 0)
+        const sidebar = await page.getByRole('button', { name: '狗窝', exact: true }).boundingBox()
+        const membersPanel = await page.getByRole('complementary', { name: '房间成员与任务' }).boundingBox()
+        expect(sidebar).not.toBeNull(); expect(membersPanel).not.toBeNull()
+        expect(geometry.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width)
+        expect(geometry.x + geometry.width).toBeLessThanOrEqual(membersPanel!.x + 1)
+        const filter = page.getByRole('button', { name: '筛选 同名 · 机器1 · 开发', exact: true })
+        await filter.click()
+        expect(await filter.getAttribute('aria-pressed')).toBe('true')
+        await page.getByRole('button', { name: '全部', exact: true }).click()
+        expect(await filter.getAttribute('aria-pressed')).toBe('false')
+        await page.getByRole('button', { name: 'Settings', exact: true }).click()
+        await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor()
+        await page.keyboard.press('Escape')
+        await page.getByRole('dialog', { name: 'Settings', exact: true }).waitFor({ state: 'hidden' })
+      }
+      await input.fill('Enter keeps this draft')
+      await input.press('Enter')
+      expect(await input.inputValue()).toBe('Enter keeps this draft\n')
+      expect(agent.session.events.filter(event => event.type === 'user/message')).toHaveLength(0)
+      expect(await seat.evaluate(el => getComputedStyle(el, '::before').content)).toBe('none')
       await input.fill(prompt)
       const promptResponse = page.waitForResponse(response => response.url().endsWith('/api/session.prompt'))
       const settled = scaffold.whenTurnSettled()
@@ -303,9 +363,29 @@ describe('web e2e: kennel room real send', () => {
       })
       expect(response.status()).toBe(200)
       expect(await response.json()).toMatchObject({ result: { ok: true, value: { accepted: true } } })
-      expect(await settled).toBe(roomSession)
       const log = page.getByRole('log')
+      await log.getByText(prompt, { exact: true }).waitFor({ timeout: 15_000 })
+      expect(agent.status).toBe('running')
+      await assertLocalFrost()
+      expect(agent.status).toBe('running')
+      await page.screenshot({ path: join(tmpdir(), 'dsh-kennel-blue-fantasy-running.png') })
+      expect(await settled).toBe(roomSession)
       await log.getByText(reply, { exact: true }).waitFor({ timeout: 15_000 })
+      // Reproduce the previous room rule in this browser only: the same
+      // geometry assertion must reject a seat with no positioning ancestor.
+      const previousPosition = await seat.evaluate((el) => {
+        const previous = (el as HTMLElement).style.position
+        ;(el as HTMLElement).style.position = 'static'
+        return previous
+      })
+      try {
+        await expect(assertLocalFrost()).rejects.toThrow(/to be close to/)
+        await page.screenshot({ path: join(tmpdir(), 'dsh-kennel-blue-fantasy-static.png') })
+      } finally {
+        await seat.evaluate((el, previous) => { (el as HTMLElement).style.position = previous }, previousPosition)
+      }
+      await assertLocalFrost()
+      await page.screenshot({ path: join(tmpdir(), 'dsh-kennel-blue-fantasy-send.png') })
       expect(await input.inputValue()).toBe('')
       const userEvents = agent.session.events.filter(event => event.type === 'user/message' && event.data.source.kind === 'user')
       expect(userEvents).toHaveLength(1)
@@ -326,6 +406,7 @@ describe('web e2e: kennel room real send', () => {
       expect(new URL((await reloadedRoom).url()).searchParams.get('session_id')).toBe(roomSession)
       await log.getByText(prompt, { exact: true }).waitFor({ timeout: 15_000 })
       await log.getByText(reply, { exact: true }).waitFor({ timeout: 15_000 })
+      await assertLocalFrost()
       expect(await log.locator('article').allTextContents()).toMatchInlineSnapshot(`
         [
           "我Reply exactly KENNEL_ROOM_SEND_OK and stop.",
@@ -342,6 +423,10 @@ describe('web e2e: kennel room real send', () => {
       if (fixtureLink !== undefined) {
         expect((await lstat(fixtureLink)).isSymbolicLink()).toBe(true)
         await unlink(fixtureLink)
+      }
+      if (skinLink !== undefined) {
+        expect((await lstat(skinLink)).isSymbolicLink()).toBe(true)
+        await unlink(skinLink)
       }
       await scaffold.close().catch((error: unknown) => failures.push(error))
     }
