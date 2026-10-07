@@ -424,7 +424,8 @@
 }
 
 .scrollBody:has(> :global([data-slot='conversation.room.content']) > :global([data-conversation-scroll-owner])) > .composerSeat {
-  position: static;
+  /* Keep skin pseudo-elements anchored to this normal-flow seat. */
+  position: relative;
   flex: none;
   background: none;
 }
