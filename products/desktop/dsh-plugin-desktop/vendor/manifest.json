@@ -255,6 +255,11 @@
       "name": "Codegraph object-rooted tool input schemas",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "d1b8a01f32f1625637454c0e5b9b32f2a1e7394e"
+    },
+    {
+      "name": "Kennel normal-flow composer frost positioning",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "aaaa3799af1c60239761a4f3b844811875fc2fdd"
     }
   ],
   "sourcePackages": {
@@ -401,7 +406,7 @@
     "dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz": "81591b3edd03c01e1de0562d0dca0f2f95fedff238fb7e265b9bd3756f9d716c",
     "dsh-packages/deepseek-ai-dsh-client-modules-0.1.0-rc.5.tgz": "9131dc1df333152ff7937355b591d48a500d0a3313435be02849187adb443f07",
     "dsh-packages/deepseek-ai-dsh-client-runtime-0.1.0-rc.5.tgz": "0eed9578e361c1395381ee0bb1fc61d72ce2e9a3d63304c67fba9b90d2070a56",
-    "dsh-packages/deepseek-ai-dsh-client-ui-conversation-0.1.0-rc.5.tgz": "d3b7bf834f666def14866dfe2a785b47473eee461b21e1ad0a6e8bacde40d373",
+    "dsh-packages/deepseek-ai-dsh-client-ui-conversation-0.1.0-rc.5.tgz": "43e97c6a4d69f9f34d80b5335c251ae4455dfd1250d798d21a7f7da5869c4fbe",
     "dsh-packages/deepseek-ai-dsh-client-ui-input-trigger-0.1.0-rc.5.tgz": "7a1095cee8b42ebcd57c08c4f17e55195ccfbd56d7be8d66ab44dd9f40d2974d",
     "dsh-packages/deepseek-ai-dsh-client-ui-primitives-0.1.0-rc.5.tgz": "53b835d5a322626f223d8851f8333a217d8c1daa359093c90bfc215efe169531",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "fcd7a73ae65c5b938b3e5ec44288efadd9b801f684669516c4ba08f17541c22f",
@@ -470,7 +475,7 @@
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "f9ecb9781bd709faa4b3c905b5695917af78436bd5007afc79ddfa5311b1cee6",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "4f2d66548e49d8b1bdfbf72a01b90d171fa69190a6d7c057ed9824a8ef26b852",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "97c9e6e8ac3698e464f98493d6c13b68be32a0202a6d5119c50d5440b22d6c12",
-    "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "9bc580077ae85fcfbe121358a5bab52b7f20ba913e6b0bff533774de26ab5eff",
+    "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "558a81f41bff84561b3b20bc14750ef2f118ef90c8fa5991443571ee2dcdc194",
     "dsh-packages/dsh-better-sidebar-0.15.0-solar.1.tgz": "e5ef31ca74a46a4d7e023fdc5f2dafd37aa458622f0db4824ad0393819e256fc",
     "dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz": "a630eee30376920234619fe3fed5e1f965632016b28d468530cbe5b733209b18",
     "dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz": "ef0859804a4df7b0d7e765d57604874ec4b4747a0681eb721785c194c3fe32c1",
