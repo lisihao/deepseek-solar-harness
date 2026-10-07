@@ -19,8 +19,7 @@
     "python/sdk-runtime"
   ],
   "ignoreDependencies": [
-    "@yarnpkg/cli-dist",
-    "lightningcss"
+    "@yarnpkg/cli-dist"
   ],
   "workspaces": {
     ".": {
