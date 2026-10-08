@@ -61,6 +61,22 @@ const install: InvariantInstaller = (ctx, fail) => {
         }
         break
       }
+      case 'kennel/dispatch-collaboration': {
+        const selected = selectedCandidate(session, event.data.messageId, event.seq, fail)
+        if (selected.kind !== 'collaboration' || selected.id !== event.data.candidate.id) {
+          fail(`dispatch collaboration for ${event.data.messageId} does not match its selected candidate`)
+        }
+        break
+      }
+      case 'kennel/dispatch-collaboration-admitted': {
+        const started = session.events.findLast(previous => previous.seq < event.seq
+          && previous.type === 'kennel/dispatch-collaboration' && previous.data.messageId === event.data.messageId)
+        if (started?.type !== 'kennel/dispatch-collaboration'
+          || started.data.candidate.collaboration !== event.data.collaboration) {
+          fail(`collaboration admission for ${event.data.messageId} has no prior start of the same kind`)
+        }
+        break
+      }
       default:
         // Other merge-extensible session event relations belong to their owners.
         break

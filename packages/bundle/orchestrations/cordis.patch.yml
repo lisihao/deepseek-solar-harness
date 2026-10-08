@@ -10,6 +10,9 @@
     - id: debate-orchestration
       name: '@deepseek-ai/dsh-debate-orchestration'
 
+    - id: kennel-review
+      name: '@deepseek-ai/dsh-kennel-review'
+
     - id: tool-orchestration
       name: '@deepseek-ai/dsh-tool-orchestration'
 

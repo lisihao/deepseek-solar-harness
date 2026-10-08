@@ -1,0 +1,152 @@
+{
+  "modelCalls": 2,
+  "dispatchEvents": [
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-submission",
+    "kennel/dispatch-admitted",
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-collaboration",
+    "kennel/dispatch-collaboration-admitted"
+  ],
+  "offeredReviews": [
+    {
+      "target": {
+        "title": "Summarize the parser for me.",
+        "authors": [
+          "alpha"
+        ]
+      },
+      "reviewers": [
+        "beta",
+        "gamma"
+      ]
+    }
+  ],
+  "started": {
+    "collaboration": "review",
+    "reviewers": [
+      {
+        "gouziId": "beta",
+        "operatorId": "gouzi.beta.codex",
+        "model": "gpt-5.6-sol"
+      },
+      {
+        "gouziId": "gamma",
+        "operatorId": "gouzi.gamma.codex",
+        "model": "gpt-5.6-luna"
+      }
+    ],
+    "assignments": [
+      {
+        "gouziId": "beta",
+        "role": "reviewer"
+      },
+      {
+        "gouziId": "gamma",
+        "role": "reviewer"
+      }
+    ]
+  },
+  "orchestrationRuns": [
+    {
+      "state": "completed",
+      "nodes": [
+        "work:passed"
+      ],
+      "recipients": [
+        "alpha"
+      ]
+    },
+    {
+      "state": "completed",
+      "nodes": [
+        "review-1:passed",
+        "review-2:passed"
+      ],
+      "recipients": [
+        "beta",
+        "gamma"
+      ]
+    }
+  ],
+  "executed": [
+    {
+      "member": "beta",
+      "nodeId": "review-1",
+      "model": "gpt-5.6-sol"
+    },
+    {
+      "member": "gamma",
+      "nodeId": "review-2",
+      "model": "gpt-5.6-luna"
+    },
+    {
+      "member": "alpha",
+      "nodeId": "work",
+      "model": "gpt-5.6-luna"
+    }
+  ],
+  "reviewGrants": [
+    {
+      "read": [
+        "**"
+      ],
+      "write": [],
+      "effects": []
+    },
+    {
+      "read": [
+        "**"
+      ],
+      "write": [],
+      "effects": []
+    }
+  ],
+  "reviewersReadTheResult": true,
+  "externalMethods": [
+    "operator.events",
+    "operator.execute",
+    "operator.inspect",
+    "operator.providers"
+  ],
+  "room": {
+    "status": 200,
+    "tasks": [
+      {
+        "state": "completed",
+        "nodes": [
+          {
+            "gouziId": "beta",
+            "state": "passed",
+            "accepted": true,
+            "preview": "结论：通过\n- beta 核对了 src/parse.ts，空输入有处理。"
+          },
+          {
+            "gouziId": "gamma",
+            "state": "passed",
+            "accepted": true,
+            "preview": "结论：通过\n- gamma 核对了 src/parse.ts，空输入有处理。"
+          }
+        ]
+      },
+      {
+        "state": "completed",
+        "nodes": [
+          {
+            "gouziId": "alpha",
+            "state": "passed",
+            "accepted": true,
+            "preview": "The parser lives in src/parse.ts and handles empty input."
+          }
+        ]
+      }
+    ]
+  },
+  "managerAssistantMessages": 0
+}

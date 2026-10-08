@@ -701,7 +701,34 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-admitted': { messageId: string; runId: string }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:79`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-collaboration--log-only"></a>
+
+#### `kennel/dispatch-collaboration` — log-only
+
+```ts persistence-catalog
+/** Collaboration candidate and command identity committed before the registered kind starts it. */
+'kennel/dispatch-collaboration': { messageId: string; candidate: KennelCollaborationCandidate; commandId: string }
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:81`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-collaboration-admitted--log-only"></a>
+
+#### `kennel/dispatch-collaboration-admitted` — log-only
+
+```ts persistence-catalog
+/** Admission receipt linking the user message to its collaboration run and each member's assignment. */
+'kennel/dispatch-collaboration-admitted': {
+  messageId: string
+  collaboration: string
+  runId: string
+  assignments: readonly { gouziId: string; role: string }[]
+}
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:83`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-control--log-only"></a>
 
@@ -712,29 +739,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-control': { messageId: string; candidate: KennelControlCandidate; result: OrchestrationRunSnapshot }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:82`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
-
-<a id="kenneldispatch-debate--log-only"></a>
-
-#### `kennel/dispatch-debate` — log-only
-
-```ts persistence-catalog
-/** Debate members and command identity committed before the Debate starts. */
-'kennel/dispatch-debate': { messageId: string; candidate: KennelDebateCandidate; commandId: string }
-```
-
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:78`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
-
-<a id="kenneldispatch-debate-admitted--log-only"></a>
-
-#### `kennel/dispatch-debate-admitted` — log-only
-
-```ts persistence-catalog
-/** Admission receipt linking the user message to its Debate run and each member's role. */
-'kennel/dispatch-debate-admitted': { messageId: string; runId: string; assignments: readonly { gouziId: string; role: string }[] }
-```
-
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:80`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:90`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-decision--log-only"></a>
 
@@ -745,7 +750,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-decision': { messageId: string; source: 'jev' | 'deepseek' | 'codex'; provider: string; model?: string; candidateId: string; fallbackReason?: string }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:75`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-model--log-only"></a>
 
@@ -756,7 +761,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-model': { messageId: string; record: DispatchModelRecord }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:73`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-request--log-only"></a>
 
@@ -767,7 +772,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-request': { messageId: string; message: UserMessage; candidates: readonly KennelDispatchCandidate[] }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:71`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-submission--log-only"></a>
 
@@ -778,7 +783,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-submission': { messageId: string; compilationId: string; commandId: string }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:77`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 ### `llm/*`
 

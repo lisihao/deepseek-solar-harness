@@ -5,8 +5,8 @@
     "kennel/dispatch-model",
     "kennel/dispatch-model",
     "kennel/dispatch-decision",
-    "kennel/dispatch-debate",
-    "kennel/dispatch-debate-admitted"
+    "kennel/dispatch-collaboration",
+    "kennel/dispatch-collaboration-admitted"
   ],
   "offered": [
     [

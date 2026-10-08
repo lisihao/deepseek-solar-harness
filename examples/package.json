@@ -129,6 +129,7 @@
     "@deepseek-ai/dsh-browser": "workspace:*",
     "@deepseek-ai/dsh-debate": "workspace:*",
     "@deepseek-ai/dsh-debate-orchestration": "workspace:*",
+    "@deepseek-ai/dsh-kennel-review": "workspace:*",
     "@deepseek-ai/dsh-physical-operator-chatgpt-web": "workspace:*",
     "@deepseek-ai/dsh-model-allocation-local": "workspace:*",
     "jsdom": "29.1.1",

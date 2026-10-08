@@ -14,7 +14,7 @@
     "src/recipient-message.ts",
     "src/room.ts",
     "src/dispatch-model.ts",
-    "src/debate.ts",
+    "src/collaboration.ts",
     "src/dispatcher.ts"
   ],
   "references": [

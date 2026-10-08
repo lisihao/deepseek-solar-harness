@@ -39,6 +39,7 @@ import { gouziRoom, gouziRoomEvidence } from './room.ts'
 import './host-service.ts'
 import type { GouziProjectSource } from './host-service.ts'
 import { installKennelDispatch, type KennelDispatchConfig } from './dispatcher.ts'
+import { KennelCollaborationRegistry } from './collaboration.ts'
 import { GouziRecipientResolver, installKennelRecipientGuard } from './recipient.ts'
 
 export * from './contracts.ts'
@@ -540,6 +541,7 @@ function failure(error: unknown): Reply {
 export function apply(ctx: Context, config: Config = {}): void {
   const resolved = Config(config)
   new GouziRecipientResolver(ctx, resolved.dispatcher?.enabled === true)
+  new KennelCollaborationRegistry(ctx)
   if (resolved.dispatcher) installKennelDispatch(ctx, resolved.dispatcher)
   installKennelRecipientGuard(ctx)
   const grantDeadlineMs = config.grantDeadlineMs ?? 2 * 60 * 60_000

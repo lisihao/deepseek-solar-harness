@@ -294,6 +294,7 @@
     { "path": "./packages/orchestration/debate" },
     { "path": "./packages/orchestration/debate-local" },
     { "path": "./packages/orchestration/debate-orchestration" },
+    { "path": "./packages/orchestration/kennel-review" },
     { "path": "./packages/orchestration/tool-debate" },
     { "path": "./packages/orchestration/ui-debate/tsconfig.host.json" },
     { "path": "./packages/orchestration/continual-harness" },

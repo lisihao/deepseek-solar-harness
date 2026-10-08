@@ -14,7 +14,7 @@ Debate 的阵容跑在主实例自己的 Codex 和 Claude Code 算子上，而�
 
 角色按注册表顺序分配：靠前的成员依次担任建议者、证伪者，有第四个成员时担任证据审计者，最后一个成员担任裁判。至少需要三个成员，这样裁判不会参与辩论。每个成员运行能够服务其固定模型的入口，没有固定模型时运行第一个可用入口，使用固定的模型或该入口 catalog 的默认模型。默认模型由 daemon 以 `GouziOperatorCapability.defaultModel` 报告，因为 Host 进程看不到成员的远程 catalog。
 
-调度器不了解 Debate 策略。它通过 `ctx.kennelDebates` 触达 Debate，这是在 `@deepseek-ai/dsh-orchestration` 中定义、由 [`debate-orchestration`](../../../../packages/orchestration/debate-orchestration/README.md) 提供的服务：它分配角色，用 `defaultDebateBudget` 推导普通的三轮预算，启动 Debate，并在后台批准，因为批准会在各轮结算后才返回。共用的人设、轮次协议、收敛规则和预算移到了 `@deepseek-ai/dsh-debate`，工具和狗窝使用同一份。
+调度器不了解 Debate 策略。[`debate-orchestration`](../../../../packages/orchestration/debate-orchestration/README.md) 把它注册为 `debate` [协作类型](../architecture/2026-10-09-kennel-collaboration-kinds.md)：它提供候选，分配角色，用 `defaultDebateBudget` 推导普通的三轮预算，启动 Debate，并在后台批准，因为批准会在各轮结算后才返回。共用的人设、轮次协议、收敛规则和预算移到了 `@deepseek-ai/dsh-debate`，工具和狗窝使用同一份。
 
 每一轮的 Graph 都带着[接收者集合](../architecture/2026-10-08-gouzi-recipient-sets.md)准入，集合来自成员当前的 generation。daemon 随后逐个成员检查可用性、工作区和授权，把成员与其他算子混用的轮次会被拒绝。
 
@@ -28,4 +28,4 @@ Debate 的阵容跑在主实例自己的 Codex 和 Claude Code 算子上，而�
 
 ## 后果
 
-进展以本会话的 TaskGraph Run 显示在房间里，并归属到各成员，同时显示在 Debate 面板中，不会流式写入聊天。用户暂时不能选择成员或角色，角色也不使用成员自己的角色模板。没有任何可用入口提供其固定模型的成员会被排除，合格成员少于三个时不提供 Debate。成员按轮辩论，还不会评论或审核彼此已完成的工作。远程主机上真实的 Codex 和 Claude Code catalog 尚未在此验证。
+进展以本会话的 TaskGraph Run 显示在房间里，并归属到各成员，同时显示在 Debate 面板中，不会流式写入聊天。用户暂时不能选择成员或角色，角色也不使用成员自己的角色模板。没有任何可用入口提供其固定模型的成员会被排除，合格成员少于三个时不提供 Debate。成员还可以通过 `review` 类型评审彼此已完成的工作。远程主机上真实的 Codex 和 Claude Code catalog 尚未在此验证。

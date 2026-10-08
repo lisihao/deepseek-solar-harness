@@ -1257,6 +1257,24 @@ export interface Config {
 
 来源： [`packages/jobs/jobs-local/src/index.ts:31`](../packages/jobs/jobs-local/src/index.ts)
 
+<a id="deepseek-aidsh-kennel-review"></a>
+
+## `@deepseek-ai/dsh-kennel-review`
+
+需要：`kennelCollaborations` · `orchestrations`
+
+```ts config-catalog
+/** Review plugin configuration. */
+export interface Config {
+  /** Most members that review one task. */
+  readonly maxReviewers?: number
+  /** Most recent finished tasks offered for review. */
+  readonly maxTargets?: number
+}
+```
+
+来源： [`packages/orchestration/kennel-review/src/index.ts:33`](../packages/orchestration/kennel-review/src/index.ts)
+
 <a id="deepseek-aidsh-llm-deepseek"></a>
 
 ## `@deepseek-ai/dsh-llm-deepseek`
@@ -1763,7 +1781,7 @@ export type PublicEvidenceMode = 'off' | 'shadow' | 'apply'
 export type CostAwareMode = PublicEvidenceMode
 ```
 
-Source: [`packages/orchestration/model-allocation-local/src/index.ts:31`](../packages/orchestration/model-allocation-local/src/index.ts)
+来源： [`packages/orchestration/model-allocation-local/src/index.ts:31`](../packages/orchestration/model-allocation-local/src/index.ts)
 
 <a id="deepseek-aidsh-model-catalog-local"></a>
 
@@ -2246,7 +2264,7 @@ export interface RadarConfig {
 }
 ```
 
-Source: [`packages/orchestration/scheduling-evidence/src/index.ts:91`](../packages/orchestration/scheduling-evidence/src/index.ts)
+来源： [`packages/orchestration/scheduling-evidence/src/index.ts:91`](../packages/orchestration/scheduling-evidence/src/index.ts)
 
 <a id="deepseek-aidsh-sdk-jsonrpc-server"></a>
 
@@ -3664,7 +3682,7 @@ export interface DispatchModelConfig {
 
 依赖： [`LogicalTaskGraphV1`](../packages/orchestration/orchestration/src/index.ts) · [`OrchestrationNodeSpecV1`](../packages/orchestration/orchestration/src/index.ts)
 
-来源： [`packages/orchestration/ui-gouzi/src/index.ts:51`](../packages/orchestration/ui-gouzi/src/index.ts)
+来源： [`packages/orchestration/ui-gouzi/src/index.ts:52`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 
