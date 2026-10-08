@@ -43,6 +43,8 @@ export interface KennelWorkCandidate {
   readonly workspace: string
   readonly mode: 'chat' | 'read' | 'write'
   readonly operatorIds: readonly string[]
+  /** Native model the member is pinned to; every listed operator offers it. Absent when Smart Auto chooses. */
+  readonly model?: string
 }
 
 /** A revision-bound action on an existing task in this room. */
@@ -121,7 +123,10 @@ export function kennelDispatchGraph(selected: KennelWorkCandidate, text: string,
     ...selected.mode === 'chat' ? {} : { workspaceToolLimits: config.workspaceToolLimits },
     acceptance: [{ id: 'result', description: selected.mode === 'chat' ? 'Return the member reply.' : 'Return the requested result and evidence.', kind: 'operator-completed' }],
     retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] }, timeoutMs: config.taskTimeoutMs,
-    operator: { preferredIds: selected.operatorIds, fallbackIds: [] },
+    operator: {
+      preferredIds: selected.operatorIds, fallbackIds: [],
+      ...selected.model === undefined ? {} : { profile: { model: selected.model } },
+    },
   }
   return {
     version: 1, title: node.title, workspace: selected.workspace, maxParallel: 1,
@@ -189,12 +194,15 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
         return entry.projectScopes.flatMap(workspace => (['chat', 'read', 'write'] as const)
           .filter(mode => mode !== 'write' || String(member.hostId) === 'local')
           .flatMap((mode) => {
+            // A pinned model qualifies only the runtimes whose catalog offers it; none left means the member is not a candidate.
             const operatorIds = entry.operators.filter(operator => operator.available && operator.supportsGenerationLimits === true
-              && (mode === 'chat' || operator.supportsGovernedWorkspacePolicy === true)).map(operator => operator.operatorId)
+              && (mode === 'chat' || operator.supportsGovernedWorkspacePolicy === true)
+              && (member.model === undefined || operator.models.includes(member.model))).map(operator => operator.operatorId)
             return operatorIds.length === 0 ? [] : [{
               kind: 'work' as const, id: JSON.stringify([String(member.gouziId), member.generation, workspace, mode]),
               gouziId: String(member.gouziId), generation: member.generation, name: member.name, role: member.role,
               activity: member.activity, workspace, mode, operatorIds,
+              ...member.model === undefined ? {} : { model: member.model },
             }]
           }))
       })
@@ -282,11 +290,12 @@ async function confirmCandidate(ctx: Context, selected: KennelWorkCandidate): Pr
   const member = (await control.list()).members.find(value => String(value.gouziId) === selected.gouziId)
   const entry = (await control.executionOperators()).find(value => String(value.gouziId) === selected.gouziId
     && value.generation === selected.generation)
-  if (member?.membership !== 'enabled' || member.generation !== selected.generation || !entry
+  if (member?.membership !== 'enabled' || member.generation !== selected.generation || member.model !== selected.model || !entry
     || !entry.projectScopes.includes(selected.workspace)
     || selected.operatorIds.some(id => !entry.operators.some(operator => operator.operatorId === id
       && operator.available && operator.supportsGenerationLimits === true
-      && (selected.mode === 'chat' || operator.supportsGovernedWorkspacePolicy === true)))) {
+      && (selected.mode === 'chat' || operator.supportsGovernedWorkspacePolicy === true)
+      && (selected.model === undefined || operator.models.includes(selected.model))))) {
     throw new HarnessError('选中的狗子、执行实例或项目已变化；未改派给其他成员。', 'GOUZI_STATE_CONFLICT')
   }
 }

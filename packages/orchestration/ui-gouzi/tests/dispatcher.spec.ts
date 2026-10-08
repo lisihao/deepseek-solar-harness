@@ -23,7 +23,7 @@ async function fixture(persisted = true) {
   const agent = { id: 'agent', session } as unknown as Agent
   const member = { hostId: 'local', gouziId: 'dog', generation: 2, membership: 'enabled', name: 'Dog', role: 'research', activity: 'idle' }
   const entry = { gouziId: 'dog', generation: 2, projectScopes: ['/project'], operators: [{ operatorId: 'gouzi.dog.codex', available: true,
-    supportsGenerationLimits: true, supportsGovernedWorkspacePolicy: true }] }
+    supportsGenerationLimits: true, supportsGovernedWorkspacePolicy: true, models: [] as string[] }] }
   const compile = vi.fn(async (_request: unknown) => ({ compilationId: 'compiled' })); const start = vi.fn(async (_request: unknown) => ({ runId: 'run' }))
   const list = vi.fn(async (): Promise<readonly OrchestrationRunSnapshot[]> => [])
   const inspect = vi.fn(async (_id: unknown): Promise<OrchestrationRunSnapshot> => existingRun())
@@ -115,6 +115,38 @@ it('uses a product-registered Jev catalog before DeepSeek and refuses an empty c
   const g = await fixture(); g.ctx.llm.registerAdapter(['Jev'], new Adapter(g.generate))
   await expect(g.run()).rejects.toMatchObject({ code: 'KENNEL_JEV_MODEL_MISSING' })
   expect(g.generate).not.toHaveBeenCalled(); expect(g.compile).not.toHaveBeenCalled()
+})
+it('pins a member model into the node profile and offers only runtimes whose catalog carries it', async () => {
+  const f = await fixture()
+  Object.assign(f.member, { model: 'gpt-5.5' })
+  const [codex] = f.entry.operators
+  codex!.models = ['gpt-5.5']
+  f.entry.operators.push({ ...codex!, operatorId: 'gouzi.dog.claude-code', models: ['claude-opus-5-5'] })
+  await f.run()
+  const request = f.compile.mock.calls[0]?.[0] as {
+    graph: { nodes: { operator: unknown }[] }
+    admission: { gouziRecipient: { operatorIds: string[] } }
+  }
+  expect(request.graph.nodes[0]!.operator).toEqual({ preferredIds: ['gouzi.dog.codex'], fallbackIds: [], profile: { model: 'gpt-5.5' } })
+  expect(request.admission.gouziRecipient.operatorIds).toEqual(['gouzi.dog.codex'])
+  const logged = f.agent.session.events.find(event => event.type === 'kennel/dispatch-request')?.data
+  expect(logged?.candidates[0]).toMatchObject({ model: 'gpt-5.5', operatorIds: ['gouzi.dog.codex'] })
+  expect(kennelDispatchGraph(candidate, 'hello', config).nodes[0]!.operator).toEqual({ preferredIds: candidate.operatorIds, fallbackIds: [] })
+})
+it('offers no candidate for a pinned model that no available runtime carries', async () => {
+  const f = await fixture()
+  Object.assign(f.member, { model: 'retired-model' })
+  f.entry.operators[0]!.models = ['gpt-5.5']
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_NO_EXECUTOR' })
+  expect(f.generate).not.toHaveBeenCalled(); expect(f.compile).not.toHaveBeenCalled()
+})
+it('does not start a task whose member model changed after selection', async () => {
+  const f = await fixture()
+  Object.assign(f.member, { model: 'gpt-5.5' })
+  f.entry.operators[0]!.models = ['gpt-5.5', 'gpt-5.6']
+  f.compile.mockImplementation(async () => { Object.assign(f.member, { model: 'gpt-5.6' }); return { compilationId: 'compiled' } })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  expect(f.start).not.toHaveBeenCalled()
 })
 it('rechecks project and execution availability after compile before start', async () => {
   const f = await fixture()

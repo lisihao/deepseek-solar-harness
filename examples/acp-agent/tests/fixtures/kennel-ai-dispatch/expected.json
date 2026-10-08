@@ -86,7 +86,10 @@
           "fallbackIds": [],
           "preferredIds": [
             "gouzi.stable-dog.codex"
-          ]
+          ],
+          "profile": {
+            "model": "gpt-5.6-sol"
+          }
         }
       }
     ]
@@ -162,6 +165,9 @@
     "hasWorkerResult": false
   },
   "executionCount": 1,
+  "executedModels": [
+    "gpt-5.6-sol"
+  ],
   "hasSealedGrant": true,
   "managerAssistantMessages": 0
 }

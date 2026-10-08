@@ -1138,6 +1138,9 @@ describe('orchestration daemon', () => {
 
     const edited = await client.gouziEdit('gouzi-1', { name: 'Mochi', avatarId: 'corgi', role: 'testing' })
     expect(edited).toMatchObject({ name: 'Mochi', avatarId: 'corgi', role: 'testing', roleVersion: 2 })
+    expect(edited).not.toHaveProperty('model')
+    expect((await client.gouziEdit('gouzi-1', { model: 'gpt-5.5' })).model).toBe('gpt-5.5')
+    expect(await client.gouziEdit('gouzi-1', { model: null })).not.toHaveProperty('model')
     expect((await client.gouziSetEndpoint('gouzi-1', 'http://127.0.0.1:4100')).endpoint).toBe('http://127.0.0.1:4100/')
     expect((await client.gouziSetMembership('gouzi-1', 'enabled')).membership).toBe('enabled')
     await client.gouziSetMembership('gouzi-1', 'retiring')
@@ -1148,7 +1151,7 @@ describe('orchestration daemon', () => {
       credentialsRevoked: true, workSettled: true, processTreeStopped: true,
     })).membership).toBe('archived')
     // The archived member released its slot, so an eleventh member can now be created.
-    expect((await client.gouziCreate(draft(11))).gouziId).toBe('gouzi-11')
+    expect(await client.gouziCreate({ ...draft(11), model: 'claude-opus-5-5' })).toMatchObject({ gouziId: 'gouzi-11', model: 'claude-opus-5-5' })
     expect((await client.gouziList()).members).toHaveLength(11)
   })
 

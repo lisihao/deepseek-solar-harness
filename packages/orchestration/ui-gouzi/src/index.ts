@@ -32,6 +32,7 @@ import {
   type GouziHostInspection,
   type GouziHostProjection,
   type GouziMemberProjection,
+  type GouziModelOptions,
   type GouziProjectsCheck,
 } from './contracts.ts'
 import { gouziRoom, gouziRoomEvidence } from './room.ts'
@@ -223,8 +224,9 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
       const name = optionalText(body, 'name')
       const avatarId = optionalText(body, 'avatarId')
       const requestedRole = optionalText(body, 'role')
-      if (name === undefined && avatarId === undefined && requestedRole === undefined) {
-        throw new GouziInputError('edit needs a name, avatarId, or role')
+      const model = body.model === null ? null : optionalText(body, 'model')
+      if (name === undefined && avatarId === undefined && requestedRole === undefined && model === undefined) {
+        throw new GouziInputError('edit needs a name, avatarId, role, or model')
       }
       return {
         action,
@@ -232,8 +234,10 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
         ...name === undefined ? {} : { name: memberName(name) },
         ...avatarId === undefined ? {} : { avatarId: avatar(avatarId) },
         ...requestedRole === undefined ? {} : { role: role(requestedRole) },
+        ...model === undefined ? {} : { model },
       }
     }
+    case 'models': return { action, gouziId: text(body, 'gouziId') }
     case 'wake':
     case 'rest':
     case 'retire':
@@ -249,6 +253,7 @@ function project(member: GouziMemberView, hostLabel: string): GouziMemberProject
     name: member.name,
     avatarId: member.avatarId,
     role: member.role,
+    ...member.model === undefined ? {} : { model: member.model },
     hostId: String(member.hostId),
     hostLabel,
     membership: member.membership,
@@ -457,7 +462,17 @@ async function removeHost(ctx: Context, control: GouziControl, hostId: string): 
   return { removed: true }
 }
 
+/** Models any available runtime of the current member generation offers, in catalog order without repeats. */
+async function memberModels(control: GouziControl, gouziId: string): Promise<GouziModelOptions> {
+  const member = await requireMember(control, gouziId)
+  const entry = (await control.executionOperators())
+    .find(value => String(value.gouziId) === gouziId && value.generation === member.generation)
+  const models = entry === undefined ? [] : entry.operators.filter(operator => operator.available).flatMap(operator => operator.models)
+  return { models: [...new Set(models)] }
+}
+
 type ExecuteResult =
+  | GouziModelOptions
   | GouziMemberProjection
   | GouziHostInspection
   | GouziHostProjection
@@ -486,7 +501,9 @@ async function execute(ctx: Context, control: GouziControl, request: GouziContro
         ...request.name === undefined ? {} : { name: request.name },
         ...request.avatarId === undefined ? {} : { avatarId: request.avatarId },
         ...request.role === undefined ? {} : { role: request.role },
+        ...request.model === undefined ? {} : { model: request.model },
       }))
+    case 'models': return memberModels(control, request.gouziId)
     case 'wake': return wake(ctx, control, request.gouziId)
     case 'rest': return rest(ctx, control, request.gouziId)
     case 'retire': return retire(ctx, control, request.gouziId)

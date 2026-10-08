@@ -1479,6 +1479,7 @@ export class OrchestrationDaemon {
           name: requiredString(member, 'name'),
           avatarId: requiredString(member, 'avatar_id') as GouziAvatarId,
           role: requiredString(member, 'role') as GouziRole,
+          ...member.model === undefined ? {} : { model: requiredString(member, 'model') },
           grantDeadlineMs: requiredInteger(member, 'grant_deadline_ms'),
         })
       }
@@ -1489,6 +1490,7 @@ export class OrchestrationDaemon {
           ...edit.name === undefined ? {} : { name: requiredString(edit, 'name') },
           ...edit.avatar_id === undefined ? {} : { avatarId: requiredString(edit, 'avatar_id') as GouziAvatarId },
           ...edit.role === undefined ? {} : { role: requiredString(edit, 'role') as GouziRole },
+          ...edit.model === undefined ? {} : { model: edit.model === null ? null : requiredString(edit, 'model') },
         })
       }
       case 'gouzi.set_membership': {

@@ -22,6 +22,8 @@
 
 `GET /api/gouzi` 返回 `GouziDashboardV1`：十只的上限、已占用名额数、当前调用方能否管理、这个 Host 能否启动成员，以及所有未归档的成员。每个成员带有 `membership`、`connection`、`activity`，以及由 `gouziPrimaryState` 归约出的一个 `state`：不在 `enabled` 的成员显示其 membership，联系不上的成员先显示这一点而不是它最后的活动，其余显示活动。`POST` 接收 `GouziControlRequest`，并要求带 `x-dsh-gouzi-control: 1` 头；本机回环属主、`cockpit` 与 `admin` 设备可以管理，`pocket` 设备只读，`gouzi` 凭据会被拒绝。
 
+成员可以固定到一个原生模型。编辑表单提供 `models` 操作返回的模型：它不重复地列出该成员当前可用运行环境的模型目录，成员离线时返回空列表；已固定但没有任何运行环境提供的模型仍可选中，并标为不可用。`edit` 设置 `model`，传 `null` 则清除。调度器只通过目录中包含该模型的运行环境提供已固定的成员，把模型写入任务节点的 `operator.profile`，并在成员的模型于调度决定之后变化时拒绝启动。已固定的模型没有可用运行环境提供时，该成员不进入候选；未固定的成员由 Smart Auto 选择模型。
+
 `check-projects` 接收 `hostId` 和非空的绝对路径列表 `projects`，只读检查已有目录，不修改目录、配对宿主或创建成员，并返回 `GouziProjectsCheck`：每个请求的 `path` 对应 `usable: true`，或带 `message` 的 `usable: false`。Git 仓库、没有 origin 的仓库和普通目录均可选择。选择器先检查候选工作区和新选目录，再允许选择；所有选中项目通过检查才允许下一步。检查未完成或请求失败都不能授权选择。路径不存在、路径是文件和权限拒绝会给出可操作的目录错误；进程与超时错误仍作为请求失败报告。确认前关闭向导不会初始化 Git。
 
 确认领养后，系统再次只读检查全部选中目录并检查十只成员的容量，然后按顺序为每个不同的已解析 source 调用 `prepareRepository`。只有选中目录位于 Git 仓库之外时才初始化 Git；准备过程不暂存文件、不提交，也不修改 origin。`GouziProjectSource` 包含不透明的 SHA-256 `projectId`、用户确切选中目录的真实路径 `source`，以及可选的规范 origin 信息 `repository`。确认页明确显示第一个选中项目为默认项目，并将其持久化为 `defaultProjectId`。准备失败不会创建成员或配对宿主，也不占用名额；错误会列出已经完成准备的目录，并保留其中的元数据。准备完成后，系统只配对一次所选宿主，以 `provisioning` 创建成员，配置项目映射、启动进程、记录端点，再启用成员。启动失败仍以 `provisioning` 占着名额，并报告 `GOUZI_START_FAILED`；唤醒会重试启动。领养逐个进行。退役在归档前停止成员及其 Resident 进程树；正在工作的成员不能休息或退役。[目录领养决策](../../../.agents/notes/implemented/feature/2026-10-06-gouzi-directory-adoption.md)记录执行与恢复语义。

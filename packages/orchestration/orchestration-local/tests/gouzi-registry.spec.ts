@@ -156,6 +156,39 @@ describe('GouziRegistry members', () => {
     store.close()
   })
 
+  it('pins a model at creation or edit, trims it, clears it with null, and keeps it across reopening', async () => {
+    const { store, root } = await open()
+    store.gouzi.pairHost(HOST)
+    expect(store.gouzi.create(member(1))).not.toHaveProperty('model')
+    expect(store.gouzi.create(member(2, { model: '  gpt-5.5  ' })).model).toBe('gpt-5.5')
+    const id = GouziId('gouzi-1')
+    expect(store.gouzi.edit(id, { model: 'claude-opus-5-5' }).model).toBe('claude-opus-5-5')
+    // An edit that omits the model keeps it, and a role change does not touch it.
+    expect(store.gouzi.edit(id, { name: 'Pixel', role: 'testing' }).model).toBe('claude-opus-5-5')
+    store.close()
+
+    const reopened = await open(root)
+    expect(reopened.store.gouzi.read(id)?.model).toBe('claude-opus-5-5')
+    expect(reopened.store.gouzi.read(GouziId('gouzi-2'))?.model).toBe('gpt-5.5')
+    expect(reopened.store.gouzi.edit(id, { model: null })).not.toHaveProperty('model')
+    reopened.store.close()
+  })
+
+  it('rejects an empty, overlong, or control-character model without changing the member', async () => {
+    const { store } = await open()
+    store.gouzi.pairHost(HOST)
+    store.gouzi.create(member(1, { model: 'gpt-5.5' }))
+    const id = GouziId('gouzi-1')
+    for (const model of ['', '   ', 'x'.repeat(129), 'gpt\n5', 'gpt\u0000']) {
+      expect(() => store.gouzi.edit(id, { model })).toThrow('gouzi model must be 1 to 128 printable characters')
+      expect(() => store.gouzi.create(member(2, { model }))).toThrow('gouzi model must be 1 to 128 printable characters')
+    }
+    expect(store.gouzi.read(id)?.model).toBe('gpt-5.5')
+    expect(store.gouzi.read(GouziId('gouzi-2'))).toBeUndefined()
+    expect(store.gouzi.edit(id, { model: 'x'.repeat(128) }).model).toHaveLength(128)
+    store.close()
+  })
+
   it('follows provisioning, enabled and retiring only, and treats archived as terminal', async () => {
     const { store } = await open()
     store.gouzi.pairHost(HOST)
