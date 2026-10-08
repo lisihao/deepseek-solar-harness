@@ -29,14 +29,17 @@ async function fixture(persisted = true) {
   const inspect = vi.fn(async (_id: unknown): Promise<OrchestrationRunSnapshot> => existingRun())
   const control = vi.fn(async (_request: unknown): Promise<OrchestrationRunSnapshot> => existingRun())
   const persist = vi.fn(async (_session: typeof session) => {})
+  const members: (typeof member)[] = [member]; const entries: (typeof entry)[] = [entry]
   if (persisted) ctx.on('session/flush', persist)
-  ctx.provide('orchestrations', { gouzi: { list: async () => ({ members: [member], hosts: [] }), executionOperators: async () => [entry] }, compile, start, list, inspect, control } as never)
+  ctx.provide('orchestrations', { gouzi: { list: async () => ({ members, hosts: [] }), executionOperators: async () => entries }, compile, start, list, inspect, control } as never)
   const generate = vi.fn((_options: GenerateOptions) => JSON.stringify({ candidateId: candidate.id }))
   ctx.llm.registerAdapter(['deepseek-official'], new Adapter(generate))
   await ctx.plugin(Object.assign((child: Context) => { installKennelDispatch(child, config) }, { inject: ['sessions'] }))
   const controller = new AbortController(); const message = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] })
   const run = (messages: UserMessage[] = [message]) => ctx.waterfall('agent/pre-step', { agent, signal: controller.signal, turn: 1, step: 1 } as never, async () => ({ kind: 'enter' as const, messages }))
-  return { ctx, agent, member, entry, compile, start, generate, controller, message, run, list, inspect, control, persist }
+  return {
+    ctx, agent, member, entry, members, entries, compile, start, generate, controller, message, run, list, inspect, control, persist,
+  }
 }
 it('fills nested dispatcher defaults for Config({})', () => {
   expect(Config({}).dispatcher).toMatchObject({ enabled: true, jevProvider: 'Jev', deepseek: { provider: 'deepseek-official', model: 'deepseek-flash' }, codex: { operatorId: 'codex' } })
@@ -226,6 +229,108 @@ it('offers an addressed room the runs of a recipient set that names the addresse
     text: encodeKennelMessage('status', { gouziId: 'dog', generation: 2, mode: 'standard' }) }] })
   await expect(f.run([addressed])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
   expect(f.generate).toHaveBeenCalledOnce()
+})
+/** Three members that each hold /project, the Debate Provider, and an entry whose default model differs from the first listed. */
+async function debateFixture(extra: { pinned?: string } = {}) {
+  const f = await fixture()
+  Object.assign(f.entry.operators[0]!, { models: ['gpt-5.6-luna', 'gpt-5.6-sol'], defaultModel: 'gpt-5.6-sol' })
+  for (const [index, id] of ['cat', 'bird'].entries()) {
+    f.members.push({ ...f.member, gouziId: id, name: id, generation: index + 1 })
+    f.entries.push({ ...f.entry, gouziId: id, generation: index + 1, operators: [{ ...f.entry.operators[0]!, operatorId: `gouzi.${id}.codex` }] })
+  }
+  if (extra.pinned !== undefined) Object.assign(f.member, { model: extra.pinned })
+  const starts: unknown[] = []
+  const persistedBeforeStart: boolean[] = []
+  const starter = {
+    minMembers: 3, maxMembers: 4,
+    start: vi.fn(async (request: { members: { gouziId: string }[] }) => {
+      persistedBeforeStart.push(f.agent.session.events.some(event => event.type === 'kennel/dispatch-debate'))
+      starts.push(request)
+      return { runId: 'debate-1', assignments: request.members.map((value, index) => ({ gouziId: value.gouziId, role: index === 2 ? 'decision-judge' : `participant-${String(index)}` })) }
+    }),
+  }
+  f.ctx.provide('kennelDebates', starter as never)
+  const debateId = JSON.stringify(['debate', '/project', ['dog', 2], ['cat', 1], ['bird', 2]])
+  return { ...f, starter, starts, persistedBeforeStart, debateId }
+}
+const choicesIn = (options: GenerateOptions) => {
+  const block = options.messages[0]!.content[0]!
+  if (block.type !== 'text') throw new Error('fixture expects text')
+  type Candidate = { kind: string; id: string; members?: { gouziId: string; model: string; operatorId: string }[] }
+  return (JSON.parse(block.text) as { candidates: Candidate[] }).candidates
+}
+it('offers a Debate only when enough members qualify and a Debate Provider is installed', async () => {
+  const bare = await fixture()
+  bare.generate.mockImplementation((options) => { expect(choicesIn(options).some(choice => choice.kind === 'debate')).toBe(false); return '{"candidateId":"clarify"}' })
+  await expect(bare.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+
+  const f = await debateFixture()
+  f.generate.mockImplementation((options) => {
+    const debates = choicesIn(options).filter(choice => choice.kind === 'debate')
+    expect(debates).toHaveLength(1)
+    // Members keep registry order; an unpinned member runs the catalog's default model on its first available entry.
+    expect(debates[0]).toMatchObject({ id: f.debateId, members: [
+      { gouziId: 'dog', operatorId: 'gouzi.dog.codex', model: 'gpt-5.6-sol' },
+      { gouziId: 'cat', operatorId: 'gouzi.cat.codex', model: 'gpt-5.6-sol' },
+      { gouziId: 'bird', operatorId: 'gouzi.bird.codex', model: 'gpt-5.6-sol' },
+    ] })
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+
+  const two = await debateFixture()
+  two.members.pop(); two.entries.pop()
+  two.generate.mockImplementation((options) => { expect(choicesIn(options).some(choice => choice.kind === 'debate')).toBe(false); return '{"candidateId":"clarify"}' })
+  await expect(two.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+})
+it('runs a pinned member on its pinned model and leaves out a member whose pinned model no entry offers', async () => {
+  const pinned = await debateFixture({ pinned: 'gpt-5.6-luna' })
+  pinned.generate.mockImplementation((options) => {
+    expect(choicesIn(options).find(choice => choice.kind === 'debate')?.members?.map(value => [value.gouziId, value.model])).toEqual([['dog', 'gpt-5.6-luna'], ['cat', 'gpt-5.6-sol'], ['bird', 'gpt-5.6-sol']])
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(pinned.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+
+  const retired = await debateFixture({ pinned: 'retired-model' })
+  retired.generate.mockImplementation((options) => { expect(choicesIn(options).some(choice => choice.kind === 'debate')).toBe(false); return '{"candidateId":"clarify"}' })
+  await expect(retired.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+})
+it('starts the selected Debate through the Provider after durably recording its members, without compiling a task', async () => {
+  const f = await debateFixture()
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.debateId }))
+  expect(await f.run()).toEqual({ kind: 'reject' })
+  expect(f.starts).toEqual([{
+    commandId: `kennel:debate:agent:${String(f.message.id)}`, sessionId: 'agent', workspace: '/project', prompt: 'hello',
+    members: [
+      { gouziId: 'dog', name: 'Dog', operatorId: 'gouzi.dog.codex', model: 'gpt-5.6-sol' },
+      { gouziId: 'cat', name: 'cat', operatorId: 'gouzi.cat.codex', model: 'gpt-5.6-sol' },
+      { gouziId: 'bird', name: 'bird', operatorId: 'gouzi.bird.codex', model: 'gpt-5.6-sol' },
+    ],
+  }])
+  expect(f.persistedBeforeStart).toEqual([true])
+  expect(f.compile).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled()
+  const types = f.agent.session.events.map(event => event.type)
+  expect(types.indexOf('kennel/dispatch-debate')).toBeLessThan(types.indexOf('kennel/dispatch-debate-admitted'))
+  expect(f.agent.session.events.at(-1)).toMatchObject({ type: 'kennel/dispatch-debate-admitted', data: {
+    runId: 'debate-1', assignments: [{ gouziId: 'dog' }, { gouziId: 'cat' }, { gouziId: 'bird', role: 'decision-judge' }] } })
+  // The same source message is never started twice.
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_DISPATCH_UNCONFIRMED' })
+  expect(f.starter.start).toHaveBeenCalledOnce()
+})
+it('does not start a Debate when a member changed between selection and start, or for an addressed room', async () => {
+  const f = await debateFixture()
+  f.generate.mockImplementation(() => { f.members[1]!.generation = 9; return JSON.stringify({ candidateId: f.debateId }) })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  expect(f.starter.start).not.toHaveBeenCalled()
+
+  const retired = await debateFixture()
+  retired.generate.mockImplementation(() => { retired.entries[2]!.operators[0]!.models = ['other-model']; return JSON.stringify({ candidateId: retired.debateId }) })
+  await expect(retired.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+
+  const addressed = await debateFixture()
+  addressed.generate.mockImplementation((options) => { expect(choicesIn(options).some(choice => choice.kind === 'debate')).toBe(false); return '{"candidateId":"clarify"}' })
+  const message = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: encodeKennelMessage('hello', { gouziId: 'dog', generation: 2, mode: 'standard' }) }] })
+  await expect(addressed.run([message])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
 })
 it('refuses a revision change between selection and inspection', async () => {
   const f = await fixture(); f.list.mockResolvedValue([existingRun()]); f.inspect.mockResolvedValue(existingRun('running', 'agent', 4))

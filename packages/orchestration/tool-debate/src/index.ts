@@ -4,6 +4,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
+  DEFAULT_DEBATE_CONVERGENCE,
+  DEFAULT_DEBATE_PERSONAS,
+  DEFAULT_DEBATE_ROUNDS,
+  defaultDebateBudget,
   type DebateControlAction,
   type DebateAgentProgressUsageV1,
   DebateError,
@@ -57,8 +61,6 @@ const MAX_REF_ITEMS = 20
 const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
 const PLAN_DEBATE_CONFLICT_MESSAGE = 'Plan mode and host-level Debate cannot run together. Exit Plan mode with /plan off or disable Debate.'
-const AUTOMATIC_INPUT_TOKENS_PER_PARTICIPANT_PER_ROUND = 100_000
-const AUTOMATIC_OUTPUT_TOKENS_PER_PARTICIPANT_PER_ROUND = 15_000
 const EXACT_ONE_ROUND_HINT = new RegExp(
   [
     String.raw`\b(?:exactly|just|only)\s+(?:one|1)\s+rounds?\b`,
@@ -198,67 +200,29 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
     Object.freeze({
       version: 1, role: 'constructive-proposer', kind: 'participant', operatorId: 'codex',
       model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
-      persona: Object.freeze({
-        title: 'Constructive Proposer',
-        mandate: 'Build the strongest practical answer to the user objective.',
-        stance: 'Constructive, concrete, and explicit about assumptions.',
-        instructions: Object.freeze([
-          'Present a compact position with testable claims and implementation consequences.',
-          'Use source references when available and identify the highest-impact uncertainty.',
-        ]),
-      }),
+      persona: DEFAULT_DEBATE_PERSONAS['constructive-proposer'],
     }),
     Object.freeze({
       version: 1, role: 'skeptical-falsifier', kind: 'participant', operatorId: 'claude-code',
       model: 'claude-fable-5', tier: 'medium', source: 'native-subscription', required: true,
       fallbackOperatorIds: Object.freeze(['codex']),
-      persona: Object.freeze({
-        title: 'Skeptical Falsifier',
-        mandate: 'Find decisive counterexamples, hidden assumptions, and failure modes.',
-        stance: 'Skeptical without becoming contrarian or speculative.',
-        instructions: Object.freeze([
-          'Attack claims rather than personalities and rank objections by decision impact.',
-          'Distinguish observed contradictions from uncertainties needing evidence.',
-        ]),
-      }),
+      persona: DEFAULT_DEBATE_PERSONAS['skeptical-falsifier'],
     }),
     Object.freeze({
       version: 1, role: 'evidence-auditor', kind: 'participant', operatorId: 'codex',
       model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
-      persona: Object.freeze({
-        title: 'Evidence Auditor',
-        mandate: 'Check whether important claims are supported, traceable, and decision-relevant.',
-        stance: 'Evidence-first and precise about what is not established.',
-        instructions: Object.freeze([
-          'Map each material claim to an available source or mark the evidence gap.',
-          'Reject citations or artifacts that do not directly support the associated claim.',
-        ]),
-      }),
+      persona: DEFAULT_DEBATE_PERSONAS['evidence-auditor'],
     }),
     Object.freeze({
       version: 1, role: 'decision-judge', kind: 'judge', operatorId: 'claude-code',
       model: 'claude-opus-5', tier: 'high', source: 'native-subscription', required: true,
       fallbackOperatorIds: Object.freeze(['codex']),
-      persona: Object.freeze({
-        title: 'Decision Judge',
-        mandate: 'Reconcile the strongest supported claims and preserve material dissent.',
-        stance: 'Decisive when evidence permits and explicit when it does not.',
-        instructions: Object.freeze([
-          'Judge the shared claim ledger after participant outputs, not by model reputation.',
-          'State the decision, unresolved blockers, minority view, and conditions that would change it.',
-        ]),
-      }),
+      persona: DEFAULT_DEBATE_PERSONAS['decision-judge'],
     }),
   ]),
-  budget: Object.freeze(automaticDebateBudget(3, 4)),
-  rounds: Object.freeze({
-    version: 1, firstRound: 'blind-independent', followUp: 'claim-ledger',
-    escalation: 'high-severity-unresolved',
-  }),
-  convergence: Object.freeze({
-    version: 1, scoreThreshold: 0.82, minSettledAgents: 3,
-    maxUnresolvedHighSeverity: 0, requireEvidenceForCritical: true, earlyStop: true,
-  }),
+  budget: Object.freeze(defaultDebateBudget(3, 4)),
+  rounds: DEFAULT_DEBATE_ROUNDS,
+  convergence: DEFAULT_DEBATE_CONVERGENCE,
   preserveDissent: true,
 })
 
@@ -285,24 +249,6 @@ export function debateInitialPlanForPrompt(prompt: string): DebateInitialPlan {
   return { plannedRounds: 3, reason: 'ordinary', explanation: '普通讨论采用默认深度。' }
 }
 
-function automaticDebateBudget(
-  maxRounds: DebateInitialPlan['plannedRounds'],
-  participantCount: number,
-): DebatePolicyV1['budget'] {
-  const roundParticipants = maxRounds * participantCount
-  const maxInputTokens = roundParticipants * AUTOMATIC_INPUT_TOKENS_PER_PARTICIPANT_PER_ROUND
-  const maxOutputTokens = roundParticipants * AUTOMATIC_OUTPUT_TOKENS_PER_PARTICIPANT_PER_ROUND
-  return {
-    version: 1,
-    maxRounds,
-    maxTurnsPerAgent: maxRounds,
-    maxAgentsPerRound: participantCount,
-    maxInputTokens,
-    maxOutputTokens,
-    maxTotalTokens: maxInputTokens + maxOutputTokens,
-  }
-}
-
 /**
  * Resolve the automatic policy for a prompt while retaining a caller-supplied
  * policy byte-for-byte, including its monetary cap.
@@ -321,7 +267,7 @@ export function debatePolicyForPrompt(
   return {
     ...DEFAULT_DEBATE_POLICY,
     mode,
-    budget: automaticDebateBudget(plan.plannedRounds, DEFAULT_DEBATE_POLICY.roster.length),
+    budget: defaultDebateBudget(plan.plannedRounds, DEFAULT_DEBATE_POLICY.roster.length),
   }
 }
 

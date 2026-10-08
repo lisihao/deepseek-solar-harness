@@ -1087,6 +1087,29 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'kennelDebates',
+    summary: 'Starts Debates over kennel members; the Debate Provider owns roles, budget, and rounds.',
+    description: 'Starts Debates over kennel members; the Debate Provider owns roles, budget, and rounds.',
+    methods: [
+      {
+        signature: 'readonly minMembers: number',
+        description: 'Fewest distinct members a Debate needs for an independent judge.',
+        parameters: [],
+      },
+      {
+        signature: 'readonly maxMembers: number',
+        description: 'Most distinct members the Debate roles can hold.',
+        parameters: [],
+      },
+      {
+        signature: 'start(request: KennelDebateRequest): Promise<KennelDebateRun>',
+        description: 'Start and approve a Debate. The request is the user\'s explicit choice, so the run is approved at once; the rounds then run in the background and their state is read from the Debate and the room.',
+        parameters: [{ name: 'request', description: 'members, workspace, and objective.' }],
+        returns: 'the run and each member\'s role.',
+      },
+    ],
+  },
+  {
     key: 'llm',
     summary: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
     description: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
@@ -4834,7 +4857,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziOperatorCapability',
-    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n}',
+    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n    readonly defaultModel?: string;\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n}',
   },
   {
     name: 'GouziOwnerId',
@@ -4987,6 +5010,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'JsonValue',
     declaration: 'export type JsonValue = null | boolean | number | string | JsonValue[] | {\n    [key: string]: JsonValue;\n};',
+  },
+  {
+    name: 'KennelDebateAssignment',
+    declaration: 'export interface KennelDebateAssignment {\n    readonly gouziId: GouziId;\n    readonly role: string;\n}',
+  },
+  {
+    name: 'KennelDebateMember',
+    declaration: 'export interface KennelDebateMember {\n    readonly gouziId: GouziId;\n    readonly name: string;\n    readonly operatorId: string;\n    readonly model: string;\n}',
+  },
+  {
+    name: 'KennelDebateRequest',
+    declaration: 'export interface KennelDebateRequest {\n    readonly commandId: string;\n    readonly sessionId: string;\n    readonly workspace: string;\n    readonly prompt: string;\n    readonly members: readonly KennelDebateMember[];\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n}',
+  },
+  {
+    name: 'KennelDebateRun',
+    declaration: 'export interface KennelDebateRun {\n    readonly runId: string;\n    readonly assignments: readonly KennelDebateAssignment[];\n}',
   },
   {
     name: 'KnobState',

@@ -47,6 +47,8 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'hook/result',
   'kennel/dispatch-admitted',
   'kennel/dispatch-control',
+  'kennel/dispatch-debate',
+  'kennel/dispatch-debate-admitted',
   'kennel/dispatch-decision',
   'kennel/dispatch-model',
   'kennel/dispatch-request',

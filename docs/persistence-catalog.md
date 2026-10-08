@@ -555,7 +555,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:128`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -579,7 +579,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orch
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:140`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:142`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -590,7 +590,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:140`](../packages/orch
 'debate/preferences': DebateExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:124`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -605,7 +605,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:124`](../packages/orch
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:152`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:154`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 
@@ -699,7 +699,7 @@ Source: [`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-
 'kennel/dispatch-admitted': { messageId: string; runId: string }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-control--log-only"></a>
 
@@ -710,7 +710,29 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orc
 'kennel/dispatch-control': { messageId: string; candidate: KennelControlCandidate; result: OrchestrationRunSnapshot }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:82`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-debate--log-only"></a>
+
+#### `kennel/dispatch-debate` — log-only
+
+```ts persistence-catalog
+/** Debate members and command identity committed before the Debate starts. */
+'kennel/dispatch-debate': { messageId: string; candidate: KennelDebateCandidate; commandId: string }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:78`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-debate-admitted--log-only"></a>
+
+#### `kennel/dispatch-debate-admitted` — log-only
+
+```ts persistence-catalog
+/** Admission receipt linking the user message to its Debate run and each member's role. */
+'kennel/dispatch-debate-admitted': { messageId: string; runId: string; assignments: readonly { gouziId: string; role: string }[] }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:80`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-decision--log-only"></a>
 
@@ -721,7 +743,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orc
 'kennel/dispatch-decision': { messageId: string; source: 'jev' | 'deepseek' | 'codex'; provider: string; model?: string; candidateId: string; fallbackReason?: string }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-model--log-only"></a>
 
@@ -732,7 +754,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orc
 'kennel/dispatch-model': { messageId: string; record: DispatchModelRecord }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-request--log-only"></a>
 
@@ -743,7 +765,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orc
 'kennel/dispatch-request': { messageId: string; message: UserMessage; candidates: readonly KennelDispatchCandidate[] }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:66`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-submission--log-only"></a>
 
@@ -754,7 +776,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:66`](../packages/orc
 'kennel/dispatch-submission': { messageId: string; compilationId: string; commandId: string }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 ### `llm/*`
 

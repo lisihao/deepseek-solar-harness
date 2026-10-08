@@ -16,6 +16,12 @@ Debate Command Receipt 会在调用本适配器前持久化，TaskGraph 的 star
 
 可选的 `dshHome` 配置遵循 harness 统一的主目录解析规则。Debate 运行状态保存在 `$DSH_HOME/debates`；Bundle 用户不需要配置独立状态路径。
 
+## 成员槽位
+
+`operatorId` 是已注册狗子入口（`gouzi.<gouziId>.<operator>`）的阵容槽位会在该成员上运行。当每个槽位都指定成员时，该轮的准入会带上 `gouziRecipient`（一个成员）或 `gouziRecipients`（多个成员），内容来自成员当前的 generation，所以 daemon 会逐个成员检查可用性、工作区和授权。把成员和其他算子混用、为成员槽位指定 fallback、或指定未注册成员的轮次，会以 `DEBATE_UNSUPPORTED` 或 `DEBATE_ROSTER_INVALID` 被拒绝。
+
+该插件还提供 `ctx.kennelDebates`。它按成员顺序给三个或四个成员分配建议者、证伪者、可选的证据审计者和裁判角色，推导普通的三轮策略，启动辩论，并在后台批准，因为批准会在各轮结算后才返回。
+
 ## 模型体验
 
 ### 密封的 `NodeExecutionPlan` 回合

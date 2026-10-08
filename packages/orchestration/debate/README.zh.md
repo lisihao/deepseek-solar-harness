@@ -14,6 +14,8 @@
 - 只有 `completed`、`max_rounds` 或 `budget_limited` 且最后一轮完全 settled 的运行才能继续，且 token 用量必须 known；存在货币上限时，费用归集也必须 known。`DebateRunResultV1` 区分完成、回合上限、预算上限、失败、不确定、拒绝、停止和运行中结果；已耗尽或预测无法容纳的 metered cap 会报告实际额度，并要求走既有的显式批准路径。
 - Provider 可以在已准入槽位运行期间追加 `debate.agent.progress`。其 v1 payload 被严格限制为来源 sequence/time、phase、有界公开输出预览、工具开始/完成名称、审批要求、usage 以及请求/实际路由；提示词、私有推理、凭据，以及原生 session 或 command 标识不属于该事件契约。
 
+本包还导出 Consumer 组装策略时共用的默认值：四个角色的 `DEFAULT_DEBATE_PERSONAS`、`DEFAULT_DEBATE_ROUNDS`、`DEFAULT_DEBATE_CONVERGENCE` 和 `defaultDebateBudget(maxRounds, participantCount)`。它们不指定任何 Provider、算子或模型。
+
 ## Provider boundary
 
 Provider 必须使用导出的 policy、start、control、event-read、event、snapshot、continuation-state 和 command-receipt validator 校验不可信 JSON。已发布的 snapshot 可以省略 `topic`、`continuation` 和 `result`；出现的字段必须是精确的 version-1 记录。未知字段、错误版本、不支持的角色标识、父级身份不匹配、不安全预算和无界事件分页都会 fail closed。每个 start 请求必须提供 canonical TaskGraph workspace。

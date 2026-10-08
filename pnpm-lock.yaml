@@ -521,6 +521,12 @@ importers:
       '@deepseek-ai/dsh-credentials-local':
         specifier: workspace:*
         version: link:../packages/credentials/credentials-local
+      '@deepseek-ai/dsh-debate':
+        specifier: workspace:*
+        version: link:../packages/orchestration/debate
+      '@deepseek-ai/dsh-debate-orchestration':
+        specifier: workspace:*
+        version: link:../packages/orchestration/debate-orchestration
       '@deepseek-ai/dsh-e2b':
         specifier: workspace:*
         version: link:../packages/e2b/e2b

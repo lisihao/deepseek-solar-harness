@@ -338,6 +338,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Resolves the current human request to an enabled member generation and available execution entries before sealing TaskGraph admission.',
   },
   {
+    key: 'kennelDebates',
+    pkg: 'orchestration',
+    title: 'Kennel Debate starter',
+    mode: 'seam',
+    implementations: ['debate-orchestration'],
+    consumers: ['ui-gouzi'],
+    note: 'Turns a set of kennel members into a Debate roster with one role per member and starts it; the Debate Provider keeps owning rounds, budget, and verdicts.',
+  },
+  {
     key: 'gouziHost',
     pkg: 'ui-gouzi',
     title: 'Gouzi member process host',

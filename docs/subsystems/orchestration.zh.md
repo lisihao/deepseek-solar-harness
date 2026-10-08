@@ -333,7 +333,7 @@ abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV
 abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
 ```
 
-Source: [`packages/orchestration/debate/src/index.ts:1389`](../../packages/orchestration/debate/src/index.ts)
+Source: [`packages/orchestration/debate/src/index.ts:1390`](../../packages/orchestration/debate/src/index.ts)
 
 <a id="ctxgouzihost--gouzihostservice-abstract-seam"></a>
 
@@ -441,6 +441,24 @@ abstract compile(request: IntentCompileRequest): Promise<IntentIRV1>
 ```
 
 Source: [`packages/orchestration/intent-compiler/src/index.ts:43`](../../packages/orchestration/intent-compiler/src/index.ts)
+
+<a id="ctxkenneldebates--kenneldebatestarter"></a>
+
+### `ctx.kennelDebates` — `KennelDebateStarter`
+
+Starts Debates over kennel members; the Debate Provider owns roles, budget, and rounds.
+
+```ts cordis-catalog
+/**
+ * Start and approve a Debate. The request is the user's explicit choice, so the run is approved at once; the
+ * rounds then run in the background and their state is read from the Debate and the room.
+ * @param request - members, workspace, and objective.
+ * @returns the run and each member's role.
+ */
+start(request: KennelDebateRequest): Promise<KennelDebateRun>
+```
+
+Source: [`packages/orchestration/orchestration/src/kennel-debate.ts:45`](../../packages/orchestration/orchestration/src/kennel-debate.ts)
 
 <a id="ctxmodelallocation--modelallocationservice-abstract-seam"></a>
 
