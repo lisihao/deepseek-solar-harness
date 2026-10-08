@@ -60,7 +60,9 @@ async function serviceFixture() {
 describe('LocalRemoteOperatorHostService', () => {
   it.each([{ endpoint: 'http://127.0.0.1:13301', qualified: false }, { endpoint: 'https://remote.invalid', qualified: true }])(
     'refuses complete snapshot transfer without both local authority qualification and loopback ($endpoint)', async ({ endpoint, qualified }) => {
-      const { source, dshHome } = await serviceFixture()
+      const dshHome = await mkdtemp(join(tmpdir(), 'dsh-snapshot-refusal-'))
+      const source = { root: join(dshHome, 'source'), commit: 'a'.repeat(40) }
+      await mkdir(source.root)
       const store = new OrchestrationStore(join(dshHome, 'owner-store'))
       const provider = { operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'fixture', tags: [],
         maxConcurrency: 1, injectionBoundaries: [], available: true, authentication: 'native-subscription',

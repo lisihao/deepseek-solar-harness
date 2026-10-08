@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 /** Real Loader/daemon composition; only the external Resident catalog is deterministic. */
+import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -23,7 +24,10 @@ registry.gouzi.create({ gouziId: GouziId('stable-dog'), ownerId: GouziOwnerId('m
 registry.gouzi.setMembership(GouziId('stable-dog'), 'enabled')
 registry.gouzi.setEndpoint(GouziId('stable-dog'), 'http://127.0.0.1:13301')
 registry.gouzi.edit(GouziId('stable-dog'), { name: 'Renamed' })
+const qualifiedMember = registry.gouzi.list().find(member => member.gouziId === 'stable-dog')
+if (qualifiedMember === undefined) throw new Error('fixture member was not registered')
 registry.close()
+const workspace = await realpath(home)
 const originalFetch = globalThis.fetch
 const remoteMethods: string[] = []
 let available = true
@@ -31,6 +35,7 @@ const provider = {
   operatorId: 'claude-code', product: 'claude-code', displayName: 'Keyless Claude', description: 'Keyless external catalog',
   tags: ['analysis'], maxConcurrency: 1, injectionBoundaries: [], available: true,
   authentication: 'native-subscription', productVersion: 'fixture', protocolHash: 'fixture',
+  gouziWorkspace: { gouziId: String(qualifiedMember.gouziId), generation: qualifiedMember.generation, projectId: 'a'.repeat(64), projectScopes: [workspace] },
   models: [{ model: 'claude-sonnet-4-6', displayName: 'Sonnet', description: 'Fixture', supportedEfforts: [], isDefault: true, supportsAdaptiveThinking: true }],
 }
 globalThis.fetch = async (input, init) => {
@@ -51,7 +56,7 @@ const daemon = new OrchestrationDaemon({
 await daemon.start()
 const ctx = await boot('kennel-room-keyless', resolveConfigPath(configPath, undefined))
 try {
-  const handle = await ctx.agents.create({ sessionId: SessionId('kennel-room-a'), meta: { cwd: home } })
+  const handle = await ctx.agents.create({ sessionId: SessionId('kennel-room-a'), meta: { cwd: workspace } })
   const agent = handle.agent
   const user = (text: string, turn: number) => {
     agent.session.append('turn/start', { turn })
@@ -68,7 +73,7 @@ try {
   for (const text of injectedInputs) agent.session.append('user/message', createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'kennel-fixture-context' } }), { surfaceOp: 'append' })
   const recipient = await ctx.get('orchestrationRecipients')!.resolve(agent.session.events)
   const graph: LogicalTaskGraphV1 = {
-    version: 1, title: 'Bounded kennel read', workspace: home, maxParallel: 1, risk: 'medium',
+    version: 1, title: 'Bounded kennel read', workspace, maxParallel: 1, risk: 'medium',
     nodes: [{
       id: 'read', title: 'Read fixture', task: 'Read the bounded fixture without changes.',
       role: 'analysis', dependsOn: [], requiredForCompletion: true,

@@ -491,6 +491,9 @@ importers:
       '@deepseek-ai/dsh-browser':
         specifier: workspace:*
         version: link:../packages/browser/browser
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:*
+        version: link:../packages/client/connection
       '@deepseek-ai/dsh-code-runtime-worker-thread':
         specifier: workspace:*
         version: link:../packages/code-runtime/code-runtime-worker-thread
