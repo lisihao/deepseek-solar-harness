@@ -94,6 +94,8 @@ export interface GouziMemberProjection {
   readonly name: string
   readonly avatarId: GouziAvatar
   readonly role: GouziRoleId
+  /** Native model the member is pinned to; absent means Smart Auto chooses. */
+  readonly model?: string
   /** Machine the member lives on. */
   readonly hostId: string
   readonly hostLabel: string
@@ -191,10 +193,19 @@ export type GouziControlRequest =
     readonly name?: string
     readonly avatarId?: GouziAvatar
     readonly role?: GouziRoleId
+    /** A native model id to pin, or `null` to return to Smart Auto. */
+    readonly model?: string | null
   }
+  | { readonly action: 'models'; readonly gouziId: string }
   | { readonly action: 'wake'; readonly gouziId: string }
   | { readonly action: 'rest'; readonly gouziId: string }
   | { readonly action: 'retire'; readonly gouziId: string }
+
+/** Reply to the `models` action: native models the member's registered runtimes offer now. */
+export interface GouziModelOptions {
+  /** Empty when the member is offline or its runtimes are unavailable. */
+  readonly models: readonly string[]
+}
 
 /** Failure body of every non-2xx response. */
 export interface GouziErrorV1 {

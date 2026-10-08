@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  GOUZI_AVATAR_IDS, GOUZI_MEMBER_LIMIT, GOUZI_ROLES, OrchestrationError,
+  GOUZI_AVATAR_IDS, GOUZI_MEMBER_LIMIT, GOUZI_ROLES, GouziId, OrchestrationError,
   type GouziControl, type GouziHostRecord, type GouziMemberView, type GouziMembership,
 } from '@deepseek-ai/dsh-orchestration'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
@@ -31,7 +31,9 @@ class FakeControl implements GouziControl {
     return next
   }
 
-  executionOperators() { return Promise.resolve([]) }
+  /** Test hook: what the daemon reports for each enabled member's registered runtimes. */
+  observed: Awaited<ReturnType<GouziControl['executionOperators']>> = []
+  executionOperators() { return Promise.resolve(this.observed) }
   list() { return Promise.resolve({ hosts: this.hosts, members: this.members }) }
   pairHost(host: Omit<GouziHostRecord, 'pairedAt'>) {
     this.calls.push('pairHost')
@@ -53,7 +55,15 @@ class FakeControl implements GouziControl {
   }
   edit(gouziId: string, edit: Parameters<GouziControl['edit']>[1]) {
     this.calls.push('edit')
-    return Promise.resolve(this.replace(this.find(gouziId), edit))
+    const { model, ...rest } = edit
+    const current = this.find(gouziId)
+    // Like the registry: a null model removes the property instead of storing null.
+    const { model: _previous, ...withoutModel } = current
+    const next = model === undefined
+      ? { ...current, ...rest }
+      : model === null ? { ...withoutModel, ...rest } : { ...current, ...rest, model }
+    this.members = this.members.map(value => value === current ? next : value)
+    return Promise.resolve(next)
   }
   setMembership(gouziId: string, membership: Exclude<GouziMembership, 'archived'>) {
     this.calls.push(`membership:${membership}`)
@@ -610,6 +620,39 @@ describe('Gouzi Host route', () => {
     control.observe(id, { activity: 'resting' })
     expect((await send('POST', { action: 'rest', gouziId: id }, CONTROL)).status).toBe(200)
     expect(host.stopped).toEqual([[id, false]])
+  })
+
+  it('pins a model, keeps it across other edits, clears it with null, and rejects a malformed model', async () => {
+    const { send } = await mount()
+    const id = (await send('POST', ADOPT, CONTROL)).body.gouziId
+    expect((await send('POST', { action: 'edit', gouziId: id, model: 'gpt-5.5' }, CONTROL)).body).toMatchObject({ model: 'gpt-5.5' })
+    expect((await send('POST', { action: 'edit', gouziId: id, name: 'Pixel' }, CONTROL)).body).toMatchObject({ name: 'Pixel', model: 'gpt-5.5' })
+    const cleared = (await send('POST', { action: 'edit', gouziId: id, model: null }, CONTROL)).body
+    expect(cleared).toMatchObject({ name: 'Pixel' })
+    expect(cleared).not.toHaveProperty('model')
+    for (const model of ['', 5, ['gpt-5.5']]) {
+      expect(await send('POST', { action: 'edit', gouziId: id, model }, CONTROL)).toMatchObject({ status: 400 })
+    }
+  })
+
+  it('lists the models a member\'s available runtimes offer, once each, and none while it is offline', async () => {
+    const { control, send } = await mount()
+    const id = (await send('POST', ADOPT, CONTROL)).body.gouziId
+    expect((await send('POST', { action: 'models', gouziId: id }, CONTROL)).body).toEqual({ models: [] })
+    const operator = (operatorId: string, available: boolean, models: string[]) => ({ operatorId, available, models })
+    control.observed = [{
+      gouziId: GouziId(id), generation: 1, projectScopes: [],
+      operators: [
+        operator(`gouzi.${id}.codex`, true, ['gpt-5.5', 'gpt-5.6']),
+        operator(`gouzi.${id}.claude-code`, true, ['claude-opus-5-5', 'gpt-5.5']),
+        operator(`gouzi.${id}.other`, false, ['hidden']),
+      ],
+    }]
+    expect((await send('POST', { action: 'models', gouziId: id }, CONTROL)).body)
+      .toEqual({ models: ['gpt-5.5', 'gpt-5.6', 'claude-opus-5-5'] })
+    control.observed = [{ ...control.observed[0]!, generation: 2 }]
+    expect((await send('POST', { action: 'models', gouziId: id }, CONTROL)).body).toEqual({ models: [] })
+    expect(await send('POST', { action: 'models', gouziId: 'missing' }, CONTROL)).toMatchObject({ status: 400 })
   })
 
   it('retires: retiring first, then stops the process tree, then archives with evidence', async () => {
