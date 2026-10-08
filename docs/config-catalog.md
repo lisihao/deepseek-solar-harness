@@ -1255,6 +1255,24 @@ export interface Config {
 
 Source: [`packages/jobs/jobs-local/src/index.ts:31`](../packages/jobs/jobs-local/src/index.ts)
 
+<a id="deepseek-aidsh-kennel-review"></a>
+
+## `@deepseek-ai/dsh-kennel-review`
+
+Requires: `kennelCollaborations` · `orchestrations`
+
+```ts config-catalog
+/** Review plugin configuration. */
+export interface Config {
+  /** Most members that review one task. */
+  readonly maxReviewers?: number
+  /** Most recent finished tasks offered for review. */
+  readonly maxTargets?: number
+}
+```
+
+Source: [`packages/orchestration/kennel-review/src/index.ts:33`](../packages/orchestration/kennel-review/src/index.ts)
+
 <a id="deepseek-aidsh-llm-deepseek"></a>
 
 ## `@deepseek-ai/dsh-llm-deepseek`
@@ -3662,7 +3680,7 @@ export interface DispatchModelConfig {
 
 Depends on: [`LogicalTaskGraphV1`](../packages/orchestration/orchestration/src/index.ts) · [`OrchestrationNodeSpecV1`](../packages/orchestration/orchestration/src/index.ts)
 
-Source: [`packages/orchestration/ui-gouzi/src/index.ts:51`](../packages/orchestration/ui-gouzi/src/index.ts)
+Source: [`packages/orchestration/ui-gouzi/src/index.ts:52`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

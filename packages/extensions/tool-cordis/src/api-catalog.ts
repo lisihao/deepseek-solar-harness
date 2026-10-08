@@ -1087,25 +1087,21 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
-    key: 'kennelDebates',
-    summary: 'Starts Debates over kennel members; the Debate Provider owns roles, budget, and rounds.',
-    description: 'Starts Debates over kennel members; the Debate Provider owns roles, budget, and rounds.',
+    key: 'kennelCollaborations',
+    summary: 'Registry of the collaboration kinds the kennel dispatcher can offer.',
+    description: 'Registry of the collaboration kinds the kennel dispatcher can offer.',
     methods: [
       {
-        signature: 'readonly minMembers: number',
-        description: 'Fewest distinct members a Debate needs for an independent judge.',
-        parameters: [],
+        signature: 'register(kind: KennelCollaborationKind): () => void',
+        description: 'Register a kind.',
+        parameters: [{ name: 'kind', description: 'the kind to offer; a repeated or reserved name fails.' }],
+        returns: 'the disposer that removes it.',
       },
       {
-        signature: 'readonly maxMembers: number',
-        description: 'Most distinct members the Debate roles can hold.',
+        signature: 'kinds(): readonly KennelCollaborationKind[]',
+        description: 'List the registered kinds.',
         parameters: [],
-      },
-      {
-        signature: 'start(request: KennelDebateRequest): Promise<KennelDebateRun>',
-        description: 'Start and approve a Debate. The request is the user\'s explicit choice, so the run is approved at once; the rounds then run in the background and their state is read from the Debate and the room.',
-        parameters: [{ name: 'request', description: 'members, workspace, and objective.' }],
-        returns: 'the run and each member\'s role.',
+        returns: 'the kinds in registration order.',
       },
     ],
   },
@@ -5012,20 +5008,36 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type JsonValue = null | boolean | number | string | JsonValue[] | {\n    [key: string]: JsonValue;\n};',
   },
   {
-    name: 'KennelDebateAssignment',
-    declaration: 'export interface KennelDebateAssignment {\n    readonly gouziId: GouziId;\n    readonly role: string;\n}',
+    name: 'KennelCollaborationCandidate',
+    declaration: 'export interface KennelCollaborationCandidate {\n    readonly kind: \'collaboration\';\n    readonly collaboration: string;\n    readonly id: string;\n    readonly workspace: string;\n    readonly members: readonly KennelCollaborationMember[];\n    readonly details: Readonly<Record<string, unknown>>;\n}',
   },
   {
-    name: 'KennelDebateMember',
-    declaration: 'export interface KennelDebateMember {\n    readonly gouziId: GouziId;\n    readonly name: string;\n    readonly operatorId: string;\n    readonly model: string;\n}',
+    name: 'KennelCollaborationFacts',
+    declaration: 'export interface KennelCollaborationFacts {\n    readonly sessionId: string;\n    readonly members: readonly GouziMemberView[];\n    readonly entries: readonly KennelExecutionEntry[];\n    readonly runs: readonly OrchestrationRunSnapshot[];\n    readonly recipient?: {\n        readonly gouziId: string;\n        readonly generation: number;\n    };\n}',
   },
   {
-    name: 'KennelDebateRequest',
-    declaration: 'export interface KennelDebateRequest {\n    readonly commandId: string;\n    readonly sessionId: string;\n    readonly workspace: string;\n    readonly prompt: string;\n    readonly members: readonly KennelDebateMember[];\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n}',
+    name: 'KennelCollaborationKind',
+    declaration: 'export interface KennelCollaborationKind {\n    readonly kind: string;\n    readonly guidance: string;\n    offer(facts: KennelCollaborationFacts): readonly KennelCollaborationCandidate[] | Promise<readonly KennelCollaborationCandidate[]>;\n    start(request: KennelCollaborationRequest): Promise<KennelCollaborationStarted>;\n}',
   },
   {
-    name: 'KennelDebateRun',
-    declaration: 'export interface KennelDebateRun {\n    readonly runId: string;\n    readonly assignments: readonly KennelDebateAssignment[];\n}',
+    name: 'KennelCollaborationLimits',
+    declaration: 'export interface KennelCollaborationLimits {\n    readonly contextTokens: number;\n    readonly taskTimeoutMs: number;\n    readonly titleMaxChars: number;\n    readonly generationLimits: NonNullable<OrchestrationNodeSpecV1[\'generationLimits\']>;\n    readonly workspaceToolLimits: NonNullable<OrchestrationNodeSpecV1[\'workspaceToolLimits\']>;\n}',
+  },
+  {
+    name: 'KennelCollaborationMember',
+    declaration: 'export interface KennelCollaborationMember {\n    readonly gouziId: string;\n    readonly generation: number;\n    readonly name: string;\n    readonly role: string;\n    readonly operatorId: string;\n    readonly model: string;\n}',
+  },
+  {
+    name: 'KennelCollaborationRequest',
+    declaration: 'export interface KennelCollaborationRequest {\n    readonly commandId: string;\n    readonly sessionId: string;\n    readonly messageId: string;\n    readonly prompt: string;\n    readonly candidate: KennelCollaborationCandidate;\n    readonly limits: KennelCollaborationLimits;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n}',
+  },
+  {
+    name: 'KennelCollaborationStarted',
+    declaration: 'export interface KennelCollaborationStarted {\n    readonly runId: string;\n    readonly assignments: readonly {\n        readonly gouziId: string;\n        readonly role: string;\n    }[];\n}',
+  },
+  {
+    name: 'KennelExecutionEntry',
+    declaration: 'export type KennelExecutionEntry = Awaited<ReturnType<GouziControl[\'executionOperators\']>>[number];',
   },
   {
     name: 'KnobState',

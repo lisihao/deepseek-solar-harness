@@ -442,23 +442,28 @@ abstract compile(request: IntentCompileRequest): Promise<IntentIRV1>
 
 Source: [`packages/orchestration/intent-compiler/src/index.ts:43`](../../packages/orchestration/intent-compiler/src/index.ts)
 
-<a id="ctxkenneldebates--kenneldebatestarter"></a>
+<a id="ctxkennelcollaborations--kennelcollaborations"></a>
 
-### `ctx.kennelDebates` — `KennelDebateStarter`
+### `ctx.kennelCollaborations` — `KennelCollaborations`
 
-Starts Debates over kennel members; the Debate Provider owns roles, budget, and rounds.
+Registry of the collaboration kinds the kennel dispatcher can offer.
 
 ```ts cordis-catalog
 /**
- * Start and approve a Debate. The request is the user's explicit choice, so the run is approved at once; the
- * rounds then run in the background and their state is read from the Debate and the room.
- * @param request - members, workspace, and objective.
- * @returns the run and each member's role.
+ * Register a kind.
+ * @param kind - the kind to offer; a repeated or reserved name fails.
+ * @returns the disposer that removes it.
  */
-start(request: KennelDebateRequest): Promise<KennelDebateRun>
+register(kind: KennelCollaborationKind): () => void
+
+/**
+ * List the registered kinds.
+ * @returns the kinds in registration order.
+ */
+kinds(): readonly KennelCollaborationKind[]
 ```
 
-Source: [`packages/orchestration/orchestration/src/kennel-debate.ts:45`](../../packages/orchestration/orchestration/src/kennel-debate.ts)
+Source: [`packages/orchestration/orchestration/src/kennel-collaboration.ts:105`](../../packages/orchestration/orchestration/src/kennel-collaboration.ts)
 
 <a id="ctxmodelallocation--modelallocationservice-abstract-seam"></a>
 

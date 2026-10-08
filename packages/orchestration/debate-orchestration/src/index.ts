@@ -33,7 +33,7 @@ import type {
   OrchestrationEvent,
   OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
-import { KennelDebateProvider } from './kennel.ts'
+import { kennelDebatePlugin } from './kennel.ts'
 import { gouziAdmission } from './members.ts'
 import type {
   DebateTaskGraphAdapterOptions,
@@ -760,5 +760,5 @@ export function apply(ctx: Context, config: Config): void {
     ...(config.providerId === undefined ? {} : { providerId: config.providerId }),
     ...(config.providerVersion === undefined ? {} : { providerVersion: config.providerVersion }),
   })
-  ctx.plugin(KennelDebateProvider)
+  ctx.plugin(kennelDebatePlugin)
 }

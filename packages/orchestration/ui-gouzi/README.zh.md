@@ -24,7 +24,7 @@
 
 成员可以固定到一个原生模型。编辑表单提供 `models` 操作返回的模型：它不重复地列出该成员当前可用运行环境的模型目录，成员离线时返回空列表；已固定但没有任何运行环境提供的模型仍可选中，并标为不可用。`edit` 设置 `model`，传 `null` 则清除。调度器只通过目录中包含该模型的运行环境提供已固定的成员，把模型写入任务节点的 `operator.profile`，并在成员的模型于调度决定之后变化时拒绝启动。已固定的模型没有可用运行环境提供时，该成员不进入候选；未固定的成员由 Smart Auto 选择模型。
 
-安装了辩论提供者（`ctx.kennelDebates`）时，调度器还会为每个至少有三个已启用成员在可用入口上持有的项目提供一个 `debate` 候选；点名某个成员的消息不会得到它。候选按注册表顺序列出最多四个成员，并写明每个成员将运行的入口和模型：成员固定的模型，否则是该入口 catalog 的默认模型（`GouziOperatorCapability.defaultModel`），再否则是它列出的第一个模型。AI 选中后，Host 会再次确认每个成员，在提供者启动前记录 `kennel/dispatch-debate`，启动后记录带有各成员角色的 `kennel/dispatch-debate-admitted`。提供者让靠前的成员担任辩论角色，最后一个成员担任裁判，所以裁判不会参与辩论。辩论的各轮作为本会话的普通 TaskGraph Run 运行，所以房间会显示每个成员的发言并归属到该成员。调度器不了解任何辩论策略；角色、预算和轮次由提供者负责。
+本包提供 `ctx.kennelCollaborations`，这是协作类型的注册表：协作指几个成员一起做事，而不是一个成员接一个任务。每个类型根据成员、成员的执行入口、本会话的 Run 以及用户点名的成员给出由 Host 确认的候选，并启动用户选定的那个。调度器把所有候选与工作、控制候选一起交给 AI，把每个提供候选的类型的 `guidance` 句子加进指令，除此之外不了解类型的任何内容。AI 选中候选后，Host 会重新询问类型并拒绝 id 已不再提供的候选，在类型启动 Run 之前记录 `kennel/dispatch-collaboration`，启动之后记录带有各成员分工的 `kennel/dispatch-collaboration-admitted`。类型启动的 Run 是本会话的普通 TaskGraph Run，所以房间会显示每个成员的发言并归属到该成员。类型名必须唯一，且不能是 `work`、`control` 或 `clarify`。[`debate-orchestration`](../debate-orchestration/README.md) 注册 `debate`，[`kennel-review`](../kennel-review/README.md) 注册 `review`；任何注入 `kennelCollaborations` 并在 `ctx.effect` 中注册类型的插件，无需修改调度器就能增加新类型。
 
 `check-projects` 接收 `hostId` 和非空的绝对路径列表 `projects`，只读检查已有目录，不修改目录、配对宿主或创建成员，并返回 `GouziProjectsCheck`：每个请求的 `path` 对应 `usable: true`，或带 `message` 的 `usable: false`。Git 仓库、没有 origin 的仓库和普通目录均可选择。选择器先检查候选工作区和新选目录，再允许选择；所有选中项目通过检查才允许下一步。检查未完成或请求失败都不能授权选择。路径不存在、路径是文件和权限拒绝会给出可操作的目录错误；进程与超时错误仍作为请求失败报告。确认前关闭向导不会初始化 Git。
 
@@ -67,7 +67,7 @@ interface GouziProjectSource {
 
 #### What the model sees
 
-调度器发起独立且不带工具的模型请求，包含用户目标、Host 核验过的工作／控制候选，以及只返回候选身份或澄清的固定指令。配置、准备后的请求、已记录输出或失败、选择、提交及准入回执均保留在会话事件中。调度请求不包含任务执行工具。
+调度器发起独立且不带工具的模型请求，包含用户目标、Host 核验过的工作、控制和协作候选，以及只返回候选身份或澄清的固定指令。配置、准备后的请求、已记录输出或失败、选择、提交及准入回执均保留在会话事件中。调度请求不包含任务执行工具。
 
 #### Token effect
 

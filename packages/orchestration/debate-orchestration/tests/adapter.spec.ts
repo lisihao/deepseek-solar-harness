@@ -17,7 +17,7 @@ import type {
 } from '@deepseek-ai/dsh-orchestration'
 import { BasicContextCompiler } from '@deepseek-ai/dsh-orchestration-local'
 import { Config, DebateTaskGraphRoundExecutor, apply } from '../src/index.ts'
-import { KennelDebateProvider } from '../src/kennel.ts'
+import { kennelDebatePlugin } from '../src/kennel.ts'
 import type { DebateTaskGraphOrchestrations } from '../src/types.ts'
 
 function turn(
@@ -104,7 +104,7 @@ describe('Debate TaskGraph round adapter', () => {
       expect.objectContaining({ root: join(resolve('/tmp/dsh-debate-home'), 'debates') }),
       undefined,
     ])
-    expect(installed[1]?.plugin).toBe(KennelDebateProvider)
+    expect(installed[1]?.plugin).toBe(kennelDebatePlugin)
   })
 
   it('plans participants in parallel and fences the judge behind every participant', () => {

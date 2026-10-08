@@ -20,7 +20,7 @@ The optional `dshHome` configuration follows the harness-wide home resolution ru
 
 A roster slot whose `operatorId` is a registered Gouzi entry (`gouzi.<gouziId>.<operator>`) runs on that member. When every slot names a member, the round's admission carries `gouziRecipient` for one member or `gouziRecipients` for several, built from the members' current generations, so the daemon checks availability, workspace, and grants for each member. A round that mixes members with other operators, names a fallback for a member slot, or names an unregistered member is refused with `DEBATE_UNSUPPORTED` or `DEBATE_ROSTER_INVALID`.
 
-The plugin also provides `ctx.kennelDebates`. It gives three or four members the proposer, falsifier, optional evidence-auditor, and judge roles in member order, derives the ordinary three-round policy, starts the Debate, and approves it in the background because approval returns when the rounds settle.
+The plugin also registers the `debate` kennel collaboration kind with `ctx.kennelCollaborations` while a kennel registry is present. It offers one candidate per project that at least three enabled members hold on a usable entry, never for a message addressed to one member. It gives three or four members the proposer, falsifier, optional evidence-auditor, and judge roles in member order, derives the ordinary three-round policy, starts the Debate, and approves it in the background because approval returns when the rounds settle. The candidate id names every member's generation, entry, and model, so a changed member makes the choice stale.
 
 ## Model Experience
 

@@ -815,4 +815,4 @@ export * from './gouzi.ts'
 export default OrchestrationService
 
 export type { OrchestrationRecipientResolver } from './recipient-resolver.ts'
-export type * from './kennel-debate.ts'
+export * from './kennel-collaboration.ts'
