@@ -27,6 +27,7 @@ import {
 import { orchestrationGraphGuidance } from '@deepseek-ai/dsh-tool-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { Context } from '@deepseek-ai/cordis'
+import SessionStore from '@deepseek-ai/dsh-session'
 import * as OrchestrationLocal from '@deepseek-ai/dsh-orchestration-local'
 import * as UiGouzi from '@deepseek-ai/dsh-ui-gouzi'
 import { GouziHostService, type GouziProvisionInput, type GouziSshTarget } from '@deepseek-ai/dsh-ui-gouzi'
@@ -495,6 +496,7 @@ describe.sequential('Gouzi members as real processes', () => {
     const routes: Array<{ handler: (request: never, response: never) => Promise<void> }> = []
     ctx.provide('webServer', { register: (route: (typeof routes)[number]) => { routes.push(route); return () => {} } } as never)
     new FixtureHost(ctx)
+    await ctx.plugin(SessionStore).await()
     await ctx.plugin({ name: OrchestrationLocal.name, apply: OrchestrationLocal.apply }, OrchestrationLocal.Config({
       dshHome: mainHome, autoStart: false, headlessNodeExecutable: process.execPath,
     })).await()
