@@ -1,0 +1,167 @@
+{
+  "modelCalls": 4,
+  "persistedBeforeModel": [
+    true,
+    true,
+    true,
+    true
+  ],
+  "persistedBeforeExecution": [
+    true
+  ],
+  "inspect": {
+    "exactOriginalRun": true,
+    "action": "inspect",
+    "state": "completed"
+  },
+  "cancel": {
+    "exactWriteRun": true,
+    "state": "cancelled",
+    "durableReceipt": true
+  },
+  "totalRunCount": 2,
+  "durableDispatchEvents": [
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-submission",
+    "kennel/dispatch-admitted",
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-control"
+  ],
+  "durableUserMessage": true,
+  "externalMethods": [
+    "operator.events",
+    "operator.execute",
+    "operator.inspect",
+    "operator.providers"
+  ],
+  "userText": [
+    [
+      {
+        "type": "text",
+        "text": "hello"
+      }
+    ],
+    [
+      {
+        "type": "text",
+        "text": "inspect task"
+      }
+    ]
+  ],
+  "dispatchEvents": [
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-submission",
+    "kennel/dispatch-admitted",
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-control"
+  ],
+  "compiled": {
+    "risk": "low",
+    "nodes": [
+      {
+        "id": "work",
+        "readScopes": [],
+        "writeScopes": [],
+        "effectBudget": {
+          "cost": [],
+          "execute": [],
+          "network": [],
+          "read": [],
+          "risk": [],
+          "write": []
+        },
+        "operator": {
+          "fallbackIds": [],
+          "preferredIds": [
+            "gouzi.stable-dog.codex"
+          ]
+        }
+      }
+    ]
+  },
+  "admission": {
+    "sourceSessionId": "kennel-ai-a",
+    "sourceMessageMatches": true,
+    "gouziRecipient": {
+      "generation": 1,
+      "gouziId": "stable-dog",
+      "operatorIds": [
+        "gouzi.stable-dog.codex"
+      ]
+    },
+    "rlm": "disabled",
+    "autonomous": "disabled"
+  },
+  "room": {
+    "status": 200,
+    "tasks": [
+      {
+        "state": "completed",
+        "nodes": [
+          {
+            "state": "passed",
+            "gouziId": "stable-dog",
+            "result": {
+              "outputPreview": "你好，我是狗窝成员。",
+              "accepted": true,
+              "operatorId": "gouzi.stable-dog.codex",
+              "retainedEvidence": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "write": {
+    "state": "awaiting_approval",
+    "workspaceIsolation": "directory-snapshot",
+    "sourceMessageMatches": true,
+    "privateSnapshotRetained": true,
+    "snapshotCopiesSource": true,
+    "sourceBodyUnchanged": true,
+    "risk": "high",
+    "requiresApproval": true,
+    "verifier": {
+      "requiredForCompletion": true,
+      "acceptance": [
+        {
+          "description": "Require an affirmative, evidenced verification verdict.",
+          "id": "verification",
+          "kind": "model-verdict"
+        }
+      ]
+    },
+    "nodes": [
+      {
+        "id": "work",
+        "role": "implementation",
+        "state": "pending",
+        "dependsOn": []
+      },
+      {
+        "id": "verify",
+        "role": "verification",
+        "state": "pending",
+        "dependsOn": [
+          "work"
+        ]
+      }
+    ],
+    "hasWorkerResult": false
+  },
+  "executionCount": 1,
+  "hasSealedGrant": true,
+  "managerAssistantMessages": 0
+}

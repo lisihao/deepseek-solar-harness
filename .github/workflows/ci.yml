@@ -406,6 +406,28 @@ jobs:
       - name: Run complete keyless Python suite
         run: uv run --python 3.10 --group test --project python/sdk pytest
 
+  # The scheduling evidence collectors need Python 3.11 or newer, so they
+  # cannot share the 3.10 SDK job. The standard library is their only dependency.
+  python-scheduling:
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci != 'false'
+    runs-on: ubuntu-latest
+    name: python 3.12 / scheduling evidence
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Run the scheduling evidence collector tests
+        working-directory: python/scheduling-evidence
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests
+
   # One native target makes the complete release-shaped Python path required
   # without duplicating platform-independent behavior across the release matrix.
   # The reusable builder owns the executable, snapshot, wheel, clean-install,
@@ -1038,7 +1060,7 @@ jobs:
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
-    needs: [pr-impact, docs-only, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
+    needs: [pr-impact, docs-only, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-scheduling, python-runtime, windows]
     if: always() && github.event_name == 'pull_request'
     steps:
       - name: Fail if impact classification or a needed job failed
@@ -1054,6 +1076,7 @@ jobs:
             || needs['node-24-consumers'].result != 'success'
             || needs['node-compat'].result != 'success'
             || needs['python-sdk'].result != 'success'
+            || needs['python-scheduling'].result != 'success'
             || needs['python-runtime'].result != 'success'
             || needs.windows.result != 'success')
         run: |

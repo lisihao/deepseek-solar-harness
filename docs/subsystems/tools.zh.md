@@ -8,7 +8,7 @@
 
 ## `ToolDefinition` — 一个已注册的工具
 
-由一个 `ToolSchema`（面向模型的字段）、必需的规范输出声明、`execute` 函数、仅供宿主使用的调度器元数据、可选的最终内容回调和可选 UI 展示函数组成。注册表持有这些定义，循环通过它们分派调用。注册表的 `schemas()` 通过显式允许列表构建面向模型的 `ToolSchema[]`；`output`/`execute`/`finalizeContent`/`timeoutMs`/`isConcurrencySafe`/`presentCall`/`presentResult` 绝不能泄漏到模型请求中。
+由一个 `ToolSchema`（面向模型的字段）、必需的规范输出声明、`execute` 函数、仅供宿主使用的调度器元数据、可选的最终内容回调和可选 UI 展示函数组成。注册表持有这些定义，循环通过它们分派调用。注册表的 `schemas()` 通过显式允许列表构建面向模型的 `ToolSchema[]`；`delegation`/`output`/`execute`/`finalizeContent`/`timeoutMs`/`isConcurrencySafe`/`presentCall`/`presentResult` 绝不能泄漏到模型请求中。
 
 ```ts type-equiv
 /** Tool-owned canonical output contract used after the body returns a JSON value. */
@@ -25,6 +25,12 @@ interface ToolOutputDefinition {
 ```ts type-equiv
 /** A registered tool: its schema plus the execution function. */
 interface ToolDefinition extends ToolSchema {
+  /** Internal dispatcher identity; absent actions means every call delegates execution. Never model-visible. */
+  readonly delegation?: {
+    readonly family: 'physical-operator' | 'subagent'
+    /** Only these action values delegate when this list is present. */
+    readonly actions?: readonly string[]
+  }
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
@@ -94,6 +100,8 @@ interface ToolDefinition extends ToolSchema {
 ```
 
 `execute` 接收 `args: unknown`——原始的 `ToolDefinition` 自行校验输入。第一方工具不需要手写校验；它们使用 `defineTool`，由后者代为校验并收窄参数类型、根据 `output.schema` 推导函数体返回类型，并为两个输出投影器提供类型约束。`finalizeContent` 特意接收不可变的执行对象而非类型化参数，因为无效输入和外层流水线失败也会到达该回调；它可以施加工具自有的内容限制，同时保留 `isError`、规范值、结构化错误身份、延迟上下文与展示元数据。
+
+`delegation` 标识内部的 `physical-operator` 或 `subagent` 分派器。存在 `actions` 时，只有所列 action 值会委派执行；省略该列表表示每次调用都会委派。面向模型的 schema 不包含这项元数据。每个 `ToolExecution` 从入口处选中的实际定义捕获它。调用主体前，分派仍检查当前可见性和执行模式，并要求定义与捕获时相同：异步准备期间卸载或替换定义后，抵达主体分派的调用会返回 `UNKNOWN_TOOL`，既不执行捕获的主体，也不执行替代定义。包的[执行生命周期](../../packages/core/tools/README.md#execution-lifecycle)规定了这一行为。
 
 ## 统一的 JSON 值 schema DSL
 
@@ -289,6 +297,8 @@ interface CodeDispatchLog {
  * observers run.
  */
 interface ToolExecution extends ToolExecutionInput {
+  /** Internal dispatcher identity captured with this execution's actual definition; never model-visible or durable. */
+  readonly delegation?: ToolDefinition['delegation']
   /** Root model-requested call, resolved for every root and nested execution. */
   readonly rootCallId: CallId
   /** Registry-assigned identity shared with nested calls only as their opaque `parent` token. */
@@ -571,7 +581,7 @@ async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>
 
 Types: [ScopeKey](scope.md)
 
-Source: [`packages/core/tools/src/index.ts:789`](../../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:798`](../../packages/core/tools/src/index.ts)
 
 <a id="tools-events"></a>
 

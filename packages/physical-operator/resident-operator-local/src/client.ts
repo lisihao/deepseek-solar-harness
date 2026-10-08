@@ -11,11 +11,15 @@ import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-p
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import type {
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorGenerationLimits,
+  PhysicalOperatorGovernedWorkspacePolicy,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorNativeToolPolicy,
 } from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
+  ResidentCommandRefusal,
+  type ResidentOperatorCommandId,
   ResidentOperatorSessionId,
   ResidentOperatorTurnId,
   RESIDENT_PROTOCOL_VERSION,
@@ -23,6 +27,7 @@ import {
   type ResidentEventPage,
   type ResidentCompactResult,
   type NativeContext,
+  type ResidentProviderQueryOptions,
   type ResidentProviderStatus,
   type ResidentSessionSnapshot,
   type ResidentTurnSnapshot,
@@ -41,6 +46,7 @@ const REQUIRED_METHODS = Object.freeze([
   'session.inspect',
   'turn.execute',
   'turn.inspect',
+  'command.inspect',
   'turn.interrupt',
   'turn.resolve_indeterminate',
   'session.compact',
@@ -50,6 +56,13 @@ const REQUIRED_METHODS = Object.freeze([
 
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 const DAEMON_RECOVERIES_BY_ROOT = new Map<string, Promise<void>>()
+/** Only the installed v14/schema5 peer may retire while upgrading to v14/schema6. */
+const RETIRABLE_UPGRADE = {
+  predecessorProtocolVersion: 14,
+  predecessorStateSchemaVersion: 5,
+  successorProtocolVersion: 14,
+  successorStateSchemaVersion: 6,
+}
 
 interface ListResponse {
   readonly sessions: ResidentSessionSnapshot[]
@@ -66,6 +79,12 @@ interface HandshakeResponse {
   readonly buildCommit: string
   readonly methods: string[]
   readonly driverManifestSha256: string
+}
+
+interface HandshakeParams {
+  readonly protocol_version: number
+  readonly state_schema_version: number
+  readonly driver_manifest_sha256: string
 }
 
 const HANDSHAKE_FAILURE = Symbol('resident handshake failure')
@@ -92,7 +111,7 @@ function unwrapHandshakeFailure(error: unknown): HandshakeFailure | undefined {
 }
 
 class DaemonQualificationError extends ResidentOperatorError {
-  constructor(message: string, code: string, readonly daemonInstanceId: string) {
+  constructor(message: string, code: string, readonly handshake: HandshakeResponse) {
     super(message, code)
     this.name = 'DaemonQualificationError'
   }
@@ -272,10 +291,13 @@ export class ResidentDaemonClient {
 
   /**
    * Read current native product qualification snapshots.
+   * @param options - optional native model catalog refresh policy.
    * @returns one status per configured product Driver.
    */
-  async providers(): Promise<ResidentProviderStatus[]> {
-    return (await this.request<ProviderResponse>('operator.list', {})).providers
+  async providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]> {
+    return (await this.request<ProviderResponse>('operator.list', {
+      ...options?.refreshModels === true ? { refresh_models: true } : {},
+    })).providers
   }
 
   /**
@@ -314,6 +336,21 @@ export class ResidentDaemonClient {
   }
 
   /**
+   * Read a durable command's turn receipt without execution or replay.
+   * @param commandId - caller-owned durable command identity.
+   * @returns the snapshot, or undefined for a successful query with no current receipt.
+   */
+  async inspectCommand(commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined> {
+    const snapshot = await this.request<unknown>('command.inspect', { command_id: commandId })
+    if (snapshot === null) return undefined
+    if (typeof snapshot !== 'object' || !('commandId' in snapshot) || snapshot.commandId !== commandId) {
+      throw new ResidentOperatorError('resident daemon returned an invalid command receipt', 'INVALID_RESULT')
+    }
+    return snapshot as ResidentTurnSnapshot
+  }
+
+
+  /**
    * Admit or replay one durable command and poll its result.
    * @param request - command identity, retry lineage, operator, workspace, prompt, and signal.
    * @returns holder-owned raw turn identities, revision, result, and disposal.
@@ -331,6 +368,8 @@ export class ResidentDaemonClient {
     profile?: PhysicalOperatorExecutionPreference
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1
     nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
+    generationLimits?: PhysicalOperatorGenerationLimits
+    governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy
     signal: AbortSignal
   }): Promise<{
     turnId: string
@@ -355,6 +394,9 @@ export class ResidentDaemonClient {
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { model_tool_bridge: request.modelToolBridge },
       native_tool_policy: request.nativeToolPolicy ?? 'inherit',
+      ...request.generationLimits === undefined ? {} : { generation_limits: request.generationLimits },
+      ...request.governedWorkspacePolicy === undefined ? {} : { governed_workspace_policy: request.governedWorkspacePolicy },
+      bridge_admission_timeout_ms: this.options.connectTimeoutMs,
     }, request.signal)
     let settled = false
     const observation = new AbortController()
@@ -585,28 +627,18 @@ export class ResidentDaemonClient {
       await this.handshake()
       return false
     }
-    const expectedInstanceId = initialError instanceof DaemonQualificationError
-      ? initialError.daemonInstanceId
-      : `legacy-protocol-pid-${observedPid}`
     const observedAuthority = readDaemonAuthorityIdentity(this.options.root)
-    if (observedAuthority !== undefined && (
-      observedAuthority.pid !== observedPid
-      || (initialError instanceof DaemonQualificationError && observedAuthority.instanceId !== expectedInstanceId)
-    )) {
-      throw new ResidentOperatorError(
-        `resident daemon upgrade is blocked because its authority identity changed: ${errorMessage(initialError)}`,
-        'PROTOCOL_MISMATCH',
-      )
-    }
     const retirementDeadline = Date.now() + this.options.connectTimeoutMs
     try {
-      const response = await this.rawRequest<{ readonly draining: boolean; readonly replaced?: boolean }>(
-        'system.shutdown',
-        {
+      const response = await this.withTransport(async (transport) => {
+        const peer = await this.handshakeForRetirement(transport, initialError)
+        if (this.daemonPid() !== observedPid) return { draining: false, replaced: true }
+        this.assertRetiringAuthorityIdentity(observedAuthority, observedPid, peer, initialError)
+        return unwrapWire(await transport.request('system.shutdown', {
           expected_daemon_pid: observedPid,
-          expected_daemon_instance_id: expectedInstanceId,
-        },
-      )
+          expected_daemon_instance_id: peer.daemonInstanceId,
+        })) as { readonly draining: boolean; readonly replaced?: boolean }
+      })
       if (response.replaced === true) {
         await this.handshake()
         return false
@@ -648,7 +680,120 @@ export class ResidentDaemonClient {
     return true
   }
 
-  private handshakeParams(): object {
+  private assertRetiringAuthorityIdentity(
+    observedAuthority: DaemonAuthorityIdentity | undefined,
+    observedPid: number,
+    peer: HandshakeResponse,
+    initialError: unknown,
+  ): void {
+    const currentAuthority = readDaemonAuthorityIdentity(this.options.root)
+    if (
+      (observedAuthority !== undefined && (
+        observedAuthority.pid !== observedPid
+        || observedAuthority.instanceId !== peer.daemonInstanceId
+      ))
+      || (currentAuthority !== undefined && (
+        currentAuthority.pid !== observedPid
+        || currentAuthority.instanceId !== peer.daemonInstanceId
+      ))
+      || (observedAuthority !== undefined && (
+        currentAuthority === undefined
+        || currentAuthority.pid !== observedAuthority.pid
+        || currentAuthority.instanceId !== observedAuthority.instanceId
+      ))
+    ) {
+      throw new ResidentOperatorError(
+        `resident daemon upgrade is blocked because its authority identity changed: ${errorMessage(initialError)}`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
+  }
+
+  private async handshakeForRetirement(
+    transport: JsonRpcLineTransport,
+    initialError: unknown,
+  ): Promise<HandshakeResponse> {
+    const observed = initialError instanceof DaemonQualificationError ? initialError.handshake : undefined
+    const params = observed === undefined ? this.predecessorHandshakeParams() : this.handshakeParamsForPeer(observed)
+    const response = unwrapWire(await transport.request('system.handshake', params)) as HandshakeResponse
+    this.validateRetiringHandshake(response)
+    if (!this.handshakeMatchesParams(response, params)
+      || (observed !== undefined && !this.sameHandshakeIdentity(response, observed))) {
+      throw new ResidentOperatorError(
+        'resident daemon upgrade handshake identity changed before shutdown',
+        'PROTOCOL_MISMATCH',
+      )
+    }
+    return response
+  }
+
+  private predecessorHandshakeParams(): HandshakeParams {
+    if (!this.supportsKnownPredecessorRetirement()) {
+      throw new ResidentOperatorError('resident daemon upgrade has no supported predecessor handshake', 'PROTOCOL_MISMATCH')
+    }
+    return {
+      protocol_version: RETIRABLE_UPGRADE.predecessorProtocolVersion,
+      state_schema_version: RETIRABLE_UPGRADE.predecessorStateSchemaVersion,
+      driver_manifest_sha256: residentDriverManifestSha256(this.options.driverModules ?? []),
+    }
+  }
+
+  private supportsKnownPredecessorRetirement(): boolean {
+    return RESIDENT_PROTOCOL_VERSION === RETIRABLE_UPGRADE.successorProtocolVersion
+      && RESIDENT_STATE_SCHEMA_VERSION === RETIRABLE_UPGRADE.successorStateSchemaVersion
+  }
+
+  private handshakeParamsForPeer(peer: HandshakeResponse): HandshakeParams {
+    return {
+      protocol_version: peer.protocolVersion,
+      state_schema_version: peer.stateSchemaVersion,
+      driver_manifest_sha256: peer.driverManifestSha256,
+    }
+  }
+
+  private handshakeMatchesParams(response: HandshakeResponse, params: HandshakeParams): boolean {
+    return response.protocolVersion === params.protocol_version
+      && response.stateSchemaVersion === params.state_schema_version
+      && response.driverManifestSha256 === params.driver_manifest_sha256
+  }
+
+  private sameHandshakeIdentity(first: HandshakeResponse, second: HandshakeResponse): boolean {
+    return first.protocolVersion === second.protocolVersion
+      && first.stateSchemaVersion === second.stateSchemaVersion
+      && first.buildCommit === second.buildCommit
+      && first.daemonInstanceId === second.daemonInstanceId
+      && first.driverManifestSha256 === second.driverManifestSha256
+  }
+
+  private validateRetiringHandshake(response: HandshakeResponse): void {
+    const isKnownPredecessor = this.supportsKnownPredecessorRetirement()
+      && response.protocolVersion === RETIRABLE_UPGRADE.predecessorProtocolVersion
+      && response.stateSchemaVersion === RETIRABLE_UPGRADE.predecessorStateSchemaVersion
+    if (!Number.isSafeInteger(response.protocolVersion)
+      || !Number.isSafeInteger(response.stateSchemaVersion)
+      || (response.protocolVersion !== RESIDENT_PROTOCOL_VERSION)
+      || (response.stateSchemaVersion !== RESIDENT_STATE_SCHEMA_VERSION
+        && !isKnownPredecessor)) {
+      throw new ResidentOperatorError('resident daemon upgrade handshake is not a supported predecessor', 'PROTOCOL_MISMATCH')
+    }
+    if (typeof response.daemonInstanceId !== 'string' || response.daemonInstanceId.length === 0) {
+      throw new ResidentOperatorError('resident daemon upgrade handshake is missing its instance identity', 'PROTOCOL_MISMATCH')
+    }
+    if (typeof response.buildCommit !== 'string' || response.buildCommit.length === 0) {
+      throw new ResidentOperatorError('resident daemon upgrade handshake is missing its build identity', 'PROTOCOL_MISMATCH')
+    }
+    if (typeof response.driverManifestSha256 !== 'string' || response.driverManifestSha256.length === 0) {
+      throw new ResidentOperatorError('resident daemon upgrade handshake is missing its Driver identity', 'PROTOCOL_MISMATCH')
+    }
+    if (!Array.isArray(response.methods)
+      || !response.methods.every(method => typeof method === 'string')
+      || REQUIRED_METHODS.some(method => !(isKnownPredecessor && method === 'command.inspect')
+        && !response.methods.includes(method))) {
+      throw new ResidentOperatorError('resident daemon upgrade handshake does not support the required method set', 'PROTOCOL_MISMATCH')
+    }
+  }
+
+  private handshakeParams(): HandshakeParams {
     return {
       protocol_version: RESIDENT_PROTOCOL_VERSION,
       state_schema_version: RESIDENT_STATE_SCHEMA_VERSION,
@@ -675,7 +820,7 @@ export class ResidentDaemonClient {
       throw new DaemonQualificationError(
         'resident daemon protocol or state schema mismatch',
         'PROTOCOL_MISMATCH',
-        response.daemonInstanceId,
+        response,
       )
     }
     const expectedBuildCommit = process.env.DSH_BUILD_COMMIT ?? 'development'
@@ -683,7 +828,7 @@ export class ResidentDaemonClient {
       throw new DaemonQualificationError(
         `resident daemon build ${response.buildCommit} does not match client ${expectedBuildCommit}`,
         'PROVIDER_VERSION_MISMATCH',
-        response.daemonInstanceId,
+        response,
       )
     }
     const expectedDriverManifest = residentDriverManifestSha256(this.options.driverModules ?? [])
@@ -691,7 +836,7 @@ export class ResidentDaemonClient {
       throw new DaemonQualificationError(
         `resident daemon Driver manifest ${response.driverManifestSha256} does not match client ${expectedDriverManifest}`,
         'PROVIDER_VERSION_MISMATCH',
-        response.daemonInstanceId,
+        response,
       )
     }
     if (!Array.isArray(response.methods)
@@ -725,7 +870,9 @@ export class ResidentDaemonClient {
       try {
         await this.handshakeOnTransport(transport)
         handshakeComplete = true
-        return unwrapWire(await transport.request(method, params, signal)) as T
+        return unwrapWire(await transport.request(method, params, signal), method === 'turn.execute'
+          ? (message, code) => new ResidentCommandRefusal(message, code)
+          : undefined) as T
       } catch (error) {
         if (!handshakeComplete) throw markHandshakeFailure(error, daemonPid)
         throw error

@@ -5,7 +5,7 @@ import type { ServerResponse } from 'node:http'
 import { authorizeRemoteRequest } from '@deepseek-ai/dsh-host-remote-auth'
 import { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type { WebModelCatalog, WebModelPreferences } from './model-catalog.ts'
+import type { WebModelCatalog, WebModelPreferences, WebModelProfile } from './model-catalog.ts'
 
 /** Same-origin local setup route. */
 export const CHATGPT_WEB_SETUP_PATH = '/api/chatgpt-web'
@@ -20,7 +20,8 @@ export interface WebSetupStatus {
 export interface WebSetup {
   status(): WebSetupStatus
   refreshCatalog(sessionId?: string): Promise<WebModelCatalog>
-  preferences(sessionId: string): WebModelPreferences
+  /** Return saved controls plus any primary-menu model pin for this Session. */
+  preferences(sessionId: string): WebModelProfile
   selectPreferences(sessionId: string, profile: WebModelPreferences): Promise<WebModelCatalog | undefined>
 }
 

@@ -1,7 +1,7 @@
 # Keyless model-menu composition: the real physical-operator route and
 # allocator with the Solar product's entry configuration (ChatGPT Web plus
 # Codex's two newest models) and a DeepSeek catalog narrowed to V4-Pro and
-# V4-Flash. The fixture replaces only the native Codex, Claude Code, and
+# V4.1-Flash. The fixture replaces only the native Codex, Claude Code, and
 # ChatGPT Web product boundaries, and every catalog read counts as stale so a
 # plain menu read always rereads it in the background.
 - id: base
@@ -18,8 +18,8 @@
           models:
             - id: deepseek-v4-pro
               name: DeepSeek-V4-Pro
-            - id: deepseek-v4-flash
-              name: DeepSeek-V4-Flash
+            - id: deepseek-flash
+              name: DeepSeek-V4.1-Flash
       - insert:
           - id: user-questions
             name: '@deepseek-ai/dsh-user-questions'

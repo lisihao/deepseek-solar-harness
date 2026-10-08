@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.24.0",
+  "version": "3.39.1",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -13,6 +13,8 @@
   "types": "lib/types/index.d.ts",
   "bin": {
     "dsh-desktop": "lib/bin.js",
+    "dsh-gouzi-agent": "lib/gouzi-agent-bin.js",
+    "dsh-gouzi-worker": "lib/gouzi-worker-bin.js",
     "dsh-plugin-desktop": "lib/bin.js",
     "dsh-product-server": "lib/product-server-bin.js"
   },
@@ -28,6 +30,14 @@
     "./product-server": {
       "types": "./lib/types/product-server.d.ts",
       "default": "./lib/product-server.js"
+    },
+    "./gouzi-worker": {
+      "types": "./lib/types/gouzi-worker.d.ts",
+      "default": "./lib/gouzi-worker.js"
+    },
+    "./gouzi-host": {
+      "types": "./lib/types/gouzi-host.d.ts",
+      "default": "./lib/gouzi-host.js"
     },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
@@ -67,6 +77,7 @@
     "cordis.patch.yml",
     "docs/**",
     "vendor/agent-presets/**",
+    "vendor/scheduling-evidence-python/**",
     "vendor/dsh-packages/**",
     "lib/**/*.js",
     "lib/**/*.map",
@@ -160,6 +171,7 @@
     "@deepseek-ai/dsh-client-ui-remote-modules": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-settings-plugins": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings-scheduling-evidence": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-settings-scheduling-evidence-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-sidebar": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-task-template": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz",
@@ -191,6 +203,7 @@
     "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-directory-picker-native": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-frontend-static": "file:vendor/dsh-packages/deepseek-ai-dsh-host-frontend-static-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-host-gouzi-member": "file:vendor/dsh-packages/deepseek-ai-dsh-host-gouzi-member-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-host-plugin-inventory": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-remote-auth": "file:vendor/dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-host-webserver": "file:vendor/dsh-packages/deepseek-ai-dsh-host-webserver-0.1.0-rc.5.tgz",
@@ -204,6 +217,7 @@
     "@deepseek-ai/dsh-message-feedback": "0.1.0-rc.6",
     "@deepseek-ai/dsh-model-allocation": "file:vendor/dsh-packages/deepseek-ai-dsh-model-allocation-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-model-allocation-local": "file:vendor/dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-model-catalog-local": "0.1.0-rc.6",
     "@deepseek-ai/dsh-model-worker": "file:vendor/dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-model-worker-deepseek": "file:vendor/dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz",
@@ -229,6 +243,8 @@
     "@deepseek-ai/dsh-sandbox": "0.1.0-rc.6",
     "@deepseek-ai/dsh-sandbox-policy": "0.1.0-rc.6",
     "@deepseek-ai/dsh-sandbox-windows-acl": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-scheduling-evidence": "file:vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-scheduling-evidence-rpc": "file:vendor/dsh-packages/deepseek-ai-dsh-scheduling-evidence-rpc-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-scope": "0.1.0-rc.6",
     "@deepseek-ai/dsh-sdk-protocol": "file:vendor/dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-session": "0.1.0-rc.6",
@@ -273,6 +289,7 @@
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.6",
     "@deepseek-ai/dsh-ui-debate": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-ui-gouzi": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-user-approval": "0.1.0-rc.6",
@@ -282,7 +299,7 @@
     "@deepseek-ai/dsh-workflow": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@linxin666/dsh-client-ui-skin-blue-fantasy": "file:vendor/dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz",
-    "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz",
+    "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.24.tgz",
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz",
     "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.14.tgz",
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5-solar.1.tgz",
@@ -330,6 +347,7 @@
       "build/**",
       "lib/**",
       "vendor/agent-presets/**",
+      "vendor/scheduling-evidence-python/**",
       "node_modules/**"
     ],
     "afterPack": "./scripts/verify-packaged-runtime.ts",
@@ -348,7 +366,8 @@
       "cordis.patch.yml",
       "lib/**",
       "package.json",
-      "vendor/agent-presets/**"
+      "vendor/agent-presets/**",
+      "vendor/scheduling-evidence-python/**"
     ],
     "mac": {
       "target": [

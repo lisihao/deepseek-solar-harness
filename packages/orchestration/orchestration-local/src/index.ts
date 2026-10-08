@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import OrchestrationService, {
+  type GouziControl,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
   type OrchestrationArtifactRef,
@@ -28,7 +29,7 @@ import OrchestrationService, {
   type OrchestrationStartRequest,
 } from '@deepseek-ai/dsh-orchestration'
 import { OrchestrationDaemonClient } from './client.ts'
-import { LocalRemoteOperatorHostService } from './remote-execution-host.ts'
+import { mountRemoteOperatorHost, type RemoteHostConfig } from './remote-host.ts'
 
 export { OrchestrationDaemonClient, startDetachedOrchestrationDaemon } from './client.ts'
 export {
@@ -42,7 +43,11 @@ export { graphCertificate, nodesConflict, scopeOverlap, validateGraph } from './
 export { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from './providers.ts'
 export { BROWSER_CAPABILITY, BROWSER_MODEL_TOOL_SCHEMA, BrowserModelToolBridge, parseBrowserModelPlan } from './browser-model-tool-bridge.ts'
 export { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from './store.ts'
-export { LocalRemoteOperatorHostService } from './remote-execution-host.ts'
+export { LocalRemoteOperatorHostService, resolveRepositorySource } from './remote-execution-host.ts'
+export { gouziOperatorServer, type GouziGrantStore, type GouziOperatorOptions } from './gouzi-operator.ts'
+export { GouziRegistry } from './gouzi-registry.ts'
+export { RemotePhysicalOperator, createRemotePhysicalOperators, type RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
+export { RemoteSyncHttpClient, RemoteSyncRejectedError, RemoteSyncTransportError } from './remote-sync-http-client.ts'
 export * from './auto-refine.ts'
 
 export const name = 'orchestration-local'
@@ -50,9 +55,7 @@ export const name = 'orchestration-local'
 // Local daemon plugins intentionally expose the same bounded connection configuration surface.
 /* jscpd:ignore-start */
 /** Local daemon client configuration. */
-export interface Config {
-  /** Optional DSH home; defaults to the ordinary harness-owned location. */
-  readonly dshHome?: string
+export interface Config extends RemoteHostConfig {
   /** Start an independent daemon when no compatible socket is available. */
   readonly autoStart?: boolean
   /** Maximum handshake and per-request connection wait in milliseconds. */
@@ -65,18 +68,9 @@ export interface Config {
   readonly browserProviderModules?: string[]
   /** Explicit executable or helper used for the detached headless daemon. */
   readonly headlessNodeExecutable?: string
-  /** Maximum time for one Server-side exact-commit Git materialization. */
-  readonly remoteMaterializationTimeoutMs?: number
-  /** Maximum time for one bounded Resident artifact read. */
-  readonly remoteArtifactReadTimeoutMs?: number
-  /** Maximum exact artifact bytes returned over Remote Sync. */
-  readonly remoteArtifactMaxBytes?: number
-  /** Lease retained for one command-isolated remote execution checkout. */
-  readonly remoteWorkspaceLeaseMs?: number
 }
 
 export const Config: z<Config> = z.object({
-  dshHome: z.string(),
   autoStart: z.boolean().default(true),
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
   residentDriverModules: z.array(z.string()).default([]),
@@ -87,11 +81,23 @@ export const Config: z<Config> = z.object({
   remoteArtifactReadTimeoutMs: z.number().step(1).min(100).max(60_000).default(15_000),
   remoteArtifactMaxBytes: z.number().step(1).min(1_024).max(8 * 1024 * 1024).default(8 * 1024 * 1024),
   remoteWorkspaceLeaseMs: z.number().step(1).min(60_000).max(7 * 24 * 60 * 60_000).default(24 * 60 * 60_000),
+  dshHome: z.string(),
+  directoryLockRoot: z.string(),
 })
 /* jscpd:ignore-end */
 
 class LocalOrchestrationService extends OrchestrationService {
   private readonly client: OrchestrationDaemonClient
+  override readonly gouzi: GouziControl = {
+    list: () => this.client.gouziList(),
+    executionOperators: () => this.client.gouziExecutionOperators(),
+    pairHost: host => this.client.gouziPairHost(host),
+    create: input => this.client.gouziCreate(input),
+    edit: (gouziId, edit) => this.client.gouziEdit(gouziId, edit),
+    setMembership: (gouziId, membership) => this.client.gouziSetMembership(gouziId, membership),
+    setEndpoint: (gouziId, endpoint) => this.client.gouziSetEndpoint(gouziId, endpoint),
+    archive: (gouziId, evidence) => this.client.gouziArchive(gouziId, evidence),
+  }
 
   constructor(ctx: Context, config: Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>) {
     super(ctx)
@@ -152,13 +158,6 @@ class LocalOrchestrationService extends OrchestrationService {
 
 export function apply(ctx: Context, config: Config): void {
   const resolved = config as Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>
-  const dshHome = resolveDshHome(resolved.dshHome)
-  new LocalRemoteOperatorHostService(ctx, {
-    dshHome,
-    timeoutMs: resolved.remoteMaterializationTimeoutMs,
-    artifactReadTimeoutMs: resolved.remoteArtifactReadTimeoutMs,
-    artifactMaxBytes: resolved.remoteArtifactMaxBytes,
-    workspaceLeaseMs: resolved.remoteWorkspaceLeaseMs,
-  })
+  mountRemoteOperatorHost(ctx, resolved)
   new LocalOrchestrationService(ctx, resolved)
 }

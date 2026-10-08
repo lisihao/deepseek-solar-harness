@@ -1,12 +1,14 @@
 /** Host-local execution facilities consumed by authenticated Remote Sync. */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { RemoteResidentArtifactDocument, RemoteWorkspaceIdentityV1 } from './remote-sync.ts'
+import type { RemoteResidentArtifactDocument, RemoteExecutionWorkspaceIdentityV1, RemoteResidentTurnSnapshot } from './remote-sync.ts'
 
-/** Server-local result of resolving and materializing one immutable Git workspace. */
+type WorkspaceMutation = NonNullable<NonNullable<RemoteResidentTurnSnapshot['result']>['workspaceMutation']>
+
+/** Server-local result of resolving an execution workspace. */
 export interface RemoteMaterializedWorkspaceV1 {
   readonly version: 1
-  readonly identity: RemoteWorkspaceIdentityV1
+  readonly identity: RemoteExecutionWorkspaceIdentityV1
   /** Absolute Server-local cwd; this value is never returned over Remote Sync. */
   readonly path: string
 }
@@ -34,20 +36,63 @@ export abstract class RemoteOperatorHostService extends Service {
   }
 
   /**
-   * Prove at least one configured repository can be resolved on this Server.
+   * Advertise durable mutation capture from isolated Git checkouts.
+   * @returns whether this receiving host implements version 1 mutation return.
+   */
+  supportsWorkspaceMutationReturn(): boolean { return false }
+
+  /**
+   * Advertise sealed current-input bundles for isolated read and write execution.
+   * @returns whether this host implements version 1 snapshot input materialization.
+   */
+  supportsWorkspaceSnapshotInput(): boolean { return false }
+
+  /**
+   * Capture or recover the terminal patch before releasing an isolated checkout.
+   * @param _executionId - durable command owning the checkout.
+   * @returns the exact base-bound patch, or undefined for read execution.
+   */
+  captureWorkspaceMutation(_executionId: string): Promise<WorkspaceMutation | undefined> {
+    return Promise.resolve(undefined)
+  }
+
+  /**
+   * Prove at least one configured repository or project can be resolved on this Server.
    * @returns bounded readiness without exposing source URLs or credentials.
    */
   abstract qualification(): Promise<RemoteOperatorHostQualification>
 
   /**
-   * Resolve an allowed repository identity and materialize its exact commit.
-   * @param identity - immutable repository, commit, and optional subdirectory.
-   * @param executionId - idempotent physical execution identity owning the isolated workspace lease.
+   * Read the persisted default project for this Gouzi host.
+   * @returns the registered project identity and verified default project roots, or undefined on a generic host.
+   */
+  gouziWorkspace(): Promise<{ projectId: string; readonly projectScopes?: readonly string[] } | undefined> {
+    return Promise.resolve(undefined)
+  }
+
+  /**
+   * Inspect a previously acquired execution lease without acquiring or replacing it.
+   * @param _executionId - physical execution identity owning the workspace.
+   * @returns its workspace, or undefined when no lease exists.
+   * @throws Error - when this generic host does not implement lease inspection.
+   */
+  inspectWorkspace(_executionId: string): Promise<RemoteMaterializedWorkspaceV1 | undefined> {
+    return Promise.reject(new Error('remote execution workspace inspection is unsupported'))
+  }
+
+  /**
+   * Resolve an allowed Git commit or a registered Gouzi project directory.
+   * @param identity - receiving-host workspace selection and optional subdirectory.
+   * @param executionId - idempotent physical execution identity owning the workspace lease.
+   * @param mutationReturn - optional base commit and bundle retained for returning isolated edits.
+   * @param snapshotInput - optional self-contained current input bundle for a local member.
    * @returns a Server-local execution cwd.
    */
   abstract materializeWorkspace(
-    identity: RemoteWorkspaceIdentityV1,
+    identity: RemoteExecutionWorkspaceIdentityV1,
     executionId: string,
+    mutationReturn?: { readonly baseSha: string; readonly baseBundle?: string },
+    snapshotInput?: { readonly baseSha: string; readonly baseBundle: string },
   ): Promise<RemoteMaterializedWorkspaceV1>
 
   /**
@@ -57,7 +102,7 @@ export abstract class RemoteOperatorHostService extends Service {
   abstract renewWorkspace(executionId: string): Promise<void>
 
   /**
-   * Release one proven-settled execution workspace without touching the immutable object cache.
+   * Release one settled execution lease; registered project files remain on disk.
    * @param executionId - physical execution identity owning the workspace.
    */
   abstract releaseWorkspace(executionId: string): Promise<void>

@@ -1,0 +1,14 @@
+{
+  "sender": "TaskGraph sender workspace",
+  "receiver": "member selected directory",
+  "registeredProjectMatchesBinding": true,
+  "nativeCwdMatchesBinding": true,
+  "privateInputMatchesDriver": true,
+  "originalInputContextRetained": true,
+  "output": [
+    {
+      "text": "README.md:1: gouzi fixture\nFiles: README.md",
+      "type": "text"
+    }
+  ]
+}

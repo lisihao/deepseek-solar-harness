@@ -6,12 +6,24 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { WebModelCatalog } from './model-catalog.ts'
 
-const choiceSchema = z.object({ id: z.string().min(1), label: z.string().min(1) }).strict()
+const pickerChoiceSchema = z.object({ id: z.string().min(1), label: z.string().min(1) }).strict()
+const modelChoiceSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  reasoning: z.object({
+    efforts: z.array(pickerChoiceSchema),
+    defaultEffort: z.string().min(1).optional(),
+  }).strict().optional(),
+  featuredRank: z.number().int().nonnegative().optional(),
+}).strict().refine(choice => choice.reasoning?.defaultEffort === undefined
+  || choice.reasoning.efforts.some(effort => effort.id === choice.reasoning?.defaultEffort), {
+  message: 'default reasoning effort must be visible for its model',
+})
 const catalogFileSchema = z.object({
   version: z.literal(1),
   catalog: z.object({
-    models: z.array(choiceSchema),
-    efforts: z.array(choiceSchema),
+    models: z.array(modelChoiceSchema),
+    efforts: z.array(pickerChoiceSchema),
     selectedModel: z.string().min(1).optional(),
     selectedEffort: z.string().min(1).optional(),
     observedAt: z.string().min(1),
@@ -47,7 +59,17 @@ export class WebModelCatalogCache {
     if (!parsed.success) return undefined
     const { models, efforts, selectedModel, selectedEffort, observedAt } = parsed.data.catalog
     return {
-      models,
+      models: models.map(choice => ({
+        id: choice.id,
+        label: choice.label,
+        ...choice.reasoning === undefined ? {} : {
+          reasoning: {
+            efforts: choice.reasoning.efforts.map(effort => ({ id: effort.id, label: effort.label })),
+            ...choice.reasoning.defaultEffort === undefined ? {} : { defaultEffort: choice.reasoning.defaultEffort },
+          },
+        },
+        ...choice.featuredRank === undefined ? {} : { featuredRank: choice.featuredRank },
+      })),
       efforts,
       ...selectedModel === undefined ? {} : { selectedModel },
       ...selectedEffort === undefined ? {} : { selectedEffort },

@@ -118,6 +118,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Adapters register provider implementations; the loop and compaction call the provider-neutral stream service.',
   },
   {
+    key: 'modelCatalogs',
+    pkg: 'model-catalog-local',
+    title: 'Persistent account model catalog',
+    mode: 'core',
+    consumers: ['host-apiproxy', 'llm-deepseek', 'tool-physical-operator', 'physical-operator-chatgpt-web'],
+    note: 'Discovery plugins register sources; the SQLite service stores complete inventories and the host projects available menu shortcuts.',
+  },
+  {
     key: 'tokenMeter',
     pkg: 'token-meter',
     title: 'Replay token measurement',
@@ -286,6 +294,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path.',
   },
   {
+    key: 'schedulingEvidence',
+    pkg: 'scheduling-evidence',
+    title: 'Scheduling evidence collector gateway',
+    mode: 'core',
+    consumers: ['tool-physical-operator', 'scheduling-evidence-rpc'],
+    note: 'Runs the Radar and AI Frontier collectors as bounded child processes, returns their stored JSON documents, and, once the owner turns Radar on, keeps the stored generation current and hands the allocator its evidence.',
+  },
+  {
     key: 'rlmStrategy',
     pkg: 'rlm-strategy',
     title: 'Node-local RLM strategy seam',
@@ -311,6 +327,23 @@ const SERVICE_ROLES: ServiceRole[] = [
     implementations: ['orchestration-local'],
     consumers: ['tool-orchestration', 'ui-orchestration'],
     note: 'Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer.',
+  },
+  {
+    key: 'orchestrationRecipients',
+    pkg: 'orchestration',
+    title: 'User-selected orchestration recipient resolver',
+    mode: 'seam',
+    implementations: ['ui-gouzi'],
+    consumers: ['tool-orchestration'],
+    note: 'Resolves the current human request to an enabled member generation and available execution entries before sealing TaskGraph admission.',
+  },
+  {
+    key: 'gouziHost',
+    pkg: 'ui-gouzi',
+    title: 'Gouzi member process host',
+    mode: 'seam',
+    consumers: ['ui-gouzi'],
+    note: 'Starts, adopts, and stops execution-member processes on the machine that runs the Server; the Desktop product provides it and the roster only consumes it.',
   },
   {
     key: 'remoteAuth',

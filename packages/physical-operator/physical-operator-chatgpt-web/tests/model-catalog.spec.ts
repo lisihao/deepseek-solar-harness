@@ -216,6 +216,16 @@ function mountPage(options: {
 interface LivePageOptions {
   readonly lockedEffort?: string
   readonly malformedLock?: string
+  readonly selectedModel?: string
+  readonly selectedEffort?: string
+  readonly effortForModel?: Readonly<Record<string, string>>
+  readonly sliderForModel?: Readonly<Record<string, boolean>>
+  readonly effortOptions?: readonly {
+    readonly id: string
+    readonly label: string
+    readonly isMax?: boolean
+    readonly requiresExplicitSelection?: boolean
+  }[]
   /** Omit the advanced view's way back to the simple view, as current ChatGPT pickers do. */
   readonly oneWayViews?: boolean
   /** Leave every slider option's `isLocked` undefined, as current ChatGPT pickers do. */
@@ -224,20 +234,28 @@ interface LivePageOptions {
 
 /** Build the September 2026 two-view native model picker with its opaque reasoning slider. */
 function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
-  const effortOptions = [
+  const effortOptions = (options.effortOptions ?? [
     { id: 'gpt-5-6:', label: '即时', isMax: false, requiresExplicitSelection: false },
     { id: 'gpt-5-6-thinking:standard', label: '中', isMax: false, requiresExplicitSelection: false },
     { id: 'gpt-5-6-thinking:extended', label: '高', isMax: false, requiresExplicitSelection: true },
     { id: 'gpt-5-6-thinking:max', label: '极高', isMax: true, requiresExplicitSelection: true },
     { id: 'gpt-6-pro:', label: 'Pro', isMax: false, requiresExplicitSelection: false },
-  ].map(option => ({
+  ]).map(option => ({
     ...option,
     isLocked: options.unsetLocks === true
       ? undefined
       : option.id === options.malformedLock ? { unexpected: true } : option.id === options.lockedEffort,
   }))
-  let selectedModel = '最新'
-  let selectedEffort = 'gpt-6-pro:'
+  let selectedModel = options.selectedModel ?? '最新'
+  const initialEffort = options.selectedEffort ?? effortOptions.at(-1)?.id
+  if (initialEffort === undefined || !effortOptions.some(option => option.id === initialEffort)) {
+    throw new Error('live fixture selected effort must be one advertised option')
+  }
+  let selectedEffort = initialEffort
+  if (!['最新', 'GPT-5.6 Sol', 'GPT-5.5'].includes(selectedModel)) {
+    throw new Error('live fixture selected model must be one advanced row')
+  }
+  const selectedEffortIndex = effortOptions.findIndex(option => option.id === selectedEffort)
   const keyboardEvents: string[] = []
   document.body.innerHTML = `<form>
     <div class="ProseMirror" contenteditable="true"><p>keep this exact private draft</p></div>
@@ -248,14 +266,14 @@ function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
       <div data-model-picker-view="simple">
         <div data-model-picker-view-toggle="true" role="menuitem" aria-label="选择模型">6 Pro</div>
         <div id="live-reasoning-owner" data-reasoning-slider="true" role="menuitem" aria-label="强度" aria-keyshortcuts="ArrowLeft ArrowRight">
-          <div role="slider" aria-hidden="true" aria-valuemin="0" aria-valuemax="4" aria-valuenow="4"></div>
+          <div role="slider" aria-hidden="true" aria-valuemin="0" aria-valuemax="${effortOptions.length - 1}" aria-valuenow="${selectedEffortIndex}"></div>
         </div>
       </div>
       <div data-model-picker-view="advanced" aria-hidden="true" inert>
         <div data-model-picker-view-toggle="true" role="menuitem" aria-label="返回">返回</div>
-        <button type="button" role="menuitemradio" aria-checked="true"><span>最新</span></button>
-        <button type="button" role="menuitemradio" aria-checked="false"><span>GPT-5.6 Sol</span></button>
-        <button type="button" role="menuitemradio" aria-checked="false"><span>GPT-5.5</span><span>即将退役</span></button>
+        <button type="button" role="menuitemradio" aria-checked="${selectedModel === '最新'}"><span>最新</span></button>
+        <button type="button" role="menuitemradio" aria-checked="${selectedModel === 'GPT-5.6 Sol'}"><span>GPT-5.6 Sol</span></button>
+        <button type="button" role="menuitemradio" aria-checked="${selectedModel === 'GPT-5.5'}"><span>GPT-5.5</span><span>即将退役</span></button>
       </div>
       <div data-model-picker-view="discarded" aria-hidden="true" inert>
         <button type="button" role="menuitemradio" aria-checked="false"><span>Hidden model</span></button>
@@ -301,6 +319,10 @@ function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
       },
     },
   })
+  const setSliderForModel = (model: string) => {
+    owner.style.display = options.sliderForModel?.[model] === false ? 'none' : ''
+  }
+  setSliderForModel(selectedModel)
   let sent = 0
   send.addEventListener('click', (event) => { sent += 1; event.preventDefault() })
   bindMenu(trigger, menu)
@@ -325,6 +347,9 @@ function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
     row.addEventListener('click', () => {
       const label = row.querySelector('span')?.textContent ?? ''
       selectedModel = label
+      setSliderForModel(selectedModel)
+      const modelEffort = options.effortForModel?.[label]
+      if (modelEffort !== undefined) setSelectedEffort(modelEffort)
       for (const candidate of advanced.querySelectorAll<HTMLElement>('[role="menuitemradio"]')) {
         candidate.setAttribute('aria-checked', String(candidate === row))
       }
@@ -337,10 +362,15 @@ function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
     const current = effortOptions.findIndex(option => option.id === selectedEffort)
     const next = current + (event.key === 'ArrowRight' ? 1 : -1)
     if (next < 0 || next >= effortOptions.length || effortOptions[next]!.isLocked) return
-    selectedEffort = effortOptions[next]!.id
-    reactProps.children.props.children.props.selectedOptionId = selectedEffort
-    slider.setAttribute('aria-valuenow', String(next))
+    setSelectedEffort(effortOptions[next]!.id)
   })
+  function setSelectedEffort(id: string): void {
+    const index = effortOptions.findIndex(option => option.id === id)
+    if (index < 0) throw new Error('live fixture model effort must be one advertised option')
+    selectedEffort = id
+    reactProps.children.props.children.props.selectedOptionId = selectedEffort
+    slider.setAttribute('aria-valuenow', String(index))
+  }
   return {
     draft,
     menu,
@@ -401,7 +431,53 @@ function discoveryOptions(): DiscoverWebModelsOptions {
   }
 }
 
+/** Return the deterministic virtual route emitted for one latest-row slider family. */
+function projectedId(row: string, family: string): string {
+  return `web-v1:${encodeURIComponent(JSON.stringify([row, family]))}`
+}
+
 describe('ChatGPT Web model catalog', () => {
+  it('rejects a late non-cooperative browser result after cancellation', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(BrowserRuntime)
+    const pending = Promise.withResolvers<BrowserRunProgramResultV1>()
+    const browser: BrowserProvider = {
+      descriptor: {
+        id: BrowserProviderId('model-catalog-late-result'),
+        layers: ['browser-js-v1'],
+        capabilities: CAPABILITIES,
+      },
+      available: () => true,
+      runProgram: async (_program: BrowserRunProgramV1, _signal?: AbortSignal) => await pending.promise,
+    }
+    ctx.browser.registerProvider(browser)
+    const controller = new AbortController()
+    const discovery = discoverWebModels(ctx, discoveryOptions(), controller.signal)
+    const cancellation = new Error('catalog deadline')
+    controller.abort(cancellation)
+    pending.resolve({
+      version: 1,
+      workspace: {
+        id: BrowserWorkspaceId('model-catalog-late-result'),
+        name: 'fixture-chatgpt-web',
+        lifecycle: 'active',
+        control: 'agent',
+      },
+      output: {
+        kind: 'json',
+        value: {
+          status: 'ok',
+          models: [{ id: 'late-model', label: 'Late model' }],
+          efforts: [],
+          observedAt: '2026-09-30T00:00:00.000Z',
+        },
+      },
+    })
+
+    await expect(discovery).rejects.toBe(cancellation)
+  })
+
   it('applies a requested model and effort on the selected page before sending', async () => {
     const page = mountPage({ selectedModel: 'gpt-2031-cascade', selectedEffort: 'deliberate' })
     page.draft.replaceChildren()
@@ -480,7 +556,7 @@ describe('ChatGPT Web model catalog', () => {
     })
     const result = await new AsyncFunction('browser', program.source)(browser)
 
-    expect(result).toEqual({ status: 'effort-selection-unavailable' })
+    expect(result).toEqual({ status: 'effort-selection-unavailable', stage: 'effort-selection-unavailable' })
     expect(page.sent()).toBe(0)
     expect(send).toBeTruthy()
     expect(page.draft.textContent).toBe('')
@@ -575,20 +651,35 @@ describe('ChatGPT Web model catalog', () => {
 
     expect(catalog).toMatchObject({
       models: [
-        { id: '最新', label: '最新' },
-        { id: 'GPT-5.6 Sol', label: 'GPT-5.6 Sol' },
-        { id: 'GPT-5.5', label: 'GPT-5.5' },
+        {
+          id: projectedId('最新', 'gpt-5-6'), label: 'GPT-5.6', featuredRank: 2,
+          reasoning: { defaultEffort: 'gpt-5-6:', efforts: [{ id: 'gpt-5-6:', label: '即时' }] },
+        },
+        {
+          id: projectedId('最新', 'gpt-5-6-thinking'), label: 'GPT-5.6 Thinking', featuredRank: 1,
+          reasoning: {
+            defaultEffort: 'gpt-5-6-thinking:standard',
+            efforts: [
+              { id: 'gpt-5-6-thinking:standard', label: '中' },
+              { id: 'gpt-5-6-thinking:extended', label: '高' },
+              { id: 'gpt-5-6-thinking:max', label: '极高' },
+            ],
+          },
+        },
+        {
+          id: projectedId('最新', 'gpt-6-pro'), label: 'GPT-6 Pro', featuredRank: 0,
+          reasoning: { defaultEffort: 'gpt-6-pro:', efforts: [{ id: 'gpt-6-pro:', label: 'Pro' }] },
+        },
+        { id: 'GPT-5.6 Sol', label: 'GPT-5.6 Sol', featuredRank: 3 },
+        { id: 'GPT-5.5', label: 'GPT-5.5', featuredRank: 4 },
       ],
       efforts: [
-        { id: 'gpt-5-6:', label: '即时' },
-        { id: 'gpt-5-6-thinking:standard', label: '中' },
-        { id: 'gpt-5-6-thinking:extended', label: '高' },
-        { id: 'gpt-5-6-thinking:max', label: '极高' },
         { id: 'gpt-6-pro:', label: 'Pro' },
       ],
-      selectedModel: '最新',
+      selectedModel: projectedId('最新', 'gpt-6-pro'),
       selectedEffort: 'gpt-6-pro:',
     })
+    expect(catalog.models.map(choice => choice.label)).not.toContain('最新')
     expect(catalog.models.map(choice => choice.label)).not.toContain('Hidden model')
     expect(catalog.models.map(choice => choice.label)).not.toContain('选择模型')
     expect(catalog.efforts.map(choice => choice.id)).not.toContain('wrong-scope')
@@ -601,6 +692,76 @@ describe('ChatGPT Web model catalog', () => {
     expect(page.menu.querySelector('[data-model-picker-view="simple"]')?.getAttribute('aria-hidden')).toBeNull()
     expect(page.menu.querySelector('[data-model-picker-view="advanced"]')?.getAttribute('aria-hidden')).toBe('true')
     expect(browser.operations.map(operation => operation.kind)).toEqual(['select-page', 'open'])
+  })
+
+  it('fails closed when a renamed latest row cannot identify multiple observed slider families', async () => {
+    const page = mountLivePage()
+    const latest = page.menu.querySelector<HTMLElement>('[data-model-picker-view="advanced"] [role="menuitemradio"] span')
+    if (latest === null) throw new Error('live fixture has no latest row label')
+    latest.textContent = 'Current model'
+    const { ctx } = await browserFixture(true)
+
+    await expect(discoverWebModels(ctx, discoveryOptions()))
+      .rejects.toThrow('could not identify one visible Latest model row')
+
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+    expect(page.menu.style.display).toBe('none')
+  })
+
+  it('waits for a delayed model trigger before applying an explicit latest and Pro selection', async () => {
+    const page = mountLivePage()
+    const form = page.modelTrigger.parentElement
+    if (form === null) throw new Error('live picker fixture has no form')
+    page.modelTrigger.remove()
+    const { ctx, browser } = await browserFixture()
+    const evaluate = browser.evaluate.bind(browser)
+    let firstEvaluation = true
+    browser.evaluate = async (pageName, evaluator, input) => {
+      if (firstEvaluation) {
+        firstEvaluation = false
+        setTimeout(() => { form.append(page.modelTrigger) }, 0)
+      }
+      return await evaluate(pageName, evaluator, input)
+    }
+
+    const catalog = await applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      timeoutMs: 1_000,
+      selection: { model: '最新', effort: 'gpt-6-pro:' },
+    })
+
+    expect(catalog.selectedModel).toBe(projectedId('最新', 'gpt-6-pro'))
+    expect(catalog.selectedEffort).toBe('gpt-6-pro:')
+    expect(page.selectedModel()).toBe('最新')
+    expect(page.selectedEffort()).toBe('gpt-6-pro:')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+    expect(page.menu.style.display).toBe('none')
+  })
+
+  it('fails closed when the ready composer has no model trigger', async () => {
+    const page = mountLivePage()
+    page.modelTrigger.remove()
+    const { ctx } = await browserFixture()
+
+    await expect(discoverWebModels(ctx, { ...discoveryOptions(), timeoutMs: 10 }))
+      .rejects.toThrow('unique visible model picker')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
+  it('fails closed when the ready composer has ambiguous model triggers', async () => {
+    const page = mountLivePage()
+    const duplicate = page.modelTrigger.cloneNode(true) as HTMLButtonElement
+    makeVisible(duplicate)
+    page.modelTrigger.parentElement?.append(duplicate)
+    const { ctx } = await browserFixture()
+
+    await expect(discoverWebModels(ctx, { ...discoveryOptions(), timeoutMs: 10 }))
+      .rejects.toThrow('unique visible model picker')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
   })
 
   it('ignores sidebar chats and projects whose titles mention models when finding the picker', async () => {
@@ -619,8 +780,8 @@ describe('ChatGPT Web model catalog', () => {
 
     const catalog = await discoverWebModels(ctx, discoveryOptions())
 
-    expect(catalog.models.map(choice => choice.label)).toEqual(['最新', 'GPT-5.6 Sol', 'GPT-5.5'])
-    expect(catalog.selectedModel).toBe('最新')
+    expect(catalog.models.map(choice => choice.label)).toEqual(['GPT-5.6', 'GPT-5.6 Thinking', 'GPT-6 Pro', 'GPT-5.6 Sol', 'GPT-5.5'])
+    expect(catalog.selectedModel).toBe(projectedId('最新', 'gpt-6-pro'))
   })
 
   it('reopens the picker to read reasoning when the page offers no way back from the advanced view', async () => {
@@ -629,8 +790,8 @@ describe('ChatGPT Web model catalog', () => {
 
     const catalog = await discoverWebModels(ctx, discoveryOptions())
 
-    expect(catalog.models.map(choice => choice.label)).toEqual(['最新', 'GPT-5.6 Sol', 'GPT-5.5'])
-    expect(catalog.efforts.map(choice => choice.label)).toEqual(['即时', '中', '高', '极高', 'Pro'])
+    expect(catalog.models.map(choice => choice.label)).toEqual(['GPT-5.6', 'GPT-5.6 Thinking', 'GPT-6 Pro', 'GPT-5.6 Sol', 'GPT-5.5'])
+    expect(catalog.efforts.map(choice => choice.label)).toEqual(['Pro'])
     expect(catalog.selectedEffort).toBe('gpt-6-pro:')
     expect(page.menu.style.display).toBe('none')
     expect(page.modelTrigger.getAttribute('aria-expanded')).toBe('false')
@@ -673,6 +834,138 @@ describe('ChatGPT Web model catalog', () => {
     expect(page.menu.querySelector('[data-model-picker-view="simple"]')?.getAttribute('aria-hidden')).toBeNull()
   })
 
+  it('projects and selects an unknown latest-slider family without a source allowlist', async () => {
+    const page = mountLivePage({
+      effortOptions: [
+        { id: 'future/lattice-9:quick', label: 'Quick' },
+        { id: 'future/lattice-9:deep', label: 'Deep', requiresExplicitSelection: true },
+        { id: 'gpt-6-pro:', label: 'Pro' },
+      ],
+      selectedEffort: 'gpt-6-pro:',
+    })
+    const { ctx } = await browserFixture(true)
+
+    const observed = await discoverWebModels(ctx, discoveryOptions())
+    const future = observed.models.find(choice => choice.id === projectedId('最新', 'future/lattice-9'))
+
+    expect(future).toEqual({
+      id: projectedId('最新', 'future/lattice-9'),
+      label: 'future/lattice-9',
+      reasoning: {
+        efforts: [
+          { id: 'future/lattice-9:quick', label: 'Quick' },
+          { id: 'future/lattice-9:deep', label: 'Deep' },
+        ],
+        defaultEffort: 'future/lattice-9:quick',
+      },
+      featuredRank: 1,
+    })
+
+    const defaulted = await applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      selection: { model: future!.id },
+    })
+    expect(defaulted.selectedModel).toBe(future!.id)
+    expect(defaulted.selectedEffort).toBe('future/lattice-9:quick')
+    expect(page.selectedModel()).toBe('最新')
+    expect(page.selectedEffort()).toBe('future/lattice-9:quick')
+
+    const selected = await applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      selection: { model: future!.id, effort: 'future/lattice-9:deep' },
+    })
+    expect(selected.selectedModel).toBe(future!.id)
+    expect(selected.selectedEffort).toBe('future/lattice-9:deep')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
+  it('restores a legacy selection and its effort after temporarily inspecting latest-slider families', async () => {
+    const page = mountLivePage({
+      selectedModel: 'GPT-5.6 Sol',
+      selectedEffort: 'gpt-5-6-thinking:extended',
+      effortForModel: {
+        最新: 'gpt-6-pro:',
+        'GPT-5.6 Sol': 'gpt-5-6-thinking:extended',
+      },
+    })
+    const { ctx } = await browserFixture(true)
+
+    const catalog = await discoverWebModels(ctx, discoveryOptions())
+
+    expect(catalog.models.some(choice => choice.id === projectedId('最新', 'gpt-6-pro'))).toBe(true)
+    expect(catalog.selectedModel).toBe('GPT-5.6 Sol')
+    expect(catalog.selectedEffort).toBe('gpt-5-6-thinking:extended')
+    expect(page.selectedModel()).toBe('GPT-5.6 Sol')
+    expect(page.selectedEffort()).toBe('gpt-5-6-thinking:extended')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
+  it('projects latest slider families when a selected legacy row has no slider, then restores that row', async () => {
+    const page = mountLivePage({
+      selectedModel: 'GPT-5.6 Sol',
+      sliderForModel: { 'GPT-5.6 Sol': false, 最新: true },
+    })
+    const { ctx } = await browserFixture(true)
+
+    const catalog = await discoverWebModels(ctx, discoveryOptions())
+
+    expect(catalog.models.map(choice => choice.label)).toEqual(['GPT-5.6', 'GPT-5.6 Thinking', 'GPT-6 Pro', 'GPT-5.6 Sol', 'GPT-5.5'])
+    expect(catalog.selectedModel).toBe('GPT-5.6 Sol')
+    expect(catalog.efforts).toEqual([])
+    expect(catalog.selectedEffort).toBeUndefined()
+    expect(page.selectedModel()).toBe('GPT-5.6 Sol')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
+  it('restores the legacy controls before rejecting a malformed latest slider observation', async () => {
+    const page = mountLivePage({
+      selectedModel: 'GPT-5.6 Sol',
+      selectedEffort: 'gpt-5-6-thinking:extended',
+      malformedLock: 'gpt-6-pro:',
+      effortForModel: {
+        最新: 'gpt-6-pro:',
+        'GPT-5.6 Sol': 'gpt-5-6-thinking:extended',
+      },
+    })
+    const { ctx } = await browserFixture(true)
+
+    await expect(discoverWebModels(ctx, discoveryOptions()))
+      .rejects.toThrow('could not read unambiguous visible reasoning choices')
+
+    expect(page.selectedModel()).toBe('GPT-5.6 Sol')
+    expect(page.selectedEffort()).toBe('gpt-5-6-thinking:extended')
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
+  it('rejects malformed, removed, and cross-family projected routes without selecting another family', async () => {
+    const page = mountLivePage()
+    const { ctx } = await browserFixture(true)
+    const pro = projectedId('最新', 'gpt-6-pro')
+
+    await expect(applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      selection: { model: 'web-v1:not-json' },
+    })).rejects.toThrow('exact advertised model')
+    await expect(applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      selection: { model: pro, effort: 'gpt-5-6-thinking:extended' },
+    })).rejects.toThrow('exact advertised effort')
+    await expect(applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      selection: { model: projectedId('最新', 'removed/future'), effort: 'removed/future:deep' },
+    })).rejects.toThrow('exact advertised effort')
+
+    expect(page.selectedModel()).toBe('最新')
+    expect(page.selectedEffort()).toBe('gpt-6-pro:')
+    expect(page.keyboardEvents()).toEqual([])
+    expect(page.draft.textContent).toBe('keep this exact private draft')
+    expect(page.sent()).toBe(0)
+  })
+
   it('fails a locked opaque reasoning choice before the generated web task can fill or send', async () => {
     const page = mountLivePage({ lockedEffort: 'gpt-5-6-thinking:extended' })
     const { ctx } = await browserFixture()
@@ -704,7 +997,7 @@ describe('ChatGPT Web model catalog', () => {
     })
     const result = await new AsyncFunction('browser', program.source)(browser)
 
-    expect(result).toEqual({ status: 'effort-selection-unavailable' })
+    expect(result).toEqual({ status: 'effort-selection-unavailable', stage: 'effort-selection-unavailable' })
     expect(page.selectedEffort()).toBe('gpt-6-pro:')
     expect(page.keyboardEvents()).toEqual([])
     expect(page.draft.textContent).toBe('')

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Workspace umbrella for runnable demos and example-owned test compositions: declares their cordis.yml packages so plain Node resolves real exports→lib. Not a build target.",
+  "description": "Workspace umbrella for runnable demos and example-owned test compositions: declares their cordis.yml packages so plain Node resolves real exports\u2192lib. Not a build target.",
   "dependencies": {
     "@deepseek-ai/cordis-plugin-hmr": "workspace:*",
     "@deepseek-ai/cordis-plugin-include": "workspace:*",
@@ -19,6 +19,7 @@
     "@deepseek-ai/dsh-shell-env": "workspace:*",
     "@deepseek-ai/dsh-bash-local": "workspace:*",
     "@deepseek-ai/dsh-bash-sandbox": "workspace:*",
+    "@deepseek-ai/dsh-client-connection": "workspace:*",
     "@deepseek-ai/dsh-code-runtime-worker-thread": "workspace:*",
     "@deepseek-ai/dsh-command-feedback": "workspace:*",
     "@deepseek-ai/dsh-command-goal": "workspace:*",
@@ -128,6 +129,10 @@
     "@deepseek-ai/dsh-browser": "workspace:*",
     "@deepseek-ai/dsh-physical-operator-chatgpt-web": "workspace:*",
     "@deepseek-ai/dsh-model-allocation-local": "workspace:*",
-    "jsdom": "29.1.1"
+    "jsdom": "29.1.1",
+    "@deepseek-ai/dsh-orchestration-local": "workspace:*",
+    "@deepseek-ai/dsh-tool-orchestration": "workspace:*",
+    "@deepseek-ai/dsh-ui-gouzi": "workspace:*",
+    "@deepseek-ai/dsh-host-webserver": "workspace:*"
   }
 }

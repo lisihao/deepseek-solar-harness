@@ -1,6 +1,6 @@
 /** Local resident-operatord JSON-RPC server and lifecycle authority. @module @deepseek-ai/dsh-resident-operator-local/daemon */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
@@ -11,6 +11,8 @@ import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-p
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorGenerationLimits,
+  PhysicalOperatorGovernedWorkspacePolicy,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorReasoningEffort,
@@ -21,6 +23,7 @@ import {
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
   type NativeContext,
+  type ResidentProviderQueryOptions,
   type ResidentProviderStatus,
   type ResidentProductDriver,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -30,9 +33,14 @@ import {
   CodexResidentDriver,
 } from './drivers.ts'
 import { residentDriverManifestSha256 } from './driver-modules.ts'
-import { validateResidentModelToolBridge } from './model-tool-bridge.ts'
-import { wireFailure, wireSuccess } from './protocol.ts'
-import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
+import { validateResidentModelToolBridge, verifyModelToolBridgeReady } from './model-tool-bridge.ts'
+import { decodeGenerationLimits, decodeGovernedWorkspacePolicy, wireFailure, wireSuccess } from './protocol.ts'
+import {
+  canonicalCompactRequestHash,
+  canonicalNativeToolCatalogHash,
+  canonicalRequestHash,
+  ResidentStore,
+} from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
 /** Public protocol-v14 method set advertised by daemon handshake. */
@@ -45,6 +53,7 @@ export const RESIDENT_METHODS = Object.freeze([
   'session.inspect',
   'turn.execute',
   'turn.inspect',
+  'command.inspect',
   'turn.interrupt',
   'turn.resolve_indeterminate',
   'session.compact',
@@ -52,7 +61,12 @@ export const RESIDENT_METHODS = Object.freeze([
   'event.read',
 ] as const)
 
+interface BridgeAttachment {
+  descriptor: PhysicalOperatorModelToolBridgeV1 | undefined
+}
+
 interface ActiveTurn {
+  readonly bridgeAttachment: BridgeAttachment
   readonly commandId: string
   readonly controller: AbortController
   readonly done: Promise<void>
@@ -61,6 +75,12 @@ interface ActiveTurn {
 interface ActiveCompaction {
   readonly controller: AbortController
   readonly done: Promise<unknown>
+}
+
+interface PendingQualification {
+  readonly refreshModels: boolean
+  readonly token: object
+  readonly promise: Promise<ResidentProviderStatus>
 }
 
 /** Construction inputs for one independent local daemon. */
@@ -145,6 +165,15 @@ function integerParam(params: Record<string, unknown>, name: string): number {
     throw new ResidentOperatorError(`resident protocol requires non-negative integer ${name}`, 'INVALID_RESULT')
   }
   return Number(value)
+}
+
+function refreshModelsParam(params: Record<string, unknown>): boolean {
+  const value = params.refresh_models
+  if (value === undefined) return false
+  if (typeof value !== 'boolean') {
+    throw new ResidentOperatorError('resident protocol refresh_models must be a boolean', 'INVALID_RESULT')
+  }
+  return value
 }
 
 function promptParam(params: Record<string, unknown>): ContentBlock[] {
@@ -286,7 +315,7 @@ export class ResidentDaemon {
   private readonly sockets = new Set<Socket>()
   private readonly active = new Map<string, ActiveTurn>()
   private readonly activeCompactions = new Map<string, ActiveCompaction>()
-  private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
+  private readonly qualifications = new Map<string, PendingQualification>()
   private readonly authentications = new Map<string, Promise<ResidentProviderStatus>>()
   private authorityOwned = false
   private closing = false
@@ -413,7 +442,9 @@ export class ResidentDaemon {
       case 'system.handshake':
         return this.handshake(params)
       case 'operator.list': {
-        const providers = await this.providerStatuses()
+        const providers = await this.providerStatuses(
+          refreshModelsParam(params) ? { refreshModels: true } : undefined,
+        )
         return { providers, sessions: this.store.list() }
       }
       case 'operator.authenticate':
@@ -424,6 +455,8 @@ export class ResidentDaemon {
         return this.store.inspectSession(stringParam(params, 'session_id'))
       case 'turn.execute':
         return this.execute(params)
+      case 'command.inspect':
+        return this.store.inspectCommand(ResidentOperatorCommandId(stringParam(params, 'command_id'))) ?? null
       case 'turn.inspect':
         return this.store.inspectTurn(stringParam(params, 'turn_id'))
       case 'turn.interrupt': {
@@ -511,22 +544,43 @@ export class ResidentDaemon {
     }
   }
 
-  private providerStatuses(): Promise<ResidentProviderStatus[]> {
-    return Promise.all([...this.drivers.values()].map(driver => this.qualify(driver)))
+  private providerStatuses(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]> {
+    return Promise.all([...this.drivers.values()].map(driver => this.qualify(driver, options)))
   }
 
-  private qualify(driver: ResidentProductDriver): Promise<ResidentProviderStatus> {
+  private qualify(
+    driver: ResidentProductDriver,
+    options?: ResidentProviderQueryOptions,
+  ): Promise<ResidentProviderStatus> {
+    const refreshModels = options?.refreshModels === true
     const current = this.qualifications.get(driver.operatorId)
-    if (current !== undefined) return current
-    const pending = driver.qualify().then(status => ({
+    if (current === undefined) return this.startQualification(driver, refreshModels)
+    if (!refreshModels || current.refreshModels) return current.promise
+    return this.startQualification(driver, true, current.promise)
+  }
+
+  private startQualification(
+    driver: ResidentProductDriver,
+    refreshModels: boolean,
+    after?: Promise<ResidentProviderStatus>,
+  ): Promise<ResidentProviderStatus> {
+    const options = refreshModels ? { refreshModels: true } : undefined
+    const qualification = after === undefined
+      ? driver.qualify(options)
+      : after.then(
+        () => driver.qualify(options),
+        () => driver.qualify(options),
+      )
+    const token = {}
+    const pending = qualification.then(status => ({
       ...status,
       supportsExplicitAuthentication: driver.authenticate !== undefined,
     })).finally(() => {
-      if (this.qualifications.get(driver.operatorId) === pending) {
+      if (this.qualifications.get(driver.operatorId)?.token === token) {
         this.qualifications.delete(driver.operatorId)
       }
     })
-    this.qualifications.set(driver.operatorId, pending)
+    this.qualifications.set(driver.operatorId, { refreshModels, token, promise: pending })
     return pending
   }
 
@@ -584,8 +638,19 @@ export class ResidentDaemon {
     const nativeContext = nativeContextParam(params)
     const requestedProfile = profileParam(params)
     const nativeToolPolicy = nativeToolPolicyParam(params)
+    const generationLimits = decodeGenerationLimits(params.generation_limits)
+    const governedWorkspacePolicy = decodeGovernedWorkspacePolicy(params.governed_workspace_policy)
+    if (governedWorkspacePolicy !== undefined && nativeToolPolicy !== 'dsh-tools-authoritative') {
+      throw new ResidentOperatorError('Governed workspace execution requires DSH-authoritative tools', 'INVALID_REQUEST')
+    }
+    const bridgeAdmissionTimeoutMs = params.bridge_admission_timeout_ms === undefined
+      ? undefined
+      : integerParam(params, 'bridge_admission_timeout_ms')
+    if (bridgeAdmissionTimeoutMs !== undefined && (bridgeAdmissionTimeoutMs < 1 || bridgeAdmissionTimeoutMs > 60_000)) {
+      throw new ResidentOperatorError('bridge admission timeout must be between 1 and 60000 milliseconds', 'INVALID_RESULT')
+    }
     const modelToolBridge = validateResidentModelToolBridge(modelToolBridgeParam(params), nativeToolPolicy)
-    if (nativeToolPolicy === 'dsh-tools-authoritative' && modelToolBridge === undefined) {
+    if (nativeToolPolicy === 'dsh-tools-authoritative' && modelToolBridge === undefined && governedWorkspacePolicy === undefined) {
       throw new ResidentOperatorError('a DSH-tool-authoritative resident turn requires a model tool bridge', 'INVALID_RESULT')
     }
     const supersedesCommandId = params.supersedes_command_id === undefined
@@ -598,19 +663,32 @@ export class ResidentDaemon {
     if (driver === undefined) {
       throw new ResidentOperatorError(`no resident provider for ${operatorId}`, 'SESSION_UNAVAILABLE')
     }
-    const qualification = await this.qualify(driver)
-    if (!qualification.available || qualification.authentication !== 'native-subscription') {
+    const modelOnly = operatorId === 'codex' && (nativeToolPolicy === 'disabled' || governedWorkspacePolicy !== undefined)
+    const qualification = modelOnly ? {
+      kind: 'model-only' as const,
+      profile: (() => {
+        const model = requestedProfile?.model
+        if (model === undefined || model.trim().length === 0) {
+          throw new ResidentOperatorError('Direct Codex execution requires an explicitly resolved profile.model', 'EXECUTION_PROFILE_UNSUPPORTED')
+        }
+        return { model, ...requestedProfile?.effort === undefined ? {} : { effort: requestedProfile.effort } }
+      })(),
+    } : { kind: 'native' as const, status: await this.qualify(driver) }
+    if (qualification.kind === 'native' && (!qualification.status.available || qualification.status.authentication !== 'native-subscription')) {
       throw new ResidentOperatorError(
-        qualification.unavailableReason ?? `${operatorId} has no qualified subscription`,
-        unavailableProviderCode(qualification),
+        qualification.status.unavailableReason ?? `${operatorId} has no qualified subscription`,
+        unavailableProviderCode(qualification.status),
       )
     }
     const locked = this.store.lockedProfile(operatorId, workspace, laneId)
-    const resolved = locked !== undefined && requestedProfile === undefined
+    const resolved = qualification.kind === 'model-only' ? {
+      profile: qualification.profile,
+      source: 'manual' as const,
+    } : locked !== undefined && requestedProfile === undefined
       ? locked
       : resolveResidentExecutionProfile(
         driver.operatorId,
-        qualification.models,
+        qualification.status.models,
         prompt,
         locked === undefined || requestedProfile === undefined
           ? requestedProfile
@@ -621,7 +699,7 @@ export class ResidentDaemon {
               : { effort: requestedProfile.effort ?? locked.profile.effort },
           },
       )
-    const requestHash = canonicalRequestHash(
+    const nativeRequestHash = canonicalRequestHash(
       operatorId,
       workspace,
       prompt,
@@ -633,6 +711,12 @@ export class ResidentDaemon {
       nativeToolPolicy,
       nativeContext,
     )
+    const requestHash = generationLimits === undefined && governedWorkspacePolicy === undefined
+      ? nativeRequestHash
+      : createHash('sha256').update(JSON.stringify({ nativeRequestHash, generationLimits, governedWorkspacePolicy })).digest('hex')
+    const nativeToolCatalogSha256 = operatorId === 'codex'
+      ? canonicalNativeToolCatalogHash(nativeToolPolicy, modelToolBridge)
+      : undefined
     const accepted = this.store.accept(
       commandId,
       requestHash,
@@ -643,8 +727,28 @@ export class ResidentDaemon {
       supersedesCommandId,
       taskLabel,
       laneId,
+      nativeToolPolicy,
+      modelToolBridge,
+      {
+        workspace,
+        prompt,
+        ...systemPrompt === undefined ? {} : { systemPrompt },
+        ...nativeContext === undefined ? {} : { nativeContext },
+        nativeToolPolicy,
+      },
     )
-    if (accepted.state === 'accepted' && !this.active.has(accepted.turnId)) {
+    const existing = this.active.get(accepted.turnId)
+    if (existing !== undefined && modelToolBridge !== undefined
+      && existing.bridgeAttachment.descriptor?.socketPath !== modelToolBridge.socketPath) {
+      if (nativeToolPolicy === 'dsh-tools-authoritative') {
+        await verifyModelToolBridgeReady(modelToolBridge, bridgeAdmissionTimeoutMs === undefined
+          ? existing.controller.signal
+          : AbortSignal.any([existing.controller.signal, AbortSignal.timeout(bridgeAdmissionTimeoutMs)]))
+      }
+      existing.bridgeAttachment.descriptor = modelToolBridge
+    }
+    if (accepted.state === 'accepted' && existing === undefined) {
+      const bridgeAttachment = { descriptor: modelToolBridge }
       const controller = new AbortController()
       const done = this.runDriver(
         driver,
@@ -654,11 +758,15 @@ export class ResidentDaemon {
         prompt,
         systemPrompt,
         resolved.profile,
-        modelToolBridge,
+        bridgeAttachment,
         nativeToolPolicy,
+        nativeToolCatalogSha256,
+        bridgeAdmissionTimeoutMs,
+        generationLimits,
+        governedWorkspacePolicy,
         controller,
       )
-      this.active.set(accepted.turnId, { commandId, controller, done })
+      this.active.set(accepted.turnId, { commandId, controller, done, bridgeAttachment })
       void done.finally(() => { this.active.delete(accepted.turnId) })
     }
     return accepted
@@ -747,8 +855,12 @@ export class ResidentDaemon {
     prompt: ContentBlock[],
     systemPrompt: string | undefined,
     profile: Parameters<ResidentProductDriver['execute']>[0]['profile'],
-    modelToolBridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+    bridgeAttachment: BridgeAttachment,
     nativeToolPolicy: PhysicalOperatorNativeToolPolicy,
+    nativeToolCatalogSha256: string | undefined,
+    bridgeAdmissionTimeoutMs: number | undefined,
+    generationLimits: PhysicalOperatorGenerationLimits | undefined,
+    governedWorkspacePolicy: PhysicalOperatorGovernedWorkspacePolicy | undefined,
     controller: AbortController,
   ): Promise<void> {
     const heartbeat = setInterval(
@@ -765,12 +877,17 @@ export class ResidentDaemon {
         prompt,
         ...systemPrompt === undefined ? {} : { systemPrompt },
         profile,
-        ...modelToolBridge === undefined ? {} : { modelToolBridge },
+        get modelToolBridge() { return bridgeAttachment.descriptor },
+        ...bridgeAdmissionTimeoutMs === undefined ? {} : { modelToolBridgeAdmissionTimeoutMs: bridgeAdmissionTimeoutMs },
         nativeToolPolicy,
+        ...generationLimits === undefined ? {} : { generationLimits },
+        ...governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy },
+        ...driver.operatorId === 'codex' && (nativeToolPolicy === 'disabled' || governedWorkspacePolicy !== undefined)
+          ? { governedToolRoot: join(this.options.root, 'model-tools') } : {},
         ...nativeSessionId === undefined ? {} : { nativeSessionId },
         signal: controller.signal,
         onRunning: (nativeSessionId, nativeTurnId) => {
-          this.store.markRunning(commandId, nativeSessionId, nativeTurnId)
+          this.store.markRunning(commandId, nativeSessionId, nativeTurnId, nativeToolCatalogSha256)
         },
         onProgress: (phase) => {
           this.store.progress(commandId, phase)
@@ -779,17 +896,18 @@ export class ResidentDaemon {
           this.store.observe(commandId, observation)
         },
       })
-      this.store.markRunning(commandId, result.nativeSessionId)
+      if (result.nativeSessionId !== undefined) {
+        this.store.markRunning(commandId, result.nativeSessionId, undefined, nativeToolCatalogSha256)
+      }
       this.store.settle(commandId, result)
     } catch (error) {
       const aborted = controller.signal.aborted
       const normalized = normalizeResidentDriverError(error, aborted)
-      this.store.fail(
-        commandId,
-        normalized.code,
-        safeDiagnostic(normalized.message, prompt),
-        aborted ? 'aborted' : 'error',
-      )
+      if (normalized.code === 'COMMAND_INDETERMINATE') {
+        this.store.markTurnIndeterminate(commandId, safeDiagnostic(normalized.message, prompt))
+      } else {
+        this.store.fail(commandId, normalized.code, safeDiagnostic(normalized.message, prompt), aborted ? 'aborted' : 'error')
+      }
     } finally {
       clearInterval(heartbeat)
     }

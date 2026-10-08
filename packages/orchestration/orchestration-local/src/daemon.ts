@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime from '@deepseek-ai/dsh-browser'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
@@ -66,11 +67,21 @@ import LocalRlmRuntime from '@deepseek-ai/dsh-rlm-runtime-local'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
+  GouziAuthorityEpoch,
+  GouziHostId,
+  GouziId,
+  type GouziControl,
+  type GouziMemberView,
+  GouziOwnerId,
   OrchestrationArtifactRef,
   OrchestrationError,
   OrchestrationRunId,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
+  type GouziAvatarId,
+  type GouziMembership,
+  type GouziRole,
+  type LogicalTaskGraphV1,
   type NodeExecutionPlanV1,
   type OrchestrationBlocker,
   type OrchestrationAdmissionTraceV1,
@@ -133,7 +144,9 @@ import {
   type OrchestrationClusterConfig,
   type OrchestrationClusterPeerTransport,
 } from './cluster.ts'
+import { verificationVerdictFailure } from './verification-verdict.ts'
 import { GitWorktreeManager } from './git-worktrees.ts'
+import { WorkspaceSnapshotManager, type WorkspaceSnapshot } from './workspace-snapshot.ts'
 import { dependsTransitively, graphCertificate, nodesConflict, validateGraph } from './graph.ts'
 import {
   BasicContextCompiler,
@@ -146,6 +159,7 @@ import {
   createRemotePhysicalOperators,
   type RemotePhysicalOperatorServer,
 } from './remote-physical-operator.ts'
+import { gouziOperatorServer } from './gouzi-operator.ts'
 import { readRemoteOperatorCatalog } from './remote-operators.ts'
 import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,
@@ -155,7 +169,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 5
+export const ORCHESTRATION_PROTOCOL_VERSION = 7
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -176,6 +190,14 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'cluster.heartbeat',
   'cluster.export',
   'cluster.install',
+  'gouzi.list',
+  'gouzi.execution_operators',
+  'gouzi.pair_host',
+  'gouzi.create',
+  'gouzi.edit',
+  'gouzi.set_membership',
+  'gouzi.set_endpoint',
+  'gouzi.archive',
 ] as const)
 
 /**
@@ -602,6 +624,14 @@ function requiredString(params: Record<string, unknown>, name: string): string {
   return value
 }
 
+function requiredRecord(params: Record<string, unknown>, name: string): Record<string, unknown> {
+  const value = params[name]
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new OrchestrationError(`protocol requires ${name}`, 'GRAPH_INVALID')
+  }
+  return value as Record<string, unknown>
+}
+
 function requiredInteger(params: Record<string, unknown>, name: string): number {
   const value = params[name]
   if (!Number.isSafeInteger(value) || Number(value) < 0) throw new OrchestrationError(`protocol requires non-negative ${name}`, 'GRAPH_INVALID')
@@ -879,7 +909,8 @@ function promptFromPlan(
       '',
       context.task,
       '',
-      `Workspace: ${context.workspace}`,
+      `Sender workspace: ${context.workspace}`,
+      'Use the executor current working directory for filesystem operations. A remote executor materializes the same repository and commit at its own path; the sender workspace is not a directory on that host. Resolve the listed relative scopes against the executor working directory.',
       `Read scopes: ${node.readScopes.join(', ') || 'none'}`,
       `Write scopes: ${node.writeScopes.join(', ') || 'none'}`,
       `Acceptance: ${node.acceptance.map(value => value.description).join('; ') || 'operator completion'}`,
@@ -932,6 +963,49 @@ function taskGraphContextEnvelope(
       contextPacketRef: String(plan.contextPacketRef),
     },
   })
+}
+
+/** Validate collaboration trace fields at the daemon JSON ingress without discarding them. */
+function validateAdmissionWire(value: unknown): asserts value is OrchestrationAdmissionTraceV1 | undefined {
+  if (value === undefined) return
+  const fail = (): never => { throw new OrchestrationError('orchestration admission is invalid', 'GRAPH_INVALID') }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail()
+  const admission = value as Record<string, unknown>
+  if (!['auto', 'direct', 'codex', 'claude-code'].includes(String(admission.policy))
+    || admission.route !== 'taskgraph' || typeof admission.sourceSessionId !== 'string'
+    || admission.sourceSessionId.trim().length === 0) fail()
+  const choices: Record<string, readonly string[]> = {
+    rlm: ['auto', 'enabled', 'disabled'], autonomous: ['auto', 'enabled', 'disabled'],
+    continualHarness: ['auto', 'off', 'session', 'workspace', 'global'],
+    optimization: ['balanced', 'quality', 'speed', 'economy'],
+    plannerVerifierPreference: ['codex-sol', 'claude-frontier', 'best-high-tier'],
+    executionPreference: ['luna-first', 'claude-sonnet', 'balanced'],
+  }
+  for (const [key, allowed] of Object.entries(choices)) {
+    if (admission[key] !== undefined && (typeof admission[key] !== 'string' || !allowed.includes(admission[key]))) fail()
+  }
+  const runtime = admission.runtimeContext
+  if (runtime !== undefined) {
+    if (runtime === null || typeof runtime !== 'object' || Array.isArray(runtime)) fail()
+    const fields = runtime as Record<string, unknown>
+    if (fields.version !== 1 || typeof fields.sourceSessionId !== 'string'
+      || typeof fields.contextSnapshotMessageId !== 'string' || !Array.isArray(fields.sections)) fail()
+    for (const section of fields.sections as unknown[]) {
+      if (section === null || typeof section !== 'object' || Array.isArray(section)) fail()
+      const fields = section as Record<string, unknown>
+      if (typeof fields.name !== 'string' || typeof fields.text !== 'string') fail()
+    }
+  }
+  const recipient = admission.gouziRecipient
+  if (recipient !== undefined) {
+    if (recipient === null || typeof recipient !== 'object' || Array.isArray(recipient)) fail()
+    const fields = recipient as Record<string, unknown>
+    if (typeof fields.gouziId !== 'string' || fields.gouziId.trim() !== fields.gouziId || fields.gouziId.length === 0
+      || !Number.isSafeInteger(fields.generation) || Number(fields.generation) < 1
+      || !Array.isArray(fields.operatorIds) || fields.operatorIds.length === 0
+      || fields.operatorIds.some(id => typeof id !== 'string' || id.length === 0 || id.trim() !== id)
+      || new Set(fields.operatorIds).size !== fields.operatorIds.length) fail()
+  }
 }
 
 /** Reject a session strategy that would silently promote Standard to RLM. */
@@ -1159,9 +1233,13 @@ export class OrchestrationDaemon {
   private readonly rlmProgressSources = new Map<string, PhysicalProgressSource[]>()
   private readonly remoteOperatorRegistrations = new Map<string, {
     readonly signature: string
+    readonly member?: GouziMemberView
+    readonly operatorIds: readonly string[]
     readonly dispose: readonly (() => Promise<void>)[]
   }>()
   private remoteOperatorRefreshAt = 0
+  /** Operator id of each attempt's sealed plan; an attempt's plan never changes, so it is read once. */
+  private readonly attemptOperators = new Map<string, string>()
   private clusterActionAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
@@ -1333,7 +1411,12 @@ export class OrchestrationDaemon {
   private async dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
       case 'system.handshake': return this.handshake(params)
-      case 'orchestration.compile': this.requireClusterLeader(); return this.compile(params.request as never)
+      case 'orchestration.compile': {
+        this.requireClusterLeader()
+        const request = params.request as Parameters<Context['orchestrations']['compile']>[0]
+        validateAdmissionWire((params.request as { readonly admission?: unknown } | undefined)?.admission)
+        return this.compile(request)
+      }
       case 'orchestration.start': {
         this.requireClusterLeader()
         return this.startRun({
@@ -1362,6 +1445,60 @@ export class OrchestrationDaemon {
       case 'cluster.heartbeat': return this.expectCluster().heartbeat(params.request as OrchestrationClusterHeartbeatRequest)
       case 'cluster.export': this.requireClusterLeader(); return this.store.exportClusterReplica()
       case 'cluster.install': return this.installClusterReplica(params.request as OrchestrationClusterInstallRequest)
+      case 'gouzi.execution_operators': return this.gouziExecutionOperators()
+      case 'gouzi.list': return { hosts: this.store.gouzi.listHosts(), members: this.store.gouzi.list() }
+      case 'gouzi.pair_host': {
+        this.requireClusterLeader()
+        const host = requiredRecord(params, 'host')
+        return this.store.gouzi.pairHost({
+          hostId: GouziHostId(requiredString(host, 'host_id')),
+          label: requiredString(host, 'label'),
+          authorityEpoch: GouziAuthorityEpoch(requiredString(host, 'authority_epoch')),
+          credentialRef: requiredString(host, 'credential_ref'),
+        })
+      }
+      case 'gouzi.create': {
+        this.requireClusterLeader()
+        const member = requiredRecord(params, 'member')
+        return this.store.gouzi.create({
+          gouziId: GouziId(requiredString(member, 'gouzi_id')),
+          ownerId: GouziOwnerId(requiredString(member, 'owner_id')),
+          hostId: GouziHostId(requiredString(member, 'host_id')),
+          name: requiredString(member, 'name'),
+          avatarId: requiredString(member, 'avatar_id') as GouziAvatarId,
+          role: requiredString(member, 'role') as GouziRole,
+          grantDeadlineMs: requiredInteger(member, 'grant_deadline_ms'),
+        })
+      }
+      case 'gouzi.edit': {
+        this.requireClusterLeader()
+        const edit = requiredRecord(params, 'edit')
+        return this.store.gouzi.edit(GouziId(requiredString(params, 'gouzi_id')), {
+          ...edit.name === undefined ? {} : { name: requiredString(edit, 'name') },
+          ...edit.avatar_id === undefined ? {} : { avatarId: requiredString(edit, 'avatar_id') as GouziAvatarId },
+          ...edit.role === undefined ? {} : { role: requiredString(edit, 'role') as GouziRole },
+        })
+      }
+      case 'gouzi.set_membership': {
+        this.requireClusterLeader()
+        return this.store.gouzi.setMembership(
+          GouziId(requiredString(params, 'gouzi_id')),
+          requiredString(params, 'membership') as Exclude<GouziMembership, 'archived'>,
+        )
+      }
+      case 'gouzi.set_endpoint': {
+        this.requireClusterLeader()
+        return this.store.gouzi.setEndpoint(GouziId(requiredString(params, 'gouzi_id')), requiredString(params, 'endpoint'))
+      }
+      case 'gouzi.archive': {
+        this.requireClusterLeader()
+        const evidence = requiredRecord(params, 'evidence')
+        return this.store.gouzi.archive(GouziId(requiredString(params, 'gouzi_id')), {
+          credentialsRevoked: evidence.credentials_revoked === true,
+          workSettled: evidence.work_settled === true,
+          processTreeStopped: evidence.process_tree_stopped === true,
+        })
+      }
       case 'system.shutdown':
         setTimeout(() => { void this.close() }, 10)
         return { draining: true }
@@ -1396,18 +1533,75 @@ export class OrchestrationDaemon {
     }
   }
 
+  private async validateGouziRecipient(
+    admission: OrchestrationAdmissionTraceV1 | undefined,
+    graph: LogicalTaskGraphV1,
+  ): Promise<void> {
+    const recipient = admission?.gouziRecipient
+    if (recipient === undefined) return
+    for (const node of graph.nodes) {
+      const preferred = node.operator?.preferredIds
+      if (!Array.isArray(preferred) || preferred.length === 0
+        || preferred.some((id: string) => !recipient.operatorIds.includes(PhysicalOperatorId(id)))
+        || (node.operator?.fallbackIds?.length ?? 0) !== 0) {
+        throw new OrchestrationError(`node ${node.id} must use only the selected Gouzi execution entries without fallback`, 'GRAPH_INVALID')
+      }
+      if ((node.rlm?.mode ?? admission?.rlm ?? 'auto') !== 'disabled'
+        || (node.autonomous?.mode ?? admission?.autonomous ?? 'disabled') !== 'disabled') {
+        throw new OrchestrationError(
+          'fixed Gouzi recipients currently support Standard execution with RLM and Autonomous disabled only',
+          'GRAPH_INVALID',
+        )
+      }
+    }
+    const entries = await this.gouziExecutionOperators()
+    const member = entries.find(value => value.gouziId === recipient.gouziId && value.generation === recipient.generation)
+    if (member === undefined || !member.projectScopes.includes(graph.workspace)
+      || recipient.operatorIds.some(id => !member.operators.some(operator => operator.operatorId === id && operator.available))) {
+      throw new OrchestrationError('selected Gouzi generation or execution entry is unavailable', 'RUN_STATE_CONFLICT')
+    }
+  }
+
+  private workspaceSnapshots(graph: LogicalTaskGraphV1): WorkspaceSnapshotManager {
+    if (graph.workspaceSnapshotLimits === undefined) throw new OrchestrationError('directory snapshot limits are missing', 'GRAPH_INVALID')
+    return new WorkspaceSnapshotManager({ ownedRoot: join(this.options.root, 'workspace-snapshots'), ...graph.workspaceSnapshotLimits })
+  }
+
   private async compile(request: Parameters<Context['orchestrations']['compile']>[0]): Promise<OrchestrationCompilationV1> {
     validateGraph(request.graph)
     validateAdmissionRuntimeContext(request.admission)
     validateAdmissionStrategy(request.admission)
-    const workspace = await realpath(request.graph.workspace).catch(() => {
+    await this.validateGouziRecipient(request.admission, request.graph)
+    const selectedMember = request.admission?.gouziRecipient === undefined ? undefined
+      : this.store.gouzi.read(request.admission.gouziRecipient.gouziId)
+    const remoteRead = selectedMember !== undefined && String(selectedMember.hostId) !== 'local'
+      && request.graph.nodes.every(node => node.writeScopes.length === 0 && node.effectBudget.write.length === 0)
+      && (request.graph.workspaceIsolation === undefined || request.graph.workspaceIsolation === 'shared')
+    // The authenticated member catalog has already verified this exact project on its own host.
+    const workspace = remoteRead ? request.graph.workspace : await realpath(request.graph.workspace).catch(() => {
       throw new OrchestrationError(`graph workspace does not exist: ${request.graph.workspace}`, 'GRAPH_INVALID')
     })
     const graph = structuredClone({ ...request.graph, workspace })
     if (graph.workspaceIsolation === 'git-worktree') {
       await this.worktrees.verifyRepository(workspace, graph.baseSha as string)
     }
+    if (graph.workspaceIsolation === 'directory-snapshot') {
+      const recipient = request.admission?.gouziRecipient
+      const member = recipient === undefined ? undefined : this.store.gouzi.read(recipient.gouziId)
+      if (member !== undefined && (String(member.hostId) !== 'local' || member.endpoint === undefined
+        || !['127.0.0.1', '[::1]'].includes(new URL(member.endpoint).hostname))) {
+        throw new OrchestrationError('完整目录快照仅允许本机狗子；远程传输需要明确授权。', 'GRAPH_INVALID')
+      }
+    }
+    const sourceSnapshot = graph.workspaceIsolation === 'directory-snapshot'
+      ? await this.workspaceSnapshots(graph).prepare(workspace, request.admission?.sourceMessageId === undefined
+        ? randomUUID() : canonicalSha256({
+          graph, sourceSessionId: request.admission.sourceSessionId, sourceMessageId: request.admission.sourceMessageId,
+        }))
+      : undefined
+    const workspaceSnapshotRef = sourceSnapshot === undefined ? undefined : this.store.putArtifact(sourceSnapshot)
     const intent = await this.ctx.intentCompiler.compile(structuredClone(request.intent))
+    await this.validateGouziRecipient(request.admission, graph)
     const intentRef = this.store.putArtifact(intent)
     const requirementRef = request.requirement === undefined ? undefined : this.store.putArtifact(request.requirement)
     const graphRef = this.store.putArtifact(graph)
@@ -1415,7 +1609,7 @@ export class OrchestrationDaemon {
     const blockers: OrchestrationBlocker[] = intent.requiresClarification
       ? [{ code: 'INTENT_CLARIFICATION_REQUIRED', message: intent.ambiguities.join('; ') }]
       : []
-    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, certificate, admission: request.admission }).slice(0, 32)}`
+    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, workspaceSnapshotRef, certificate, admission: request.admission }).slice(0, 32)}`
     const compilation: OrchestrationCompilationV1 = {
       version: 1,
       compilationId,
@@ -1424,19 +1618,24 @@ export class OrchestrationDaemon {
       ...requirementRef === undefined ? {} : { requirementRef },
       graphRef,
       graph,
+      ...workspaceSnapshotRef === undefined ? {} : { workspaceSnapshotRef },
       ...request.admission === undefined ? {} : { admission: structuredClone(request.admission) },
       certificate,
       requiresClarification: intent.requiresClarification,
       blockers,
     }
     this.store.saveCompilation(compilation)
-    for (const ref of [intentRef, requirementRef, graphRef].filter(value => value !== undefined)) {
+    for (const ref of [intentRef, requirementRef, graphRef, workspaceSnapshotRef].filter(value => value !== undefined)) {
       this.store.recordArtifact('compilation_artifacts', { ref: String(ref) })
     }
     return compilation
   }
 
-  private startRun(request: OrchestrationStartRequest): OrchestrationRunSnapshot {
+  private async startRun(request: OrchestrationStartRequest): Promise<OrchestrationRunSnapshot> {
+    if (this.store.commandReceipt(request.commandId) === undefined) {
+      const compilation = this.store.getCompilation(request.compilationId)
+      await this.validateGouziRecipient(compilation.admission, compilation.graph)
+    }
     return this.withCommandReceipt(
       'orchestration.start',
       request,
@@ -1487,6 +1686,7 @@ export class OrchestrationDaemon {
       intentRef: compilation.intentRef,
       ...compilation.requirementRef === undefined ? {} : { requirementRef: compilation.requirementRef },
       graphRef: compilation.graphRef,
+      ...compilation.workspaceSnapshotRef === undefined ? {} : { workspaceSnapshotRef: compilation.workspaceSnapshotRef },
       ...approvalRef === undefined ? {} : { approvalRef },
       retryAfter: {},
     }
@@ -1510,6 +1710,7 @@ export class OrchestrationDaemon {
   private controlUnchecked(request: OrchestrationControlRequest): OrchestrationRunSnapshot {
     const record = this.expectRevision(request.runId, request.expectedRevision)
     const current = record.snapshot.state
+    if (record.snapshot.delivery?.state === 'applying') throw new OrchestrationError('任务正在最终回写，已进入不可中断阶段；请查看原任务结果。', 'RUN_STATE_CONFLICT')
     let state = current
     if (request.action === 'pause' && current === 'running') state = 'paused'
     else if (request.action === 'resume' && current === 'paused') state = 'running'
@@ -1766,23 +1967,26 @@ export class OrchestrationDaemon {
   }
 
   private async refreshRemoteOperators(initial: boolean): Promise<void> {
-    let servers: readonly RemotePhysicalOperatorServer[]
+    let registrations: readonly { readonly server: RemotePhysicalOperatorServer; readonly member?: GouziMemberView }[]
     try {
-      servers = this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root)
+      registrations = [
+        ...(this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root)).map(server => ({ server })),
+        ...await this.gouziServers(),
+      ]
     } catch (error) {
       if (initial) throw error
       this.ctx.logger.warn(`remote operator catalog rejected: ${error instanceof Error ? error.message : String(error)}`)
       this.remoteOperatorRefreshAt = Date.now() + 5_000
       return
     }
-    const desired = new Map(servers.map(server => [server.id, server] as const))
+    const desired = new Map(registrations.map(({ server }) => [server.id, server] as const))
     for (const [serverId, registration] of this.remoteOperatorRegistrations) {
       if (desired.has(serverId)) continue
       await Promise.allSettled(registration.dispose.map(dispose => dispose()))
       this.remoteOperatorRegistrations.delete(serverId)
     }
-    for (const server of servers) {
-      const signature = JSON.stringify(server)
+    for (const { server, member } of registrations) {
+      const signature = JSON.stringify([server, member?.generation, member?.hostId])
       const existing = this.remoteOperatorRegistrations.get(server.id)
       if (existing?.signature === signature) continue
       try {
@@ -1792,14 +1996,114 @@ export class OrchestrationDaemon {
           this.remoteOperatorRegistrations.delete(server.id)
         }
         const dispose = operators.map(operator => this.ctx.physicalOperators.registerOperator(operator))
-        this.remoteOperatorRegistrations.set(server.id, { signature, dispose })
+        this.remoteOperatorRegistrations.set(server.id, {
+          signature, dispose, operatorIds: operators.map(operator => String(operator.descriptor.id)),
+          ...member === undefined ? {} : { member },
+        })
+        this.observeGouzi(server, 'online')
       } catch (error) {
         this.ctx.logger.warn(
           `remote operator Server "${server.label}" unavailable: ${error instanceof Error ? error.message : String(error)}`,
         )
+        this.observeGouzi(server, 'unreachable')
       }
     }
     this.remoteOperatorRefreshAt = Date.now() + 5_000
+  }
+
+  private async gouziExecutionOperators(): ReturnType<GouziControl['executionOperators']> {
+    const registrations = [...this.remoteOperatorRegistrations.entries()]
+    const catalogs = await this.ctx.physicalOperators.residentCatalogs()
+    return this.store.gouzi.list().filter(member => member.membership === 'enabled').map((member) => {
+      const operatorIds = new Set(registrations.flatMap(([serverId, registration]) => {
+        const registered = registration.member
+        return this.remoteOperatorRegistrations.get(serverId) === registration
+          && registered?.gouziId === member.gouziId
+          && registered.generation === member.generation
+          && registered.hostId === member.hostId
+          && registered.ownerId === member.ownerId
+          && registered.endpoint === member.endpoint
+          ? registration.operatorIds : []
+      }))
+      return {
+        gouziId: member.gouziId,
+        generation: member.generation,
+        projectScopes: [...new Set(catalogs.filter(catalog => operatorIds.has(String(catalog.operatorId))
+          && catalog.gouziWorkspace?.gouziId === String(member.gouziId)
+          && catalog.gouziWorkspace.generation === member.generation)
+          .flatMap(catalog => catalog.gouziWorkspace?.projectScopes ?? []))],
+        operators: catalogs.filter(catalog => operatorIds.has(String(catalog.operatorId))).map(catalog => ({
+          operatorId: String(catalog.operatorId),
+          available: catalog.available,
+          supportsGenerationLimits: catalog.supportsGenerationLimits === true,
+          supportsGovernedWorkspacePolicy: catalog.supportsGovernedWorkspacePolicy === true,
+          ...catalog.unavailableReason === undefined ? {} : { unavailableReason: catalog.unavailableReason },
+          models: catalog.models.map(model => model.model),
+        })),
+      }
+    })
+  }
+
+  /** Enabled Gouzi members as remote Servers; a member whose credential cannot be read is skipped with a warning. */
+  private async gouziServers(): Promise<Array<{ readonly server: RemotePhysicalOperatorServer; readonly member: GouziMemberView }>> {
+    const servers: Array<{ readonly server: RemotePhysicalOperatorServer; readonly member: GouziMemberView }> = []
+    for (const member of this.store.gouzi.list()) {
+      if (member.membership !== 'enabled' || member.endpoint === undefined) continue
+      const host = this.store.gouzi.getHost(member.hostId)
+      if (host === undefined) continue
+      try {
+        const resolved = await this.ctx.get('credentials')?.resolve(credentialRef(host.credentialRef))
+        servers.push({
+          member,
+          server: gouziOperatorServer({
+            store: this.store,
+            gouziId: member.gouziId,
+            validateRecipientOperator: (operatorId, generation) => {
+              const registration = this.remoteOperatorRegistrations.get(`gouzi-${String(member.gouziId)}`)
+              const registered = registration?.member
+              const current = this.store.gouzi.read(member.gouziId)
+              return registered !== undefined && current !== undefined
+                && registered.gouziId === current.gouziId
+                && registered.generation === generation && registered.generation === current.generation
+                && registered.hostId === current.hostId && registered.ownerId === current.ownerId
+                && registered.endpoint === current.endpoint && registration?.operatorIds.includes(operatorId) === true
+                && this.ctx.physicalOperators.getOperator(operatorId)?.availability().available === true
+            },
+            ...resolved === undefined ? {} : { accessToken: resolved.value },
+          }),
+        })
+      } catch (error) {
+        this.ctx.logger.warn(`gouzi "${member.name}" skipped: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    return servers
+  }
+
+  private observeGouzi(server: RemotePhysicalOperatorServer, connection: 'online' | 'unreachable'): void {
+    if (server.gouzi === undefined) return
+    const gouziId = GouziId(server.gouzi.gouziId)
+    if (this.store.gouzi.read(gouziId)?.connection !== connection) this.store.gouzi.observe(gouziId, { connection })
+  }
+
+  /** Mark a member `working` while one of its attempts is accepted or running, otherwise `resting`. */
+  private syncGouziActivity(): void {
+    const members = this.store.gouzi.list().filter(member => member.membership !== 'archived')
+    if (members.length === 0) return
+    const busy = new Set<string>()
+    for (const attempt of this.store.attempts(['accepted', 'running'])) {
+      let operatorId = this.attemptOperators.get(attempt.executionId)
+      if (operatorId === undefined) {
+        const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+        operatorId = plan.operatorPlan.operatorId
+        this.attemptOperators.set(attempt.executionId, operatorId)
+      }
+      const match = /^gouzi\.(.+?)\./u.exec(operatorId)
+      if (match?.[1] !== undefined) busy.add(match[1])
+    }
+    for (const member of members) {
+      const activity = busy.has(String(member.gouziId)) ? 'working' : 'resting'
+      if (member.activity !== activity) this.store.gouzi.observe(member.gouziId, { activity })
+    }
   }
 
   private tick(): Promise<void> {
@@ -1817,6 +2121,7 @@ export class OrchestrationDaemon {
     if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
     await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
     await this.reconcile()
+    this.syncGouziActivity()
     await this.ctx.rlmRuntime.pumpMessages()
     await this.ctx.rlmRuntime.pumpHeartbeats()
     if (this.cluster !== undefined && !this.cluster.canSchedule()) return
@@ -2017,9 +2322,9 @@ export class OrchestrationDaemon {
     const required = record.graph.nodes.filter(node => node.requiredForCompletion)
     const requiredStates = required.map(spec => record.snapshot.nodes.find(node => node.id === spec.id)?.state)
     const anyLive = record.snapshot.nodes.some(node => ['pending', 'ready', 'running', 'retry_wait', 'awaiting_approval'].includes(node.state))
-    if (requiredStates.every(state => state === 'passed') && !anyLive) this.finishRun(record, 'completed')
+    if (requiredStates.every(state => state === 'passed') && !anyLive) await this.finishRun(record, 'completed')
     else if (!anyLive && requiredStates.some(state => ['failed', 'blocked', 'cancelled', 'indeterminate'].includes(state ?? 'blocked'))) {
-      this.finishRun(record, requiredStates.includes('indeterminate') ? 'indeterminate' : 'failed')
+      await this.finishRun(record, requiredStates.includes('indeterminate') ? 'indeterminate' : 'failed')
     }
   }
 
@@ -2096,10 +2401,14 @@ export class OrchestrationDaemon {
       this.blockNode(runId, nodeId, blockers)
       return undefined
     }
-    const executionWorkspace: NodeExecutionPlanV1['executionWorkspace'] = record.graph.workspaceIsolation === 'git-worktree'
+    const snapshotWorkspace = record.workspaceSnapshotRef === undefined ? undefined
+      : this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot
+    const authorityWorkspace = snapshotWorkspace?.workspace ?? record.snapshot.workspace
+    const executionWorkspace: NodeExecutionPlanV1['executionWorkspace'] = (record.graph.workspaceIsolation === 'git-worktree'
+      || record.graph.workspaceIsolation === 'directory-snapshot')
       && (capabilityPlan.effectiveWriteScopes.length > 0 || capabilityPlan.effectiveEffects.write.length > 0)
-      ? await this.worktrees.prepare(record.snapshot.workspace, runId, nodeId, attempt)
-      : { mode: 'shared', path: record.snapshot.workspace }
+      ? await this.worktrees.prepare(authorityWorkspace, runId, nodeId, attempt)
+      : { mode: 'shared', path: authorityWorkspace }
     if (executionWorkspace.mode === 'git-worktree') {
       this.store.saveRun(record, [event(record.snapshot.runId, 'worktree.prepared', {
         path: executionWorkspace.path,
@@ -2327,7 +2636,7 @@ export class OrchestrationDaemon {
         operatorId,
         mode: selectedProvider === undefined ? 'model-worker' as const : 'resident' as const,
         ...allocation.profile === undefined ? {} : { profile: allocation.profile },
-        nativeToolPolicy: nativeToolPolicy(capabilityPlan),
+        nativeToolPolicy: spec.workspaceToolLimits === undefined ? nativeToolPolicy(capabilityPlan) : 'dsh-tools-authoritative',
         injectionBoundaries: selectedProvider?.injectionBoundaries ?? [],
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
@@ -2462,6 +2771,10 @@ export class OrchestrationDaemon {
       }
       const nodePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan)
       const contextEnvelope = taskGraphContextEnvelope(plan, nodePrompt)
+      const workspaceSnapshotInput = record.workspaceSnapshotRef === undefined ? undefined
+        : await this.workspaceSnapshots(record.graph).captureInput(
+          (this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot).snapshotId,
+        )
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -2472,7 +2785,17 @@ export class OrchestrationDaemon {
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
         ...browserBinding === undefined ? {} : { modelToolBridge: browserBinding.descriptor },
-        nativeToolPolicy: requiresBrowser ? 'dsh-tools-authoritative' : plan.operatorPlan.nativeToolPolicy,
+        ...plan.effectiveWriteScopes.length === 0 || plan.executionWorkspace.mode !== 'git-worktree'
+          || plan.executionWorkspace.startSha === undefined ? {}
+          : { workspaceMutationReturn: { baseSha: plan.executionWorkspace.startSha } },
+        ...workspaceSnapshotInput === undefined ? {} : { workspaceSnapshotInput },
+        ...spec.generationLimits === undefined ? {} : { generationLimits: spec.generationLimits },
+        ...spec.workspaceToolLimits === undefined ? {} : { governedWorkspacePolicy: {
+          version: 1 as const, sourceWorkspace: record.snapshot.workspace,
+          readScopes: capabilityPlan.effectiveReadScopes, writeScopes: capabilityPlan.effectiveWriteScopes,
+          forbiddenScopes: spec.forbiddenScopes ?? [], limits: spec.workspaceToolLimits,
+        } },
+        nativeToolPolicy: requiresBrowser || spec.workspaceToolLimits !== undefined ? 'dsh-tools-authoritative' : plan.operatorPlan.nativeToolPolicy,
       })
       this.recordContextEnvelope(
         record,
@@ -2491,7 +2814,7 @@ export class OrchestrationDaemon {
         executionId: String(plan.executionId), turnId: receipt.turnId,
         operatorId: plan.operatorPlan.operatorId,
         laneId: String(plan.executionId),
-        contextIsolation: 'fresh-native-thread',
+        contextIsolation: spec.generationLimits === undefined ? 'fresh-native-thread' : 'bounded-model-request',
       }, next.snapshot.nodes.find(value => value.id === spec.id))])
       const key = `${String(record.snapshot.runId)}\0${spec.id}`
       const active: ActiveAttempt = {
@@ -4001,6 +4324,7 @@ export class OrchestrationDaemon {
       parent: fakeParent(workspace, String(record.snapshot.runId)),
       signal,
       ...residentProfile === undefined ? {} : { residentProfile },
+      ...spec.generationLimits === undefined ? {} : { generationLimits: spec.generationLimits },
       ...modelToolBridge === undefined ? {} : { modelToolBridge },
       ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
       ...residentLaneId === undefined ? {} : { residentLaneId },
@@ -4429,11 +4753,13 @@ export class OrchestrationDaemon {
       this.failAttempt(active, new OrchestrationError(`graph node disappeared: ${active.nodeId}`, 'GRAPH_INVALID'))
       return
     }
-    if (result.stopReason === 'completed') {
+    const acceptanceFailure = verificationVerdictFailure(spec, result)
+    if (result.stopReason === 'completed' && acceptanceFailure === undefined) {
       const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
       try {
         const integration = await this.worktrees.integrate(
-          record.snapshot.workspace,
+          record.workspaceSnapshotRef === undefined ? record.snapshot.workspace
+            : (this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot).workspace,
           plan.executionWorkspace,
           `${active.runId}:${active.nodeId}:${String(active.attempt)}`,
         )
@@ -4475,7 +4801,7 @@ export class OrchestrationDaemon {
       return
     }
     const humanReview = spec.acceptance.some(value => value.kind === 'human-review')
-    const passed = result.stopReason === 'completed'
+    const passed = result.stopReason === 'completed' && acceptanceFailure === undefined
     const pendingUpdates = this.store.capabilityUpdates(active.runId, active.nodeId)
       .filter(value => value.state === 'queued' && value.generation > active.generation)
     const nextGeneration = pendingUpdates.reduce((maximum, value) => Math.max(maximum, value.generation), active.generation)
@@ -4488,7 +4814,7 @@ export class OrchestrationDaemon {
       state,
       capabilityGeneration: continueNextTurn ? nextGeneration : value.capabilityGeneration,
       evidenceRefs: [...value.evidenceRefs, evidenceRef],
-      blockers: passed ? [] : [{ code: 'OPERATOR_STOPPED', message: `operator stopped with ${result.stopReason}`, nodeId: active.nodeId }],
+      blockers: passed ? [] : [{ code: acceptanceFailure === undefined ? 'OPERATOR_STOPPED' : 'VERIFICATION_REJECTED', message: acceptanceFailure ?? `operator stopped with ${result.stopReason}`, nodeId: active.nodeId }],
       updatedAt: now(),
     } : value)
     const next = withRevision(record, {
@@ -4672,10 +4998,35 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, 'node.blocked', { blockers }, nodes.find(value => value.id === nodeId))])
   }
 
-  private finishRun(record: RuntimeRunRecord, state: 'completed' | 'failed' | 'indeterminate'): void {
+  private async finishRun(record: RuntimeRunRecord, state: 'completed' | 'failed' | 'indeterminate'): Promise<void> {
     const current = this.store.getRun(String(record.snapshot.runId))
     if (current.snapshot.state !== 'running') return
-    const next = withRevision(current, { ...current.snapshot, state })
+    if (state === 'completed' && current.workspaceSnapshotRef !== undefined) {
+      const snapshot = this.store.readArtifact(current.workspaceSnapshotRef) as WorkspaceSnapshot
+      if (current.snapshot.delivery?.state === 'applying' || current.snapshot.delivery?.state === 'indeterminate') {
+        this.store.saveRun(withRevision(current, { ...current.snapshot, state: 'indeterminate', delivery: { state: 'indeterminate' } }),
+          [event(current.snapshot.runId, 'run.indeterminate', { code: 'COMMAND_INDETERMINATE', message: '需核对原回写结果，未重新回写。' })])
+        return
+      }
+      this.store.saveRun(withRevision(current, { ...current.snapshot, delivery: { state: 'applying' } }),
+        [event(current.snapshot.runId, 'workspace.snapshot.delivery_started', { snapshotRef: String(current.workspaceSnapshotRef) })])
+      try {
+        const changedPaths = await this.workspaceSnapshots(current.graph).conditionalApply(snapshot.snapshotId, snapshot.workspace)
+        this.store.appendEvents([event(current.snapshot.runId, 'workspace.snapshot.applied', { snapshotRef: String(current.workspaceSnapshotRef), changedPaths })])
+      } catch (error) {
+        state = error instanceof Error && 'code' in error && error.code === 'COMMAND_INDETERMINATE' ? 'indeterminate' : 'failed'
+        const blocker = { code: error instanceof Error && 'code' in error ? String(error.code) : 'INTEGRATION_FAILED', message: renderError(error) }
+        const latest = this.store.getRun(String(current.snapshot.runId))
+        if (latest.snapshot.state !== 'running' || latest.snapshot.delivery?.state !== 'applying') return
+        this.store.saveRun(withRevision(latest, { ...latest.snapshot, state, delivery: { state: state === 'indeterminate' ? 'indeterminate' : 'failed' }, blockers: [...latest.snapshot.blockers, blocker] }),
+          [event(latest.snapshot.runId, `run.${state}`, blocker)])
+        return
+      }
+    }
+    const latest = this.store.getRun(String(current.snapshot.runId))
+    if (latest.snapshot.state !== 'running') return
+    const next = withRevision(latest, { ...latest.snapshot, state,
+      ...state === 'completed' && latest.workspaceSnapshotRef !== undefined ? { delivery: { state: 'applied' as const } } : {} })
     this.store.saveRun(next, [event(next.snapshot.runId, `run.${state}`, {})])
   }
 

@@ -7,9 +7,17 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CODEX_APP_SERVER_METHODS } from '@deepseek-ai/dsh-subagent-codex'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
+
+const claudeSdk = vi.hoisted(() => ({ query: vi.fn() }))
+vi.mock('@anthropic-ai/claude-agent-sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@anthropic-ai/claude-agent-sdk')>()
+  claudeSdk.query.mockImplementation(actual.query)
+  return { ...actual, query: claudeSdk.query }
+})
+
 import {
   claudeEnvironment,
   claudeAuthenticationFailureCode,
@@ -25,6 +33,8 @@ import {
   CodexResidentDriver,
   codexDaemonVersion,
   createClaudeRlmMcpServer,
+  codexDynamicToolSpecs,
+  codexToolName,
   createCodexRlmToolHandler,
   isClaudeNativeSubscription,
   missingCodexProtocolMethods,
@@ -102,6 +112,64 @@ describe('Claude Code resident driver environment', () => {
       else process.env.TEST_CLAUDE_AUTH_MARKER = previousMarker
       if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY
       else process.env.ANTHROPIC_API_KEY = previousApiKey
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it.runIf(process.platform !== 'win32')('refreshes the cached Claude model catalog without prompting or logging in', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-claude-model-catalog-'))
+    const executable = join(root, 'claude')
+    const marker = join(root, 'invocations.txt')
+    const previousPath = process.env.PATH
+    const previousMarker = process.env.TEST_CLAUDE_CATALOG_MARKER
+    const catalogs = [
+      [{
+        value: 'claude-old', displayName: 'Claude Old', description: 'Old catalog',
+        supportedEffortLevels: ['low'], supportsAdaptiveThinking: false,
+      }],
+      [{
+        value: 'claude-new', displayName: 'Claude New', description: 'New catalog',
+        supportedEffortLevels: ['high'], supportsAdaptiveThinking: true,
+      }],
+    ]
+    const supportedModels = vi.fn(async () => catalogs.shift() ?? [])
+    const close = vi.fn()
+    claudeSdk.query
+      .mockImplementationOnce(() => ({ supportedModels, close }) as never)
+      .mockImplementationOnce(() => ({ supportedModels, close }) as never)
+    try {
+      writeFileSync(executable, [
+        '#!/bin/sh',
+        'printf "%s\\n" "$*" >> "$TEST_CLAUDE_CATALOG_MARKER"',
+        'if [ "$1" = "--version" ]; then',
+        '  printf "%s\\n" "2.1.239 (Claude Code)"',
+        '  exit 0',
+        'fi',
+        'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then',
+        '  printf "%s\\n" \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"pro"}\'',
+        '  exit 0',
+        'fi',
+        'exit 64',
+        '',
+      ].join('\n'))
+      chmodSync(executable, 0o700)
+      process.env.PATH = [root, '/usr/bin', '/bin'].join(delimiter)
+      process.env.TEST_CLAUDE_CATALOG_MARKER = marker
+      const driver = new ClaudeCodeResidentDriver()
+
+      await expect(driver.qualify()).resolves.toMatchObject({ models: [{ model: 'claude-old' }] })
+      await expect(driver.qualify()).resolves.toMatchObject({ models: [{ model: 'claude-old' }] })
+      await expect(driver.qualify({ refreshModels: true })).resolves.toMatchObject({ models: [{ model: 'claude-new' }] })
+
+      expect(supportedModels).toHaveBeenCalledTimes(2)
+      expect(claudeSdk.query).toHaveBeenCalledTimes(2)
+      expect(close).toHaveBeenCalledTimes(2)
+      expect(readFileSync(marker, 'utf8')).not.toContain('auth login')
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      if (previousMarker === undefined) delete process.env.TEST_CLAUDE_CATALOG_MARKER
+      else process.env.TEST_CLAUDE_CATALOG_MARKER = previousMarker
       rmSync(root, { recursive: true, force: true })
     }
   })
@@ -291,6 +359,19 @@ describe('Claude Code resident driver environment', () => {
     })
   })
 
+  it('identifies the exact DSH bridge tools despite shell and editor names', () => {
+    const prompt = nativeToolSystemPrompt('Task context', 'dsh-tools-authoritative', {
+      version: 1, socketPath: '/tmp/dsh-tools.sock', sessionId: 'session',
+      tools: [
+        { name: 'bash', description: 'Run commands', inputSchema: { type: 'object' } },
+        { name: 'str_replace_editor', description: 'Edit files', inputSchema: { type: 'object' } },
+      ],
+    })
+    expect(prompt).toContain('The DSH bridge tools for this turn are: "bash", "str_replace_editor".')
+    expect(prompt).toContain('These named tools are DSH-owned')
+    expect(prompt).toContain('any product-native approval request will be declined')
+  })
+
   it('removes the Claude native tool surface for a sealed no-tool execution', () => {
     expect(claudeNativeToolOptions('disabled')).toEqual({ tools: [], allowedTools: [] })
     expect(claudeNativeToolOptions('dsh-tools-authoritative')).toEqual({ tools: [], allowedTools: [] })
@@ -300,6 +381,8 @@ describe('Claude Code resident driver environment', () => {
     expect(nativeToolSystemPrompt('DSH authority', 'disabled')).toContain('DSH authority')
     expect(nativeToolSystemPrompt('DSH authority', 'inherit')).toBe('DSH authority')
     expect(codexApprovalBehavior('dsh-tools-authoritative')).toBe('decline')
+    expect(codexApprovalBehavior('disabled')).toBe('decline')
+    expect(() => codexExecutionBoundary('disabled')).toThrow(/cannot isolate inherited MCP servers/u)
     expect(codexApprovalBehavior('inherit')).toBe('require')
     expect(codexExecutionBoundary('dsh-tools-authoritative')).toEqual({
       approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled',
@@ -492,6 +575,66 @@ describe('Codex RLM host tool', () => {
   })
 })
 
+describe('Codex dynamic tool names', () => {
+  const spec = (name: string) => ({ name, description: `The ${name} tool.`, inputSchema: { type: 'object' } })
+
+  it('renames a tool in the namespace Codex reserves for its own MCP servers, and leaves every other name alone', () => {
+    expect(codexToolName('mcp__reference_memory__add_observations')).toBe('dsh_mcp__reference_memory__add_observations')
+    expect(codexToolName('bash')).toBe('bash')
+    expect(codexToolName('typescript_repl')).toBe('typescript_repl')
+    expect(codexToolName('my_mcp__tool')).toBe('my_mcp__tool')
+  })
+
+  it('offers Codex only names it accepts', () => {
+    const tools = codexDynamicToolSpecs({
+      version: 1, socketPath: '/tmp/x', sessionId: 's',
+      tools: [spec('bash'), spec('mcp__reference_memory__add_observations'), spec('mcp__github__search')],
+    })
+    expect(tools.map(tool => tool.name)).toEqual(['bash', 'dsh_mcp__reference_memory__add_observations', 'dsh_mcp__github__search'])
+    expect(tools.some(tool => tool.name.startsWith('mcp__'))).toBe(false)
+  })
+
+  it('refuses a bridge whose renamed tool would collide with another tool', () => {
+    expect(() => codexDynamicToolSpecs({
+      version: 1, socketPath: '/tmp/x', sessionId: 's',
+      tools: [spec('mcp__a__b'), spec('dsh_mcp__a__b')],
+    })).toThrow(/collides/u)
+  })
+
+  it('maps a call on the renamed tool back to the real tool, and refuses the reserved name itself', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-codex-alias-'))
+    const socketPath = localIpcAddress(root, 'bridge')
+    const called: string[] = []
+    const bridgeServer = createServer((socket) => {
+      const transport = new JsonRpcLineTransport(socket, socket)
+      transport.onRequest((_method, params) => {
+        called.push(String(params.tool))
+        return Promise.resolve({ value: 'ok' })
+      })
+      transport.start()
+    })
+    await new Promise<void>((resolve, reject) => {
+      bridgeServer.once('error', reject)
+      bridgeServer.listen(socketPath, resolve)
+    })
+    const handler = createCodexRlmToolHandler('resident-command', {
+      version: 1, socketPath, sessionId: 'alias-session', tools: [spec('mcp__reference_memory__add_observations')],
+    }, new AbortController().signal)
+    try {
+      await expect(handler({
+        threadId: 't', turnId: 'u', callId: 'c1', tool: 'dsh_mcp__reference_memory__add_observations', arguments: {},
+      })).resolves.toMatchObject({ success: true })
+      expect(called).toEqual(['mcp__reference_memory__add_observations'])
+      await expect(handler({
+        threadId: 't', turnId: 'u', callId: 'c2', tool: 'mcp__reference_memory__add_observations', arguments: {},
+      })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+    } finally {
+      await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('Claude Code resident terminal failures', () => {
   it('classifies an expired native subscription as an authentication failure', () => {
     const failure = claudeResultFailure({
@@ -669,5 +812,38 @@ describe('Codex protocol qualification', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+
+describe('disabled Codex native execution', () => {
+  it.each([undefined, 'persistent-native-thread'])('rejects an unreachable legacy bridge without native qualification for session %s', async (nativeSessionId) => {
+    const driver = new CodexResidentDriver()
+    const qualify = vi.spyOn(driver, 'qualify')
+    const onRunning = vi.fn()
+    const onProgress = vi.fn()
+    const onObservation = vi.fn()
+    const execution = driver.execute({
+      commandId: 'no-effects' as Parameters<CodexResidentDriver['execute']>[0]['commandId'],
+      workspace: '/user-project',
+      prompt: [{ type: 'text', text: 'hello' }],
+      profile: { model: 'existing-model' },
+      ...nativeSessionId === undefined ? {} : { nativeSessionId },
+      nativeToolPolicy: 'disabled',
+      modelToolBridge: {
+        version: 1, socketPath: '/unreachable-bridge', sessionId: 'no-effects',
+        tools: [{ name: 'typescript_repl', description: 'Unreachable bridge', inputSchema: { type: 'object' } }],
+      },
+      signal: new AbortController().signal,
+      onRunning,
+      onProgress,
+      onObservation,
+    })
+    await expect(execution).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    await expect(execution).rejects.toThrow('Legacy REPL bridge is unavailable')
+    expect(qualify).not.toHaveBeenCalled()
+    expect(onRunning).not.toHaveBeenCalled()
+    expect(onProgress).not.toHaveBeenCalled()
+    expect(onObservation).not.toHaveBeenCalled()
   })
 })

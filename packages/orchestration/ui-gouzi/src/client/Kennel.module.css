@@ -1,0 +1,57 @@
+/* The kennel's sidebar row. */
+
+.trigger {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 8px);
+  height: 34px;
+  margin: 0 -4px;
+  padding: 6px 2px 6px 10px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: inherit;
+}
+.trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.trigger:disabled { opacity: 0.6; cursor: progress; }
+.trigger.rail {
+  width: 36px;
+  height: 36px;
+  margin: 2px 0;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 50%;
+}
+.label { min-width: 0; flex: 1 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
+.badge { flex: none; margin-right: 8px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.stack { display: flex; flex: none; }
+.stack > svg + svg { margin-left: -8px; }
+.error { margin: 4px 10px; color: var(--dsw-alias-state-error-primary); font-size: 11px; line-height: 16px; }
+
+/* The welcome card on a blank kennel session. */
+.hero {
+  width: min(560px, 100%);
+  box-sizing: border-box;
+  margin: 10px auto 0;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+.hero strong { color: var(--dsw-alias-label-primary); font-size: 14px; }
+.hero p { margin: 4px 0 0; }
+.heroNote { margin-left: 8px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.dogs { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.dogs li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dogName { flex: none; color: var(--dsw-alias-label-primary); }
+.dogMeta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font-size: 12px; }

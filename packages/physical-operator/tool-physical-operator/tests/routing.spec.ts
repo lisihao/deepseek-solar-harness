@@ -4,7 +4,8 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
+import type { ModelAllocationEvidence, ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import AgentRegistry, {
   agentEvents,
   assembleContextFor,
@@ -46,7 +47,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
-import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
+import SubscriptionFirstModelAllocation, { canonicalCohortKey } from '@deepseek-ai/dsh-model-allocation-local'
 import * as tool from '../src/index.ts'
 import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
@@ -78,6 +79,8 @@ class DurableOperator implements PhysicalOperator {
   readonly requests: PhysicalOperatorProviderStartRequest[] = []
   readonly receipts = new Map<string, Receipt>()
   productStarts = 0
+  /** When set, a freshly started run fails with this message after the product has started. */
+  resultFailureMessage?: string | undefined
 
   constructor(
     readonly id: 'codex' | 'claude-code' | 'chatgpt-web',
@@ -139,7 +142,9 @@ class DurableOperator implements PhysicalOperator {
     const bridged = this.bridgeToolName === undefined
       ? undefined
       : await callBridgeTool(request, this.bridgeToolName, { value: 'hello' })
-    if (created && this.immediate) receipt.result.resolve(this.resultValue(bridged))
+    if (created && this.resultFailureMessage !== undefined) {
+      receipt.result.reject(new PhysicalOperatorError(`Claude Code returned an error result: ${this.resultFailureMessage}`, 'INVALID_RESULT'))
+    } else if (created && this.immediate) receipt.result.resolve(this.resultValue(bridged))
     const activeReceipt = receipt
     let settled = false
     void activeReceipt.result.promise.then(() => { settled = true }, () => { settled = true })
@@ -272,6 +277,8 @@ async function setup(options: {
   taskTemplate?: TaskTemplateDraft
   toolConfig?: tool.Config
   mountAllocator?: boolean
+  allocatorConfig?: AllocatorConfig
+  schedulingEvidence?: SchedulingEvidenceStub
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
@@ -346,7 +353,14 @@ async function setup(options: {
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
   ctx.physicalOperators.registerOperator(chatgpt)
-  if (options.mountAllocator === true) await ctx.plugin(SubscriptionFirstModelAllocation)
+  if (options.mountAllocator === true) await ctx.plugin(SubscriptionFirstModelAllocation, options.allocatorConfig)
+  if (options.schedulingEvidence !== undefined) {
+    const evidenceFor = options.schedulingEvidence
+    await ctx.plugin(class FakeSchedulingEvidence extends Service {
+      constructor(parent: Context) { super(parent, 'schedulingEvidence') }
+      evidenceFor = evidenceFor
+    })
+  }
   const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool, options.toolConfig)
   const primary = options.primary ?? 'deepseek'
   const agent = ctx.agentLoop.create(SessionId('router-session'), primary === 'deepseek'
@@ -354,6 +368,10 @@ async function setup(options: {
     : { provider: 'dsh-physical-operator', model: primary })
   return { ctx, deepseek, codex, claude, chatgpt, mounted, agent, echoCalls }
 }
+
+type AllocatorConfig = ConstructorParameters<typeof SubscriptionFirstModelAllocation>[1]
+/** Stands in for `ctx.schedulingEvidence.evidenceFor`, whose collectors need Python and the network. */
+type SchedulingEvidenceStub = (offers: readonly ModelExecutionOffer[], taskType: string) => ModelAllocationEvidence | undefined
 
 function send(agent: Agent, text: string): void {
   agent.followup(createUserMessage({
@@ -1208,11 +1226,19 @@ describe('host physical-operator routing', () => {
     expect(preferred.codex.requests).toHaveLength(1)
     expect(preferred.deepseek.requests).toHaveLength(0)
 
-    const automatic = await setup()
+    const automatic = await setup({ codexBridgeTool: 'subscription_echo' })
     send(automatic.agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
     await automatic.agent.whenIdle()
     expect(automatic.codex.requests).toHaveLength(1)
     expect(automatic.deepseek.requests).toHaveLength(0)
+    expect(automatic.echoCalls).toEqual(['hello'])
+    expect(automatic.codex.requests[0]?.nativeToolPolicy).toBe('dsh-tools-authoritative')
+    expect(automatic.agent.session.events.filter(event => event.type === 'physical-operator/tool-call')).toHaveLength(1)
+    expect(automatic.agent.session.events.filter(event => event.type === 'physical-operator/tool-result')).toHaveLength(1)
+    const answer = lastAssistantMessage(automatic.agent).content[0]
+    if (answer?.type !== 'text') throw new Error('expected the bridged tool response')
+    const result: unknown = JSON.parse(answer.text)
+    expect(result).toEqual({ isError: false, content: [{ type: 'text', text: 'subscription:hello' }], value: 'subscription:hello' })
   })
 
   it('falls back from an automatically selected unauthenticated Claude to Codex with a distinct durable trace', async () => {
@@ -1247,6 +1273,25 @@ describe('host physical-operator routing', () => {
       data: { commandId: dispatches[0].data.commandId, code: 'AUTH_MODE_MISMATCH' },
     }))
     expect(agent.session.events.filter(event => event.type === 'physical-operator/routing-decision')).toHaveLength(2)
+  })
+
+  it('falls back to Codex when the started Claude model needs usage credits the subscription lacks', async () => {
+    const { agent, deepseek, codex, claude } = await setup({})
+    claude.resultFailureMessage = 'Fable 5.1 requires usage credits. Switch to another model.'
+
+    send(agent, '你觉得 DSH 应该怎么优化架构更好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.productStarts).toBe(1)
+    expect(codex.productStarts).toBe(1)
+    expect(lastAssistantMessage(agent).source).toMatchObject({ provider: 'dsh-physical-operator', model: 'codex' })
+    const dispatches = agent.session.events.filter(event => event.type === 'physical-operator/dispatch')
+    if (dispatches[0]?.type !== 'physical-operator/dispatch') throw new Error('expected a first dispatch')
+    expect(agent.session.events).toContainEqual(expect.objectContaining({
+      type: 'physical-operator/dispatch-terminal',
+      data: { commandId: dispatches[0].data.commandId, code: 'MODEL_REQUIRES_CREDITS' },
+    }))
   })
 
   it('falls back only after Smart Auto cannot admit its selected Claude runtime', async () => {
@@ -1372,8 +1417,17 @@ describe('host physical-operator routing', () => {
       readonly codexUsedPercent?: number
       readonly claudeAvailable?: boolean
       readonly catalogMaxAgeMs?: number
+      readonly models?: typeof codexModels
+      readonly allocatorConfig?: AllocatorConfig
+      readonly schedulingEvidence?: SchedulingEvidenceStub
     } = {}) {
-      const fixture = await setup({ mountAllocator: true, toolConfig: { catalogMaxAgeMs: options.catalogMaxAgeMs ?? 600_000 } })
+      const models = options.models ?? codexModels
+      const fixture = await setup({
+        mountAllocator: true,
+        toolConfig: { catalogMaxAgeMs: options.catalogMaxAgeMs ?? 600_000 },
+        ...options.allocatorConfig === undefined ? {} : { allocatorConfig: options.allocatorConfig },
+        ...options.schedulingEvidence === undefined ? {} : { schedulingEvidence: options.schedulingEvidence },
+      })
       const reads = { codex: 0, claude: 0 }
       const codexCatalog = fixture.codex.residentCatalog.bind(fixture.codex)
       const claudeCatalog = fixture.claude.residentCatalog.bind(fixture.claude)
@@ -1383,10 +1437,10 @@ describe('host physical-operator routing', () => {
           ...await codexCatalog(),
           product: 'codex',
           available: options.codexAvailable ?? true,
-          models: codexModels,
+          models,
           ...options.codexUsedPercent === undefined ? {} : {
             quotaPools: [{
-              poolId: 'codex-plan', displayName: 'Codex plan', models: codexModels.map(model => model.model),
+              poolId: 'codex-plan', displayName: 'Codex plan', models: models.map(model => model.model),
               meter: 'native-subscription' as const, primary: { usedPercent: options.codexUsedPercent }, observedAt: '2026-09-26T00:00:00.000Z',
             }],
           },
@@ -1422,6 +1476,203 @@ describe('host physical-operator routing', () => {
       }
     })
 
+    it('keeps a request to write a pasted profile into memory on the main model', async () => {
+      const { agent, codex, claude, deepseek, disposeSelection } = await allocationSetup()
+      try {
+        send(agent, '后面文字是GPT上的记忆，你分析后，写到记忆中，要精准：你主要围绕 AI 产业、系统架构开展研究，输出研究报告和技术方案；关注单请求序列内并行生成。')
+        await agent.whenIdle()
+        expect(codex.requests).toHaveLength(0)
+        expect(claude.requests).toHaveLength(0)
+        expect(deepseek.requests).toHaveLength(1)
+        expect(routingReason(agent)).toBe('记忆写入由主模型通过 DSH 记忆工具完成，不委派给外部算子')
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    describe('public evidence', () => {
+      const tied = [nativeModel('gpt-6-astra', 'GPT-6-Astra'), nativeModel('gpt-6-sol', 'GPT-6-Sol')]
+      const record = (model: string, value: number, effort = 'high'): Record<string, unknown> => {
+        const row: Record<string, unknown> = {
+          source: 'codex-radar', upstream_dataset: 'dradar', benchmark: 'Codex Radar community tasks', benchmark_version: '2026-10-01',
+          metric_kind: 'pass_rate', score_kind: 'resolved_rate', unit: 'proportion', harness: 'codex-radar-community',
+          reasoning_effort: effort, task_type: 'coding', execution_surface: 'codex', billing_identity: 'native-subscription',
+          provider: 'codex', canonical_model_id: model, value, sample_count: 1000, lineage_id: `radar:${model}`,
+          correlation_group: 'codex-radar:g1', comparability: { status: 'comparable' }, observed_at: '2026-10-01', freshness_state: 'fresh',
+          provenance: 'community_observation',
+        }
+        return { ...row, cohort_key: canonicalCohortKey(row) }
+      }
+      const favoring = (favored: string, taskTypes: string[]): SchedulingEvidenceStub => (offers, taskType) => {
+        taskTypes.push(taskType)
+        return {
+          taskType: 'coding',
+          snapshots: [{ source: 'radar', snapshotId: 'g1', digest: 'sha256:g1' }],
+          records: Object.fromEntries(offers.filter(offer => offer.provider === 'codex').map(offer => [
+            offer.offerId, [record(offer.model, offer.model === favored ? 0.9 : 0.5, offer.profile?.effort)],
+          ])),
+        }
+      }
+      const delegate = async (options: Parameters<typeof allocationSetup>[0]) => {
+        const fixture = await allocationSetup({ models: tied, ...options })
+        send(fixture.agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+        await fixture.agent.whenIdle()
+        return fixture
+      }
+
+      it('records the verdict without using it in the default shadow mode', async () => {
+        const taskTypes: string[] = []
+        const baseline = await delegate({})
+        const baselineModel = baseline.codex.requests[0]?.residentProfile?.model
+        baseline.disposeSelection()
+        const other = tied.find(model => model.model !== baselineModel)?.model as string
+        const { agent, codex, disposeSelection } = await delegate({ schedulingEvidence: favoring(other, taskTypes) })
+        try {
+          expect(codex.requests[0]?.residentProfile?.model).toBe(baselineModel)
+          expect(routingReason(agent)).toContain(`；公开证据（shadow）：倾向 codex:${other}，影子模式未采用`)
+          expect(taskTypes).toEqual(['coding'])
+        } finally {
+          disposeSelection()
+        }
+      })
+
+      it('lets same-cohort evidence break the tie in apply mode', async () => {
+        const baseline = await delegate({})
+        const baselineModel = baseline.codex.requests[0]?.residentProfile?.model
+        baseline.disposeSelection()
+        const other = tied.find(model => model.model !== baselineModel)?.model as string
+        const { agent, codex, disposeSelection } = await delegate({
+          allocatorConfig: { publicEvidence: 'apply' },
+          schedulingEvidence: favoring(other, []),
+        })
+        try {
+          expect(codex.requests[0]?.residentProfile?.model).toBe(other)
+          expect(routingReason(agent)).toContain('public-evidence-tiebreak')
+          expect(routingReason(agent)).toContain('，已采用')
+        } finally {
+          disposeSelection()
+        }
+      })
+
+      it('says nothing about evidence when the service offers none', async () => {
+        const { agent, disposeSelection } = await delegate({ schedulingEvidence: () => undefined })
+        try {
+          expect(routingReason(agent)).not.toContain('公开证据')
+        } finally {
+          disposeSelection()
+        }
+      })
+
+      it('reports an abstention', async () => {
+        const { agent, disposeSelection } = await delegate({
+          schedulingEvidence: offers => ({
+            taskType: 'coding',
+            snapshots: [{ source: 'radar', snapshotId: 'g1', digest: 'd' }],
+            records: Object.fromEntries(offers.map(offer => [offer.offerId, []])),
+          }),
+        })
+        try {
+          expect(routingReason(agent)).toContain('；公开证据（shadow）：弃权（')
+        } finally {
+          disposeSelection()
+        }
+      })
+    })
+
+    describe('cost and time awareness', () => {
+      const ASTRA: Record<string, readonly [number, number, number, number]> = {
+        low: [0.656, 157, 1.69, 600], medium: [0.716, 141, 1.81, 660], high: [0.736, 140, 2.51, 780], xhigh: [0.74, 130, 3.17, 1_020],
+      }
+      const measured: SchedulingEvidenceStub = offers => ({
+        taskType: 'coding',
+        snapshots: [{ source: 'radar', snapshotId: 'g1', digest: 'sha256:g1' }],
+        records: Object.fromEntries(offers.filter(entry => entry.model === 'gpt-6-astra').map((entry) => {
+          const [passRate, samples, usd, seconds] = ASTRA[entry.profile?.effort ?? 'high'] as readonly [number, number, number, number]
+          const base = {
+            source: 'codex-radar', upstream_dataset: 'dradar', benchmark: 'Codex Radar community tasks', benchmark_version: '2026-10-01',
+            metric_kind: 'pass_rate', score_kind: 'resolved_rate', unit: 'proportion', harness: 'codex-radar-community',
+            reasoning_effort: entry.profile?.effort, task_type: 'coding', execution_surface: 'codex', billing_identity: 'native-subscription',
+            provider: 'codex', canonical_model_id: entry.model, value: passRate, sample_count: samples, avg_cost_usd: usd,
+            avg_runtime_seconds: seconds, lineage_id: entry.offerId, correlation_group: 'g', comparability: { status: 'comparable' },
+            observed_at: '2026-10-01', freshness_state: 'fresh', provenance: 'community_observation',
+          }
+          return [entry.offerId, [{ ...base, cohort_key: canonicalCohortKey(base) }]]
+        })),
+      })
+      const EASY = '给这个代码加一行注释'
+      const NORMAL = '给我修复这个 TypeScript 构建 bug 并补齐测试'
+      const HARD = '重构整个支付模块的代码并迁移到新接口'
+
+      const run = async (text: string, mode: 'shadow' | 'apply', messages: readonly string[] = []) => {
+        const fixture = await allocationSetup({ allocatorConfig: { costAware: mode }, schedulingEvidence: measured })
+        try {
+          for (const message of [...messages, text]) {
+            send(fixture.agent, message)
+            await fixture.agent.whenIdle()
+          }
+          const decision = fixture.agent.session.events.findLast(event => event.type === 'physical-operator/routing-decision')
+          return {
+            profile: fixture.codex.requests.at(-1)?.residentProfile,
+            reason: routingReason(fixture.agent) ?? '',
+            allocation: decision?.type === 'physical-operator/routing-decision' ? decision.data.allocation : undefined,
+          }
+        } finally {
+          fixture.disposeSelection()
+        }
+      }
+
+      it('records, without using it, the cheapest sufficient strength for a simple request in shadow mode', async () => {
+        const { profile, reason } = await run(EASY, 'shadow')
+
+        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'high' })
+        expect(reason).toContain('成本感知（shadow，难度简单）：倾向 codex:gpt-6-astra:low（通过率 65.6%，成本 $1.69，耗时 10 分钟），基线是 codex:gpt-6-astra，影子模式未采用')
+      })
+
+      it('uses a cheaper strength for a simple request and a narrower margin for an ordinary one in apply mode', async () => {
+        const easy = await run(EASY, 'apply')
+        const normal = await run(NORMAL, 'apply')
+
+        expect(easy.profile).toEqual({ model: 'gpt-6-astra', effort: 'low' })
+        expect(easy.reason).toContain('成本感知（apply，难度简单）：改选 codex:gpt-6-astra:low')
+        expect(normal.profile).toEqual({ model: 'gpt-6-astra', effort: 'medium' })
+        expect(normal.reason).toContain('成本感知（apply，难度一般）：改选 codex:gpt-6-astra:medium')
+      })
+
+      it('records the facts behind the choice on the routing-decision event, so a report can count them without reading prose', async () => {
+        const shadow = await run(EASY, 'shadow')
+        expect(shadow.allocation).toMatchObject({
+          difficulty: 'easy',
+          chosenOfferId: 'codex:gpt-6-astra',
+          selection: {
+            mode: 'shadow', status: 'used', objective: 'economy', applied: false,
+            baselineOfferId: 'codex:gpt-6-astra', selectedOfferId: 'codex:gpt-6-astra:low',
+            selected: { passRate: 0.656, avgCostUsd: 1.69, avgRuntimeSeconds: 600, sampleCount: 157 },
+            baseline: { passRate: 0.736, avgCostUsd: 2.51, avgRuntimeSeconds: 780, sampleCount: 140 },
+          },
+        })
+        expect(shadow.allocation?.evidence).toMatchObject({ mode: 'shadow' })
+        const applied = await run(NORMAL, 'apply')
+        expect(applied.allocation).toMatchObject({
+          difficulty: 'normal', chosenOfferId: 'codex:gpt-6-astra:medium',
+          selection: { mode: 'apply', applied: true, selectedOfferId: 'codex:gpt-6-astra:medium' },
+        })
+      })
+
+      it('keeps the strongest offer, and says nothing about cost, for a hard request', async () => {
+        const { profile, reason } = await run(HARD, 'apply')
+
+        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'high' })
+        expect(reason).not.toContain('成本感知')
+      })
+
+      it('raises the difficulty of a retry by a step', async () => {
+        const { profile, reason } = await run('还是不行，重试一下这个代码修改', 'apply', [EASY])
+
+        expect(reason).toContain('难度一般')
+        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'medium' })
+      })
+    })
+
     it('lets the allocator pick a frontier Claude model for analysis work', async () => {
       const { agent, codex, claude, disposeSelection } = await allocationSetup()
       try {
@@ -1430,6 +1681,27 @@ describe('host physical-operator routing', () => {
         expect(codex.requests).toHaveLength(0)
         expect(claude.requests[0]?.residentProfile).toEqual({ model: 'claude-opus-5', effort: 'high' })
         expect(routingReason(agent)).toContain('Claude Code · Claude Opus 5')
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    it('stops offering a Claude model that needs usage credits for the rest of the session', async () => {
+      const { agent, codex, claude, disposeSelection } = await allocationSetup()
+      try {
+        claude.resultFailureMessage = 'Claude Opus 5 requires usage credits.'
+        send(agent, '请深度分析这个系统的架构并给出评审意见')
+        await agent.whenIdle()
+        expect(claude.requests[0]?.residentProfile?.model).toBe('claude-opus-5')
+        expect(codex.requests).toHaveLength(1)
+
+        claude.resultFailureMessage = undefined
+        send(agent, '请再深度分析这个系统的存储架构并给出评审意见')
+        await agent.whenIdle()
+        const dispatches = agent.session.events.filter(event => event.type === 'physical-operator/dispatch')
+        const last = dispatches.at(-1)
+        if (last?.type !== 'physical-operator/dispatch') throw new Error('expected a dispatch for the second request')
+        expect(`${last.data.operatorId}:${last.data.residentProfile?.model}`).not.toBe('claude-code:claude-opus-5')
       } finally {
         disposeSelection()
       }

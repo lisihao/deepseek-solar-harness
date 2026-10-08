@@ -11,6 +11,7 @@ import {
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResidentCatalog,
+  type PhysicalOperatorResidentCatalogOptions,
 } from '@deepseek-ai/dsh-physical-operator'
 import { residentProgressPage, ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
 import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
@@ -74,7 +75,7 @@ function subagentReason(name: string, provider: SubagentProvider | undefined): s
 
 class DualModePhysicalOperator implements PhysicalOperator {
   readonly descriptor: PhysicalOperatorDescriptor
-  readonly residentCatalog?: () => Promise<PhysicalOperatorResidentCatalog>
+  readonly residentCatalog?: (options?: PhysicalOperatorResidentCatalogOptions) => Promise<PhysicalOperatorResidentCatalog>
 
   // Both provider forms project the same immutable discovery descriptor.
   /* jscpd:ignore-start */
@@ -94,8 +95,8 @@ class DualModePhysicalOperator implements PhysicalOperator {
       ],
     }
     if (config.residentProvider !== undefined) {
-      this.residentCatalog = async () => {
-        const provider = (await this.ctx.residentOperators.providers())
+      this.residentCatalog = async (options) => {
+        const provider = (await this.ctx.residentOperators.providers(options))
           .find(value => value.operatorId === config.residentProvider)
         if (provider === undefined) {
           throw new PhysicalOperatorError(
@@ -110,6 +111,8 @@ class DualModePhysicalOperator implements PhysicalOperator {
           supportsModelToolBridge: true,
           location: 'local',
           supportsWorkspaceMutationReturn: true,
+          supportsGenerationLimits: provider.supportsGenerationLimits === true,
+          supportsGovernedWorkspacePolicy: provider.supportsGovernedWorkspacePolicy === true,
           available: provider.available,
           ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
           ...provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: provider.quotaUnavailableReason },
@@ -210,8 +213,13 @@ class DualModePhysicalOperator implements PhysicalOperator {
         ? {}
         : { nativeContext: { version: 1, digest: request.contextEnvelope.digest } },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+      // Independently loadable adapters forward the same optional resident request fields.
+      /* jscpd:ignore-start */
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
+      ...request.generationLimits === undefined ? {} : { generationLimits: request.generationLimits },
+      ...request.governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy: request.governedWorkspacePolicy },
+      /* jscpd:ignore-end */
       signal: request.signal,
     })
     return {
@@ -234,6 +242,7 @@ class DualModePhysicalOperator implements PhysicalOperator {
       },
       result: turn.result.then(result => ({
         output: result.output,
+        ...result.providerResponse === undefined ? {} : { providerResponse: result.providerResponse },
         stopReason: result.stopReason,
         // Preserve the native product counters across the Resident-to-physical
         // operator seam.  The Resident store already persists this optional

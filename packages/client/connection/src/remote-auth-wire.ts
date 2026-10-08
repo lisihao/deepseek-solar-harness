@@ -3,7 +3,7 @@
 export const REMOTE_AUTH_RPC_CHANNEL = '/remote-auth'
 
 /** Fixed product scope granted to a paired remote device. */
-export type RemoteDeviceScope = 'cockpit' | 'pocket' | 'admin'
+export type RemoteDeviceScope = 'cockpit' | 'pocket' | 'admin' | 'gouzi'
 
 /** One-time pairing code minted by the Server. */
 export interface RemotePairingChallenge {
@@ -117,7 +117,7 @@ function nonEmptyString(value: unknown, label: string): string {
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
-  if (value === 'cockpit' || value === 'pocket' || value === 'admin') return value
+  if (value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi') return value
   throw new Error(`remote auth scope is invalid: ${String(value)}`)
 }
 

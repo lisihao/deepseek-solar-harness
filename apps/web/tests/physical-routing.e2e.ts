@@ -15,6 +15,7 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const ROUTE_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-options.json', import.meta.url))
 const CLI_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-cli-runtimes.json', import.meta.url))
+const RESIDENT_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-resident-panel.json', import.meta.url))
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/physical-routing-fixtures.mjs', import.meta.url))
 
@@ -176,14 +177,14 @@ describe('web e2e: physical operator qualification and routing', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-routing'))
     // Neither the closed Resident action nor the closed collaboration control
     // may qualify native providers or start a native-product operation. The
-    // model menu's mount-time directory read qualifies them once in the
-    // background; wait for it so later counts belong to the controls.
+    // model directory reads its persisted catalog on mount; qualification is
+    // reserved for the explicit refresh action below.
     expect(qualificationRequests).toEqual([])
     const codexQualification = join(
       scaffold.harnessHome,
       'physical-routing-qualification-count',
     )
-    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(0)
+    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBe(0)
     const menuQualifications = await numberInFile(codexQualification)
 
     const dialog = await collaborationPanel()
@@ -194,7 +195,6 @@ describe('web e2e: physical operator qualification and routing', () => {
     await showPage(dialog, '高级调度')
     await dialog.getByRole('button', { name: /优先 Claude Code/ }).click()
     await expect.poll(() => qualificationRequests.length, { timeout: 10_000 }).toBeGreaterThan(0)
-    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(menuQualifications)
     await expect.poll(() => dialog.getByText(/AUTH_MODE_MISMATCH/).isVisible(), { timeout: 10_000 }).toBe(true)
 
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
@@ -223,8 +223,13 @@ describe('web e2e: physical operator qualification and routing', () => {
 
     await dialog.getByRole('button', { name: '关闭协作方式' }).click()
     await page.getByRole('button', { name: /^Select model/ }).click()
-    await page.getByRole('menuitem', { name: /^Model/ }).click()
-    await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+    const modelMenu = page.getByRole('menu', { name: 'Model and reasoning effort' })
+    const refreshModels = modelMenu.getByRole('menuitem', { name: 'Refresh models and operators' })
+    await refreshModels.click()
+    await expect.poll(() => refreshModels.isEnabled(), { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => numberInFile(codexQualification), { timeout: 15_000 }).toBeGreaterThan(menuQualifications)
+    await modelMenu.getByRole('menuitem', { name: /^Model/ }).click()
+    await page.getByRole('menuitemradio', { name: /Codex/ }).first().click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
     const selectedPanel = await collaborationPanel()
     await showPage(selectedPanel, '高级调度')
@@ -272,8 +277,8 @@ describe('web e2e: physical operator qualification and routing', () => {
     await expect.poll(() => webPanel.getByText('当前主模型：ChatGPT 网页版（独立问答）').isVisible()).toBe(true)
     expect(await webClaudeOption.isVisible()).toBe(false)
     expect(await webPanel.getByRole('button', { name: '刷新模型与算子' }).isEnabled()).toBe(true)
-    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).isDisabled()).toBe(true)
-    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' }).isDisabled()).toBe(true)
+    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).isEnabled()).toBe(true)
+    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' }).isEnabled()).toBe(true)
     expect(await webPanel.getByRole('combobox', { name: 'Claude 思考强度' }).count()).toBe(0)
     await webPanel.getByRole('button', { name: '高级调度' }).click()
     await expect.poll(() => webPanel.getByRole('combobox', { name: '模型分配目标' }).isDisabled()).toBe(true)
@@ -282,7 +287,7 @@ describe('web e2e: physical operator qualification and routing', () => {
 
     const primaryBeforeRefresh = await page.getByRole('button', { name: /^Select model/ }).getAttribute('aria-label')
     await webPanel.getByRole('button', { name: '刷新模型与算子' }).click()
-    await expect.poll(() => webPanel.getByText(/模型目录已刷新；原生算子目录已刷新；ChatGPT Web 目录已刷新/).isVisible(), { timeout: 15_000 })
+    await expect.poll(() => webPanel.getByText(/模型目录已刷新/).isVisible(), { timeout: 15_000 })
       .toBe(true)
     const webModel = webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' })
     const webEffort = webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' })
@@ -333,6 +338,49 @@ describe('web e2e: physical operator qualification and routing', () => {
     const transcript = `${JSON.stringify({ recommended, activated, afterActivation: await rows(), refused }, null, 2)}\n`
     if (scaffold.mode === 'refresh') await writeFile(CLI_SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(CLI_SNAPSHOT, 'utf8'))
+    await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
+  it('labels a normally ended Resident turn as unverified in the assembled panel', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-resident-unverified'))
+    const action = page.getByRole('button', { name: /^物理算子：/ })
+    await action.waitFor({ timeout: 15_000 })
+    await action.click()
+    const panel = page.getByRole('dialog', { name: 'Resident 物理算子' })
+    await panel.waitFor({ timeout: 15_000 })
+
+    const sessionRow = panel.locator('.dshDesktopResidentSession').filter({ hasText: 'Codex · Create and test a file' })
+    await sessionRow.waitFor({ timeout: 15_000 })
+    await expect.poll(() => sessionRow.getAttribute('data-selected'), { timeout: 15_000 }).toBe('true')
+    await sessionRow.getByText('执行结束（未验收）', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
+
+    const activityRow = panel.locator('.dshDesktopResidentEvents > ol > li > button').filter({ hasText: 'Create and test a file' })
+    await activityRow.waitFor({ timeout: 15_000 })
+    const output = panel.getByText('Cannot write files; tests were not run.', { exact: true })
+    await output.waitFor({ state: 'visible', timeout: 15_000 })
+    const unverified = panel.getByText('执行结束（未验收）', { exact: true })
+    await expect.poll(() => unverified.count(), { timeout: 15_000 }).toBeGreaterThan(0)
+    expect(await panel.getByText('任务已完成', { exact: true }).count()).toBe(0)
+    expect(await panel.getByText('已完成', { exact: true }).count()).toBe(0)
+
+    const transcript = `${JSON.stringify({
+      session: {
+        task: await sessionRow.locator('strong').textContent(),
+        phase: await sessionRow.getByText('执行结束（未验收）', { exact: true }).textContent(),
+      },
+      activity: {
+        task: await activityRow.locator('strong').textContent(),
+        status: await activityRow.locator('span').textContent(),
+      },
+      output: await output.textContent(),
+      unverifiedCount: await unverified.count(),
+      falseCompletedCount: await panel.getByText('任务已完成', { exact: true }).count()
+        + await panel.getByText('已完成', { exact: true }).count(),
+    }, null, 2)}\n`
+    if (scaffold.mode === 'refresh') await writeFile(RESIDENT_SNAPSHOT, transcript)
+    expect(transcript).toBe(await readFile(RESIDENT_SNAPSHOT, 'utf8'))
+
     await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)

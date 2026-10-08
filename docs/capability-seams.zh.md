@@ -20,6 +20,11 @@ flowchart LR
   pkg_llm_replay["llm-replay"]
   pkg_agent_loop["agent-loop"]
   pkg_compaction_basic["compaction-basic"]
+  pkg_model_catalog_local["model-catalog-local"]
+  svc_modelCatalogs["ctx.modelCatalogs<br/>Persistent account model catalog"]
+  pkg_host_apiproxy["host-apiproxy"]
+  pkg_tool_physical_operator["tool-physical-operator"]
+  pkg_physical_operator_chatgpt_web["physical-operator-chatgpt-web"]
   pkg_token_meter["token-meter"]
   svc_tokenMeter["ctx.tokenMeter<br/>Replay token measurement"]
   pkg_compaction_tool_result_pruner["compaction-tool-result-pruner"]
@@ -60,7 +65,6 @@ flowchart LR
   svc_physicalOperators["ctx.physicalOperators<br/>Physical operator registry"]
   pkg_physical_operator_subagent["physical-operator-subagent"]
   pkg_physical_operator_resident["physical-operator-resident"]
-  pkg_tool_physical_operator["tool-physical-operator"]
   pkg_resident_operator["resident-operator"]
   svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
   pkg_resident_operator_local["resident-operator-local"]
@@ -84,6 +88,9 @@ flowchart LR
   pkg_model_worker["model-worker"]
   svc_modelWorkers["ctx.modelWorkers<br/>One-shot model worker registry"]
   pkg_model_worker_deepseek["model-worker-deepseek"]
+  pkg_scheduling_evidence["scheduling-evidence"]
+  svc_schedulingEvidence["ctx.schedulingEvidence<br/>Scheduling evidence collector gateway"]
+  pkg_scheduling_evidence_rpc["scheduling-evidence-rpc"]
   pkg_rlm_strategy["rlm-strategy"]
   svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
   pkg_rlm_strategy_local["rlm-strategy-local"]
@@ -94,6 +101,9 @@ flowchart LR
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
   pkg_ui_orchestration["ui-orchestration"]
+  svc_orchestrationRecipients["ctx.orchestrationRecipients<br/>User-selected orchestration recipient resolver"]
+  pkg_ui_gouzi["ui-gouzi"]
+  svc_gouziHost["ctx.gouziHost<br/>Gouzi member process host"]
   pkg_remote_auth["remote-auth"]
   svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
   pkg_connection["connection"]
@@ -140,7 +150,6 @@ flowchart LR
   svc_commands["ctx.commands<br/>Human command registry"]
   pkg_session_projection["session-projection"]
   svc_sessionProjections["ctx.sessionProjections<br/>Session projection units"]
-  pkg_host_apiproxy["host-apiproxy"]
   pkg_session_projection_cache["session-projection-cache"]
   svc_sessionProjectionCache["ctx.sessionProjectionCache<br/>Persisted projection cache"]
   pkg_skill["skill"]
@@ -296,9 +305,11 @@ flowchart LR
   pkg_message_feedback --> svc_messageFeedback
   pkg_model_allocation --> svc_modelAllocation
   pkg_model_allocation_local --> svc_modelAllocation
+  pkg_model_catalog_local --> svc_modelCatalogs
   pkg_model_worker --> svc_modelWorkers
   pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_orchestrationRecipients
   pkg_orchestration --> svc_orchestrations
   pkg_orchestration_local --> svc_capabilityCapsules
   pkg_orchestration_local --> svc_contextCompiler
@@ -320,6 +331,7 @@ flowchart LR
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
+  pkg_scheduling_evidence --> svc_schedulingEvidence
   pkg_session --> svc_sessions
   pkg_session_persistence --> svc_sessionPersistence
   pkg_session_persistence_jsonl --> svc_sessionPersistence
@@ -364,6 +376,8 @@ flowchart LR
   pkg_token_meter --> svc_tokenMeter
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
+  pkg_ui_gouzi --> svc_gouziHost
+  pkg_ui_gouzi --> svc_orchestrationRecipients
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
   pkg_web_fetch_http --> svc_web
@@ -401,6 +415,7 @@ flowchart LR
   svc_e2b --> pkg_fs_e2b
   svc_e2b --> pkg_subprocess_e2b
   svc_fs --> pkg_tool_fs
+  svc_gouziHost --> pkg_ui_gouzi
   svc_invariants --> pkg_agent
   svc_invariants --> pkg_agent_loop
   svc_invariants --> pkg_scope
@@ -413,7 +428,12 @@ flowchart LR
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
   svc_modelAllocation --> pkg_orchestration_local
+  svc_modelCatalogs --> pkg_host_apiproxy
+  svc_modelCatalogs --> pkg_llm_deepseek
+  svc_modelCatalogs --> pkg_physical_operator_chatgpt_web
+  svc_modelCatalogs --> pkg_tool_physical_operator
   svc_modelWorkers --> pkg_orchestration_local
+  svc_orchestrationRecipients --> pkg_tool_orchestration
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
@@ -427,6 +447,8 @@ flowchart LR
   svc_sandboxPolicy --> pkg_bash_sandbox
   svc_sandboxPolicy --> pkg_fs_sandbox
   svc_sandboxPolicy --> pkg_terminal_bash
+  svc_schedulingEvidence --> pkg_scheduling_evidence_rpc
+  svc_schedulingEvidence --> pkg_tool_physical_operator
   svc_sessionPersistence --> pkg_agent_loop
   svc_sessionPersistence --> pkg_hooks_claude_code
   svc_sessionPersistence --> pkg_hooks_codex
@@ -511,6 +533,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- | --- |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | `host-runtime`, [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | 宿主会在会话事件之前提交已接受的图片；提供方适配器将已授权的持久引用解析为提供方原生内容。 |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | 适配器注册提供方实现；agent loop（智能体循环）与压缩功能调用提供方无关的流服务。 |
+| `ctx.modelCatalogs` | `core` | [`model-catalog-local`](../packages/llm/model-catalog-local) | - | [`host-apiproxy`](../packages/host/apiproxy), [`llm-deepseek`](../packages/llm/llm-deepseek), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`physical-operator-chatgpt-web`](../packages/physical-operator/physical-operator-chatgpt-web) | - | 发现插件注册来源；SQLite 服务保存完整目录，Host 投影可用的菜单入口。 |
 | `ctx.tokenMeter` | `core` | [`token-meter`](../packages/llm/token-meter) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | 拥有按会话隔离的回放折叠区；压力消费方共享不可变且带修订版本的测量结果。 |
 | `ctx.toolResultPruner` | `core` | [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | 在摘要压缩前，通过可回放的单节点表层替换来改写过大的当前工具结果。 |
 | `ctx.sessions` | `core` | [`session`](../packages/core/session) | - | [`agent-loop`](../packages/core/agent-loop), [`agent`](../packages/core/agent), [`session-persistence`](../packages/session/session-persistence), [`session-query`](../packages/session-query/session-query), [`session-query-sqlite`](../packages/session-query/session-query-sqlite), `subagent-inprocess`, [`invariants`](../packages/runtime-diagnostics/invariants), [`message-feedback`](../packages/feedback/message-feedback) | - | 拥有仅追加的 Session 实例，并发出持久的会话事件流。 |
@@ -531,9 +554,12 @@ flowchart LR
 | `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | 注册可信 TypeScript 模块，并且只调用明确允许的模块／可调用项组合；生成的 Harness 内容不能在运行时创建可执行代码。 |
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 选择合格的订阅优先执行 Offer 并建议并行度，但不派发任务。 |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 注册与 Provider 无关的一次性模型通道；计费 DeepSeek Provider 仍是最后兜底执行路径。 |
+| `ctx.schedulingEvidence` | `core` | [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | - | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`scheduling-evidence-rpc`](../packages/orchestration/scheduling-evidence-rpc) | - | 把 Radar 与 AI Frontier 采集器作为有界子进程运行并返回其存储的 JSON 文档；所有者开启 Radar 后，还会保持已存储的版本为最新，并把证据交给分配器。 |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 在节点 Attempt 内封存有界递归执行指令，永不创建或修改全局 TaskGraph。 |
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 持有节点内 TypeScript Kernel、异步子项注册表、家族消息、Receipt、Goal 与恢复机制，不成为第二个全局 TaskGraph 调度器。 |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
+| `ctx.orchestrationRecipients` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | [`tool-orchestration`](../packages/orchestration/tool-orchestration) | - | 在封存 TaskGraph 准入前，将当前人工请求解析为已启用的成员 generation 和可用执行入口。 |
+| `ctx.gouziHost` | `seam` | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | 在运行 Server 的机器上启动、接管和停止执行成员进程；Desktop 产品提供它，名册只消费它。 |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Server 是配对、凭据交换、固定设备范围、撤销和无正文命令回执的唯一写者；传输和编排投影消费已认证 principal，但不持有凭据状态。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |

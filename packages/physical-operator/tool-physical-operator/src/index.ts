@@ -1,13 +1,17 @@
 /**
  * Model-facing `physical_operator` consumer. The model discovers stable
  * operator ids and invokes one without selecting a subprocess, SDK, model, or
- * provider transport. All execution remains on `ctx.physicalOperators`.
+ * provider transport. Gouzi ids require TaskGraph dispatch; admitted direct
+ * execution remains on `ctx.physicalOperators`.
  *
  * @module @deepseek-ai/dsh-tool-physical-operator
  */
 
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
+import type {} from '@deepseek-ai/dsh-orchestration'
 import { assembleContextFor, readModelSelection, type Agent, type ModelSelection, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   isAgentLoopRequest,
@@ -53,8 +57,14 @@ import type {
 import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
 import { LiveCatalogs, latestNativeModels, ModelEntries, NativeCatalogCache, type LatestModelEntries } from './model-entries.ts'
+import {
+  NATIVE_CATALOG_PROVIDER,
+  NativeCatalogSources,
+  nativeReasoningEffortName,
+} from './native-catalog-sources.ts'
 import { nativeModelTier, type ModelAllocationPlan, type ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from '@deepseek-ai/dsh-scheduling-evidence'
 import type {
   PhysicalOperatorRoutingOption,
   PhysicalOperatorRoutingPolicy,
@@ -65,6 +75,7 @@ import type {
   PhysicalOperatorProfilePreferencesSelect,
 } from './types.ts'
 import { PhysicalOperatorModelToolBridge } from './model-tool-bridge.ts'
+import { judgeDifficulty, type Difficulty } from './difficulty.ts'
 
 export type * from './types.ts'
 
@@ -87,6 +98,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       requestedByMessageId: string
       reason: string
       operatorId?: string
+      /** Present when the allocator chose the model: the facts behind `reason`, for counting without parsing prose. */
+      allocation?: RoutingAllocationSummary
     }
     /** Durable host decision that binds one DSH message to one physical-operator command. */
     'physical-operator/dispatch': {
@@ -244,12 +257,18 @@ interface RouterCatalogs {
 }
 const routerCatalogs = new WeakMap<Context, RouterCatalogs>()
 
-const ROUTER_PROVIDER = 'dsh-physical-operator'
+const ROUTER_PROVIDER = NATIVE_CATALOG_PROVIDER
 const RESUME_SOURCE = 'physical-operator-resume'
 const TASKGRAPH_SOURCE = 'physical-operator-taskgraph'
 const ORCHESTRATION_TOOL = 'orchestration'
 const CHATGPT_WEB_OPERATOR_ID = 'chatgpt-web'
 const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
+/** Terminal code of a run whose model the account can only use with extra paid usage credits. */
+const CREDITS_REQUIRED_CODE = 'MODEL_REQUIRES_CREDITS'
+
+/** The native product's own wording when the selected model needs usage credits the subscription does not include. */
+const CREDITS_REQUIRED_PATTERN = /requires? (?:extra )?usage credits/iu
+
 const SMART_AUTO_UNAVAILABLE_CODES = new Set([
   'AUTH_MODE_MISMATCH',
   'OPERATOR_UNAVAILABLE',
@@ -282,12 +301,46 @@ interface HostRouteMessage {
   readonly source: { readonly kind: string; readonly plugin?: string }
 }
 
+/** What public evidence says one offer achieves. */
+export interface OfferMeasurement {
+  passRate: number
+  avgCostUsd: number
+  avgRuntimeSeconds: number
+  sampleCount: number
+}
+
+/**
+ * What the allocator did for one Smart Collaboration request. The measured fields come from public
+ * evidence and are absent for an offer without a complete measurement.
+ */
+export interface RoutingAllocationSummary {
+  /** How hard the request text looked; it picks the cost-aware objective. */
+  difficulty: Difficulty
+  /** The offer the allocator sealed, including any change the cost-aware selection or evidence tie-break applied. */
+  chosenOfferId: string
+  /** The cost-aware selection, present when one ran. */
+  selection?: {
+    mode: 'shadow' | 'apply'
+    status: 'used' | 'abstained'
+    objective: 'economy' | 'balanced' | 'speed'
+    applied: boolean
+    baselineOfferId: string
+    /** The offer the selection preferred; equals `baselineOfferId` when it abstained or agrees. */
+    selectedOfferId: string
+    selected?: OfferMeasurement
+    baseline?: OfferMeasurement
+  }
+  /** The public-evidence tie-break, present when one ran. */
+  evidence?: { mode: 'shadow' | 'apply'; status: 'used' | 'abstained'; applied: boolean }
+}
+
 interface HostRoutingDecision {
   readonly policy: PhysicalOperatorRoutingPolicy
   readonly route: 'primary-model' | 'ephemeral' | 'resident' | 'taskgraph-candidate'
   readonly requestedByMessageId: string
   readonly reason: string
   readonly operatorId?: string
+  readonly allocation?: RoutingAllocationSummary
   readonly hostRoute?: PendingHostRoute
 }
 
@@ -372,11 +425,6 @@ const PROFILE_EFFORTS = [
 /** Separates the operator from the native model in a router model id. */
 const OPERATOR_MODEL_SEPARATOR = ':'
 
-/** Model-menu names of native reasoning efforts. */
-const EFFORT_NAMES: Record<PhysicalOperatorReasoningEffort, string> = {
-  low: '低', medium: '中', high: '高', xhigh: '很高', max: '最大', ultra: '极限',
-}
-
 const profileProjectionSchema = zod.object({
   profiles: zod.record(zod.string(), zod.object({
     model: zod.string().optional(),
@@ -400,6 +448,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     config.catalogMaxAgeMs ?? DEFAULT_CATALOG_MAX_AGE_MS,
     (catalogs) => { entries.catalogs.replace(catalogs) },
   )
+  const nativeCatalogSources = new NativeCatalogSources(
+    options => ctx.physicalOperators.residentCatalogs(options),
+    operatorId => ctx.physicalOperators.list().find(operator => String(operator.id) === operatorId)?.displayName,
+    entries.catalogs,
+    live,
+  )
   ctx.effect(function* () {
     yield async () => { await modelTools.dispose() }
   }, 'tool-physical-operator: model tool bridge')
@@ -407,9 +461,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     routerCatalogs.set(ctx, { entries, live })
     return () => {
       routerCatalogs.delete(ctx)
+      nativeCatalogSources.close()
       live.close()
     }
   }, 'tool-physical-operator: model entries')
+  ctx.inject(['modelCatalogs'], (catalogCtx) => {
+    for (const source of nativeCatalogSources.all()) {
+      catalogCtx.modelCatalogs.register(source)
+    }
+  })
   ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools, entries, live))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
@@ -423,6 +483,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         requestedByMessageId: decision.requestedByMessageId,
         reason: decision.reason,
         ...decision.operatorId === undefined ? {} : { operatorId: decision.operatorId },
+        ...decision.allocation === undefined ? {} : { allocation: decision.allocation },
       }, { ignorable: true })
     }
     if (route !== undefined) {
@@ -630,6 +691,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.tools.register(defineTool({
     name: 'physical_operator',
+    delegation: { family: 'physical-operator', actions: ['run'] },
     description:
       'Discover and run deployment-defined physical operators. Use action=list to inspect stable operator ids, '
       + 'live availability, tags, and capacity. Use action=run with one listed operator id and a complete standalone '
@@ -754,6 +816,12 @@ export function apply(ctx: Context, config: Config = {}): void {
         throw new Error('physical_operator action=run requires a calling agent (exec.agent was undefined)')
       }
       const operatorId = requireTrimmed(request.operator_id, 'operator_id')
+      if (operatorId.startsWith('gouzi.')) {
+        throw new PhysicalOperatorError(
+          `operator ${operatorId} is TaskGraph-only: use orchestration.start with this id in a TaskGraph node's operator.preferredIds; physical_operator cannot dispatch it directly`,
+          'OPERATOR_MODE_UNSUPPORTED',
+        )
+      }
       const description = requireTrimmed(request.description, 'description')
       const prompt = requireTrimmed(request.prompt, 'prompt')
       rejectUnsupportedCapabilityMode(request)
@@ -895,7 +963,10 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       id: model,
       name: entry.displayName,
       reasoning: {
-        efforts: entry.supportedEfforts.map(effort => ({ id: ReasoningEffortId(effort), name: EFFORT_NAMES[effort] })),
+        efforts: entry.supportedEfforts.map(effort => ({
+          id: ReasoningEffortId(effort),
+          name: nativeReasoningEffortName(effort),
+        })),
         ...entry.defaultEffort === undefined ? {} : { defaultEffort: ReasoningEffortId(entry.defaultEffort) },
       },
     })
@@ -980,12 +1051,14 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         await projectPhysicalOperatorProgress(this.ctx, agent, run, dispatch.commandId)
       }
       if (!signal.aborted) {
-        const code = errorCode(error)
+        const creditsRequired = dispatch.executionMode === 'resident' && CREDITS_REQUIRED_PATTERN.test(error instanceof Error ? error.message : '')
+        const code = creditsRequired ? CREDITS_REQUIRED_CODE : errorCode(error)
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
           code,
         }, { ignorable: true })
-        if (run === undefined && dispatch.fallbackOperatorId !== undefined && smartAutoUnavailable(code)) {
+        const fallbackAllowed = creditsRequired || (run === undefined && smartAutoUnavailable(code))
+        if (fallbackAllowed && dispatch.fallbackOperatorId !== undefined) {
           throw new PhysicalOperatorError(
             `${operatorDisplayName(dispatch.operatorId)} subscription qualification failed; trying the Smart Auto fallback`,
             FALLBACK_REQUIRED_CODE,
@@ -1024,6 +1097,7 @@ async function decideHostRoute(
   agent: Agent,
   messages: readonly HostRouteMessage[],
 ): Promise<HostRoutingDecision | undefined> {
+  if (ctx.get('orchestrationRecipients')?.automaticDispatch && resolveSessionPreset(agent.session) === 'kennel') return undefined
   const current = [...messages].reverse().find(message => message.source.kind === 'user')
   const resume = [...messages].reverse().find(message => (
     message.source.kind === 'plugin' && message.source.plugin === RESUME_SOURCE
@@ -1156,6 +1230,7 @@ function taskGraphDirective(preferredOperatorId: string | undefined): UserMessag
  * one bounded physical operator, and everything else stays on the current model.
  */
 async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, text: string): Promise<HostRoutingDecision> {
+  if (isMemoryRequest(text)) return primaryDecision(messageId, 'auto', '记忆写入由主模型通过 DSH 记忆工具完成，不委派给外部算子')
   if (isParallelCandidate(text)) {
     return {
       policy: 'auto',
@@ -1166,7 +1241,8 @@ async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, 
   }
   const automatic = automaticOperator(text)
   if (automatic === undefined) return primaryDecision(messageId, 'auto', '未发现需要物理算子或 TaskGraph 的工作')
-  const allocation = await allocateSmartAuto(ctx, agent, messageId, text, automatic)
+  const difficulty = smartAutoDifficulty(agent.session.events, messageId, text)
+  const allocation = await allocateSmartAuto(ctx, agent, messageId, text, automatic, difficulty)
   if (allocation.plan === undefined) {
     return operatorDecision(
       ctx,
@@ -1181,16 +1257,47 @@ async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, 
   const { plan } = allocation
   const operatorId = plan.operatorId as PhysicalOperatorRoutingTarget
   const effort = plan.profile?.effort
-  return operatorDecision(
-    ctx,
-    agent,
-    messageId,
-    'auto',
-    operatorId,
-    `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}`,
-    operatorId === 'claude-code' ? 'codex' : undefined,
-    plan.profile,
-  )
+  return {
+    ...operatorDecision(
+      ctx,
+      agent,
+      messageId,
+      'auto',
+      operatorId,
+      `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}${evidenceNote(plan)}${selectionNote(plan, difficulty)}`,
+      operatorId === 'claude-code' ? 'codex' : undefined,
+      plan.profile,
+    ),
+    allocation: allocationSummary(plan, difficulty),
+  }
+}
+
+/** The structured account of a plan that the routing-decision event records beside the prose reason. */
+function allocationSummary(plan: ModelAllocationPlan, difficulty: Difficulty): RoutingAllocationSummary {
+  const receipt = plan.selection
+  const measured = (offerId: string): OfferMeasurement | undefined => {
+    const found = receipt?.considered.find(entry => entry.offerId === offerId)
+    if (found === undefined) return undefined
+    const { passRate, avgCostUsd, avgRuntimeSeconds, sampleCount } = found
+    return { passRate, avgCostUsd, avgRuntimeSeconds, sampleCount }
+  }
+  const selected = receipt === undefined ? undefined : measured(receipt.selectedOfferId)
+  const baseline = receipt === undefined ? undefined : measured(receipt.baselineOfferId)
+  return {
+    difficulty,
+    chosenOfferId: plan.offerId,
+    ...receipt === undefined ? {} : {
+      selection: {
+        mode: receipt.mode, status: receipt.status, objective: receipt.objective, applied: receipt.applied,
+        baselineOfferId: receipt.baselineOfferId, selectedOfferId: receipt.selectedOfferId,
+        ...selected === undefined ? {} : { selected },
+        ...baseline === undefined ? {} : { baseline },
+      },
+    },
+    ...plan.evidence === undefined ? {} : {
+      evidence: { mode: plan.evidence.mode, status: plan.evidence.status, applied: plan.evidence.applied },
+    },
+  }
 }
 
 /** Outcome of one Smart Collaboration allocation; without a plan the classifier's operator is used. */
@@ -1204,6 +1311,9 @@ type SmartAutoAllocation =
  * implementation-shaped work favors Codex and analysis-shaped work favors
  * Claude Code while quota, capacity, and tier decide the exact model.
  * Claude Code reports no quota telemetry, so unknown quota is admitted.
+ * When `ctx.schedulingEvidence` is mounted, its public evidence for the offers
+ * goes with the request; the allocator decides whether it only records a
+ * verdict (shadow) or breaks a tie (apply).
  */
 async function allocateSmartAuto(
   ctx: Context,
@@ -1211,17 +1321,20 @@ async function allocateSmartAuto(
   messageId: string,
   text: string,
   automatic: PhysicalOperatorProfileOwner,
+  difficulty: Difficulty,
 ): Promise<SmartAutoAllocation> {
   const allocator = ctx.get('modelAllocation')
   const catalogs = routerCatalogs.get(ctx)?.live
   if (allocator === undefined || catalogs === undefined) return {}
   let offers: ModelExecutionOffer[]
+  let alternatives: ModelExecutionOffer[]
   try {
-    offers = smartAutoOffers(ctx, await catalogs.current())
+    ({ offers, alternatives } = smartAutoOffers(ctx, await catalogs.current(), creditBlockedOffers(agent.session.events)))
   } catch (error) {
     return { unavailable: `原生目录读取失败：${error instanceof Error ? error.message : String(error)}` }
   }
   try {
+    const evidence = ctx.get('schedulingEvidence')?.evidenceFor([...offers, ...alternatives], automatic === 'codex' ? 'coding' : 'analysis')
     const plan = await allocator.allocate({
       runId: `session:${String(agent.id)}`,
       nodeId: messageId,
@@ -1233,9 +1346,12 @@ async function allocateSmartAuto(
       rlm: 'disabled',
       graphMaxParallel: 1,
       offers,
+      ...alternatives.length === 0 ? {} : { alternativeOffers: alternatives },
+      ...evidence === undefined ? {} : { evidence },
+      ...DIFFICULTY_OBJECTIVE[difficulty] === undefined ? {} : { costAwareObjective: DIFFICULTY_OBJECTIVE[difficulty] },
       now: new Date().toISOString(),
     })
-    const offer = offers.find(candidate => candidate.offerId === plan.offerId)
+    const offer = [...offers, ...alternatives].find(candidate => candidate.offerId === plan.offerId)
     if (offer === undefined || !isPhysicalOperatorRoutingTarget(plan.operatorId)) {
       return { unavailable: `调度器选择了未知报价 ${plan.offerId}` }
     }
@@ -1246,42 +1362,135 @@ async function allocateSmartAuto(
 }
 
 /**
+ * What each difficulty asks of the allocator beyond its baseline. A hard request asks for nothing, so it
+ * keeps the strongest offer exactly as before.
+ */
+const DIFFICULTY_OBJECTIVE: Readonly<Record<Difficulty, 'economy' | 'balanced' | undefined>> = {
+  easy: 'economy',
+  normal: 'balanced',
+  hard: undefined,
+}
+
+/** Whether the latest delegated run of this session ended in a failure. */
+function lastDispatchFailed(events: readonly SessionEvent[]): boolean {
+  const dispatch = latestDispatch(events)
+  return dispatch !== undefined && events.some(event => event.seq > dispatch.seq
+    && event.type === 'physical-operator/dispatch-terminal'
+    && event.data.commandId === dispatch.commandId)
+}
+
+/** Judge the current Smart Collaboration request together with this session's earlier requests and last delegation. */
+function smartAutoDifficulty(events: readonly SessionEvent[], messageId: string, text: string): Difficulty {
+  const earlierRequests: string[] = []
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'user/message' || String(event.data.id) === messageId) continue
+    earlierRequests.push(textContent(event.data.content))
+  }
+  return judgeDifficulty(text, { earlierRequests, lastDispatchFailed: lastDispatchFailed(events) }).level
+}
+
+const DIFFICULTY_LABEL: Readonly<Record<Difficulty, string>> = { easy: '简单', normal: '一般', hard: '困难' }
+
+/** The routing reason's account of a cost- and time-aware selection; empty when none ran for this allocation. */
+function selectionNote(plan: ModelAllocationPlan, difficulty: Difficulty): string {
+  const receipt = plan.selection
+  if (receipt === undefined) return ''
+  const head = `；成本感知（${receipt.mode}，难度${DIFFICULTY_LABEL[difficulty]}）：`
+  if (receipt.status === 'abstained') return `${head}弃权（${receipt.reason}）`
+  const pick = receipt.considered.find(entry => entry.offerId === receipt.selectedOfferId)
+  const facts = pick === undefined
+    ? ''
+    : `（通过率 ${(pick.passRate * 100).toFixed(1)}%，成本 $${pick.avgCostUsd.toFixed(2)}，耗时 ${Math.round(pick.avgRuntimeSeconds / 60)} 分钟）`
+  if (receipt.selectedOfferId === receipt.baselineOfferId) return `${head}基线 ${receipt.baselineOfferId} 已是够用里最省的${facts}`
+  return `${head}${receipt.applied ? '改选' : '倾向'} ${receipt.selectedOfferId}${facts}，基线是 ${receipt.baselineOfferId}${receipt.applied ? '' : '，影子模式未采用'}`
+}
+
+/** The routing reason's account of a public-evidence ranking; empty when none ran for this allocation. */
+function evidenceNote(plan: ModelAllocationPlan): string {
+  const receipt = plan.evidence
+  if (receipt === undefined) return ''
+  const verdict = receipt.status === 'used'
+    ? `倾向 ${receipt.evidenceOfferId}${receipt.applied ? '，已采用' : receipt.mode === 'shadow' ? '，影子模式未采用' : '，与基线一致'}`
+    : '弃权'
+  return `；公开证据（${receipt.mode}）：${verdict}（${receipt.reason}）`
+}
+
+/** The offers one Smart Collaboration allocation considers, and the other reasoning strengths of the same models. */
+interface SmartAutoOffers {
+  readonly offers: ModelExecutionOffer[]
+  readonly alternatives: ModelExecutionOffer[]
+}
+
+/**
  * Subscription offers for Smart Collaboration: each native model of an
  * available Codex or Claude Code catalog that accepts the DSH tool bridge.
  * Proxied models that name another provider (`openrouter/…`) are excluded,
  * and each offer's rank follows the newest-first order of the model menu so
  * an equally scored newer model wins.
  */
-function smartAutoOffers(ctx: Context, catalogs: readonly PhysicalOperatorResidentCatalog[]): ModelExecutionOffer[] {
+function smartAutoOffers(
+  ctx: Context,
+  catalogs: readonly PhysicalOperatorResidentCatalog[],
+  creditBlocked: ReadonlySet<string> = new Set(),
+): SmartAutoOffers {
   const statuses = new Map(ctx.physicalOperators.list().map(status => [String(status.id), status] as const))
-  return catalogs.flatMap((catalog) => {
+  const offers: ModelExecutionOffer[] = []
+  const alternatives: ModelExecutionOffer[] = []
+  for (const catalog of catalogs) {
     const operatorId = String(catalog.operatorId)
     const status = statuses.get(operatorId)
-    if (status === undefined || !isPhysicalOperatorProfileOwner(operatorId) || !catalog.supportsModelToolBridge) return []
+    if (status === undefined || !isPhysicalOperatorProfileOwner(operatorId) || !catalog.supportsModelToolBridge) continue
     const qualified = catalog.available && catalog.authentication === 'native-subscription' && status.state !== 'unavailable'
-    return latestNativeModels(catalog.models, catalog.models.length)
-      .map((model, rank): ModelExecutionOffer => {
-        const quotaPool = catalog.quotaPools?.find(pool => pool.models.includes(model.model))
-        return {
-          offerId: `${operatorId}:${model.model}`,
-          operatorId,
-          provider: catalog.product,
-          model: model.model,
-          displayName: `${status.displayName} · ${model.displayName}`,
-          source: 'native-subscription',
-          tier: nativeModelTier(model),
-          available: qualified,
-          maxConcurrency: status.maxConcurrency,
-          activeCount: status.active,
-          tags: status.tags,
-          ...qualified ? {} : { unavailableReasonCode: 'OPERATOR_UNAVAILABLE' as const },
-          ...quotaPool === undefined ? {} : { quotaPool },
-          quotaGuard: { unknownQuota: 'allow', protectedRemainingPercent: 0, stopAdmissionAtRemainingPercent: 0, accelerateBeforeReset: true },
-          profile: { model: model.model, ...model.defaultEffort === undefined ? {} : { effort: model.defaultEffort } },
-          rank,
-        }
+    for (const [rank, model] of latestNativeModels(catalog.models, catalog.models.length).entries()) {
+      if (creditBlocked.has(`${operatorId}:${model.model}`)) continue
+      const quotaPool = catalog.quotaPools?.find(pool => pool.models.includes(model.model))
+      const offerFor = (offerId: string, effort: PhysicalOperatorReasoningEffort | undefined, offerRank: number): ModelExecutionOffer => ({
+        offerId,
+        operatorId,
+        provider: catalog.product,
+        model: model.model,
+        displayName: `${status.displayName} · ${model.displayName}`,
+        source: 'native-subscription',
+        tier: nativeModelTier(model),
+        available: qualified,
+        maxConcurrency: status.maxConcurrency,
+        activeCount: status.active,
+        tags: status.tags,
+        ...qualified ? {} : { unavailableReasonCode: 'OPERATOR_UNAVAILABLE' as const },
+        ...quotaPool === undefined ? {} : { quotaPool },
+        quotaGuard: { unknownQuota: 'allow', protectedRemainingPercent: 0, stopAdmissionAtRemainingPercent: 0, accelerateBeforeReset: true },
+        profile: { model: model.model, ...effort === undefined ? {} : { effort } },
+        rank: offerRank,
       })
-  })
+      offers.push(offerFor(`${operatorId}:${model.model}`, model.defaultEffort, rank))
+      // The other reasoning strengths of a model are separate offers because one model costs and takes very
+      // differently by strength. Only the cost-aware selection reads them, so the baseline stays the newest model
+      // at its default strength.
+      for (const effort of model.supportedEfforts.filter(candidate => candidate !== model.defaultEffort)) {
+        alternatives.push(offerFor(`${operatorId}:${model.model}:${effort}`, effort, rank))
+      }
+    }
+  }
+  return { offers, alternatives }
+}
+
+/**
+ * Models this session already found to need usage credits the subscription lacks, as `operator:model` keys.
+ * The catalog lists them as available, so without this the allocator would pick the same model for every request.
+ * @param events - the session's ordered durable log.
+ * @returns the operator and model of every dispatch that ended with the credits-required code.
+ */
+function creditBlockedOffers(events: readonly SessionEvent[]): ReadonlySet<string> {
+  const blocked = new Set<string>()
+  for (const event of events) {
+    if (event.type !== 'physical-operator/dispatch-terminal' || event.data.code !== CREDITS_REQUIRED_CODE) continue
+    const dispatch = events.find(candidate => candidate.type === 'physical-operator/dispatch' && candidate.data.commandId === event.data.commandId)
+    if (dispatch?.type === 'physical-operator/dispatch' && dispatch.data.residentProfile?.model !== undefined) {
+      blocked.add(`${dispatch.data.operatorId}:${dispatch.data.residentProfile.model}`)
+    }
+  }
+  return blocked
 }
 
 /** Native preferences can constrain TaskGraph workers without replacing a selected primary model. */
@@ -1481,6 +1690,22 @@ function isDelegable(text: string): boolean {
   return value.length >= 12 || automaticOperator(value) !== undefined
 }
 
+/** How much of a request can carry the instruction; text after it is pasted material, not a command. */
+const MEMORY_INSTRUCTION_CHARS = 120
+
+/**
+ * Detect a request to save something into DSH memory. The memory tools exist only in this session, so an
+ * external operator cannot carry the request out; the pasted material that follows the instruction (a profile
+ * full of 研究/报告 words) must not decide the route.
+ * @param text - current user-request text.
+ * @returns whether the opening of the request asks to write to memory.
+ */
+export function isMemoryRequest(text: string): boolean {
+  const opening = text.trim().slice(0, MEMORY_INSTRUCTION_CHARS)
+  return /(?:写|存|保存|记|插入|加入|更新|添加)(?:到|入|进|为)?[^。！？\n]{0,12}(?:记忆|memory|mnemon)/iu.test(opening)
+    || /记住|remember (?:this|that|the following)/iu.test(opening)
+}
+
 /**
  * Detect work whose independent branches should remain visible to the durable Scheduler.
  * Length alone is not a signal: a long pasted document is one task.
@@ -1489,7 +1714,11 @@ function isDelegable(text: string): boolean {
  */
 export function isParallelCandidate(text: string): boolean {
   const value = text.trim()
-  return /(?:并行|多个(?:任务|方向|模块|子任务)|分别(?:分析|研究|实现|验证)|多(?:角色|智能体|代理))/u.test(value)
+  // 并行 alone is a topic word ("单请求序列内并行生成" in a pasted note); it only requests parallel work
+  // when it directs an action or names a work unit.
+  return /并行(?:地)?(?:安排|研究|分析|处理|执行|运行|推进|调研|实现|验证|开发|审查|评审|派发|开展|进行|完成|拆分|调用|跑)/u.test(value)
+    || /并行(?:的)?(?:任务|分支|子任务|工作流)/u.test(value)
+    || /(?:多个(?:任务|方向|模块|子任务)|分别(?:分析|研究|实现|验证)|多(?:角色|智能体|代理))/u.test(value)
     || /(?:跨(?:学科|模块|仓库)|全面(?:分析|研究|调研)|系统性(?:分析|研究))/u.test(value)
     || /(?:parallel|multi[- ](?:agent|stage|module)|independent branches)/iu.test(value)
 }

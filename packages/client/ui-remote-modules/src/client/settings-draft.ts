@@ -12,6 +12,8 @@ export interface RemoteModuleDraft {
   url: string
   relayPort: string
   order: string
+  /** Open the original URL in the system browser without a relay. */
+  direct: boolean
 }
 
 /** Stable error codes localized by the settings surface. */
@@ -42,6 +44,7 @@ export function draftRemoteModules(
     url: instance.url,
     relayPort: String(instance.relayPort),
     order: String(instance.order),
+    direct: instance.direct === true,
   }))
 }
 
@@ -91,17 +94,23 @@ export function validateRemoteModuleDrafts(drafts: readonly RemoteModuleDraft[])
     } else if (id !== '') ids.set(id, draft.key)
     if (label === '') setError(errors, draft.key, 'label', 'required')
     if (!validUrl(url)) setError(errors, draft.key, 'url', 'invalidUrl')
-    if (!Number.isSafeInteger(relayPort) || relayPort < 0 || relayPort > 65535) {
-      setError(errors, draft.key, 'relayPort', 'invalidPort')
-    } else if (relayPort !== 0) {
-      const firstPort = ports.get(relayPort)
-      if (firstPort !== undefined) {
-        setError(errors, firstPort, 'relayPort', 'duplicatePort')
-        setError(errors, draft.key, 'relayPort', 'duplicatePort')
-      } else ports.set(relayPort, draft.key)
+    // A direct module starts no relay, so its port text is neither validated nor reserved.
+    if (!draft.direct) {
+      if (!Number.isSafeInteger(relayPort) || relayPort < 0 || relayPort > 65535) {
+        setError(errors, draft.key, 'relayPort', 'invalidPort')
+      } else if (relayPort !== 0) {
+        const firstPort = ports.get(relayPort)
+        if (firstPort !== undefined) {
+          setError(errors, firstPort, 'relayPort', 'duplicatePort')
+          setError(errors, draft.key, 'relayPort', 'duplicatePort')
+        } else ports.set(relayPort, draft.key)
+      }
     }
     if (!Number.isSafeInteger(order)) setError(errors, draft.key, 'order', 'invalidOrder')
-    instances.push({ id, label, url, relayPort, order })
+    instances.push({
+      id, label, url, relayPort: draft.direct ? 0 : relayPort, order,
+      ...(draft.direct ? { direct: true } : {}),
+    })
   }
   return Object.keys(errors).length === 0 && drafts.length > 0
     ? { config: { instances }, errors }

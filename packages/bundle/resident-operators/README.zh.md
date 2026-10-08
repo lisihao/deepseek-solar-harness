@@ -8,7 +8,7 @@
 
 ## Composition
 
-Patch 挂载 physical-operator Service Definition、Resident Service Definition、本地 Resident Provider、现有 Codex 与 Claude Code subagent Provider、模式感知路由器，以及唯一模型 Consumer。路由器依赖 definitions 而非实现内部；Consumer 只依赖 physical definition。模型菜单提供 DeepSeek-V4-Pro、DeepSeek-V4-Flash、ChatGPT Web 和 Codex 最新的两款原生模型，`codex` 本身的入口运行其中的旗舰模型；该 patch 把 DeepSeek 目录收窄为 V4-Pro 和 V4-Flash 并关闭其端点模型发现，其他 DeepSeek 模型只能从 Models 设置页加回；Claude Code 与其他原生模型仍可用于委派，刷新得到的目录保存在 `$DSH_HOME/physical-operator`，超过十分钟后会在后台重读。该 patch 还挂载 `@deepseek-ai/dsh-model-allocation-local`，智能协作每次委派都会向它询问协作者、模型和强度。
+Patch 挂载 physical-operator Service Definition、Resident Service Definition、本地 Resident Provider、现有 Codex 与 Claude Code subagent Provider、模式感知路由器、唯一模型 Consumer 以及基于 SQLite 的 `modelCatalogs` 服务。路由器依赖 definitions 而非实现内部；Consumer 只依赖 physical definition。一次显式刷新会分别调用 DeepSeek `GET /models`、全新的 Codex 元数据、Claude Code 显式的 `supportedModels` 目录和已启用的 Web picker，各调用一次；普通读取使用持久化快照，UI 面板复用缓存结果。完整目录和来源状态都会持久化：被移除的条目标记为不可用，刷新失败则保留为未知且不进入菜单。菜单按最新旗舰/主线策略（DeepSeek Pro/Flash、Codex Astra/最新 Sol、Web Pro/Thinking）为 DeepSeek、Codex 和 Web 各提供最多两个可用入口，缺少家族时按上游顺序回退；Claude 刷新的目录只为提供方使用而存储，不作为主菜单来源。该策略不是基准排名，也不会安装或发布提供方软件。该 patch 还挂载 `@deepseek-ai/dsh-model-allocation-local`，智能协作每次委派都会向它询问协作者、模型和强度。
 
 默认执行模式保持 `ephemeral`。Resident Session 按工作区确定。Bundle/HMR 释放只断开客户端，不停止独立 daemon；禁用 Bundle 会恢复现有一次性路径，并保留 SQLite、Artifact 与产品原生 Session。
 

@@ -14,7 +14,7 @@ DeepSeek Harness 需要一个简单、可安装且能启动多个独立配置实
 
 **由一个可安装的双端插件管理配置实例数组。** `@deepseek-ai/dsh-client-ui-remote-modules` 声明自己的默认禁用 bundle 行。该行的 `instances` 数组就是多实例边界：每一项拥有唯一 id、名称、完整 HTTP(S) 目标 URL、中继端口和顺序。实例配置完全通用，包内没有部署专用分支。
 
-**每个实例拥有一个目标固定的回环中继。** Host 为每个实例启动一个绑定 `127.0.0.1` 的中继。进入的路径、方法、请求体、Cookie、重定向、流式响应和 WebSocket upgrade 始终落在唯一配置的目标 origin 上，因此它不是开放代理。中继移除 `X-Frame-Options` 以及 CSP 中唯一的 `frame-ancestors` 指令，使部署者授权的网页可以显示在 Harness 中；其余安全策略和网页字节保持不变。配置稳定中继端口后，Harness 重启前后的浏览器 Origin、Cookie 与 local storage 都能保持。
+**每个实例拥有一个目标固定的回环中继。** Host 为每个实例启动一个绑定 `127.0.0.1` 的中继。进入的路径、方法、请求体、Cookie、重定向、流式响应和 WebSocket upgrade 始终落在唯一配置的目标 origin 上，因此它不是开放代理。中继移除 `X-Frame-Options` 以及 CSP 中唯一的 `frame-ancestors` 指令，使部署者授权的网页可以显示在 Harness 中；其余安全策略和网页字节保持不变。目标站点把入口 URL 重定向到另一个公网域名时，中继把固定目标移到该域名（最多八次）并把重定向改写成自己的地址；涉及回环、私有或 IP 字面量主机的重定向一律不跟随。配置稳定中继端口后，Harness 重启前后的浏览器 Origin、Cookie 与 local storage 都能保持。标记为 `direct` 的实例不启动中继，直接加载其 URL：Desktop 中是放在以模块命名的持久分区里的 Electron `<webview>` 页面，窗口限制访客只能是不含凭据的 `http(s)` 页面、无 preload、无 Node.js 且沙箱化；其他环境用系统浏览器打开。登录请求会访问其他 origin 的站点无法在中继的 origin 下工作，X 还拒绝在 iframe 中渲染，所以只有独立的 web contents 可行。
 
 **浏览器展示目标应用，而不是对它的观测。** Host 在 `/remote-webpages/v1/instances` 发布 `no-store` 实例清单。Client controller 验证清单后写入根作用域 `defineStore`。可叠加的 `sidebar.footer.action` slot 只有一个 occupant，它把动态实例渲染为纵向条目。打开条目时恰好创建一个指向该实例中继 URL 的 iframe，并提供重新加载、新窗口打开和关闭控件。实现中不存在健康路由、归一化服务快照或服务专用面板。
 

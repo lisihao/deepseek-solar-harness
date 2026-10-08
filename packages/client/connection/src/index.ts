@@ -14,6 +14,7 @@ import type {
   OrchestrationClusterVoteRequest,
 } from '@deepseek-ai/dsh-orchestration'
 import { SessionReplicationError, type SessionReplica } from '@deepseek-ai/dsh-session-persistence'
+import { GouziAdmissionError, gouziRequestHash, parseGouziGrant } from './gouzi-member.ts'
 import {
   RemoteAuthError,
   type RemoteAuthService,
@@ -35,7 +36,7 @@ import {
   REMOTE_SYNC_COMPATIBLE_MINOR, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
   type RemoteResidentExecuteRequest,
   type RemoteSyncProtocolVersion,
-  type RemoteWorkspaceIdentityV1,
+  type RemoteExecutionWorkspaceIdentityV1,
 } from './remote-sync.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
@@ -51,6 +52,12 @@ export type {
 export { HostConnectionService } from './rpc-host.ts'
 export { REMOTE_AUTH_RPC_CHANNEL } from './remote-auth-wire.ts'
 export { RemoteOperatorHostService } from './remote-operator-host.ts'
+export {
+  GouziAdmissionError, GouziMemberService, gouziRequestHash, parseGouziGrant,
+} from './gouzi-member.ts'
+export type {
+  GouziAdmission, GouziAdmissionCode, GouziMemberHello,
+} from './gouzi-member.ts'
 export type { RemoteMaterializedWorkspaceV1, RemoteOperatorHostQualification } from './remote-operator-host.ts'
 export type {
   RemoteAccessSession, RemoteDeviceCredential, RemoteDeviceScope,
@@ -60,7 +67,7 @@ export type {
 export { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 export {
   REMOTE_SYNC_COMPATIBLE_MINOR, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
-  bindRemoteResidentProtocol, canonicalRemoteRepositoryIdentity, RemoteResidentProtocolClient,
+  bindRemoteResidentProtocol, canonicalRemoteRepositoryIdentity, RemoteResidentProtocolClient, RemoteResidentCapabilityError,
   parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
   parseRemoteResidentProviders, parseRemoteResidentResult, parseRemoteResidentTurn,
   parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
@@ -73,6 +80,7 @@ export type {
   RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
   RemoteSyncCapability, RemoteSyncClusterProjection, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncProtocolVersion, RemoteSyncResyncRequired, RemoteSyncSnapshot, RemoteWorkspaceIdentityV1,
+  RemoteExecutionWorkspaceIdentityV1, RemoteGouziWorkspaceIdentityV1,
 } from './remote-sync.ts'
 
 /** Stable Cordis plugin name. */
@@ -228,6 +236,20 @@ const REMOTE_COCKPIT_COMMAND_METHODS = new Set([
 
 /** Pocket is an observation/approval face, not a general execution client. */
 const REMOTE_POCKET_COMMAND_METHODS = new Set(['respond'])
+/**
+ * Remote Sync endpoints a `gouzi` credential may call: capability description and the operator execution
+ * methods. Every other endpoint (snapshot, replica, cluster, anything added later) is refused for that scope.
+ */
+const GOUZI_SYNC_ENDPOINTS: ReadonlySet<string> = new Set([
+  'describe',
+  'gouzi.hello',
+  'operator.providers',
+  'operator.execute',
+  'operator.inspect',
+  'operator.events',
+  'operator.artifact.read',
+  'operator.interrupt',
+])
 
 /**
  * Mounts the API gateway under the browser transport prefix. Every request on
@@ -341,6 +363,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         const method = pathname.startsWith(`${API_PATH}/`)
           ? pathname.slice(API_PATH.length + 1)
           : undefined
+        if (access.scope === 'gouzi') {
+          res.writeHead(403)
+          res.end('forbidden')
+          return
+        }
         if (access.scope === 'pocket'
           && (method === undefined
             || (!REMOTE_READ_METHODS.has(method) && !REMOTE_POCKET_COMMAND_METHODS.has(method)))) {
@@ -393,6 +420,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         authCtx.get('residentOperators'),
         () => authCtx.get('orchestrations'),
         () => authCtx.get('remoteOperatorHost'),
+        () => authCtx.get('gouziMember'),
       )
       const removeAuthRpc = connection.rpc.handle(
         REMOTE_AUTH_RPC_CHANNEL,
@@ -410,10 +438,18 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           const access = requireRemoteAccess(
             authCtx.remoteAuth,
             requestContext,
-            ['cockpit', 'pocket', 'admin'],
+            ['cockpit', 'pocket', 'admin', 'gouzi'],
           )
+          if (access.scope === 'gouzi' && !GOUZI_SYNC_ENDPOINTS.has(endpoint)) {
+            throw new ConnectionRpcHttpError(403, 'forbidden')
+          }
           if (endpoint === 'describe') {
             return { ok: true, value: await hub.describe(signal, access.scope, requestedRemoteSyncProtocol(payload)) }
+          }
+          if (endpoint === 'gouzi.hello') {
+            const member = authCtx.get('gouziMember')
+            if (member === undefined) throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: member.hello() }
           }
           if (endpoint === 'snapshot') {
             return { ok: true, value: await hub.snapshot(signal, requestedRemoteSyncProtocol(payload)) }
@@ -463,6 +499,29 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
             }
             const profile = body.profile === undefined ? undefined : residentProfile(body.profile)
             const request: RemoteResidentExecuteRequest = {
+              ...body.workspaceSnapshotInput === undefined ? {} : { workspaceSnapshotInput: (() => {
+                const input = recordPayload(body.workspaceSnapshotInput)
+                const baseSha = requiredString(input.baseSha, 'workspaceSnapshotInput.baseSha')
+                if (input.version !== 1 || !/^[a-f0-9]{40}$/u.test(baseSha)
+                  || typeof input.baseBundle !== 'string' || input.baseBundle.length > 12 * 1024 * 1024
+                  || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(input.baseBundle)) {
+                  throw new ConnectionRpcHttpError(400, 'invalid or oversized workspace snapshot input')
+                }
+                return { version: 1 as const, baseSha, baseBundle: input.baseBundle }
+              })() },
+              ...body.workspaceMutationReturn === undefined ? {} : { workspaceMutationReturn: (() => {
+                const mutation = recordPayload(body.workspaceMutationReturn)
+                if (mutation.version !== 1) throw new ConnectionRpcHttpError(400, 'unsupported workspace mutation return version')
+                const baseSha = requiredString(mutation.baseSha, 'workspaceMutationReturn.baseSha')
+                if (!/^[a-f0-9]{40}$/u.test(baseSha)) throw new ConnectionRpcHttpError(400, 'invalid mutation base SHA')
+                if (mutation.baseBundle !== undefined && (typeof mutation.baseBundle !== 'string'
+                  || mutation.baseBundle.length > 12 * 1024 * 1024
+                  || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(mutation.baseBundle))) {
+                  throw new ConnectionRpcHttpError(400, 'invalid or oversized snapshot base bundle')
+                }
+                return { version: 1 as const, baseSha,
+                  ...mutation.baseBundle === undefined ? {} : { baseBundle: mutation.baseBundle } }
+              })() },
               commandId: requiredString(body.commandId, 'commandId'),
               operatorId: requiredString(body.operatorId, 'operatorId'),
               workspaceIdentity: remoteWorkspaceIdentity(body.workspaceIdentity),
@@ -474,11 +533,54 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
                 ? {}
                 : { contextEnvelope: remoteOperatorContextEnvelope(body.contextEnvelope) },
               ...profile === undefined ? {} : { profile },
+              ...body.governedWorkspacePolicy === undefined
+                ? {}
+                : { governedWorkspacePolicy: remoteGovernedWorkspacePolicy(body.governedWorkspacePolicy) },
+              ...body.generationLimits === undefined ? {} : { generationLimits: remoteGenerationLimits(body.generationLimits) },
               ...body.nativeToolPolicy === undefined
                 ? {}
                 : { nativeToolPolicy: residentNativeToolPolicy(body.nativeToolPolicy) },
             }
-            return { ok: true, value: await hub.operatorExecute(request) }
+            if (request.nativeToolPolicy === 'dsh-tools-authoritative' && request.governedWorkspacePolicy === undefined) {
+              throw new ConnectionRpcHttpError(400, 'remote DSH file tools require a governed workspace policy')
+            }
+            // A host that mounts the member gate is a member host: every caller, including a loopback owner or a
+            // tunnel endpoint, needs a grant. Without the gate the `gouzi` scope cannot execute at all.
+            const member = authCtx.get('gouziMember')
+            if ('kind' in request.workspaceIdentity && member === undefined) {
+              throw new ConnectionRpcHttpError(403, 'registered project execution requires a Gouzi member host')
+            }
+            if (member === undefined && access.scope !== 'gouzi') {
+              return { ok: true, value: await hub.operatorExecute(request) }
+            }
+            if (member === undefined) throw new ConnectionRpcHttpError(403, 'forbidden')
+            let grant: ReturnType<typeof parseGouziGrant>
+            try {
+              grant = parseGouziGrant(body.gouziGrant)
+            } catch (error) {
+              throw new ConnectionRpcHttpError(400, error instanceof Error ? error.message : String(error))
+            }
+            if (request.governedWorkspacePolicy !== undefined
+              && (request.governedWorkspacePolicy.readScopes.some(scope => !grant.scopes.read.includes(scope))
+                || request.governedWorkspacePolicy.writeScopes.some(scope => !grant.scopes.write.includes(scope)))) {
+              throw new ConnectionRpcHttpError(403, 'GOUZI_SCOPE_MISMATCH: governed file policy exceeds its execution grant')
+            }
+            if (grant.executionId !== request.commandId) {
+              throw new ConnectionRpcHttpError(403, 'GOUZI_EXECUTION_MISMATCH: grant execution id differs from the command id')
+            }
+            try {
+              const admission = await member.admit(grant, gouziRequestHash(request), Date.now())
+              if (admission.kind === 'replay') return { ok: true, value: admission.accepted }
+            } catch (error) {
+              if (!(error instanceof GouziAdmissionError)) throw error
+              throw new ConnectionRpcHttpError(
+                error.code === 'GOUZI_EXECUTION_CONFLICT' ? 409 : 403,
+                `${error.code}: ${error.message}`,
+              )
+            }
+            const accepted = await hub.operatorExecute(request)
+            await member.recordAccepted(request.commandId, accepted)
+            return { ok: true, value: accepted }
           }
           if (endpoint === 'operator.inspect') {
             if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
@@ -781,7 +883,7 @@ function requireCurrentRemoteSyncProtocol(value: unknown): void {
     ? { major: REMOTE_SYNC_PROTOCOL.major, minor: REMOTE_SYNC_COMPATIBLE_MINOR }
     : recordPayload(value)
   if (protocol.major !== REMOTE_SYNC_PROTOCOL.major || protocol.minor !== REMOTE_SYNC_PROTOCOL.minor) {
-    throw new ConnectionRpcHttpError(409, 'remote operator execution requires remote sync protocol 1.4')
+    throw new ConnectionRpcHttpError(409, 'remote operator execution requires remote sync protocol 1.5')
   }
 }
 
@@ -821,23 +923,64 @@ function residentProfile(value: unknown): NonNullable<ResidentExecuteRequest['pr
   return { model, ...effort === undefined ? {} : { effort } }
 }
 
-function residentNativeToolPolicy(value: unknown): 'inherit' | 'disabled' {
-  if (value !== 'inherit' && value !== 'disabled') {
-    throw new ConnectionRpcHttpError(400, 'nativeToolPolicy must be inherit or disabled')
+function remoteGenerationLimits(value: unknown): NonNullable<RemoteResidentExecuteRequest['generationLimits']> {
+  const record = recordPayload(value)
+  return {
+    maxTokens: boundedInteger(record.maxTokens, 'generationLimits.maxTokens', 1, Number.MAX_SAFE_INTEGER),
+    maxOutputBytes: boundedInteger(record.maxOutputBytes, 'generationLimits.maxOutputBytes', 1, Number.MAX_SAFE_INTEGER),
+    ...record.maxToolCalls === undefined ? {} : { maxToolCalls: boundedInteger(record.maxToolCalls, 'generationLimits.maxToolCalls', 1, Number.MAX_SAFE_INTEGER) },
+  }
+}
+
+function remoteGovernedWorkspacePolicy(value: unknown): NonNullable<RemoteResidentExecuteRequest['governedWorkspacePolicy']> {
+  const record = recordPayload(value)
+  if (record.version !== 1) throw new ConnectionRpcHttpError(400, 'unsupported governed workspace policy version')
+  const scopes = (field: string): string[] => {
+    const values = record[field]
+    if (!Array.isArray(values) || values.some(scope => typeof scope !== 'string' || scope.length === 0)) {
+      throw new ConnectionRpcHttpError(400, `${field} must be a list of non-empty scope strings`)
+    }
+    return values as string[]
+  }
+  const limits = recordPayload(record.limits)
+  return {
+    version: 1,
+    sourceWorkspace: requiredString(record.sourceWorkspace, 'governedWorkspacePolicy.sourceWorkspace'),
+    readScopes: scopes('readScopes'), writeScopes: scopes('writeScopes'), forbiddenScopes: scopes('forbiddenScopes'),
+    limits: {
+      maxToolCalls: boundedInteger(limits.maxToolCalls, 'governedWorkspacePolicy.maxToolCalls', 1, Number.MAX_SAFE_INTEGER),
+      maxFileBytes: boundedInteger(limits.maxFileBytes, 'governedWorkspacePolicy.maxFileBytes', 1, Number.MAX_SAFE_INTEGER),
+      maxOutputBytes: boundedInteger(limits.maxOutputBytes, 'governedWorkspacePolicy.maxOutputBytes', 1, Number.MAX_SAFE_INTEGER),
+      maxSearchFiles: boundedInteger(limits.maxSearchFiles, 'governedWorkspacePolicy.maxSearchFiles', 1, Number.MAX_SAFE_INTEGER),
+    },
+  }
+}
+
+function residentNativeToolPolicy(value: unknown): 'inherit' | 'disabled' | 'dsh-tools-authoritative' {
+  if (value !== 'inherit' && value !== 'disabled' && value !== 'dsh-tools-authoritative') {
+    throw new ConnectionRpcHttpError(400, 'nativeToolPolicy must be inherit, disabled, or dsh-tools-authoritative')
   }
   return value
 }
 
-function remoteWorkspaceIdentity(value: unknown): RemoteWorkspaceIdentityV1 {
+function remoteWorkspaceIdentity(value: unknown): RemoteExecutionWorkspaceIdentityV1 {
   const record = recordPayload(value)
   if (record.version !== 1) throw new ConnectionRpcHttpError(400, 'workspaceIdentity.version must be 1')
+  const subdir = record.subdir === undefined ? undefined : requiredString(record.subdir, 'workspaceIdentity.subdir')
+  if (subdir !== undefined && (subdir.includes('\\') || subdir.startsWith('/') || subdir.split('/').some(segment => segment === '' || segment === '.' || segment === '..'))) {
+    throw new ConnectionRpcHttpError(400, 'workspaceIdentity.subdir must be a normalized project-relative path')
+  }
+  if (record.kind !== undefined) {
+    if (record.kind !== 'gouzi-project') throw new ConnectionRpcHttpError(400, 'workspaceIdentity.kind is invalid')
+    if ('repository' in record || 'commit' in record) throw new ConnectionRpcHttpError(400, 'Gouzi project identity must not contain Git fields')
+    const projectId = requiredString(record.projectId, 'workspaceIdentity.projectId')
+    if (!/^[a-f0-9]{64}$/u.test(projectId)) throw new ConnectionRpcHttpError(400, 'workspaceIdentity.projectId must be a lowercase SHA-256 identity')
+    return { version: 1, kind: 'gouzi-project', projectId, ...subdir === undefined ? {} : { subdir } }
+  }
+  if ('projectId' in record) throw new ConnectionRpcHttpError(400, 'Git identity must not contain projectId')
   const commit = requiredString(record.commit, 'workspaceIdentity.commit')
   if (!/^[a-f0-9]{40}$/u.test(commit)) {
     throw new ConnectionRpcHttpError(400, 'workspaceIdentity.commit must be a lowercase full Git SHA')
-  }
-  const subdir = record.subdir === undefined ? undefined : requiredString(record.subdir, 'workspaceIdentity.subdir')
-  if (subdir !== undefined && (subdir.startsWith('/') || subdir.split('/').some(segment => segment === '' || segment === '.' || segment === '..'))) {
-    throw new ConnectionRpcHttpError(400, 'workspaceIdentity.subdir must be a normalized repository-relative path')
   }
   let repository: string
   try {
@@ -854,6 +997,6 @@ function remoteWorkspaceIdentity(value: unknown): RemoteWorkspaceIdentityV1 {
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
-  if (value === 'cockpit' || value === 'pocket' || value === 'admin') return value
-  throw new ConnectionRpcHttpError(400, 'scope must be cockpit, pocket, or admin')
+  if (value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi') return value
+  throw new ConnectionRpcHttpError(400, 'scope must be cockpit, pocket, admin, or gouzi')
 }

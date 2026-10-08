@@ -456,7 +456,7 @@ export interface ConnectionConfig {
 }
 ```
 
-来源：[`packages/client/connection/src/index.ts:102`](../packages/client/connection/src/index.ts)
+来源：[`packages/client/connection/src/index.ts:110`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -502,6 +502,12 @@ export interface WebpageInstanceConfig {
   relayPort: number
   /** Ascending order inside the vertical sidebar container. */
   order: number
+  /**
+   * When `true` no relay starts and `url` is loaded directly: in Desktop as an in-app `<webview>` pane
+   * with its own saved login, elsewhere in the system browser. For sites such as X whose login cannot
+   * work from the relay's origin. Absent means `false`.
+   */
+  direct?: boolean
 }
 ```
 
@@ -1166,6 +1172,20 @@ export interface Config {
 
 来源：[`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
 
+<a id="deepseek-aidsh-host-gouzi-member"></a>
+
+## `@deepseek-ai/dsh-host-gouzi-member`
+
+```ts config-catalog
+/** Gate configuration. */
+export interface Config {
+  /** Absolute state root of this member; `gouzi/identity.json` and `gouzi/ledger.json` live under it. */
+  stateRoot: string
+}
+```
+
+来源：[`packages/host/gouzi-member/src/index.ts:18`](../packages/host/gouzi-member/src/index.ts)
+
 <a id="deepseek-aidsh-host-remote-auth"></a>
 
 ## `@deepseek-ai/dsh-host-remote-auth`
@@ -1184,7 +1204,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/host/remote-auth/src/index.ts:71`](../packages/host/remote-auth/src/index.ts)
+来源：[`packages/host/remote-auth/src/index.ts:126`](../packages/host/remote-auth/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 
@@ -1300,7 +1320,7 @@ export interface DeepSeekCatalogModel {
 
 依赖：[`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
 
-来源：[`packages/llm/llm-deepseek/src/index.ts:72`](../packages/llm/llm-deepseek/src/index.ts)
+来源：[`packages/llm/llm-deepseek/src/index.ts:82`](../packages/llm/llm-deepseek/src/index.ts)
 
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 
@@ -1704,15 +1724,70 @@ export interface Config {
 
 来源：[`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
 
+<a id="deepseek-aidsh-model-allocation-local"></a>
+
+## `@deepseek-ai/dsh-model-allocation-local`
+
+```ts config-catalog
+/** Provider settings. */
+export interface Config {
+  /**
+   * `off` ignores request evidence; `shadow` records what evidence would pick
+   * without using it; `apply` lets evidence break a tie among offers with the
+   * same top score. Default `shadow`.
+   */
+  readonly publicEvidence?: PublicEvidenceMode
+  /**
+   * For the `economy`, `balanced`, and `speed` objectives, `shadow` records the cheapest or fastest
+   * offer whose measured pass rate is good enough without using it; `apply` takes it; `off` ignores
+   * it. Needs request evidence that carries cost and runtime. Default `shadow`.
+   */
+  readonly costAware?: CostAwareMode
+  /**
+   * What one minute of waiting is worth, in the dollars of Radar's measured run cost. The cost-aware
+   * selection minimizes cost plus this value times the runtime for `economy` and `balanced` work, so a
+   * model that is cheap but takes half an hour does not win. Default 0.1; 0 ignores time.
+   */
+  readonly minuteValueUsd?: number
+  /**
+   * Fewest tasks a public measurement may rest on to take part in the cost-aware selection. A row with
+   * fewer is ignored, because a small sample cannot tell a cheap model from a good one. Default 30.
+   */
+  readonly costAwareMinSamples?: number
+}
+
+/** How public evidence takes part in allocation. */
+export type PublicEvidenceMode = 'off' | 'shadow' | 'apply'
+
+/** How the cost- and time-aware selection takes part; the values mean the same as {@link PublicEvidenceMode}. */
+export type CostAwareMode = PublicEvidenceMode
+```
+
+Source: [`packages/orchestration/model-allocation-local/src/index.ts:31`](../packages/orchestration/model-allocation-local/src/index.ts)
+
+<a id="deepseek-aidsh-model-catalog-local"></a>
+
+## `@deepseek-ai/dsh-model-catalog-local`
+
+```ts config-catalog
+/** Service configuration. */
+export interface Config {
+  /** Required `:memory:` or filesystem location of this catalog's SQLite database. */
+  readonly databasePath: string
+  /** Maximum time a source may spend on one discovery call; defaults to 15,000 ms. */
+  readonly refreshTimeoutMs?: number
+}
+```
+
+来源：[`packages/llm/model-catalog-local/src/index.ts:38`](../packages/llm/model-catalog-local/src/index.ts)
+
 <a id="deepseek-aidsh-orchestration-local"></a>
 
 ## `@deepseek-ai/dsh-orchestration-local`
 
 ```ts config-catalog
 /** Local daemon client configuration. */
-export interface Config {
-  /** Optional DSH home; defaults to the ordinary harness-owned location. */
-  readonly dshHome?: string
+export interface Config extends RemoteHostConfig {
   /** Start an independent daemon when no compatible socket is available. */
   readonly autoStart?: boolean
   /** Maximum handshake and per-request connection wait in milliseconds. */
@@ -1725,6 +1800,14 @@ export interface Config {
   readonly browserProviderModules?: string[]
   /** Explicit executable or helper used for the detached headless daemon. */
   readonly headlessNodeExecutable?: string
+}
+
+/** Remote execution host configuration shared with the full local orchestration plugin. */
+export interface RemoteHostConfig {
+  /** Optional DSH home; defaults to the ordinary harness-owned location. */
+  readonly dshHome?: string
+  /** Absolute lock metadata root shared by all Gouzi members on this host. */
+  readonly directoryLockRoot?: string
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -1736,7 +1819,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/orchestration/orchestration-local/src/index.ts:53`](../packages/orchestration/orchestration-local/src/index.ts)
+来源：[`packages/orchestration/orchestration-local/src/index.ts:58`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -1837,7 +1920,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:76`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:78`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-resident"></a>
 
@@ -1871,7 +1954,7 @@ export interface OperatorConfig {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:49`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:50`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
@@ -2021,7 +2104,7 @@ export interface Config {
   readonly dshHome?: string
   /** Start an independent local daemon when no compatible socket is reachable. */
   readonly autoStart?: boolean
-  /** Bounded socket connection and daemon startup wait in milliseconds. */
+  /** Bounded socket connection, daemon startup, and model-tool bridge admission wait in milliseconds. */
   readonly connectTimeoutMs?: number
   /** Turn-settlement polling interval in milliseconds. */
   readonly pollIntervalMs?: number
@@ -2036,7 +2119,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/physical-operator/resident-operator-local/src/index.ts:54`](../packages/physical-operator/resident-operator-local/src/index.ts)
+来源：[`packages/physical-operator/resident-operator-local/src/index.ts:56`](../packages/physical-operator/resident-operator-local/src/index.ts)
 
 <a id="deepseek-aidsh-rlm-runtime-local"></a>
 
@@ -2108,6 +2191,63 @@ export interface Config {
 
 来源：[`packages/sandbox/sandbox-policy/src/index.ts:67`](../packages/sandbox/sandbox-policy/src/index.ts)
 
+<a id="deepseek-aidsh-scheduling-evidence"></a>
+
+## `@deepseek-ai/dsh-scheduling-evidence`
+
+Requires: `subprocess`
+
+```ts config-catalog
+/** Where and how the collectors run. */
+export interface Config {
+  /** Python 3.11+ interpreter: an absolute path or a bare name looked up on the scrubbed PATH. */
+  python: string
+  /** Directory holding `codex_radar_provider` and `ai_frontier_provider` (`python/scheduling-evidence/src`). */
+  sourceRoot: string
+  /** Owner-private directory under which each collector keeps its SQLite generations. */
+  stateRoot: string
+  /** Deadline for one collector call in milliseconds; default 15000. */
+  timeoutMs?: number
+  /** Grace between SIGTERM and SIGKILL when a call is stopped; default 2000. */
+  graceMs?: number
+  /** Largest stdout or stderr kept per call, in bytes, and a larger stdout fails the call; default 1048576. */
+  maxOutputBytes?: number
+  /** Radar evidence for the allocator; omitted, the gateway offers no evidence. */
+  radar?: RadarConfig
+}
+
+/**
+ * Radar evidence for the allocator. Present, even empty, the gateway reads the
+ * Radar generation already stored; collection from the network runs only when
+ * `authorizationFile` names the owner's receipt.
+ */
+export interface RadarConfig {
+  /** The owner's authorization receipt; no network request is made without a valid one. */
+  authorizationFile?: string
+  /**
+   * The owner's statement of personal-use consent. When true and `authorizationFile` is missing,
+   * the gateway records the receipt there once. Never set by a shipped default.
+   */
+  personalUseConsent?: boolean
+  /** Time between collections in milliseconds; 30 minutes to 24 hours, default 4 hours. */
+  refreshIntervalMs?: number
+  /** Deadline for one collection in milliseconds; default 600000 (collection from the Radar site has taken three minutes). */
+  refreshTimeoutMs?: number
+  /** Seconds before a stored generation stops being used; default 604800 (7 days). */
+  staleAfterSeconds?: number
+  /** Benchmark name the records claim; default `Codex Radar community tasks`. */
+  benchmark?: string
+  /** The test environment the owner states every Radar row shares; default `codex-radar-community`. */
+  harness?: string
+  /** The one task type the dataset speaks to; default `coding`. */
+  taskType?: string
+  /** Radar model names mapped to the names offers use. */
+  modelAliases?: Record<string, string>
+}
+```
+
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:91`](../packages/orchestration/scheduling-evidence/src/index.ts)
+
 <a id="deepseek-aidsh-sdk-jsonrpc-server"></a>
 
 ## `@deepseek-ai/dsh-sdk-jsonrpc-server`
@@ -2130,7 +2270,7 @@ export interface JsonRpcConfig {
 
 依赖：`Readable`（`node:stream`）· `Writable`（`node:stream`）
 
-来源：[`packages/sdk/server/src/index.ts:29`](../packages/sdk/server/src/index.ts)
+来源：[`packages/sdk/server/src/index.ts:25`](../packages/sdk/server/src/index.ts)
 
 <a id="deepseek-aidsh-session-persistence-jsonl"></a>
 
@@ -3134,7 +3274,7 @@ export interface LatestModelEntries {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:195`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:208`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
@@ -3431,7 +3571,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'code' | 'both'
 ```
 
-来源：[`packages/core/tools/src/index.ts:654`](../packages/core/tools/src/index.ts)
+来源：[`packages/core/tools/src/index.ts:664`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -3448,6 +3588,83 @@ export interface Config {
 ```
 
 来源：[`packages/typert/loader/src/index.ts:47`](../packages/typert/loader/src/index.ts)
+
+<a id="deepseek-aidsh-ui-gouzi"></a>
+
+## `@deepseek-ai/dsh-ui-gouzi`
+
+依赖： `orchestrations` · `webServer` · `sessions`
+
+```ts config-catalog
+/** Gouzi plugin configuration. */
+export interface Config {
+  /** AI routing of real user messages in kennel sessions. */
+  readonly dispatcher?: KennelDispatchConfig
+  /** Browser room read interval in integer milliseconds. */
+  readonly roomPollIntervalMs?: number
+  /** How long after issue an execution grant may start work, in milliseconds. */
+  readonly grantDeadlineMs?: number
+}
+
+/** Deployment-owned automatic dispatch routes and request limits. */
+export interface KennelDispatchConfig extends DispatchModelConfig {
+  /** Registered product provider used when no explicit Jev model is configured. */
+  readonly jevProvider?: string
+  /** Consume real user messages in kennel sessions when enabled. */
+  readonly enabled: boolean
+  /** Maximum UTF-8 bytes of one user message before scheduling. */
+  readonly maxInputBytes: number
+  /** Maximum context tokens admitted to each assigned task. */
+  readonly contextTokens: number
+  /** Execution deadline for each task node, in milliseconds. */
+  readonly taskTimeoutMs: number
+  /** Maximum JavaScript string length of task titles. */
+  readonly titleMaxChars: number
+  /** Maximum existing room runs offered for model-selected control. */
+  readonly maxRunCandidates: number
+  /** Explicit aggregate model output and tool-call limits for each assigned node. */
+  readonly taskGenerationLimits: NonNullable<OrchestrationNodeSpecV1['generationLimits']>
+  /** File-tool limits applied to read and write nodes. */
+  readonly workspaceToolLimits: NonNullable<OrchestrationNodeSpecV1['workspaceToolLimits']>
+  /** Directory copy, bundle and timeout limits for isolated local writes. */
+  readonly workspaceSnapshotLimits: NonNullable<LogicalTaskGraphV1['workspaceSnapshotLimits']>
+}
+
+/** Deployment-owned routes; only an explicit DeepSeek balance failure permits Codex. */
+export interface DispatchModelConfig {
+  /** Explicit product Jev route; when present it runs before DeepSeek. */
+  readonly jev?: {
+    /** Registered provider id. */
+    readonly provider: string
+    /** Model identity offered by that provider. */
+    readonly model: string
+  }
+  /** Default scheduling route when no product Jev route is configured. */
+  readonly deepseek: {
+    /** Registered DeepSeek provider id. */
+    readonly provider: string
+    /** Scheduling model identity. */
+    readonly model: string
+  }
+  /** Subscription fallback used only for an explicit DeepSeek balance failure. */
+  readonly codex: {
+    /** Registered resident execution entry. */
+    readonly operatorId: string
+    /** Optional model; absence resolves the qualified catalog default. */
+    readonly model?: string
+  }
+  /** Maximum reported output tokens per scheduling judgment. */
+  readonly maxTokens: number
+  /** Scheduling request deadline, in milliseconds. */
+  readonly timeoutMs: number
+  /** Maximum retained output bytes per scheduling judgment. */
+  readonly maxOutputBytes: number
+}
+```
+
+依赖： [`LogicalTaskGraphV1`](../packages/orchestration/orchestration/src/index.ts) · [`OrchestrationNodeSpecV1`](../packages/orchestration/orchestration/src/index.ts)
+
+来源： [`packages/orchestration/ui-gouzi/src/index.ts:50`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 
@@ -3688,6 +3905,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-settings-models`（[`packages/client/ui-settings-models/src/index.ts`](../packages/client/ui-settings-models/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-settings-plugin-inventory`（[`packages/client/ui-settings-plugin-inventory/src/index.ts`](../packages/client/ui-settings-plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-settings-plugins`（[`packages/client/ui-settings-plugins/src/index.ts`](../packages/client/ui-settings-plugins/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-settings-scheduling-evidence`（[`packages/client/ui-settings-scheduling-evidence/src/index.ts`](../packages/client/ui-settings-scheduling-evidence/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-sidebar`（[`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-skill`（[`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-subagent`（[`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts)）
@@ -3711,7 +3929,6 @@ export interface Config {
 - `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
 - `@deepseek-ai/dsh-lsp`（[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
-- `@deepseek-ai/dsh-model-allocation-local`（[`packages/orchestration/model-allocation-local/src/index.ts`](../packages/orchestration/model-allocation-local/src/index.ts)）
 - `@deepseek-ai/dsh-model-worker`（[`packages/orchestration/model-worker/src/index.ts`](../packages/orchestration/model-worker/src/index.ts)）
 - `@deepseek-ai/dsh-orchestrations`（[`packages/bundle/orchestrations/src/index.ts`](../packages/bundle/orchestrations/src/index.ts)）
 - `@deepseek-ai/dsh-output-style` — 需要 `systemPrompt`（[`packages/core/output-style/src/index.ts`](../packages/core/output-style/src/index.ts)）
@@ -3719,6 +3936,7 @@ export interface Config {
 - `@deepseek-ai/dsh-resident-operators`（[`packages/bundle/resident-operators/src/index.ts`](../packages/bundle/resident-operators/src/index.ts)）
 - `@deepseek-ai/dsh-rlm-strategy-local`（[`packages/orchestration/rlm-strategy-local/src/index.ts`](../packages/orchestration/rlm-strategy-local/src/index.ts)）
 - `@deepseek-ai/dsh-schedule` — 需要 `agents` · `sessions` · `tools` · `sessionPersistence`（[`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts)）
+- `@deepseek-ai/dsh-scheduling-evidence-rpc` — 需要 `schedulingEvidence` · `connection`（[`packages/orchestration/scheduling-evidence-rpc/src/index.ts`](../packages/orchestration/scheduling-evidence-rpc/src/index.ts)）
 - `@deepseek-ai/dsh-session`（[`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts)）
 - `@deepseek-ai/dsh-session-checkpoint-policy` — 需要 `llm` · `sessionPersistence` · `sessions` · `tools`（[`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts)）
 - `@deepseek-ai/dsh-session-log-export` — 需要 `commands`（[`packages/session-query/session-log-export/src/index.ts`](../packages/session-query/session-log-export/src/index.ts)）

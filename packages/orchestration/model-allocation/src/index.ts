@@ -115,6 +115,34 @@ export interface ModelExecutionOffer {
   readonly rank?: number
 }
 
+/** One stored collector generation that an allocation read, identified by content. */
+export interface ModelAllocationEvidenceSnapshotRef {
+  /** Collector that produced the generation, such as `radar`. */
+  readonly source: string
+  readonly snapshotId: string
+  /** Content digest of the generation; a changed digest is a different input. */
+  readonly digest: string
+}
+
+/**
+ * Public benchmark evidence for the offers of one request. A Provider that
+ * implements evidence ranking compares only offers it would otherwise rank
+ * equally, so evidence never overrides quota, tier, capacity, or a pinned model.
+ */
+export interface ModelAllocationEvidence {
+  /** The exact task type every record must name. */
+  readonly taskType: string
+  /** The generations the records came from, echoed into the receipt. */
+  readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[]
+  /**
+   * Evidence records per offer id, as the collectors emit them. A record
+   * names its candidate by provider = `offer.provider`, model = `offer.model`,
+   * reasoning effort = `offer.profile.effort`, execution surface =
+   * `offer.operatorId`, and billing identity = `offer.source`.
+   */
+  readonly records: Readonly<Record<string, readonly unknown[]>>
+}
+
 /** Complete deterministic allocation input for one ready node. */
 export interface ModelAllocationRequest {
   readonly runId: string
@@ -135,6 +163,21 @@ export interface ModelAllocationRequest {
   readonly rlm: RlmExecutionMode
   readonly graphMaxParallel: number
   readonly offers: readonly ModelExecutionOffer[]
+  /** Optional public evidence; omission keeps the allocation exactly as without it. */
+  readonly evidence?: ModelAllocationEvidence
+  /**
+   * Asks for the cheapest (`economy`, `balanced`) or fastest (`speed`) offer whose measured pass rate is
+   * good enough. It does not change the baseline choice, which still follows `objective`, and needs
+   * `evidence` that carries cost and runtime; without either, nothing changes.
+   */
+  readonly costAwareObjective?: 'economy' | 'balanced' | 'speed'
+  /**
+   * Other offers of models that `offers` already holds, such as the same model at another reasoning
+   * strength. Baseline scoring and the evidence tie-break never see them, because evidence only compares
+   * offers of equal strength; only the cost-aware selection may choose one, and only when a model of the
+   * same operator in `offers` passed the quota, capacity, and pin checks.
+   */
+  readonly alternativeOffers?: readonly ModelExecutionOffer[]
   readonly now: string
 }
 
@@ -152,6 +195,69 @@ export interface ModelAllocationFallbackProvenance {
   readonly reasonCode: ModelAllocationFallbackReasonCode
 }
 
+/** What the evidence said about one offer that tied for the top score. */
+export interface ModelAllocationEvidenceCandidate {
+  readonly offerId: string
+  /** Evidence tier; 0 is preferred and equal tiers are not ordered. */
+  readonly preferenceRank: number
+  readonly status: 'used' | 'abstained'
+}
+
+/** Receipt of one evidence ranking: its inputs by digest, its verdict, and whether it changed the choice. */
+export interface ModelAllocationEvidenceReceipt {
+  /** `shadow` records the verdict without using it; `apply` lets it break the tie. */
+  readonly mode: 'shadow' | 'apply'
+  /** `used` when same-cohort evidence separated the tied offers; otherwise `abstained`. */
+  readonly status: 'used' | 'abstained'
+  readonly reason: string
+  readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[]
+  /** The offers that tied for the top score, in offer id order. */
+  readonly tiedOfferIds: readonly string[]
+  readonly candidates: readonly ModelAllocationEvidenceCandidate[]
+  /** The offer chosen without evidence. */
+  readonly baselineOfferId: string
+  /** The offer chosen with evidence; equal to the baseline when evidence abstained or agrees. */
+  readonly evidenceOfferId: string
+  /** True only in `apply` mode when evidence changed the choice. */
+  readonly applied: boolean
+}
+
+/** What public evidence said about one offer that a cost-aware selection considered. */
+export interface ModelAllocationSelectionCandidate {
+  readonly offerId: string
+  readonly passRate: number
+  readonly sampleCount: number
+  /** 95% Wilson lower bound of the pass rate. */
+  readonly lower: number
+  /** 95% Wilson upper bound of the pass rate. */
+  readonly upper: number
+  readonly avgCostUsd: number
+  readonly avgRuntimeSeconds: number
+}
+
+/**
+ * Receipt of one cost-aware selection: among offers whose measured pass rate is not worse than the
+ * best by more than a margin, the one with the lowest cost (or runtime for `speed`).
+ */
+export interface ModelAllocationSelectionReceipt {
+  /** `shadow` records the choice without using it; `apply` takes it. */
+  readonly mode: 'shadow' | 'apply'
+  /** `used` when the evidence supported a choice; otherwise `abstained`, and the baseline stands. */
+  readonly status: 'used' | 'abstained'
+  readonly reason: string
+  readonly objective: 'economy' | 'balanced' | 'speed'
+  /** What was minimized among the sufficient offers: cost plus the value of the waiting time, or the runtime alone. */
+  readonly metric: 'cost-and-time' | 'runtime'
+  readonly baselineOfferId: string
+  /** The offer the selection chose; equal to the baseline when it abstained or agrees. */
+  readonly selectedOfferId: string
+  /** Offers judged good enough, in offer id order. */
+  readonly sufficientOfferIds: readonly string[]
+  readonly considered: readonly ModelAllocationSelectionCandidate[]
+  /** True only in `apply` mode when the selection changed the choice. */
+  readonly applied: boolean
+}
+
 /** Sealed model choice and graph-wide concurrency advice. */
 export interface ModelAllocationPlan {
   readonly offerId: string
@@ -165,6 +271,10 @@ export interface ModelAllocationPlan {
   readonly fallback?: ModelAllocationFallbackProvenance
   readonly suggestedParallelism: number
   readonly rationale: readonly string[]
+  /** Present only when an evidence ranking ran for this allocation. */
+  readonly evidence?: ModelAllocationEvidenceReceipt
+  /** Present only when a cost-aware selection ran for this allocation. */
+  readonly selection?: ModelAllocationSelectionReceipt
 }
 
 /** Structured model-capacity or explicit-selection failure. */

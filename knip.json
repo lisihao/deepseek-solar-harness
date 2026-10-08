@@ -19,8 +19,7 @@
     "python/sdk-runtime"
   ],
   "ignoreDependencies": [
-    "@yarnpkg/cli-dist",
-    "lightningcss"
+    "@yarnpkg/cli-dist"
   ],
   "workspaces": {
     ".": {
@@ -877,6 +876,11 @@
       ]
     },
     "packages/orchestration/rlm-strategy": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/ui-gouzi": {
       "project": [
         "src/**/*.ts"
       ]

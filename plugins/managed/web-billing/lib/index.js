@@ -38,6 +38,7 @@ import {
   isPeak,
   monthKey,
   nextPricingTransition,
+  offPeakPriceRatio,
   priceAt,
   unitForProvider,
   zeroCounts
@@ -577,6 +578,7 @@ function apply(ctx, config) {
               kind: policy.peak !== void 0 ? "peak-offpeak" : "flat"
             },
             effectiveNow: policy?.peak !== void 0 ? (peak ? "peak" : "offPeak") : "flat",
+            offPeakPriceRatio: offPeakPriceRatio(policy),
             observedAt: now,
             refreshIntervalMs: 60 * 60 * 1000,
             nextTransitionAt: nextPricingTransition(now, policies, config.timezone, config.peakWindows),

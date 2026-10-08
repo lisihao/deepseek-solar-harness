@@ -286,6 +286,11 @@ function refreshFailureMessage(reason: unknown): string {
   return '未知错误'
 }
 
+/** Whether an asynchronous refresh may still write to this mounted control. */
+function refreshCanUpdate(alive: { readonly current: boolean }, signal: AbortSignal): boolean {
+  return alive.current && !signal.aborted
+}
+
 /** Render the logged collaboration policy next to the primary chat-model selector. */
 export function PhysicalOperatorRoutingControl({
   useProjection,
@@ -529,49 +534,35 @@ export function PhysicalOperatorRoutingControl({
     refreshController.current = controller
     setRefreshing(true)
     setRefreshMessage('正在刷新模型与算子…')
-    const modelRefresh = refreshModels()
-    const dashboardRefresh = loadResidentDashboard(undefined, controller.signal, request, { refresh: true })
-    const webUrl = new URL('/api/chatgpt-web', window.location.origin)
-    webUrl.searchParams.set('catalog', '1')
-    webUrl.searchParams.set('refresh', '1')
-    webUrl.searchParams.set('session_id', String(sessionId))
-    const webRefresh = request(webUrl, { cache: 'no-store', signal: controller.signal })
-    void Promise.allSettled([modelRefresh, dashboardRefresh, webRefresh]).then((results) => {
-      if (!alive.current || controller.signal.aborted) return
-      const [modelResult, dashboardResult, webResult] = results
+    void (async () => {
       const messages: string[] = []
-      if (modelResult.status === 'fulfilled') {
-        const failures = modelResult.value.failures.map(failure => failure.name)
+      try {
+        const modelResult = await refreshModels()
+        if (!refreshCanUpdate(alive, controller.signal)) return
+        const failures = modelResult.failures.map(failure => `${failure.name}（${failure.message}）`)
         messages.push(failures.length === 0
           ? '模型目录已刷新'
           : `模型目录已刷新，暂不可用：${failures.join('、')}`)
-      } else {
-        messages.push(`模型目录刷新失败：${refreshFailureMessage(modelResult.reason)}`)
-      }
-      if (dashboardResult.status === 'fulfilled') {
-        setDashboard(dashboardResult.value)
-        messages.push('原生算子目录已刷新')
-      } else {
-        messages.push(`原生算子目录刷新失败：${refreshFailureMessage(dashboardResult.reason)}`)
-      }
-      if (webResult.status === 'fulfilled') {
-        if (webResult.value.ok) {
-          setWebRefreshVersion(version => version + 1)
-          messages.push('ChatGPT Web 目录已刷新')
-        } else if (webResult.value.status === 404) {
-          messages.push('ChatGPT Web 未安装，已跳过')
-        } else if (webResult.value.status === 409) {
-          messages.push('ChatGPT Web 正忙，请完成当前请求后重试')
-        } else {
-          messages.push(`ChatGPT Web 刷新失败（HTTP ${String(webResult.value.status)}）`)
+        try {
+          const next = await loadResidentDashboard(undefined, controller.signal, request)
+          if (!refreshCanUpdate(alive, controller.signal)) return
+          setDashboard(next)
+          messages.push('原生算子状态已更新')
+        } catch (reason: unknown) {
+          if (!refreshCanUpdate(alive, controller.signal)) return
+          messages.push(`原生算子状态读取失败：${refreshFailureMessage(reason)}`)
         }
-      } else {
-        messages.push(`ChatGPT Web 刷新失败：${refreshFailureMessage(webResult.reason)}`)
+        setWebRefreshVersion(version => version + 1)
+      } catch (reason: unknown) {
+        if (!refreshCanUpdate(alive, controller.signal)) return
+        messages.push(`模型目录刷新失败：${refreshFailureMessage(reason)}`)
+      } finally {
+        if (!refreshCanUpdate(alive, controller.signal)) return
+        setRefreshMessage(messages.join('；'))
+        setRefreshing(false)
+        if (refreshController.current === controller) refreshController.current = undefined
       }
-      setRefreshMessage(messages.join('；'))
-      setRefreshing(false)
-      if (refreshController.current === controller) refreshController.current = undefined
-    })
+    })()
   }
 
   const basicRoutingOptions = routing.options.filter(option => option.value === 'auto' || option.value === 'direct')
@@ -625,8 +616,8 @@ export function PhysicalOperatorRoutingControl({
             onMouseDown={(event) => { event.stopPropagation() }}
           >
             <header>
-              <div><strong>协作方式</strong><small>先选择谁参与当前会话；需要时再调整 TaskGraph 高级调度。</small></div>
-              <div>
+              <div className="dshDesktopOperatorStrategyTitle"><strong>协作方式</strong><small>先选择谁参与当前会话；需要时再调整 TaskGraph 高级调度。</small></div>
+              <div className="dshDesktopOperatorStrategyActions">
                 <button
                   type="button"
                   aria-label="刷新模型与算子"
@@ -635,7 +626,7 @@ export function PhysicalOperatorRoutingControl({
                 >
                   {refreshing ? '刷新中…' : '刷新模型与算子'}
                 </button>
-                <button type="button" aria-label="关闭协作方式" disabled={locked || refreshing} onClick={() => { if (!locked && !refreshing) setOpen(false) }}>×</button>
+                <button type="button" className="dshDesktopOperatorStrategyClose" aria-label="关闭协作方式" disabled={locked || refreshing} onClick={() => { if (!locked && !refreshing) setOpen(false) }}>×</button>
               </div>
             </header>
             {refreshMessage !== undefined && <p role="status">{refreshMessage}</p>}

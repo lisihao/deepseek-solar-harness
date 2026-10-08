@@ -6,6 +6,7 @@ import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import {
   OrchestrationRunId,
   type LogicalTaskGraphV1,
+  type OrchestrationGouziRecipientV1,
   type OrchestrationRuntimeContextV1,
   type RlmAutonomousMode,
   type OrchestrationRunSnapshot,
@@ -45,6 +46,7 @@ declare module '@deepseek-ai/dsh-session/types' {
       route: 'taskgraph'
       runId: string
       maxParallel: number
+      gouziRecipient?: OrchestrationGouziRecipientV1
       rlm: RlmExecutionMode
       autonomous: RlmAutonomousMode
       continualHarness: ContinualHarnessMode
@@ -69,6 +71,37 @@ type ToolArgs = {
 
 /** Model-visible policy for durable graphs and per-node Resident operator routing. */
 export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. For repository-changing work, set qualityPolicy.independentVerification="required", give every mutating node a completion-critical downstream verification node, set graph.baseSha to the clean repository HEAD, and set workspaceIsolation="git-worktree" so each mutating attempt receives its own branch and worktree. Mark planning and verification nodes with phase="planning" or phase="verification" so the allocator requires a high-tier model; execution leaves normally use phase="execution" and low/mid-tier models. Each accepted attempt seals a content-addressed Workbench task contract covering repository/base SHA, execution worktree, authority, dependencies, artifacts, model roles, quota, timeout, retry, and permissions. RLM is a bounded node strategy declared with node.rlm, not an operator id or another global Scheduler. Prime-compatible Autonomous Mode is a separate optional host policy declared with node.autonomous or the Session preference: it injects additional turns in the same sealed RLM lane, runs configured shell quality gates before limits, and never treats assistant prose or Goal state as terminal evidence. Shell gates require the autonomous-gate execute effect. Continuous Harness is an admission preference that supplies versioned workspace/session context without mutating the Graph. Allocation is native-subscription first: Codex and Claude Code capacity is consumed before billed DeepSeek API workers; Codex standard and Spark are independent quota pools, and unused quota nearing reset increases safe parallelism. The default Codex-optimized policy prefers Sol for planning/verification gates and Luna for qualified coding leaves; users may instead choose Claude Opus/Fable for planning/verification and Claude Sonnet for execution, or leave both roles to provider-neutral scoring, without changing the Graph. DeepSeek V4 Flash/Pro are the final text-only fallback and cannot receive file-writing nodes. DSH remains the only global Scheduler and acceptance authority. Leave operator.preferredIds unset for intelligent routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
+
+const graphExample = {
+  version: 1,
+  title: 'Read the repository README',
+  workspace: '/absolute/path/to/clean/repository',
+  maxParallel: 1,
+  risk: 'low',
+  nodes: [{
+    id: 'read-readme', dependsOn: [], requiredForCompletion: true,
+    title: 'Read README', task: 'Read README.md and summarize its contents. Do not modify files.', role: 'analysis',
+    capabilityRequirements: [], capabilityBudget: [],
+    contextPolicy: { maxTokens: 4096, allowedSourceKinds: ['intent', 'artifact', 'capsule'], unavailableSource: 'degrade' },
+    effectBudget: { read: ['README.md'], write: [], execute: [], network: [], cost: [], risk: [] },
+    readScopes: ['README.md'], writeScopes: [], approvedSecretRefs: [],
+    acceptance: [{ id: 'summary', description: 'Return the README summary with file evidence.', kind: 'operator-completed' }],
+    retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
+  }],
+} satisfies LogicalTaskGraphV1
+
+/** Model-visible, complete read-only graph template; placeholders require observed workspace and task values. */
+export const orchestrationGraphGuidance = 'Complete LogicalTaskGraphV1 JSON; required for start. '
+  + 'Replace the example workspace with the observed absolute local repository checkout for the requested project, '
+  + 'and set task, scopes, effects, capabilities, acceptance and risk to the actual authorized work. '
+  + 'Use node.task, capabilityRequirements, capabilityBudget, contextPolicy, effectBudget, readScopes, writeScopes, '
+  + 'approvedSecretRefs and retryPolicy; prompt, capabilities, scope, context and retry are not their field names. '
+  + 'The Host pins a confirmed kennel recipient to actual execution entries. Use standard TaskGraph nodes, never replace the executor or infer IDs from names. Keep role, scopes, effects, budget and parallelism tied to the user task. '
+  + 'Gouzi ids route through this tool only, including single-node read-only work. '
+  + 'GRAPH_INVALID means repair the reported graph field and resubmit compilation; it does not establish an offline member '
+  + 'and is not a reason to call physical_operator with a Gouzi id. '
+  + 'Complete read-only example (placeholder workspace, no implicit authority for additional effects): '
+  + JSON.stringify(graphExample)
 
 const VALUE_SCHEMA = {
   type: 'object',
@@ -219,7 +252,7 @@ export function apply(ctx: Context): void {
     parameters: {
       action: { type: 'string', required: true, enum: ['start', 'list', 'inspect'] },
       objective: { type: 'string', description: 'Unmodified user objective; required for start.' },
-      graph_json: { type: 'string', description: 'Complete LogicalTaskGraphV1 JSON; required for start.' },
+      graph_json: { type: 'string', description: orchestrationGraphGuidance },
       run_id: { type: 'string', description: 'Run id; required for inspect.' },
     },
     output: {
@@ -233,10 +266,18 @@ export function apply(ctx: Context): void {
         return jsonObject({ kind: 'inspect', run: bounded(await ctx.orchestrations.inspect(OrchestrationRunId(args.run_id))) })
       }
       if (args.objective === undefined || args.objective.trim().length === 0) throw new Error('objective is required for action=start')
-      const graph = parseGraph(args.graph_json)
+      const inputGraph = parseGraph(args.graph_json)
       const agent = exec.agent
+      const gouziRecipient = agent === undefined ? undefined : await ctx.get('orchestrationRecipients')?.resolve(agent.session.events)
+      const graph = gouziRecipient === undefined ? inputGraph : {
+        ...inputGraph,
+        nodes: inputGraph.nodes.map(node => ({
+          ...node, operator: { ...node.operator, preferredIds: gouziRecipient.operatorIds, fallbackIds: [] },
+        })),
+      }
       const policy = agent === undefined ? 'auto' : collaborationPolicy(agent.session.events)
-      const preferences = agent === undefined ? DEFAULT_PREFERENCES : foldOrchestrationPreferences(agent.session.events)
+      const selectedPreferences = agent === undefined ? DEFAULT_PREFERENCES : foldOrchestrationPreferences(agent.session.events)
+      const preferences = gouziRecipient === undefined ? selectedPreferences : { ...selectedPreferences, rlm: 'disabled' as const, autonomous: 'disabled' as const }
       const runtimeContext = agent === undefined ? undefined : runtimeContextSnapshot(agent)
       const compilation = await ctx.orchestrations.compile({
         intent: { request: args.objective },
@@ -245,6 +286,7 @@ export function apply(ctx: Context): void {
           admission: {
             policy,
             route: 'taskgraph',
+            ...gouziRecipient === undefined ? {} : { gouziRecipient },
             sourceSessionId: String(agent.id),
             ...runtimeContext === undefined ? {} : { runtimeContext },
             ...preferences,
@@ -259,6 +301,7 @@ export function apply(ctx: Context): void {
         policy,
         route: 'taskgraph',
         runId: String(run.runId),
+        ...gouziRecipient === undefined ? {} : { gouziRecipient },
         maxParallel: graph.maxParallel,
         ...preferences,
       }, { ignorable: true })

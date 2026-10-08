@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  canonicalRemoteRepositoryIdentity, REMOTE_RESIDENT_ARTIFACT_MAX_BYTES,
+  canonicalRemoteRepositoryIdentity, REMOTE_RESIDENT_ARTIFACT_MAX_BYTES, RemoteResidentProtocolClient,
   parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
   parseRemoteResidentProviders, parseRemoteResidentTurn, parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument,
   parseRemoteSessionReplicaList, parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame,
@@ -12,7 +12,7 @@ import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
 
 const snapshot = {
-  protocol: { major: 1, minor: 4 },
+  protocol: { major: 1, minor: 5 },
   deploymentId: 'deployment-1',
   cursor: { deploymentId: 'deployment-1', sequence: 7 },
   capturedAt: '2026-08-23T08:00:00.000Z',
@@ -77,7 +77,7 @@ afterEach(() => {
 describe('Remote Sync wire parsing', () => {
   it('accepts an authenticated Server description and rejects unknown capabilities', () => {
     const description = {
-      protocol: { major: 1, minor: 4 },
+      protocol: { major: 1, minor: 5 },
       deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 },
       describedAt: '2026-08-23T08:00:00.000Z',
@@ -111,7 +111,7 @@ describe('Remote Sync wire parsing', () => {
         result: {
           ok: true,
           value: {
-            protocol: { major: 1, minor: 4 },
+            protocol: { major: 1, minor: 5 },
             deploymentId: 'deployment-1',
             cursor: { deploymentId: 'deployment-1', sequence: 7 },
             describedAt: '2026-08-23T08:00:00.000Z',
@@ -128,7 +128,7 @@ describe('Remote Sync wire parsing', () => {
     expect(seenUrl).toBe('https://server.example/remote-sync/describe')
     expect(seenUrl).not.toContain('short-lived')
     expect(seenAuthorization).toBe('Bearer short-lived')
-    expect(seenPayload).toEqual({ protocol: { major: 1, minor: 4 } })
+    expect(seenPayload).toEqual({ protocol: { major: 1, minor: 5 } })
   })
 
   it('lists, reads, and applies complete Session replicas over the same authenticated channel', async () => {
@@ -229,9 +229,86 @@ describe('Remote Sync wire parsing', () => {
       'operator.events', 'operator.interrupt',
     ])
     expect(payloads.get('operator.execute')).toMatchObject({
-      protocol: { major: 1, minor: 4 }, nativeToolPolicy: 'disabled',
+      protocol: { major: 1, minor: 5 }, nativeToolPolicy: 'disabled',
     })
-    expect(payloads.get('operator.artifact.read')).toMatchObject({ protocol: { major: 1, minor: 4 } })
+    expect(payloads.get('operator.artifact.read')).toMatchObject({ protocol: { major: 1, minor: 5 } })
+  })
+
+  it('keeps old 1.5 endpoints readable while refusing writes and current-input bundles without explicit capabilities', async () => {
+    const calls: string[] = []
+    const provider = { operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'fixture', tags: [],
+      maxConcurrency: 1, injectionBoundaries: [], available: true, authentication: 'native-subscription',
+      productVersion: 'legacy', protocolHash: 'legacy', models: [] }
+    const client = new RemoteResidentProtocolClient(async (method) => {
+      calls.push(method)
+      return method === 'operator.providers' ? [provider] : { sessionId: 'session', turnId: 'turn', stateRevision: 1 }
+    })
+    const request = { commandId: 'legacy-read', operatorId: 'codex', laneId: 'lane', prompt: [],
+      workspaceIdentity: { version: 1 as const, repository: 'github.com/fixture/legacy', commit: 'a'.repeat(40) } }
+    await expect(client.execute(request)).resolves.toMatchObject({ turnId: 'turn' })
+    await expect(client.execute({ ...request, workspaceMutationReturn: { version: 1, baseSha: 'a'.repeat(40) } }))
+      .rejects.toThrow('does not support isolated workspace mutation return')
+    await expect(client.execute({ ...request, workspaceSnapshotInput: { version: 1, baseSha: 'a'.repeat(40), baseBundle: 'Zml4dHVyZQ==' } }))
+      .rejects.toThrow('does not support sealed current workspace snapshot inputs')
+    expect(calls.filter(method => method === 'operator.execute')).toHaveLength(1)
+  })
+
+  it('refuses governed execution and generation limits before submitting to unqualified endpoints', async () => {
+    const provider = { operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'fixture', tags: [],
+      maxConcurrency: 1, injectionBoundaries: [], available: true, authentication: 'native-subscription',
+      productVersion: 'legacy', protocolHash: 'legacy', models: [] }
+    const request = { commandId: 'bounded-execution', operatorId: 'codex', laneId: 'lane', prompt: [],
+      workspaceIdentity: { version: 1 as const, repository: 'github.com/fixture/legacy', commit: 'a'.repeat(40) } }
+    const governedWorkspacePolicy = { version: 1 as const, sourceWorkspace: '/srv/project',
+      readScopes: ['.'], writeScopes: [], forbiddenScopes: [],
+      limits: { maxToolCalls: 2, maxFileBytes: 1024, maxOutputBytes: 2048, maxSearchFiles: 10 } }
+    const generationLimits = { maxTokens: 512, maxOutputBytes: 2048, maxToolCalls: 2 }
+    for (const providers of [[provider], [{ ...provider, supportsGovernedWorkspacePolicy: false, supportsGenerationLimits: false }], []]) {
+      const methods: string[] = []
+      const fetchRequest = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+        const rpc = JSON.parse(init.body) as { rpcId: string; method: string }
+        methods.push(rpc.method)
+        if (rpc.method !== 'operator.providers') throw new Error('rejected execution reached the transport')
+        return Response.json({ type: 'server-response', rpcId: rpc.rpcId, result: { ok: true, value: providers } })
+      })
+      vi.stubGlobal('fetch', fetchRequest)
+      const client = new WebRemoteSyncClient('https://server.example', 'access')
+      await expect(client.operatorExecute({ ...request, governedWorkspacePolicy }))
+        .rejects.toThrow('remote operator does not support governed workspace file authority')
+      await expect(client.operatorExecute({ ...request, generationLimits }))
+        .rejects.toThrow('remote operator does not support direct generation limits')
+      expect(methods).toEqual(['operator.providers', 'operator.providers'])
+      expect(fetchRequest).toHaveBeenCalledTimes(2)
+    }
+    const call = vi.fn(async (method: string) => method === 'operator.providers'
+      ? [{ ...provider, supportsWorkspaceMutationReturn: true, supportsWorkspaceSnapshotInput: true,
+        supportsGovernedWorkspacePolicy: true, supportsGenerationLimits: true }]
+      : { sessionId: 'session', turnId: 'turn', stateRevision: 1 })
+    const client = new RemoteResidentProtocolClient(call)
+    const boundedRequest = { ...request, governedWorkspacePolicy, generationLimits,
+      workspaceMutationReturn: { version: 1 as const, baseSha: 'a'.repeat(40) },
+      workspaceSnapshotInput: { version: 1 as const, baseSha: 'a'.repeat(40), baseBundle: 'Zml4dHVyZQ==' } }
+    await expect(client.execute(boundedRequest)).resolves.toMatchObject({ turnId: 'turn' })
+    expect(call.mock.calls.map(([method]) => method)).toEqual(['operator.providers', 'operator.execute'])
+    expect(call).toHaveBeenLastCalledWith('operator.execute', { ...boundedRequest, protocol: { major: 1, minor: 5 } }, undefined)
+  })
+
+  it('rejects malformed remote mutation results before exposing a terminal turn', () => {
+    const turn = { commandId: 'command', turnId: 'turn', sessionId: 'session', state: 'settled',
+      stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z' }
+    const mutation = { projectId: 'a'.repeat(64), baseSha: 'b'.repeat(40), patch: 'diff --git a/file b/file\n' }
+    const parse = (workspaceMutation: unknown) => parseRemoteResidentTurn({ ...turn,
+      result: { output: [], stopReason: 'completed', workspaceMutation } })
+    expect(parse(mutation)).toMatchObject({ result: { workspaceMutation: mutation } })
+    const { projectId: _projectId, ...gitMutation } = mutation
+    expect(parse({ ...gitMutation, repository: 'https://github.com/fixture/project.git' }))
+      .toMatchObject({ result: { workspaceMutation: { ...gitMutation, repository: 'github.com/fixture/project' } } })
+    expect(() => parse({ ...mutation, projectId: 'bad' })).toThrow('invalid mutation project identity')
+    for (const invalid of [{ ...mutation, baseSha: 'bad' }, { ...mutation, patch: 42 },
+      { ...mutation, patch: '汉'.repeat(Math.floor(1024 * 1024 / 3) + 1) }]) {
+      expect(() => parse(invalid)).toThrow('invalid remote workspace mutation')
+    }
   })
 
   it('validates every remote replication and Resident wire variant', () => {
@@ -321,6 +398,13 @@ describe('Remote Sync wire parsing', () => {
         { poolId: 'claude-secondary' },
       ],
     }])
+    const gouziWorkspace = { gouziId: 'gouzi-1', generation: 2, projectId: 'a'.repeat(64), projectScopes: ['/srv/default-project'] }
+    expect(parseRemoteResidentProviders([{ ...provider, gouziWorkspace }])[0]?.gouziWorkspace).toEqual(gouziWorkspace)
+    const { projectScopes: _scopes, ...legacyWorkspace } = gouziWorkspace
+    expect(parseRemoteResidentProviders([{ ...provider, gouziWorkspace: legacyWorkspace }])[0]?.gouziWorkspace?.projectScopes).toEqual([])
+    for (const invalid of [{ ...gouziWorkspace, projectScopes: [42] }, { ...gouziWorkspace, projectScopes: '' }, { ...gouziWorkspace, projectId: 'bad' }, { ...gouziWorkspace, generation: -1 }]) {
+      expect(() => parseRemoteResidentProviders([{ ...provider, gouziWorkspace: invalid }])).toThrow()
+    }
 
     const baseTurn = {
       commandId: 'command-1', turnId: 'turn-1', sessionId: 'session-1',
@@ -459,7 +543,7 @@ describe('Remote Sync wire parsing', () => {
 
   it('rejects malformed descriptions, cursors, snapshots, and scalar fields', () => {
     const description = {
-      protocol: { major: 1, minor: 4 }, deploymentId: 'deployment-1',
+      protocol: { major: 1, minor: 5 }, deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 }, describedAt: snapshot.capturedAt,
       scope: 'cockpit', capabilities: ['session.read'], host: snapshot.host,
     }

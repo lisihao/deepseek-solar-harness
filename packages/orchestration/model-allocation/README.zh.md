@@ -22,6 +22,12 @@ Planning 与 verification 可以明确优先 Codex Sol、Claude Opus/Fable，或
 
 Provider 应在不可信边界调用 `validateAdaptiveExecutionPreference`。未知字段、错误版本、非有限/非整数的失败计数和无效风险值都会 fail closed。
 
+## 公开证据
+
+`ModelAllocationRequest` 可以携带可选的 `evidence`：`taskType`、记录所来自的 `snapshots`（来源、快照 id、内容摘要），以及按 offer id 索引的 `records`。实现证据排序的 Provider 只在本来就会排成同一位置的 offer 之间比较，所以证据不会压过额度、层级、容量或用户固定的模型。一条记录通过 `provider` = `offer.provider`、`canonical_model_id` = `offer.model`、`reasoning_effort` = `offer.profile.effort`、`execution_surface` = `offer.operatorId`、`billing_identity` = `offer.source` 指明它属于哪个 offer。
+
+排序运行过的话，计划会带一份 `evidence` 回执：模式、结论、快照、打平的 offer 及其档位、不用证据时选中的 offer、用证据时选中的 offer，以及证据是否改变了选择。没有 `evidence` 时，计划与以前完全一致。
+
 ## 模型体验
 
 无直接影响，因为本 seam 不直接贡献模型可见内容。

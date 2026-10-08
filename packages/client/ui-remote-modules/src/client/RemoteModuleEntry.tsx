@@ -1,8 +1,8 @@
 /** Sidebar entries and full-page iframe panels for configured Web applications. */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createElement, useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  IconBrowseOutline16, IconCloseOutline16, IconLinkOutline16, IconRefreshOutline16, Tooltip,
+  IconBrowseOutline16, IconCloseOutline16, IconLinkOutline16, IconRefreshOutline16, IconShareOutline16, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -24,6 +24,20 @@ export type WebpageModulesSidebarProps = PropsRuntime<'sidebar.footer.action'>
 
 interface WebpagePanelProps extends WebpageInstanceView {
   onClose: () => void
+  /** Load `targetUrl` in an Electron `<webview>` instead of the relay's iframe. */
+  native?: boolean
+}
+
+interface WebviewElement extends HTMLElement {
+  reload: () => void
+}
+
+/**
+ * Report whether this browser can host Electron `<webview>` panes, which only Desktop can.
+ * @returns `true` when a created `<webview>` element has Electron's `reload` method.
+ */
+export function supportsEmbeddedWebview(): boolean {
+  return typeof (document.createElement('webview') as Partial<WebviewElement>).reload === 'function'
 }
 
 /**
@@ -42,8 +56,9 @@ export function alignLoopbackEmbedUrl(
   return parsed.href
 }
 
-function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelProps) {
+function WebpagePanel({ id, label, targetUrl, embedUrl, onClose, native = false }: WebpagePanelProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null)
+  const webview = useRef<WebviewElement | null>(null)
   const [frameRevision, setFrameRevision] = useState(0)
   const browserEmbedUrl = alignLoopbackEmbedUrl(embedUrl)
   useEffect(() => {
@@ -65,13 +80,20 @@ function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelP
             </div>
           </div>
           <div className={css.actions}>
-            <Tooltip label="在新窗口打开">
-              <a className={css.iconButton} aria-label={`在新窗口打开 ${label}`} href={browserEmbedUrl} target="_blank" rel="noreferrer">
-                <IconLinkOutline16 size={16} />
+            {!native && (
+              <Tooltip label="在新窗口打开">
+                <a className={css.iconButton} aria-label={`在新窗口打开 ${label}`} href={browserEmbedUrl} target="_blank" rel="noreferrer">
+                  <IconLinkOutline16 size={16} />
+                </a>
+              </Tooltip>
+            )}
+            <Tooltip label="用系统浏览器打开原网址">
+              <a className={css.iconButton} aria-label={`用系统浏览器打开 ${label} 的原网址`} href={targetUrl} target="_blank" rel="noreferrer">
+                <IconShareOutline16 size={16} />
               </a>
             </Tooltip>
             <Tooltip label="重新加载网页">
-              <button type="button" className={css.iconButton} aria-label={`重新加载 ${label}`} onClick={() => { setFrameRevision(value => value + 1) }}>
+              <button type="button" className={css.iconButton} aria-label={`重新加载 ${label}`} onClick={() => { if (native) webview.current?.reload(); else setFrameRevision(value => value + 1) }}>
                 <IconRefreshOutline16 size={16} />
               </button>
             </Tooltip>
@@ -82,16 +104,28 @@ function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelP
             </Tooltip>
           </div>
         </header>
-        <iframe
-          key={`${id}:${String(frameRevision)}`}
-          className={css.webFrame}
-          data-testid={`remote-webpage-frame-${id}`}
-          title={`${label} 网页`}
-          src={browserEmbedUrl}
-          allow="clipboard-read; clipboard-write; fullscreen"
-          referrerPolicy="no-referrer"
-          allowFullScreen
-        />
+        {native
+          ? createElement('webview', {
+            ref: webview,
+            className: css.webFrame,
+            'data-testid': `remote-webpage-webview-${id}`,
+            title: `${label} 网页`,
+            src: targetUrl,
+            partition: `persist:dsh-remote-${id}`,
+            allowpopups: 'true',
+          })
+          : (
+            <iframe
+              key={`${id}:${String(frameRevision)}`}
+              className={css.webFrame}
+              data-testid={`remote-webpage-frame-${id}`}
+              title={`${label} 网页`}
+              src={browserEmbedUrl}
+              allow="clipboard-read; clipboard-write; fullscreen"
+              referrerPolicy="no-referrer"
+              allowFullScreen
+            />
+          )}
       </section>
     </div>
   )
@@ -101,6 +135,23 @@ function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelP
 export function WebpageEntry({ wide, ...instance }: WebpageEntryProps) {
   const [open, setOpen] = useState(false)
   const close = useCallback(() => { setOpen(false) }, [])
+  const native = instance.direct === true && supportsEmbeddedWebview()
+  if (instance.direct === true && !native) {
+    return (
+      <Tooltip label={`${instance.label}（系统浏览器）`} delayMs={500} disabled={wide}>
+        <a
+          className={clsx(css.trigger, !wide && css.rail)}
+          aria-label={instance.label}
+          href={instance.targetUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <IconShareOutline16 size={wide ? 16 : 18} />
+          {wide && <span className={css.triggerLabel}>{instance.label}</span>}
+        </a>
+      </Tooltip>
+    )
+  }
   return (
     <>
       <Tooltip label={instance.label} delayMs={500} disabled={wide}>
@@ -116,7 +167,7 @@ export function WebpageEntry({ wide, ...instance }: WebpageEntryProps) {
           {wide && <span className={css.triggerLabel}>{instance.label}</span>}
         </button>
       </Tooltip>
-      {open && <WebpagePanel {...instance} onClose={close} />}
+      {open && <WebpagePanel {...instance} native={native} onClose={close} />}
     </>
   )
 }

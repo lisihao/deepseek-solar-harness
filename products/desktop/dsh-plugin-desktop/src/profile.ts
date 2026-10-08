@@ -13,6 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { evaluate, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -45,6 +46,12 @@ import {
 import {
   AGENT_TEAMS_PACKAGE,
   AGENT_TEAMS_ROW_ID,
+  SCHEDULING_EVIDENCE_PACKAGE,
+  SCHEDULING_EVIDENCE_ROW_ID,
+  SCHEDULING_EVIDENCE_RPC_PACKAGE,
+  SCHEDULING_EVIDENCE_RPC_ROW_ID,
+  SCHEDULING_EVIDENCE_SETTINGS_PACKAGE,
+  SCHEDULING_EVIDENCE_SETTINGS_ROW_ID,
   EGO_LITE_BROWSER_PROVIDER_PACKAGE,
   PRODUCT_BUNDLE_PACKAGES,
   PRODUCT_BUNDLE_ROW_IDS,
@@ -266,6 +273,11 @@ function productPresetRoot(): string {
   return unpackedAsarPath(fileURLToPath(new URL('../vendor/agent-presets', import.meta.url)))
 }
 
+/** Resolve the Python collectors that Desktop ships for scheduling evidence. */
+function schedulingEvidenceSourceRoot(): string {
+  return unpackedAsarPath(fileURLToPath(new URL('../vendor/scheduling-evidence-python', import.meta.url)))
+}
+
 /** Resolve the bundle patch declared by one sealed product package. */
 function productBundlePatchPath(require: NodeJS.Require, packageName: string): string {
   const packagePath = require.resolve(`${packageName}/package.json`)
@@ -408,7 +420,35 @@ interface ProductProfileOptions {
   platform: NodeJS.Platform
   profileName: string
   adapter: ProductHostAdapter
+  /** Compose a Gouzi execution member: no scheduler, cluster election, or TaskGraph daemon. */
+  gouziWorker?: boolean
+  /** Shared execution lock directory explicitly passed by the member supervisor. */
+  gouziDirectoryLockRoot?: string
 }
+
+/** Rows that schedule, vote, or present TaskGraph runs; a Gouzi member never mounts them. */
+export const GOUZI_WORKER_DISABLED_ROW_IDS = [
+  'orchestration-local',
+  'debate-orchestration',
+  'tool-orchestration',
+  'tool-debate',
+  'ui-debate',
+  'ui-orchestration',
+  'ui-gouzi',
+  SCHEDULING_EVIDENCE_ROW_ID,
+  SCHEDULING_EVIDENCE_RPC_ROW_ID,
+  SCHEDULING_EVIDENCE_SETTINGS_ROW_ID,
+] as const
+
+/** Plugin that mounts only the remote execution host of orchestration-local. */
+export const GOUZI_REMOTE_HOST_PACKAGE = '@deepseek-ai/dsh-orchestration-local/remote-host'
+
+/** Plugin that provides the member identity, grant admission, and idempotency ledger. */
+export const GOUZI_MEMBER_PACKAGE = '@deepseek-ai/dsh-host-gouzi-member'
+
+/** Row and plugin that start and stop Gouzi member processes on the machine that runs this Server. */
+export const GOUZI_HOST_ROW_ID = 'gouzi-host'
+export const GOUZI_HOST_PACKAGE = 'dsh-plugin-desktop/gouzi-host'
 
 const DESKTOP_ADAPTER_ROW_IDS = [
   'desktop-shell',
@@ -568,6 +608,24 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
       },
     })
   }
+  // Radar evidence is off until the owner turns it on in the settings document
+  // (`scheduling-evidence.radarEnabled`); the gateway mounts inert and contacts
+  // nothing without the owner's consent. The read-only RPC and the Settings page
+  // show what the store holds. A profile that supplies a row keeps it.
+  const evidenceRows = [
+    {
+      id: SCHEDULING_EVIDENCE_ROW_ID,
+      name: SCHEDULING_EVIDENCE_PACKAGE,
+      config: {
+        python: 'python3',
+        sourceRoot: schedulingEvidenceSourceRoot(),
+        stateRoot: join(home, 'scheduling-evidence'),
+      },
+    },
+    { id: SCHEDULING_EVIDENCE_RPC_ROW_ID, name: SCHEDULING_EVIDENCE_RPC_PACKAGE },
+    { id: SCHEDULING_EVIDENCE_SETTINGS_ROW_ID, name: SCHEDULING_EVIDENCE_SETTINGS_PACKAGE },
+  ].filter(row => !rows.has(row.id))
+  if (evidenceRows.length > 0) patches.push({ insert: evidenceRows })
   const agentTeams = rows.get(AGENT_TEAMS_ROW_ID)
   if (agentTeams?.name !== AGENT_TEAMS_PACKAGE) {
     throw new Error(`${BIN_NAME}: product profile must use ${AGENT_TEAMS_PACKAGE} in the ${AGENT_TEAMS_ROW_ID} row`)
@@ -608,8 +666,38 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
     // permanently capturing an undefined optional service.
     patches.push({
       id: 'connection',
-      inject: ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations', 'remoteOperatorHost'],
+      // A member has no orchestration service to wait for; it waits for the member gate instead.
+      inject: options.gouziWorker === true
+        ? ['webRuntime', 'webStartup', 'residentOperators', 'remoteOperatorHost', 'gouziMember']
+        : ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations', 'remoteOperatorHost'],
     })
+  }
+  if (options.gouziWorker !== true && !composeEntries([patches]).some(row => row.id === GOUZI_HOST_ROW_ID)) {
+    patches.push({
+      insert: [{
+        id: GOUZI_HOST_ROW_ID,
+        name: GOUZI_HOST_PACKAGE,
+        config: {
+          membersRoot: join(home, 'gouzi', 'members'),
+          hostsRoot: join(home, 'gouzi', 'hosts'),
+          // Stable per installation and distinct between machines; it is an identity, not a secret.
+          ownerId: `main-${createHash('sha256').update(home).digest('hex').slice(0, 12)}`,
+        },
+      }],
+    })
+  }
+  if (options.gouziWorker === true) {
+    if (adapter !== 'server') throw new Error(`${BIN_NAME}: a Gouzi member runs under the server adapter only`)
+    const present = new Set(composeEntries([patches]).flatMap(row => typeof row.id === 'string' ? [row.id] : []))
+    patches.push(
+      ...GOUZI_WORKER_DISABLED_ROW_IDS.filter(id => present.has(id)).map(id => ({ id, disabled: true })),
+      {
+        insert: [
+          { id: 'orchestration-remote-host', name: GOUZI_REMOTE_HOST_PACKAGE, config: { dshHome: home, directoryLockRoot: options.gouziDirectoryLockRoot } },
+          { id: 'gouzi-member', name: GOUZI_MEMBER_PACKAGE, config: { stateRoot: home } },
+        ],
+      },
+    )
   }
   if (!rows.has('webserver')) {
     throw new Error(`${BIN_NAME}: desktop profile has no webserver row`)
@@ -746,6 +834,31 @@ export function prepareProductServerProfile(
   profileName: string = PRODUCT_SERVER_PROFILE_NAME,
 ): PreparedProductServerProfile {
   return prepareProductProfile({ telemetryDisabled, home, platform, profileName, adapter: 'server' })
+}
+
+/**
+ * Load the product composition for one Gouzi execution member. The member runs the same Server transport and
+ * Resident operators, but mounts no TaskGraph daemon, scheduler, or cluster election, and its connection
+ * refuses any `operator.execute` that lacks an execution grant.
+ * @param home - the member's own harness home; it is also the member state root.
+ * @param telemetryDisabled - inherited DSH telemetry opt-out value.
+ * @param platform - native platform selecting launcher-owned safety overlays.
+ * @param directoryLockRoot - host-common execution lock directory supplied by the supervisor.
+ * @returns root config, profile metadata, and ordered patches.
+ */
+export function prepareGouziWorkerProfile(
+  home: string,
+  telemetryDisabled: string | undefined = process.env.DSH_TELEMETRY_DISABLED,
+  platform: NodeJS.Platform = process.platform,
+  directoryLockRoot: string | undefined = process.env.DSH_GOUZI_DIRECTORY_LOCK_ROOT,
+): PreparedProductServerProfile {
+  if (directoryLockRoot === undefined || directoryLockRoot.length === 0) {
+    throw new Error(`${BIN_NAME}: Gouzi worker requires a supervisor-provided directory lock root`)
+  }
+  return prepareProductProfile({
+    telemetryDisabled, home, platform, profileName: PRODUCT_SERVER_PROFILE_NAME, adapter: 'server', gouziWorker: true,
+    gouziDirectoryLockRoot: directoryLockRoot,
+  })
 }
 
 /** Expose the package anchor for focused resolution tests. */

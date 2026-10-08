@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
 import {
   apply,
@@ -20,11 +20,20 @@ const SECTIONS = [
 
 type Listener = (payload: any, next: () => Promise<any>) => Promise<any>
 
+/** Disposers of the effects the last registered plugin created; running them is the plugin being unloaded. */
+let effectDisposers: Array<() => void> = []
+
 function register(customConfig: Record<string, unknown> = {}): Map<string, { listener: Listener, options: any }> {
   const listeners = new Map<string, { listener: Listener, options: any }>()
+  effectDisposers = []
   const ctx = {
     on(event: string, callback: Listener, options?: any) {
       listeners.set(event, { listener: callback, options })
+    },
+    effect(setup: () => () => void) {
+      const dispose = setup()
+      effectDisposers.push(dispose)
+      return dispose
     },
   }
   apply(ctx, { ...config, ...customConfig })
@@ -236,6 +245,14 @@ describe('anchored-tool-bootstrap', () => {
     ]
     const result = await preStep(preStepListener, [], messages)
     expect(result.messages.map((entry: any) => entry.id)).toEqual(['user'])
+  })
+
+  test('keepTaskTemplate lets only the matched task-template instruction through phase 1', async () => {
+    const messages = [message('user', 'user'), message('task-template', 'template'), message('agent-instructions', 'instructions')]
+    const kept = await preStep(listener(register({ keepTaskTemplate: true }), 'agent/pre-step'), [], messages)
+    expect(kept.messages.map((entry: any) => entry.id)).toEqual(['user', 'template'])
+    const dropped = await preStep(listener(register(), 'agent/pre-step'), [], messages)
+    expect(dropped.messages.map((entry: any) => entry.id)).toEqual(['user'])
   })
 
   test('anchorGate holds promotion after a standard-like first block', async () => {
@@ -560,5 +577,175 @@ describe('anchored-tool-bootstrap', () => {
       async () => ({ provider: 'p', model: 'm', maxTokens: 384000 }),
     )
     expect(result.maxTokens).toBe(384000)
+  })
+  describe('delegated child with a parent-filtered tool surface', () => {
+    const childAgent = (events: unknown[] = []) => ({
+      session: { events, header: { cwd: '/workspace', origin: 'subagent' } },
+    })
+    const resultOnly = [{ name: 'mnemon_subagent_result_x' }]
+
+    test('keeps its filtered tools, contexts, sections, and output budget instead of failing', async () => {
+      const listeners = register({ bootstrapMaxTokens: 1024 })
+      const contexts = [{ name: 'sandbox:policy', text: 'Current DSH file policy: workspace-write.' }]
+      const agent = childAgent()
+      const assembled = await listener(listeners, 'system-prompt/assemble')(
+        undefined,
+        { agent },
+        async () => ({ system: 'persona', tools: resultOnly, contexts, sections: SECTIONS }),
+      )
+      expect(assembled.tools).toEqual(resultOnly)
+      expect(assembled.contexts).toEqual(contexts)
+      expect(assembled.sections).toEqual(SECTIONS)
+
+      const requested = await listener(listeners, 'agent/request')(
+        { agent, turn: 1, step: 1, signal: {} },
+        async () => ({ provider: 'p', model: 'm', maxTokens: 8192 }),
+      )
+      expect(requested.maxTokens).toBe(8192)
+
+      const messages = [message('user', 'u'), message('plugin', 'p')]
+      const decision = await listener(listeners, 'agent/pre-step')(
+        { agent, messages, turn: 1, step: 1, signal: {} },
+        async () => ({ kind: 'enter', messages }),
+      )
+      expect(decision.messages).toHaveLength(2)
+    })
+
+    test('still fails closed for a top-level session that lacks the bootstrap tools', async () => {
+      await expect(assemble(listener(register(), 'system-prompt/assemble'), [], resultOnly)).rejects.toThrow(
+        /expected exactly one bootstrap shell/,
+      )
+    })
+  })
+  describe('auto-continue after a capped first turn', () => {
+    const maxTokensEnd = { type: 'turn/end', data: { turn: 1, reason: { kind: 'max-tokens' } } }
+    const followups: any[] = []
+    const agentWithFollowup = (events: unknown[], origin?: string) => ({
+      session: { events, header: { cwd: '/workspace', ...origin === undefined ? {} : { origin } } },
+      followup: (message: unknown) => { followups.push(message) },
+    })
+
+    function sessionEventListener(customConfig: Record<string, unknown>) {
+      const listeners = register({ bootstrapMaxTokens: 1024, ...customConfig })
+      return { listeners, onEvent: listener(listeners, 'session/event') as unknown as (session: any, event: any) => void }
+    }
+
+    test('sends the configured text once, promotes the session, and does not repeat', async () => {
+      vi.useFakeTimers()
+      try {
+        followups.length = 0
+        const { listeners, onEvent } = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+        const agent = agentWithFollowup([])
+        await listener(listeners, 'agent/request')({ agent, turn: 1, step: 1, signal: {} }, async () => ({ maxTokens: 256000 }))
+        agent.session.events.push(maxTokensEnd)
+        onEvent(agent.session, maxTokensEnd)
+        onEvent(agent.session, maxTokensEnd)
+        await vi.runAllTimersAsync()
+
+        expect(followups).toHaveLength(1)
+        expect(followups[0]).toMatchObject({ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] })
+        const next = await listener(listeners, 'agent/request')({ agent, turn: 2, step: 1, signal: {} }, async () => ({ maxTokens: 1024 }))
+        expect(next.maxTokens).toBeUndefined()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    describe('a pending continuation', () => {
+      const capped = async (events: ReturnType<typeof sessionEventListener>, agent: ReturnType<typeof agentWithFollowup>, signal: unknown) => {
+        await listener(events.listeners, 'agent/request')({ agent, turn: 1, step: 1, signal }, async () => ({ maxTokens: 256000 }))
+        agent.session.events.push(maxTokensEnd)
+        events.onEvent(agent.session, maxTokensEnd)
+      }
+
+      test('is not sent when the turn was cancelled before it fired', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          const turn = new AbortController()
+          await capped(events, agent, turn.signal)
+          turn.abort({ kind: 'user' })
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      test('is dropped when the plugin is unloaded before it fired', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          await capped(events, agent, new AbortController().signal)
+          for (const dispose of effectDisposers) dispose()
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      test('is dropped when its agent is disposed before it fired', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          await capped(events, agent, new AbortController().signal)
+          await listener(events.listeners, 'agent/disposed')({ agent }, async () => undefined)
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(0)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      test('is still sent when nothing cancelled the turn', async () => {
+        vi.useFakeTimers()
+        try {
+          followups.length = 0
+          const events = sessionEventListener({ autoContinueOnMaxTokens: '继续' })
+          const agent = agentWithFollowup([])
+          await capped(events, agent, new AbortController().signal)
+          await vi.runAllTimersAsync()
+          expect(followups).toHaveLength(1)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+    })
+
+    test('stays off by default, for subagents, and for other turn endings', async () => {
+      vi.useFakeTimers()
+      try {
+        followups.length = 0
+        const off = sessionEventListener({})
+        const plain = agentWithFollowup([])
+        await listener(off.listeners, 'agent/request')({ agent: plain, turn: 1, step: 1, signal: {} }, async () => ({}))
+        off.onEvent(plain.session, maxTokensEnd)
+
+        const on = sessionEventListener({ autoContinueOnMaxTokens: true })
+        const child = agentWithFollowup([], 'subagent')
+        await listener(on.listeners, 'agent/request')({ agent: child, turn: 1, step: 1, signal: {} }, async () => ({}))
+        on.onEvent(child.session, maxTokensEnd)
+
+        const done = agentWithFollowup([])
+        await listener(on.listeners, 'agent/request')({ agent: done, turn: 1, step: 1, signal: {} }, async () => ({}))
+        on.onEvent(done.session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+        await vi.runAllTimersAsync()
+
+        expect(followups).toHaveLength(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    test('rejects an invalid autoContinueOnMaxTokens value', () => {
+      expect(() => register({ autoContinueOnMaxTokens: 3 })).toThrow(/autoContinueOnMaxTokens/)
+    })
   })
 })

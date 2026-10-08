@@ -34,6 +34,7 @@
     "@deepseek-ai/dsh-tool-debate": "workspace:^",
     "@deepseek-ai/dsh-tool-orchestration": "workspace:^",
     "@deepseek-ai/dsh-ui-debate": "workspace:^",
+    "@deepseek-ai/dsh-ui-gouzi": "workspace:^",
     "@deepseek-ai/dsh-ui-orchestration": "workspace:^"
   },
   "peerDependencies": {

@@ -13,6 +13,8 @@ This group owns the versioned seams and local runtime for compiling an intent in
 | [`continual-harness-local/`](continual-harness-local/README.md) | Owner-local bounded outcome and context Provider | provides harness seam |
 | [`model-allocation/`](model-allocation/README.md) | Quota-aware model allocation Service Definition | `ctx.modelAllocation` |
 | [`model-allocation-local/`](model-allocation-local/README.md) | Subscription-first deterministic allocator Provider | provides allocation seam |
+| [`scheduling-evidence/`](scheduling-evidence/README.md) | Gateway to the Radar and AI Frontier evidence collectors | `ctx.schedulingEvidence` |
+| [`scheduling-evidence-rpc/`](scheduling-evidence-rpc/README.md) | Read-only settings-page channel for the Radar store | `/scheduling-evidence` RPC |
 | [`model-worker/`](model-worker/README.md) | Optional one-shot model worker registry | `ctx.modelWorkers` |
 | [`model-worker-deepseek/`](model-worker-deepseek/README.md) | DeepSeek API last-resort worker Provider | registers a metered worker |
 | [`rlm-strategy/`](rlm-strategy/README.md) | Provider-neutral bounded RLM strategy seam | `ctx.rlmStrategy` |

@@ -217,6 +217,38 @@ describe('ChatGPT Web model controls', () => {
     expect(screen.getByRole('button', { name: '清除推理强度' })).toBeTruthy()
   })
 
+  it('shows a primary-menu pin on the duplicate model control while keeping reasoning selectable', () => {
+    renderControls({
+      catalog,
+      profile: { model: 'future/lattice-9', effort: 'sprint', modelSelectionPinned: true },
+    })
+
+    expect(selectControl('ChatGPT Web 模型').disabled).toBe(true)
+    expect(selectControl('ChatGPT Web 推理强度').disabled).toBe(false)
+    expect(screen.getByText('模型跟随主模型菜单')).toBeTruthy()
+    expect(screen.queryByText('推理强度跟随主模型菜单')).toBeNull()
+  })
+
+  it('disables auxiliary reasoning controls when the primary menu pins the effort', () => {
+    const noEfforts = { ...catalog, efforts: [] }
+    const request = vi.fn<BrowserRequest>(async () => response({}))
+    const profile = parseWebModelPreferences({
+      model: 'future/lattice-9', effort: 'sprint', effortSelectionPinned: true,
+    })
+    if (profile === undefined) throw new Error('pinned effort fixture must parse')
+    renderControls({
+      request,
+      catalog: noEfforts,
+      profile,
+    })
+
+    expect(selectControl('ChatGPT Web 模型').disabled).toBe(false)
+    expect(selectControl('ChatGPT Web 推理强度').disabled).toBe(true)
+    expect(screen.getByText('推理强度跟随主模型菜单')).toBeTruthy()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '清除推理强度' }).disabled).toBe(true)
+    expect(request).not.toHaveBeenCalled()
+  })
+
   it('disables and hides stale reasoning choices when the saved model differs from the observed page model', () => {
     const observedOtherModel = { ...catalog, selectedModel: 'account/custom', selectedEffort: 'deep-dive' }
     renderControls({ catalog: observedOtherModel, profile: { model: 'future/lattice-9', effort: 'sprint' } })
@@ -231,7 +263,11 @@ describe('ChatGPT Web model controls', () => {
 describe('ChatGPT Web model response parsers', () => {
   it('reject malformed nested fields while accepting an empty preference', () => {
     expect(parseWebModelPreferences({})).toEqual({})
+    expect(parseWebModelPreferences({ model: 'm', modelSelectionPinned: true })).toEqual({ model: 'm', modelSelectionPinned: true })
+    expect(parseWebModelPreferences({ effort: 'high', effortSelectionPinned: true })).toEqual({ effort: 'high', effortSelectionPinned: true })
     expect(parseWebModelPreferences({ effort: null })).toBeUndefined()
+    expect(parseWebModelPreferences({ modelSelectionPinned: 'yes' })).toBeUndefined()
+    expect(parseWebModelPreferences({ effortSelectionPinned: 'yes' })).toBeUndefined()
     expect(parseWebModelCatalog({ models: [], efforts: [], observedAt: 'now' })).toEqual({
       models: [], efforts: [], observedAt: 'now',
     })

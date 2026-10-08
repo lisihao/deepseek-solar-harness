@@ -299,13 +299,25 @@ describe('physical primary routing control', () => {
     })
   })
 
-  it('refreshes model, Resident, and Web catalogs together without changing an API primary', async () => {
-    let release: ((value: Response) => void) | undefined
-    const pending = new Promise<Response>((resolve) => { release = resolve })
+  it('keeps the refresh and close controls together in one actions group beside the title', async () => {
+    const fixture = createFixture({ current: apiPrimary(), policy: 'direct' })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+
+    const refresh = screen.getByRole('button', { name: '刷新模型与算子' })
+    const close = screen.getByRole('button', { name: '关闭协作方式' })
+    expect(refresh.parentElement).toBe(close.parentElement)
+    expect(refresh.parentElement?.className).toBe('dshDesktopOperatorStrategyActions')
+    expect(close.className).toBe('dshDesktopOperatorStrategyClose')
+    expect(refresh.parentElement?.previousElementSibling?.className).toBe('dshDesktopOperatorStrategyTitle')
+  })
+
+  it('refreshes the centralized catalog once, then reads cached Resident status without changing an API primary', async () => {
     const requestCalls: Array<{ url: string; method: string | undefined }> = []
     const requestMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       requestCalls.push({ url: requestUrl(input), method: init?.method })
-      return await pending
+      return dashboardResponse([])
     })
     const fixture = createFixture({
       current: apiPrimary(),
@@ -313,24 +325,29 @@ describe('physical primary routing control', () => {
       directoryFailures: [{ id: 'offline', name: 'Offline', message: 'catalog unavailable' }],
       request: requestMock,
     })
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof fixture.refreshModels>>>()
+    fixture.refreshModels.mockImplementation(() => pending.promise)
 
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
     fireEvent.click(screen.getByRole('button', { name: '刷新模型与算子' }))
     expect(screen.getByRole('button', { name: '刷新模型与算子' }).hasAttribute('disabled')).toBe(true)
     expect(fixture.refreshModels).toHaveBeenCalledOnce()
-    expect(requestCalls.some(call => call.url.includes('/api/resident-operators?refresh=1'))).toBe(true)
-    expect(requestCalls.some(call => call.url.includes('/api/chatgpt-web?catalog=1&refresh=1'))).toBe(true)
-    const webRefreshCall = requestCalls.find(call => call.url.includes('/api/chatgpt-web?catalog=1&refresh=1'))
-    expect(webRefreshCall === undefined ? undefined : new URL(webRefreshCall.url).searchParams.get('session_id')).toBe('session-1')
-    expect(requestCalls.every(call => call.method === undefined)).toBe(true)
+    expect(requestCalls).toEqual([])
 
-    release?.(dashboardResponse([]))
+    pending.resolve({ current: apiPrimary(), routable: true, groups: [], failures: [{
+      id: 'offline', name: 'Offline', message: 'catalog unavailable',
+    }] })
     await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toContain('模型目录已刷新，暂不可用：Offline')
-      expect(screen.getByRole('status').textContent).toContain('原生算子目录已刷新')
-      expect(screen.getByRole('status').textContent).toContain('ChatGPT Web 目录已刷新')
+      expect(requestCalls).toHaveLength(1)
+      expect(screen.getByRole('status').textContent).toContain('模型目录已刷新，暂不可用：Offline（catalog unavailable）')
+      expect(screen.getByRole('status').textContent).toContain('原生算子状态已更新')
     })
+    const dashboardUrl = new URL(requestCalls[0]?.url ?? '')
+    expect(dashboardUrl.pathname).toBe('/api/resident-operators')
+    expect(dashboardUrl.searchParams.get('refresh')).toBeNull()
+    expect(requestCalls.some(call => call.url.includes('/api/chatgpt-web'))).toBe(false)
+    expect(requestCalls.every(call => call.method === undefined)).toBe(true)
     expect(screen.getByRole('button', { name: '刷新模型与算子' }).hasAttribute('disabled')).toBe(false)
     expect(screen.getByRole('button', { name: '协作 · 仅主模型' })).toBeTruthy()
     expect(fixture.select).not.toHaveBeenCalled()
@@ -339,20 +356,13 @@ describe('physical primary routing control', () => {
     expect(fixture.selectDebateMode).not.toHaveBeenCalled()
   })
 
-  it('reports a busy Web refresh while preserving the selected native model and profile', async () => {
-    const requestMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(requestUrl(input))
-      if (url.pathname === '/api/chatgpt-web'
-        && url.searchParams.get('catalog') === '1'
-        && url.searchParams.get('refresh') === '1') {
-        return new Response('{}', { status: 409, headers: { 'content-type': 'application/json' } })
-      }
-      return dashboardResponse([nativeProvider('codex', [nativeModel('codex-live')])])
-    })
+  it('reports a centralized Web catalog failure while preserving the selected native model and profile', async () => {
+    const requestMock = vi.fn<BrowserRequest>(async () => dashboardResponse([nativeProvider('codex', [nativeModel('codex-live')])]))
     const fixture = createFixture({
       current: apiPrimary(),
       policy: 'codex',
       profiles: { codex: { model: 'codex-live', effort: 'high' } },
+      directoryFailures: [{ id: 'web', name: 'ChatGPT Web', message: '正忙，请完成当前请求后重试' }],
       request: requestMock,
     })
 
@@ -362,8 +372,10 @@ describe('physical primary routing control', () => {
     await screen.findByRole('option', { name: 'codex-live' })
     fireEvent.click(screen.getByRole('button', { name: '刷新模型与算子' }))
     await waitFor(() => {
-      expect(screen.getAllByRole('status').some(element => element.textContent?.includes('ChatGPT Web 正忙，请完成当前请求后重试'))).toBe(true)
+      expect(screen.getAllByRole('status').some(element => element.textContent?.includes('ChatGPT Web（正忙，请完成当前请求后重试）'))).toBe(true)
     })
+    expect(requestMock.mock.calls.some(([input]) => requestUrl(input).includes('/api/chatgpt-web'))).toBe(false)
+    expect(requestMock.mock.calls.some(([input]) => new URL(requestUrl(input)).searchParams.get('refresh') === '1')).toBe(false)
     expect(screen.getByRole('button', { name: '协作 · Codex' })).toBeTruthy()
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '执行模型' }).value).toBe('codex-live')
     expect(fixture.select).not.toHaveBeenCalled()
@@ -397,7 +409,7 @@ describe('physical primary routing control', () => {
       const url = new URL(requestUrl(input))
       return url.pathname === '/api/chatgpt-web' && url.searchParams.get('catalog') === '1'
     })
-    expect(catalogCall === undefined ? undefined : new URL(requestUrl(catalogCall[0])).searchParams.get('session_id')).toBe('session-1')
+    expect(catalogCall).toBeUndefined()
     expect(fixture.select).not.toHaveBeenCalled()
   })
 

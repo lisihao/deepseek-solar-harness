@@ -170,6 +170,12 @@ describe('Resident Operator Desktop projection', () => {
     const ctx = {
       residentOperators: {
         providers,
+        providerSnapshot: vi.fn()
+          .mockReturnValueOnce(undefined)
+          .mockReturnValueOnce({
+            observedAt: Date.now(),
+            providers: [provider('gpt-5.6-new', ['low', 'medium', 'high', 'ultra'])],
+          }),
         list: vi.fn(async () => []),
         authenticate,
       },
@@ -197,7 +203,7 @@ describe('Resident Operator Desktop projection', () => {
     await handler(localGet('/api/resident-operators'), cachedAgain.response)
     expect(cachedAgain.status()).toBe(200)
     expect(cachedAgain.json()).toMatchObject({
-      providers: [{ models: [{ model: 'gpt-5.5-stale', supportedEfforts: ['low', 'medium'] }] }],
+      providers: [{ models: [{ model: 'gpt-5.6-new', supportedEfforts: ['low', 'medium', 'high', 'ultra'] }] }],
     })
     expect(providers).toHaveBeenCalledOnce()
 
@@ -219,6 +225,7 @@ describe('Resident Operator Desktop projection', () => {
     const ctx = {
       residentOperators: {
         providers,
+        providerSnapshot: vi.fn(() => undefined),
         list: vi.fn(async () => []),
         authenticate,
       },
@@ -257,6 +264,44 @@ describe('Resident Operator Desktop projection', () => {
     })
     expect(providers).toHaveBeenCalledTimes(2)
     expect(authenticate).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a provider query when the central snapshot has expired', async () => {
+    const providers = vi.fn(async () => [provider('gpt-5.6-fresh', ['low', 'medium', 'high'])])
+    const providerSnapshot = vi.fn(() => ({
+      observedAt: Date.now() - 60_001,
+      providers: [provider('gpt-5.5-expired', ['low'])],
+    }))
+    const ctx = {
+      residentOperators: {
+        providers,
+        providerSnapshot,
+        list: vi.fn(async () => []),
+        authenticate: vi.fn(),
+      },
+      webServer: {
+        register: vi.fn((route: { handler: typeof handler }) => {
+          handler = route.handler
+          return () => {}
+        }),
+      },
+      get: (key: string) => key === 'remoteAuth' ? {
+        authenticate: vi.fn(() => ({ deviceId: 'local', deviceName: 'Local', scope: 'admin' as const })),
+      } : undefined,
+      logger: { warn: vi.fn() },
+    } as unknown as Context
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    registerResidentDashboard(ctx)
+    if (handler === undefined) throw new Error('dashboard route was not registered')
+
+    const response = responseRecorder()
+    await handler(localGet('/api/resident-operators'), response.response)
+
+    expect(response.status()).toBe(200)
+    expect(response.json()).toMatchObject({
+      providers: [{ models: [{ model: 'gpt-5.6-fresh', supportedEfforts: ['low', 'medium', 'high'] }] }],
+    })
+    expect(providers).toHaveBeenCalledOnce()
   })
 
   it('reconnects to daemon-owned session, progress, and settled result state', async () => {

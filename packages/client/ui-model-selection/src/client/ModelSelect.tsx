@@ -36,6 +36,18 @@ interface EffortChoice {
   description?: string
 }
 
+/** Optional availability evidence attached to a managed catalog entry. */
+interface ManagedCatalogAvailability {
+  readonly availability?: 'available'
+  readonly checkedAt?: string
+  readonly sourceName?: string
+}
+
+/** Return availability evidence only after a catalog source confirmed the model. */
+function managedCatalogAvailability(model: ManagedCatalogAvailability): ManagedCatalogAvailability | undefined {
+  return model.availability === 'available' ? model : undefined
+}
+
 /**
  * Render the composer model seat.
  * @param props - owner share (locked) + injected face (shared directory
@@ -326,6 +338,14 @@ export function ModelSelect(
                       <div className={css.groupTitle} id={headingId}>{group.name}</div>
                       {group.models.map((model) => {
                         const selected = state.current?.provider === group.id && state.current.model === model.id
+                        const availability = managedCatalogAvailability(model)
+                        const title = availability?.checkedAt === undefined
+                          ? model.name
+                          : t('option.availableTitle', {
+                            model: model.name,
+                            checkedAt: availability.checkedAt,
+                            source: availability.sourceName ?? group.name,
+                          })
                         return (
                           <button
                             ref={itemRef()}
@@ -334,12 +354,17 @@ export function ModelSelect(
                             aria-checked={selected}
                             className={clsx(css.option, selected && css.selected)}
                             key={model.id}
-                            title={model.name}
+                            title={title}
                             disabled={busy}
                             onClick={() => { choose({ provider: group.id, model: model.id }) }}
                           >
                             <span className={css.optionCopy}>
-                              <span className={css.modelName}>{model.name}</span>
+                              <span className={css.modelRow}>
+                                <span className={css.modelName}>{model.name}</span>
+                                {availability !== undefined && (
+                                  <span className={css.availability} aria-hidden="true">{t('option.available')}</span>
+                                )}
+                              </span>
                               {model.description !== undefined && (
                                 <span className={css.description}>{model.description}</span>
                               )}

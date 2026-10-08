@@ -926,6 +926,80 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'gouziHost',
+    summary: 'Starts and stops member processes on the machine that runs this Server.',
+    description: 'Starts and stops member processes on the machine that runs this Server. The Desktop product provides it; a Server without it can still list members but cannot adopt or wake one.',
+    methods: [
+      {
+        signature: 'abstract readonly ownerId: string',
+        description: 'Stable identity of this main instance, written into every grant epoch binding.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract hosts(): Promise<readonly GouziHostProjection[]>',
+        description: 'List the SSH hosts the user added; the local machine is implicit.',
+        parameters: [],
+        returns: 'the stored SSH hosts.',
+      },
+      {
+        signature: 'abstract inspectHost(target: GouziSshTarget): Promise<GouziHostInspection>',
+        description: 'Read the key an SSH machine presents, without logging in.',
+        parameters: [{ name: 'target', description: 'machine and login name.' }],
+        returns: 'the key type and fingerprint for the user to confirm.',
+        throws: ['Error - when the machine cannot be reached.'],
+      },
+      {
+        signature: 'abstract addHost(input: GouziSshTarget & { readonly password: string readonly fingerprint: string readonly label?: string }): Promise<GouziHostProjection>',
+        description: 'Trust an SSH machine and prepare it: install a dedicated key with the password, then check that DSH Desktop with Gouzi support is installed. The password is used once and not kept.',
+        parameters: [{ name: 'input', description: 'machine, login, password, and the fingerprint the user confirmed.' }],
+        returns: 'the stored host.',
+        throws: ['Error - when the key changed since inspection, the login fails, or DSH Desktop is missing or too old.'],
+      },
+      {
+        signature: 'abstract removeHost(hostId: string): Promise<void>',
+        description: 'Forget an SSH host and its dedicated key. The caller has checked that no live member uses it.',
+        parameters: [{ name: 'hostId', description: 'host id.' }],
+      },
+      {
+        signature: 'abstract browse(hostId: string, path?: string): Promise<GouziFolderListing>',
+        description: 'List the directories one level below `path` on a host, marking Git repositories.',
+        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'absolute directory; absent lists the login home directory.' }],
+        returns: 'the directory and its subdirectories.',
+      },
+      {
+        signature: 'abstract resolveRepository(hostId: string, path: string): Promise<GouziProjectSource>',
+        description: 'Inspect an existing directory without changing it and resolve its host-local project identity.',
+        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'absolute directory path on that host; Git and ordinary directories are accepted.' }],
+        returns: 'the project identity, selected real directory path, and optional canonical Git origin.',
+        throws: ['Error - when the directory is missing, inaccessible, or cannot be inspected.'],
+      },
+      {
+        signature: 'abstract prepareRepository(hostId: string, path: string): Promise<GouziProjectSource>',
+        description: 'Prepare a confirmed adoption directory, initializing Git only when it is not already in a repository. Existing project files are preserved; an origin remote is not required. Call only after all selected directories pass read-only inspection and a member slot is available.',
+        parameters: [{ name: 'hostId', description: 'host id.' }, { name: 'path', description: 'resolved source directory selected for adoption.' }],
+        returns: 'the project identity, selected real directory path, and optional canonical Git origin.',
+        throws: ['Error - when directory inspection or Git initialization fails.'],
+      },
+      {
+        signature: 'abstract provision(input: GouziProvisionInput): Promise<void>',
+        description: 'Create the member\'s home, identity, and project allowlist on its host. Idempotent for the same identity.',
+        parameters: [{ name: 'input', description: 'identity and allowlist; `hostId` selects the machine.' }],
+      },
+      {
+        signature: 'abstract start(hostId: string, gouziId: string): Promise<GouziProcessInfo>',
+        description: 'Start the member\'s process, or adopt the one already running.',
+        parameters: [{ name: 'hostId', description: 'host of the member.' }, { name: 'gouziId', description: 'member identity.' }],
+        returns: 'where the main instance reaches it and which incarnation answered.',
+      },
+      {
+        signature: 'abstract stop( hostId: string, gouziId: string, options?: { readonly reclaimResident?: boolean }, ): Promise<{ readonly processTreeStopped: boolean }>',
+        description: 'Stop the member\'s process.',
+        parameters: [{ name: 'hostId', description: 'host of the member.' }, { name: 'gouziId', description: 'member identity.' }, { name: 'options', description: '`reclaimResident` also stops the Resident daemon the member started.' }],
+        returns: 'whether no process of the member remains.',
+      },
+    ],
+  },
+  {
     key: 'intentCompiler',
     summary: 'Provider-neutral Intent compilation service.',
     description: 'Provider-neutral Intent compilation service.',
@@ -1150,6 +1224,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'modelCatalogs',
+    summary: 'Local SQLite provider and dynamic registry exposed as `ctx.modelCatalogs`.',
+    description: 'Local SQLite provider and dynamic registry exposed as `ctx.modelCatalogs`.',
+    methods: [
+      {
+        signature: 'register(source: ModelCatalogSource): () => Promise<void>',
+        description: 'Register a discovery source until its disposer runs. Source metadata is persisted at the next catalog read or refresh, while its callback stays process-local.',
+        parameters: [{ name: 'source', description: 'source that owns one existing DSH dispatch provider.' }],
+        returns: 'async disposer that aborts and drains that source\'s refresh.',
+      },
+      {
+        signature: 'list(): ModelCatalogSnapshot[]',
+        description: 'Read durable snapshots for exactly the active source registrations. Reading never invokes an upstream refresh callback.',
+        parameters: [],
+        returns: 'active-source snapshots with current models in upstream order.',
+      },
+      {
+        signature: 'async refresh(sourceIds?: readonly string[]): Promise<ModelCatalogSnapshot[]>',
+        description: 'Refresh selected sources, or every active source when omitted. A source failure becomes its durable error snapshot so healthy sources still return.',
+        parameters: [{ name: 'sourceIds', description: 'optional active source ids, deduplicated in caller order.' }],
+        returns: 'one current snapshot per selected source.',
+      },
+    ],
+  },
+  {
     key: 'modelWorkers',
     summary: 'Registry authority; concrete billed or local inference Providers remain separate plugins.',
     description: 'Registry authority; concrete billed or local inference Providers remain separate plugins.',
@@ -1175,10 +1274,33 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'orchestrationRecipients',
+    summary: 'Resolves only the current logical turn\'s explicit user selection.',
+    description: 'Resolves only the current logical turn\'s explicit user selection.',
+    methods: [
+      {
+        signature: 'readonly automaticDispatch?: boolean',
+        description: 'Whether kennel user messages are consumed by Host AI dispatch before ordinary execution.',
+        parameters: [],
+      },
+      {
+        signature: 'resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined>',
+        description: 'Confirm the selected member and its available execution entries.',
+        parameters: [{ name: 'events', description: 'ordered durable Session events.' }],
+        returns: 'confirmed recipient, or undefined when none was selected.',
+      },
+    ],
+  },
+  {
     key: 'orchestrations',
     summary: 'Provider-neutral durable orchestration control service.',
     description: 'Provider-neutral durable orchestration control service.',
     methods: [
+      {
+        signature: 'readonly gouzi?: GouziControl',
+        description: 'Gouzi host and member registry; absent in Providers that do not manage execution members.',
+        parameters: [],
+      },
       {
         signature: 'abstract compile(request: OrchestrationCompileRequest): Promise<OrchestrationCompilationV1>',
         description: 'Compile immutable Intent and Graph inputs.',
@@ -1345,9 +1467,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the current status snapshot.',
       },
       {
-        signature: 'async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]>',
+        signature: 'async residentCatalogs(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog[]>',
         description: 'Return every registered Resident model/quota catalog in registration order.',
-        parameters: [],
+        parameters: [{ name: 'options', description: 'optional native model catalog refresh policy.' }],
         returns: 'the current validated Resident catalogs.',
       },
       {
@@ -1444,10 +1566,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Abstract provider-neutral resident session/control surface.',
     methods: [
       {
-        signature: 'abstract providers(): Promise<ResidentProviderStatus[]>',
+        signature: 'abstract providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]>',
         description: 'Qualify every configured native product provider.',
-        parameters: [],
+        parameters: [{ name: 'options', description: 'optional native model catalog refresh policy.' }],
         returns: 'current version, protocol, and native-subscription availability snapshots.',
+      },
+      {
+        signature: 'providerSnapshot(): { readonly observedAt: number; readonly providers: ResidentProviderStatus[] } | undefined',
+        description: 'Read the latest completed qualification without contacting native products.',
+        parameters: [],
+        returns: 'the observed provider snapshot, or undefined when none is retained.',
       },
       {
         signature: 'authenticate(_operatorId: string): Promise<ResidentProviderStatus>',
@@ -1490,6 +1618,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the durable receipt and bounded result for one turn after caller reconnect.',
         parameters: [{ name: 'turnId', description: 'opaque turn identity from execution, a Session snapshot, or an event.' }],
         returns: 'the current receipt state, result reference, and terminal result when available.',
+      },
+      {
+        signature: 'inspectCommand(_commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined>',
+        description: 'Read a durable turn receipt by command identity without admitting or replaying execution. Absence is an observation at query time and does not exclude concurrent admission.',
+        parameters: [{ name: '_commandId', description: 'caller-owned durable command identity.' }],
+        returns: 'the current turn snapshot, or undefined when no receipt exists; unsupported providers throw.',
       },
       {
         signature: 'abstract readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage>',
@@ -1810,6 +1944,45 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the session override without applying the deployment default.',
         parameters: [{ name: 'session', description: 'session whose log supplies the override.' }],
         returns: 'the last logged mode, or `undefined` without one.',
+      },
+    ],
+  },
+  {
+    key: 'schedulingEvidence',
+    summary: 'Reads collector documents through bounded child processes.',
+    description: 'Reads collector documents through bounded child processes.',
+    methods: [
+      {
+        signature: 'evidenceFor(offers: readonly ModelExecutionOffer[], taskType: string): ModelAllocationEvidence | undefined',
+        description: 'Evidence for the allocator, from the Radar generation held in memory; it never starts a process.',
+        parameters: [{ name: 'offers', description: 'the offers the allocator will compare.' }, { name: 'taskType', description: 'the request\'s task type; evidence exists only for the dataset\'s own.' }],
+        returns: 'the evidence, or undefined when Radar is not configured, nothing usable is stored, or no offer has a record.',
+      },
+      {
+        signature: 'runCycle(): Promise<void>',
+        description: 'Run one collection and reload cycle now, or join the one already running.',
+        parameters: [],
+        returns: 'when the cycle ends; a failed cycle is logged and leaves the last stored generation in use.',
+      },
+      {
+        signature: 'async overview(): Promise<SchedulingEvidenceOverview>',
+        description: 'Read the Radar store and the owner\'s switches for the settings page. It asks the collector for the stored generation, so it shows what is on disk rather than only what the allocator holds.',
+        parameters: [],
+        returns: 'the page payload; a store that cannot be read is reported inside it, not thrown.',
+      },
+      {
+        signature: 'status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>',
+        description: 'Read a collector\'s storage status.',
+        parameters: [{ name: 'collector', description: 'which collector to ask.' }, { name: 'signal', description: 'cancels the call and stops its process tree.' }],
+        returns: 'the status document; `ok` is false when no valid generation is stored.',
+        throws: ['{SchedulingEvidenceError} When the interpreter is unusable or the call times out, is cancelled, or prints no document.'],
+      },
+      {
+        signature: 'show(collector: CollectorId, options: { readonly snapshotId?: string; readonly signal?: AbortSignal } = {}): Promise<CollectorResult>',
+        description: 'Read a stored generation without contacting the network.',
+        parameters: [{ name: 'collector', description: 'which collector to ask.' }, { name: 'options', description: '`snapshotId` selects an older generation; omitted reads the active one.' }],
+        returns: 'the generation document, or `ok: false` when none is stored.',
+        throws: ['{SchedulingEvidenceError} As for {@link status}.'],
       },
     ],
   },
@@ -3812,6 +3985,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CapsuleSnapshotRequest {\n    readonly capabilityTags?: readonly string[];\n}',
   },
   {
+    name: 'CatalogModel',
+    declaration: 'export interface CatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly availability: ModelAvailability;\n    readonly unavailableReason?: string;\n    readonly evidence: ModelCatalogEvidence;\n    readonly reasoning?: CatalogReasoning;\n    readonly featuredRank?: number;\n}',
+  },
+  {
+    name: 'CatalogReasoning',
+    declaration: 'export interface CatalogReasoning {\n    readonly efforts: readonly {\n        readonly id: string;\n        readonly name: string;\n        readonly description?: string;\n    }[];\n    readonly defaultEffort?: string;\n}',
+  },
+  {
+    name: 'CatalogRefreshResult',
+    declaration: 'export type CatalogRefreshResult = {\n    readonly available: true;\n    readonly models: readonly CatalogModel[];\n} | {\n    readonly available: false;\n    readonly reason: string;\n};',
+  },
+  {
     name: 'ClientResponse',
     declaration: 'export interface ClientResponse {\n    type: \'client-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
   },
@@ -3850,6 +4035,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CollectedOutput',
     declaration: 'export interface CollectedOutput {\n    text: string;\n    truncated: boolean;\n    spillPath?: string;\n}',
+  },
+  {
+    name: 'CollectorId',
+    declaration: 'export type CollectorId = \'radar\' | \'ai-frontier\';',
+  },
+  {
+    name: 'CollectorResult',
+    declaration: 'export interface CollectorResult {\n    readonly ok: boolean;\n    readonly exitCode: number;\n    readonly document: Readonly<Record<string, unknown>>;\n}',
   },
   {
     name: 'CommandDefinition',
@@ -4576,6 +4769,102 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GoalView extends GoalSnapshot {\n    readonly roundsStarted: number;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n    readonly activation: GoalActivation;\n}',
   },
   {
+    name: 'GouziActivity',
+    declaration: 'export type GouziActivity = \'resting\' | \'queued\' | \'working\' | \'awaiting-approval\' | \'paused\' | \'faulted\';',
+  },
+  {
+    name: 'GouziArchiveEvidence',
+    declaration: 'export interface GouziArchiveEvidence {\n    readonly credentialsRevoked: boolean;\n    readonly workSettled: boolean;\n    readonly processTreeStopped: boolean;\n}',
+  },
+  {
+    name: 'GouziAuthorityEpoch',
+    declaration: 'export type GouziAuthorityEpoch = Branded<\'GouziAuthorityEpoch\'>;',
+  },
+  {
+    name: 'GouziAvatarId',
+    declaration: 'export type GouziAvatarId = (typeof GOUZI_AVATAR_IDS)[number];',
+  },
+  {
+    name: 'GouziConnection',
+    declaration: 'export type GouziConnection = \'online\' | \'unreachable\';',
+  },
+  {
+    name: 'GouziControl',
+    declaration: 'export interface GouziControl {\n    list(): Promise<{\n        readonly hosts: readonly GouziHostRecord[];\n        readonly members: readonly GouziMemberView[];\n    }>;\n    executionOperators(): Promise<readonly {\n        readonly gouziId: GouziId;\n        readonly generation: number;\n        readonly projectScopes: readonly string[];\n        readonly operators: readonly GouziOperatorCapability[];\n    }[]>;\n    pairHost(host: Omit<GouziHostRecord, \'pairedAt\'>): Promise<GouziHostRecord>;\n    create(input: GouziCreateInput): Promise<GouziMemberView>;\n    edit(gouziId: GouziId, edit: GouziMemberEdit): Promise<GouziMemberView>;\n    setMembership(gouziId: GouziId, membership: Exclude<GouziMembership, \'archived\'>): Promise<GouziMemberView>;\n    setEndpoint(gouziId: GouziId, endpoint: string): Promise<GouziMemberView>;\n    archive(gouziId: GouziId, evidence: GouziArchiveEvidence): Promise<GouziMemberView>;\n}',
+  },
+  {
+    name: 'GouziCreateInput',
+    declaration: 'export interface GouziCreateInput {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly grantDeadlineMs: number;\n}',
+  },
+  {
+    name: 'GouziFolderListing',
+    declaration: 'export interface GouziFolderListing {\n    readonly path: string;\n    readonly parent?: string;\n    readonly entries: readonly {\n        readonly name: string;\n        readonly path: string;\n        readonly git: boolean;\n    }[];\n}',
+  },
+  {
+    name: 'GouziHostId',
+    declaration: 'export type GouziHostId = Branded<\'GouziHostId\'>;',
+  },
+  {
+    name: 'GouziHostInspection',
+    declaration: 'export interface GouziHostInspection {\n    readonly keyType: string;\n    readonly fingerprint: string;\n}',
+  },
+  {
+    name: 'GouziHostProjection',
+    declaration: 'export interface GouziHostProjection {\n    readonly hostId: string;\n    readonly label: string;\n    readonly kind: \'local\' | \'ssh\';\n    readonly address?: string;\n    readonly appVersion?: string;\n}',
+  },
+  {
+    name: 'GouziHostRecord',
+    declaration: 'export interface GouziHostRecord {\n    readonly hostId: GouziHostId;\n    readonly label: string;\n    readonly authorityEpoch: GouziAuthorityEpoch;\n    readonly credentialRef: string;\n    readonly pairedAt: string;\n}',
+  },
+  {
+    name: 'GouziId',
+    declaration: 'export type GouziId = Branded<\'GouziId\'>;',
+  },
+  {
+    name: 'GouziMemberEdit',
+    declaration: 'export interface GouziMemberEdit {\n    readonly name?: string;\n    readonly avatarId?: GouziAvatarId;\n    readonly role?: GouziRole;\n}',
+  },
+  {
+    name: 'GouziMembership',
+    declaration: 'export type GouziMembership = \'provisioning\' | \'enabled\' | \'retiring\' | \'archived\';',
+  },
+  {
+    name: 'GouziMemberView',
+    declaration: 'export interface GouziMemberView extends GouziRecord {\n    readonly connection: GouziConnection;\n    readonly activity: GouziActivity;\n    readonly grantDeadlineMs: number;\n    readonly endpoint?: string;\n}',
+  },
+  {
+    name: 'GouziOperatorCapability',
+    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n}',
+  },
+  {
+    name: 'GouziOwnerId',
+    declaration: 'export type GouziOwnerId = Branded<\'GouziOwnerId\'>;',
+  },
+  {
+    name: 'GouziProcessInfo',
+    declaration: 'export interface GouziProcessInfo {\n    readonly endpoint: string;\n    readonly pid: number;\n    readonly incarnation: number;\n}',
+  },
+  {
+    name: 'GouziProjectSource',
+    declaration: 'export interface GouziProjectSource {\n    readonly projectId: string;\n    readonly source: string;\n    readonly repository?: string;\n}',
+  },
+  {
+    name: 'GouziProvisionInput',
+    declaration: 'export interface GouziProvisionInput {\n    readonly gouziId: string;\n    readonly ownerId: string;\n    readonly hostId: string;\n    readonly generation: number;\n    readonly authorityEpoch: string;\n    readonly projects: readonly GouziProjectSource[];\n    readonly defaultProjectId: string;\n}',
+  },
+  {
+    name: 'GouziRecord',
+    declaration: 'export interface GouziRecord {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly generation: number;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly roleVersion: number;\n    readonly policyVersion: number;\n    readonly membership: GouziMembership;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'GouziRole',
+    declaration: 'export type GouziRole = (typeof GOUZI_ROLES)[number];',
+  },
+  {
+    name: 'GouziSshTarget',
+    declaration: 'export interface GouziSshTarget {\n    readonly address: string;\n    readonly port: number;\n    readonly user: string;\n}',
+  },
+  {
     name: 'ImageAttachmentLimits',
     declaration: 'export interface ImageAttachmentLimits {\n    maxImageBytes: number;\n    maxImagesPerMessage: number;\n    maxMessageImageBytes: number;\n    maxImagePixels: number;\n    mediaTypes: readonly ImageMediaType[];\n}',
   },
@@ -4777,7 +5066,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LogicalTaskGraphV1',
-    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly baseSha?: string;\n    readonly workspaceIsolation?: \'shared\' | \'git-worktree\';\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly qualityPolicy?: {\n        readonly independentVerification: \'required\' | \'advisory\';\n    };\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
+    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly baseSha?: string;\n    readonly workspaceIsolation?: \'shared\' | \'git-worktree\' | \'directory-snapshot\';\n    readonly workspaceSnapshotLimits?: {\n        readonly maxFiles: number;\n        readonly maxBytes: number;\n        readonly maxBundleBytes: number;\n        readonly timeoutMs: number;\n    };\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly qualityPolicy?: {\n        readonly independentVerification: \'required\' | \'advisory\';\n    };\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
   },
   {
     name: 'LspHover',
@@ -4916,6 +5205,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MessageSourceMap {\n    user: {\n        kind: \'user\';\n    };\n    plugin: {\n        kind: \'plugin\';\n        plugin: string;\n    } & ContextFormed;\n    model: ModelMessageSource;\n    tool: ToolMessageSource;\n}',
   },
   {
+    name: 'ModelAllocationEvidence',
+    declaration: 'export interface ModelAllocationEvidence {\n    readonly taskType: string;\n    readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[];\n    readonly records: Readonly<Record<string, readonly unknown[]>>;\n}',
+  },
+  {
+    name: 'ModelAllocationEvidenceCandidate',
+    declaration: 'export interface ModelAllocationEvidenceCandidate {\n    readonly offerId: string;\n    readonly preferenceRank: number;\n    readonly status: \'used\' | \'abstained\';\n}',
+  },
+  {
+    name: 'ModelAllocationEvidenceReceipt',
+    declaration: 'export interface ModelAllocationEvidenceReceipt {\n    readonly mode: \'shadow\' | \'apply\';\n    readonly status: \'used\' | \'abstained\';\n    readonly reason: string;\n    readonly snapshots: readonly ModelAllocationEvidenceSnapshotRef[];\n    readonly tiedOfferIds: readonly string[];\n    readonly candidates: readonly ModelAllocationEvidenceCandidate[];\n    readonly baselineOfferId: string;\n    readonly evidenceOfferId: string;\n    readonly applied: boolean;\n}',
+  },
+  {
+    name: 'ModelAllocationEvidenceSnapshotRef',
+    declaration: 'export interface ModelAllocationEvidenceSnapshotRef {\n    readonly source: string;\n    readonly snapshotId: string;\n    readonly digest: string;\n}',
+  },
+  {
     name: 'ModelAllocationFallbackProvenance',
     declaration: 'export interface ModelAllocationFallbackProvenance {\n    readonly fromOperatorId: string;\n    readonly fromModel?: string;\n    readonly reasonCode: ModelAllocationFallbackReasonCode;\n}',
   },
@@ -4929,11 +5234,35 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelAllocationPlan',
-    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly fallback?: ModelAllocationFallbackProvenance;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n}',
+    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly fallback?: ModelAllocationFallbackProvenance;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n    readonly evidence?: ModelAllocationEvidenceReceipt;\n    readonly selection?: ModelAllocationSelectionReceipt;\n}',
   },
   {
     name: 'ModelAllocationRequest',
-    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
+    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly evidence?: ModelAllocationEvidence;\n    readonly costAwareObjective?: \'economy\' | \'balanced\' | \'speed\';\n    readonly alternativeOffers?: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
+  },
+  {
+    name: 'ModelAllocationSelectionCandidate',
+    declaration: 'export interface ModelAllocationSelectionCandidate {\n    readonly offerId: string;\n    readonly passRate: number;\n    readonly sampleCount: number;\n    readonly lower: number;\n    readonly upper: number;\n    readonly avgCostUsd: number;\n    readonly avgRuntimeSeconds: number;\n}',
+  },
+  {
+    name: 'ModelAllocationSelectionReceipt',
+    declaration: 'export interface ModelAllocationSelectionReceipt {\n    readonly mode: \'shadow\' | \'apply\';\n    readonly status: \'used\' | \'abstained\';\n    readonly reason: string;\n    readonly objective: \'economy\' | \'balanced\' | \'speed\';\n    readonly metric: \'cost-and-time\' | \'runtime\';\n    readonly baselineOfferId: string;\n    readonly selectedOfferId: string;\n    readonly sufficientOfferIds: readonly string[];\n    readonly considered: readonly ModelAllocationSelectionCandidate[];\n    readonly applied: boolean;\n}',
+  },
+  {
+    name: 'ModelAvailability',
+    declaration: 'export type ModelAvailability = \'available\' | \'unavailable\' | \'unknown\';',
+  },
+  {
+    name: 'ModelCatalogEvidence',
+    declaration: 'export type ModelCatalogEvidence = \'api-list\' | \'native-list\' | \'web-picker\' | \'configuration\';',
+  },
+  {
+    name: 'ModelCatalogSnapshot',
+    declaration: 'export interface ModelCatalogSnapshot {\n    readonly id: string;\n    readonly name: string;\n    readonly provider: string;\n    readonly menuVisible: boolean;\n    readonly state: \'unrefreshed\' | \'ready\' | \'unavailable\' | \'error\';\n    readonly lastAttemptAt?: string;\n    readonly lastSuccessAt?: string;\n    readonly error?: string;\n    readonly models: readonly StoredCatalogModel[];\n}',
+  },
+  {
+    name: 'ModelCatalogSource',
+    declaration: 'export interface ModelCatalogSource {\n    readonly id: string;\n    readonly name: string;\n    readonly provider: string;\n    readonly menuVisible: boolean;\n    refresh(signal: AbortSignal): Promise<CatalogRefreshResult>;\n}',
   },
   {
     name: 'ModelExecutionOffer',
@@ -5037,11 +5366,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationAcceptanceRequirement',
-    declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\';\n}',
+    declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\' | \'model-verdict\';\n}',
   },
   {
     name: 'OrchestrationAdmissionTraceV1',
-    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly gouziRecipient?: OrchestrationGouziRecipientV1;\n    readonly sourceSessionId: string;\n    readonly sourceMessageId?: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
   },
   {
     name: 'OrchestrationArtifactRef',
@@ -5089,7 +5418,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationCompilationV1',
-    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
+    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly workspaceSnapshotRef?: OrchestrationArtifactRef;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
   },
   {
     name: 'OrchestrationCompileRequest',
@@ -5116,6 +5445,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OrchestrationEventReadRequest {\n    readonly runId: OrchestrationRunId;\n    readonly afterSequence?: number;\n    readonly limit?: number;\n}',
   },
   {
+    name: 'OrchestrationGouziRecipientV1',
+    declaration: 'export interface OrchestrationGouziRecipientV1 {\n    readonly gouziId: GouziId;\n    readonly generation: number;\n    readonly operatorIds: readonly PhysicalOperatorId[];\n}',
+  },
+  {
     name: 'OrchestrationIndeterminateRequest',
     declaration: 'export interface OrchestrationIndeterminateRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly decision: \'abandon\' | \'retry\';\n    readonly reason: string;\n}',
   },
@@ -5125,7 +5458,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationNodeSpecV1',
-    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly autonomous?: RlmAutonomousConfigV1;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly fallbackIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly generationLimits?: PhysicalOperatorGenerationLimits;\n    readonly workspaceToolLimits?: PhysicalOperatorGovernedWorkspacePolicy[\'limits\'];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly autonomous?: RlmAutonomousConfigV1;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly fallbackIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
   },
   {
     name: 'OrchestrationNodeState',
@@ -5141,7 +5474,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationRunSnapshot',
-    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly maxParallel?: number;\n    readonly effectiveParallelism?: number;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly delivery?: {\n        readonly state: \'applying\' | \'applied\' | \'failed\' | \'indeterminate\';\n    };\n    readonly maxParallel?: number;\n    readonly effectiveParallelism?: number;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'OrchestrationRunState',
@@ -5156,6 +5489,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OrchestrationStartRequest {\n    readonly commandId: string;\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
   },
   {
+    name: 'OverviewModel',
+    declaration: 'export interface OverviewModel {\n    readonly provider: string;\n    readonly model: string;\n    readonly reasoningEffort: string;\n    readonly passRate: number | null;\n    readonly sampleCount: number | null;\n    readonly iq: number | null;\n    readonly avgCostUsd: number | null;\n    readonly avgRuntimeSeconds: number | null;\n    readonly usedForEvidence: boolean;\n}',
+  },
+  {
+    name: 'OverviewStore',
+    declaration: 'export type OverviewStore = {\n    readonly available: false;\n    readonly reason: string;\n} | {\n    readonly available: true;\n    readonly snapshotId: string;\n    readonly digest: string;\n    readonly state: string;\n    readonly fetchedAt: string | null;\n    readonly sourceUpdatedAt: string | null;\n    readonly ageSeconds: number | null;\n    readonly staleAfterSeconds: number | null;\n    readonly authorization: string | null;\n    readonly rowCounts: Readonly<Record<string, number>>;\n    readonly loaded: boolean;\n};',
+  },
+  {
     name: 'PairingChallenge',
     declaration: 'export interface PairingChallenge {\n    readonly code: string;\n    readonly scope: RemoteDeviceScope;\n    readonly expiresAt: string;\n}',
   },
@@ -5165,7 +5506,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperator',
-    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    residentCatalog?(): Promise<PhysicalOperatorResidentCatalog>;\n    reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>;\n    interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    residentCatalog?(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog>;\n    reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>;\n    interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
   },
   {
     name: 'PhysicalOperatorAcceptedReceipt',
@@ -5200,6 +5541,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorExecutionPreference {\n    readonly model?: string;\n    readonly effort?: PhysicalOperatorReasoningEffort;\n}',
   },
   {
+    name: 'PhysicalOperatorGenerationLimits',
+    declaration: 'export interface PhysicalOperatorGenerationLimits {\n    readonly maxTokens: number;\n    readonly maxOutputBytes: number;\n    readonly maxToolCalls?: number;\n}',
+  },
+  {
+    name: 'PhysicalOperatorGovernedWorkspacePolicy',
+    declaration: 'export interface PhysicalOperatorGovernedWorkspacePolicy {\n    readonly version: 1;\n    readonly sourceWorkspace: string;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly forbiddenScopes: readonly string[];\n    readonly limits: {\n        readonly maxToolCalls: number;\n        readonly maxFileBytes: number;\n        readonly maxOutputBytes: number;\n        readonly maxSearchFiles: number;\n    };\n}',
+  },
+  {
     name: 'PhysicalOperatorId',
     declaration: 'export type PhysicalOperatorId = Branded<\'PhysicalOperatorId\'>;',
   },
@@ -5224,6 +5573,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorProgressPage {\n    readonly events: readonly PhysicalOperatorProgressEvent[];\n    readonly nextSequence: number;\n}',
   },
   {
+    name: 'PhysicalOperatorProviderResponse',
+    declaration: 'export interface PhysicalOperatorProviderResponse {\n    readonly provider: string;\n    readonly model: string;\n    readonly responseId?: string;\n}',
+  },
+  {
     name: 'PhysicalOperatorProviderRun',
     declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly contextReceipt?: OperatorContextEnvelopeReceiptV1;\n    readonly receipt?: PhysicalOperatorAcceptedReceipt;\n    readEvents?(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage>;\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
   },
@@ -5245,7 +5598,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorResidentCatalog',
-    declaration: 'export interface PhysicalOperatorResidentCatalog {\n    readonly operatorId: PhysicalOperatorId;\n    readonly product: string;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly supportsModelToolBridge: boolean;\n    readonly location: \'local\' | \'remote\';\n    readonly supportsWorkspaceMutationReturn: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly PhysicalOperatorResidentModel[];\n    readonly quotaPools?: readonly PhysicalOperatorQuotaPool[];\n}',
+    declaration: 'export interface PhysicalOperatorResidentCatalog {\n    readonly operatorId: PhysicalOperatorId;\n    readonly product: string;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly supportsModelToolBridge: boolean;\n    readonly location: \'local\' | \'remote\';\n    readonly supportsWorkspaceMutationReturn: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n    readonly supportsGenerationLimits?: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly PhysicalOperatorResidentModel[];\n    readonly quotaPools?: readonly PhysicalOperatorQuotaPool[];\n    readonly gouziWorkspace?: {\n        readonly gouziId: string;\n        readonly generation: number;\n        readonly projectId: string;\n        readonly projectScopes: readonly string[];\n    };\n}',
+  },
+  {
+    name: 'PhysicalOperatorResidentCatalogOptions',
+    declaration: 'export interface PhysicalOperatorResidentCatalogOptions {\n    readonly refreshModels?: boolean;\n}',
   },
   {
     name: 'PhysicalOperatorResidentModel',
@@ -5253,7 +5610,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorResult',
-    declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
+    declaration: 'export interface PhysicalOperatorResult {\n    readonly providerResponse?: PhysicalOperatorProviderResponse;\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
   },
   {
     name: 'PhysicalOperatorRun',
@@ -5261,7 +5618,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly contextEnvelope?: OperatorContextEnvelopeV1;\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly contextEnvelope?: OperatorContextEnvelopeV1;\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly workspaceSnapshotInput?: {\n        readonly baseSha: string;\n        readonly baseBundle: string;\n    };\n    readonly workspaceMutationReturn?: {\n        readonly baseSha: string;\n        readonly baseBundle?: string;\n    };\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly generationLimits?: PhysicalOperatorGenerationLimits;\n    readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -5368,6 +5725,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly charsRemoved: number;\n}',
   },
   {
+    name: 'RadarCycleReport',
+    declaration: 'export interface RadarCycleReport {\n    readonly startedAt: string;\n    readonly finishedAt: string;\n    readonly collection: \'skipped\' | \'ok\' | \'failed\';\n    readonly reload: \'ok\' | \'failed\';\n    readonly message?: string;\n}',
+  },
+  {
     name: 'ReadFileLine',
     declaration: 'export interface ReadFileLine {\n    number: number;\n    text: string;\n}',
   },
@@ -5397,7 +5758,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RemoteDeviceScope',
-    declaration: 'export type RemoteDeviceScope = \'cockpit\' | \'pocket\' | \'admin\';',
+    declaration: 'export type RemoteDeviceScope = \'cockpit\' | \'pocket\' | \'admin\' | \'gouzi\';',
   },
   {
     name: 'RemoteDeviceView',
@@ -5457,7 +5818,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly nativeContext?: NativeContext;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly nativeContext?: NativeContext;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly generationLimits?: PhysicalOperatorGenerationLimits;\n    readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',
@@ -5504,8 +5865,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ResidentOperatorTurnId = Branded<\'ResidentOperatorTurnId\'>;',
   },
   {
+    name: 'ResidentProviderQueryOptions',
+    declaration: 'export interface ResidentProviderQueryOptions {\n    readonly refreshModels?: boolean;\n}',
+  },
+  {
     name: 'ResidentProviderStatus',
-    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly unavailableCode?: ResidentProviderUnavailableCode;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly supportsExplicitAuthentication?: boolean;\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly unavailableCode?: ResidentProviderUnavailableCode;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly supportsExplicitAuthentication?: boolean;\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
   },
   {
     name: 'ResidentProviderUnavailableCode',
@@ -5541,7 +5906,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentTurnResult',
-    declaration: 'export interface ResidentTurnResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly resultRef?: string;\n}',
+    declaration: 'export interface ResidentTurnResult {\n    readonly providerResponse?: PhysicalOperatorProviderResponse;\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly resultRef?: string;\n}',
   },
   {
     name: 'ResidentTurnSnapshot',
@@ -5898,6 +6263,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ScheduledToolPreparation',
     declaration: 'export type ScheduledToolPreparation = {\n    kind: \'dispatch\';\n    exec: ToolRunContext;\n} | {\n    kind: \'post-result\';\n    exec: ToolRunContext;\n    result: ToolExecutionResult;\n} | {\n    kind: \'final-result\';\n    exec: ToolRunContext;\n    result: ToolExecutionResult;\n};',
+  },
+  {
+    name: 'SchedulingEvidenceOverview',
+    declaration: 'export interface SchedulingEvidenceOverview {\n    readonly version: 1;\n    readonly radar: {\n        readonly enabled: boolean;\n        readonly personalUseConsent: boolean;\n        readonly python: string;\n        readonly refreshIntervalMs: number | null;\n    };\n    readonly lastCycle: RadarCycleReport | null;\n    readonly store: OverviewStore;\n    readonly models: readonly OverviewModel[];\n}',
   },
   {
     name: 'Scoped',
@@ -6304,6 +6673,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface StorageForms {\n}',
   },
   {
+    name: 'StoredCatalogModel',
+    declaration: 'export interface StoredCatalogModel extends CatalogModel {\n    readonly sourceId: string;\n    readonly lastSeenAt: string;\n    readonly checkedAt: string;\n}',
+  },
+  {
     name: 'StoredImageAttachment',
     declaration: 'export interface StoredImageAttachment {\n    ref: ImageAttachmentRef;\n    data: Uint8Array;\n}',
   },
@@ -6665,7 +7038,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolDefinition',
-    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
+    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly delegation?: {\n        readonly family: \'physical-operator\' | \'subagent\';\n        readonly actions?: readonly string[];\n    };\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
   },
   {
     name: 'ToolDispatchExecution',
@@ -6677,7 +7050,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolExecution',
-    declaration: 'export interface ToolExecution extends ToolExecutionInput {\n    readonly rootCallId: CallId;\n    readonly token: ToolExecutionToken;\n}',
+    declaration: 'export interface ToolExecution extends ToolExecutionInput {\n    readonly delegation?: ToolDefinition[\'delegation\'];\n    readonly rootCallId: CallId;\n    readonly token: ToolExecutionToken;\n}',
   },
   {
     name: 'ToolExecutionFailure',

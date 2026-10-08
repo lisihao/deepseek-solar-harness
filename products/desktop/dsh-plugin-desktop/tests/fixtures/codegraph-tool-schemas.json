@@ -1,0 +1,165 @@
+[
+  {
+    "name": "codegraph_callees",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "root": {
+          "type": "string",
+          "description": "代码库根目录（默认取插件配置或当前目录）"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "限定符号名"
+        }
+      },
+      "required": [
+        "symbol"
+      ]
+    }
+  },
+  {
+    "name": "codegraph_callers",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "root": {
+          "type": "string",
+          "description": "代码库根目录（默认取插件配置或当前目录）"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "限定符号名，如 pkg.cart.Cart.add"
+        }
+      },
+      "required": [
+        "symbol"
+      ]
+    }
+  },
+  {
+    "name": "codegraph_dependents",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "module": {
+          "type": "string",
+          "description": "文件路径或模块 id"
+        },
+        "root": {
+          "type": "string",
+          "description": "代码库根目录（默认取插件配置或当前目录）"
+        }
+      },
+      "required": [
+        "module"
+      ]
+    }
+  },
+  {
+    "name": "codegraph_deps",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "module": {
+          "type": "string",
+          "description": "文件路径（web/util.ts）或模块 id（pkg.cart）"
+        },
+        "root": {
+          "type": "string",
+          "description": "代码库根目录（默认取插件配置或当前目录）"
+        }
+      },
+      "required": [
+        "module"
+      ]
+    }
+  },
+  {
+    "name": "codegraph_impact",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "depth": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "root": {
+          "type": "string",
+          "description": "代码库根目录（默认取插件配置或当前目录）"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "限定符号名"
+        }
+      },
+      "required": [
+        "symbol"
+      ]
+    }
+  },
+  {
+    "name": "codegraph_overview",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "description": "代码库根目录"
+        }
+      }
+    }
+  },
+  {
+    "name": "codegraph_reindex",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "force": {
+          "type": "boolean",
+          "description": "true 强制全量重解析（默认 false 增量）"
+        },
+        "root": {
+          "type": "string",
+          "description": "代码库根目录"
+        }
+      }
+    }
+  },
+  {
+    "name": "codegraph_search",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer"
+        },
+        "query": {
+          "type": "string",
+          "description": "全文检索词"
+        },
+        "root": {
+          "type": "string",
+          "description": "代码库根目录（默认取插件配置或当前目录）"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  }
+]

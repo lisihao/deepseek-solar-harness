@@ -178,7 +178,9 @@ export class FaceModelEmitter {
       .filter(declaration => declaration.id !== root)
       .map(declaration => ({
         name: declaration.name,
-        declaration: this.renderer.renderDeclaration(declaration.id),
+        declaration: declaration.exported && declaration.kind === 'interface' && declaration.parts === undefined
+          ? declaration.text
+          : this.renderer.renderDeclaration(declaration.id),
       }))
       .sort((left, right) => left.name.localeCompare(right.name))
   }

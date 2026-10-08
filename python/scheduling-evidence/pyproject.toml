@@ -1,0 +1,10 @@
+[project]
+name = "dsh-scheduling-evidence"
+version = "0.0.0"
+description = "Radar and AI Frontier evidence collectors for DSH scheduling. Not published."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.dsh]
+# Sources are added to PYTHONPATH by the caller; this directory is never pip-installed.
+source-root = "src"

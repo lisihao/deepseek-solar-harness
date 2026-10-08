@@ -24,6 +24,9 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../llm/model-catalog-local"
+    },
+    {
       "path": "../../util/home-paths"
     },
     {
@@ -58,6 +61,15 @@
     },
     {
       "path": "../../orchestration/model-allocation"
+    },
+    {
+      "path": "../../orchestration/scheduling-evidence"
+    },
+    {
+      "path": "../../preset/agent-presets"
+    },
+    {
+      "path": "../../orchestration/orchestration"
     }
   ]
 }

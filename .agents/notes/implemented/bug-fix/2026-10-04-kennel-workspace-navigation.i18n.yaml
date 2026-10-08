@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-04-kennel-workspace-navigation.md
+2026-10-04-kennel-workspace-navigation.md: 475960d730595c43c446c0c1597dadf31a91f404
+2026-10-04-kennel-workspace-navigation.zh.md: 7f838588bc552cb4a0ca0af69a12a87385dd257a

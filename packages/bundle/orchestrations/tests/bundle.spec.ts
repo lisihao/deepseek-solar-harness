@@ -24,6 +24,7 @@ describe('orchestrations bundle', () => {
       'tool-debate',
       'ui-debate',
       'ui-orchestration',
+      'ui-gouzi',
     ])
     expect(rows[0]?.config).toMatchObject({ autoStart: true, connectTimeoutMs: 15_000 })
     for (const row of rows) expect(manifest.dependencies).toHaveProperty(String(row.name))
@@ -53,7 +54,7 @@ describe('orchestrations bundle', () => {
       expect(dependencies(definition)).not.toContain(local)
       expect(dependencies(definition)).not.toContain('@deepseek-ai/dsh-rlm-runtime-local')
     }
-    for (const consumer of ['tool-orchestration', 'ui-orchestration']) {
+    for (const consumer of ['tool-orchestration', 'ui-orchestration', 'ui-gouzi']) {
       const values = dependencies(consumer)
       expect(values).toContain('@deepseek-ai/dsh-orchestration')
       expect(values).not.toContain(local)

@@ -1,5 +1,6 @@
 /** Headless smoke for the complete published DSH Web profile and renderer manifest. */
 
+import { deepStrictEqual } from 'node:assert'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,6 +14,7 @@ import {
 import { DESKTOP_SETTINGS_NAMESPACE } from '../lib/index.js'
 import { installDesktopPnpmRuntime } from '../lib/desktop-runtime-environment.js'
 import { installProfilePackageResolver } from '../lib/module-resolution.js'
+import { stopProductServerDaemons } from './product-server-processes.mjs'
 import { prepareDesktopProfile } from '../lib/profile.js'
 import { DesktopProfileService } from '../lib/profile-service.js'
 
@@ -162,6 +164,39 @@ try {
   )
   await runtime.mountScheduled()
 
+  const codegraphNames = [
+    'codegraph_callees',
+    'codegraph_callers',
+    'codegraph_dependents',
+    'codegraph_deps',
+    'codegraph_impact',
+    'codegraph_overview',
+    'codegraph_reindex',
+    'codegraph_search',
+  ]
+  const tools = ctx.get('tools')
+  if (tools === undefined) {
+    throw new Error('assembled desktop profile is missing the tools service')
+  }
+  const codegraphSchemas = tools.schemas()
+    .filter(schema => schema.name.startsWith('codegraph_'))
+    .map(({ name, parameters }) => ({ name, parameters }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+  deepStrictEqual(
+    codegraphSchemas.map(schema => schema.name),
+    codegraphNames,
+    'assembled desktop profile must expose the complete eight-tool Codegraph catalog',
+  )
+  const expectedCodegraphSchemas = JSON.parse(readFileSync(
+    new URL('../tests/fixtures/codegraph-tool-schemas.json', import.meta.url),
+    'utf8',
+  ))
+  deepStrictEqual(
+    codegraphSchemas,
+    expectedCodegraphSchemas,
+    'assembled model-visible Codegraph parameters must match the keyless schema snapshot',
+  )
+
   if (ctx.get('desktopPnpm') === undefined) {
     throw new Error('assembled desktop profile is missing the desktop pnpm Host capability')
   }
@@ -266,6 +301,8 @@ try {
   await ctx?.fiber.dispose()
   releasePackageResolver?.()
   pnpmRuntime?.dispose()
+  // The booted profile starts detached Resident and orchestration daemons; they outlive the context and the home.
+  await stopProductServerDaemons(home)
   rmSync(home, { recursive: true, force: true })
   if (previousDshHome === undefined) delete process.env.DSH_HOME
   else process.env.DSH_HOME = previousDshHome

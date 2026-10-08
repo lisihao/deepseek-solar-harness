@@ -25,6 +25,10 @@ Provider 使用稳定的小写 ID、展示元数据、选择标签、正数 `max
 | `CONTEXT_ENVELOPE_INVALID` | 回执未标识所提供的信封。 |
 | `CONTEXT_ENVELOPE_REJECTED` | Provider 明确拒绝物化该信封。 |
 
+`residentCatalog()` 可以为当前狗子默认项目绑定提供 `gouziWorkspace`，包含 `gouziId`、`generation`、`projectId` 与 `projectScopes`。提供方负责核验成员本地目录；普通算子省略该字段。消费方将此资料与实际注册及成员 generation 匹配，不从在线状态或模型元数据推导目录权限。字段缺失时不提供项目范围。
+
+调用方要求这些策略时，最新 Resident catalog 必须明确声明 `supportsGenerationLimits` 与 `supportsGovernedWorkspacePolicy`；字段缺失表示不支持。旧的禁用工具且工具为空的请求可以省略 `generationLimits` 并沿用提供方默认值；省略不表示声明了 token 上限。`generationLimits` 限制已观察输出字节、报告的输出 token 和可选工具调用数。`governedWorkspacePolicy` 封存源工作区、读写范围、禁止范围和文件工具限制。快照输入与修改返回字段携带确切当前检查点和返回修改，不转移原目录所有权。
+
 ## 权威边界
 
 本包抽取的是 AI4Research 中有价值的身份和执行边界，而不是复制其已退役的物理算子守护进程。它不读取 `physical-operators.json`，不修改 Solar 或 AI4Research 状态，不推断算子选择，也不会建立第二套调度器。Provider 实现可以在该约定背后独立演进。

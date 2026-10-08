@@ -22,6 +22,8 @@ import {
   ensureDesktopProfile,
   ensureProductServerProfile,
   prepareDesktopProfile,
+  prepareGouziWorkerProfile,
+  GOUZI_WORKER_DISABLED_ROW_IDS,
   prepareProductServerProfile,
   readDesktopShellMode,
 } from '../src/profile.ts'
@@ -155,6 +157,62 @@ describe('desktop profile composition', () => {
       'desktop-profiles',
       'desktop-updates',
     ]) expect(rowIds).not.toContain(desktopRow)
+  })
+
+  it('composes a Gouzi member without any scheduler row and gates its connection on the member service', () => {
+    const home = temporaryHome()
+    const server = composeEntries([prepareProductServerProfile(undefined, home, 'darwin').patches])
+    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin', join(home, 'shared-execution-locks')).patches])
+    const workerById = new Map(worker.map(row => [row.id, row] as const))
+
+    for (const id of GOUZI_WORKER_DISABLED_ROW_IDS) {
+      expect(server.find(row => row.id === id), id).toBeDefined()
+      expect(workerById.get(id)?.disabled, id).toBe(true)
+    }
+    expect(workerById.get('orchestration-remote-host')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-orchestration-local/remote-host',
+      config: { dshHome: home, directoryLockRoot: join(home, 'shared-execution-locks') },
+    }))
+    expect(workerById.get('gouzi-member')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-host-gouzi-member',
+      config: { stateRoot: home },
+    }))
+    expect(workerById.get('resident-operators')?.disabled).not.toBe(true)
+    const inject = workerById.get('connection')?.inject as string[]
+    expect(inject).toContain('gouziMember')
+    expect(inject).not.toContain('orchestrations')
+    // The ordinary Product Server keeps waiting for the orchestration service and has no member gate.
+    expect(server.find(row => row.id === 'gouzi-member')).toBeUndefined()
+    expect(server.find(row => row.id === 'connection')?.inject).toContain('orchestrations')
+  })
+
+  it('refuses a Gouzi worker profile without its supervisor-owned shared lock root', () => {
+    expect(() => prepareGouziWorkerProfile(temporaryHome(), undefined, 'darwin', '')).toThrow('directory lock root')
+  })
+
+  it('mounts the local Gouzi host on Desktop and Product Server but never inside a member', () => {
+    const home = temporaryHome()
+    for (const patches of [
+      prepareDesktopProfile(undefined, home, 'darwin').patches,
+      prepareProductServerProfile(undefined, home, 'darwin').patches,
+    ]) {
+      const rows = composeEntries([patches]).filter(row => row.id === 'gouzi-host')
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toEqual(expect.objectContaining({
+        name: 'dsh-plugin-desktop/gouzi-host',
+        config: { membersRoot: join(home, 'gouzi', 'members'), hostsRoot: join(home, 'gouzi', 'hosts'), ownerId: expect.stringMatching(/^main-[0-9a-f]{12}$/u) },
+      }))
+    }
+    const ids = (prepareProductServerProfile(undefined, home, 'darwin').patches)
+    expect(composeEntries([ids]).find(row => row.id === 'ui-gouzi')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-ui-gouzi',
+    }))
+    const worker = composeEntries([prepareGouziWorkerProfile(home, undefined, 'darwin', join(home, 'shared-execution-locks')).patches])
+    expect(worker.find(row => row.id === 'gouzi-host')).toBeUndefined()
+    expect(worker.find(row => row.id === 'ui-gouzi')?.disabled).toBe(true)
+    // The owner identity differs between two installations.
+    const other = composeEntries([prepareProductServerProfile(undefined, temporaryHome(), 'darwin').patches]).find(row => row.id === 'gouzi-host')
+    expect((other?.config as { ownerId: string }).ownerId).not.toBe((composeEntries([ids]).find(row => row.id === 'gouzi-host')?.config as { ownerId: string }).ownerId)
   })
 
   it('mounts the sealed Synapse bundle exactly once on Desktop and Product Server', () => {
@@ -371,6 +429,20 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'agent-teams')).toEqual(expect.objectContaining({
       name: '@nanmicoder/dsh-agent-teams',
       config: expect.objectContaining({ memberPersonaPlacement: 'prompt' }),
+    }))
+    expect(rows.find(row => row.id === 'scheduling-evidence-rpc')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-scheduling-evidence-rpc',
+    }))
+    expect(rows.find(row => row.id === 'ui-settings-scheduling-evidence')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-client-ui-settings-scheduling-evidence',
+    }))
+    expect(rows.find(row => row.id === 'scheduling-evidence')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-scheduling-evidence',
+      config: {
+        python: 'python3',
+        sourceRoot: expect.stringMatching(/vendor[\\/]scheduling-evidence-python$/u),
+        stateRoot: expect.stringMatching(/scheduling-evidence$/u),
+      },
     }))
     expect(rows.find(row => row.id === 'remote-web-ui')).toEqual(expect.objectContaining({
       name: '@linxin666/dsh-remote-web-ui',

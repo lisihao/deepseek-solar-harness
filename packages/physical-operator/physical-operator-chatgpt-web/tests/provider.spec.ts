@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Script } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { ModelCatalogSource } from '@deepseek-ai/dsh-model-catalog-local'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime, {
   BrowserError,
@@ -339,6 +341,41 @@ describe('ChatGPT Web physical operator', () => {
     expect(serializedProgramRequest(provider.programs[1]!)).not.toHaveProperty('effort')
   })
 
+  it('registers the optional Web catalog source and disposes it with the plugin fiber', async () => {
+    const sources: ModelCatalogSource[] = []
+    let disposals = 0
+    const stateRoot = mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-catalog-source-'))
+    const ctx = new Context()
+    ctx.provide('modelCatalogs', {
+      register(source: ModelCatalogSource): () => void {
+        sources.push(source)
+        return () => { disposals += 1 }
+      },
+    } as never)
+    try {
+      await ctx.plugin(BrowserRuntime)
+      await ctx.plugin(PhysicalOperatorRuntime)
+      ctx.browser.registerProvider(new StubBrowserProvider())
+      await ctx.plugin(adapter, {
+        stateRoot,
+        workspaceName: 'fixture-chatgpt-web',
+        generationTimeoutMs: 1_000,
+        submissionTimeoutMs: 100,
+        pollIntervalMs: 10,
+        progressIntervalMs: 20,
+        outputMaxBytes: 2_048,
+      })
+
+      expect(sources).toEqual([expect.objectContaining({
+        id: 'web:chatgpt-web', name: 'ChatGPT Web', provider: 'dsh-physical-operator', menuVisible: true,
+      })])
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+    expect(disposals).toBe(1)
+  })
+
   it('registers an ephemeral, single-flight browser operator and submits the merged text prompt', async () => {
     const { ctx, plugin, provider } = await setup()
     expect(ctx.physicalOperators.status('chatgpt-web')).toMatchObject({
@@ -431,7 +468,7 @@ describe('ChatGPT Web physical operator', () => {
     expect(responsePoll).toBeGreaterThan(send)
     expect(program.source).toContain("return { status: 'auth-required' }")
     expect(program.source).toContain("return { status: 'context-not-isolated' }")
-    expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
+    expect(program.source).toContain("return { status: 'model-selection-unavailable', stage: selection.status }")
     expect(program.source).toContain("return { status: 'draft-present'")
     expect(program.source).toContain("kind: 'click'")
     expect(program.source).toContain("selector: '[data-dsh-chatgpt-web-send=\"true\"]'")
@@ -1286,6 +1323,24 @@ describe('ChatGPT Web physical operator', () => {
     expect(provider.programs).toHaveLength(1)
     expect(serializedProgramRequest(provider.programs[0]!)).toMatchObject({ model: 'GPT-5' })
 
+    await plugin.dispose()
+    await ctx.fiber.dispose()
+  })
+
+  it.each([
+    ['model-selection-unavailable', 'model-options-unavailable', 'requested model selection (model-options-unavailable)'],
+    ['effort-selection-unavailable', 'reasoning-options-unavailable', 'requested reasoning effort (reasoning-options-unavailable)'],
+    ['model-selection-unavailable', 'Not A Token!', 'requested model selection'],
+    ['effort-selection-unavailable', 42, 'requested reasoning effort'],
+  ] as const)('names the picker step that failed for a %s outcome (%s)', async (status, stage, message) => {
+    const provider = new StubBrowserProvider(async () => resultFor({ status, stage }))
+    const { ctx, plugin } = await setup(provider)
+    const run = await ctx.physicalOperators.start('chatgpt-web', { ...request(), residentProfile: { model: 'GPT-5' } })
+
+    const error = await run.result.then(() => undefined, (cause: unknown) => cause as Error)
+
+    expect(error?.message).toContain(message)
+    expect(error?.message.endsWith(')')).toBe(typeof stage === 'string' && /^[a-z-]+$/u.test(stage))
     await plugin.dispose()
     await ctx.fiber.dispose()
   })

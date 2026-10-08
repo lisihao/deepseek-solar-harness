@@ -90,6 +90,10 @@
       "kind": "migration-debt",
       "note": "fix(trajectory): enforce host-safe physical traces"
     },
+    "packages/client/runtime/src/client/contract/sessions.ts": {
+      "kind": "seam",
+      "note": "Expose existing workspace-scoped SessionRuntime.create on the browser service face so kennel navigation can create an independent conversation before switching views; see .agents/notes/implemented/bug-fix/2026-10-04-kennel-workspace-navigation.md."
+    },
     "packages/client/runtime/src/client/index.ts": {
       "kind": "migration-debt",
       "note": "feat: ship dual-mode workbench orchestration"
@@ -118,6 +122,26 @@
       "kind": "migration-debt",
       "note": "feat: ship dual-mode workbench orchestration"
     },
+    "packages/client/ui-conversation/src/client/apply.ts": {
+      "kind": "seam",
+      "note": "Expose optional room slots while preserving the existing composer priority and ordinary conversation behavior."
+    },
+    "packages/client/ui-conversation/src/client/contract/slots.ts": {
+      "kind": "seam",
+      "note": "Define optional header, content, aside, and composer slots for plugin-owned conversation rooms."
+    },
+    "packages/client/ui-conversation/src/client/index.ts": {
+      "kind": "seam",
+      "note": "Export the room-slot types through the existing conversation client API."
+    },
+    "packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css": {
+      "kind": "seam",
+      "note": "Lay out an optional room and preserve ordinary trajectory geometry and scroll ownership."
+    },
+    "packages/client/ui-conversation/src/client/skeleton/ConversationRoot.tsx": {
+      "kind": "seam",
+      "note": "Render plugin-owned room slots and delegate to the existing question, approval, and default composer paths."
+    },
     "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx": {
       "kind": "backport",
       "note": "feat(desktop): backport selected official behaviors"
@@ -129,6 +153,14 @@
     "packages/client/ui-input-trigger/src/types.ts": {
       "kind": "backport",
       "note": "feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/ui-model-selection/src/client/ModelSelect.module.css": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-model-selection/src/client/ModelSelect.tsx": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
     },
     "packages/client/ui-model-selection/src/client/directory.ts": {
       "kind": "migration-debt",
@@ -142,14 +174,6 @@
       "kind": "migration-debt",
       "note": "feat(model-selection): refresh models and operators from the model menu"
     },
-    "packages/client/ui-model-selection/src/client/ModelSelect.module.css": {
-      "kind": "migration-debt",
-      "note": "feat(model-selection): refresh models and operators from the model menu"
-    },
-    "packages/client/ui-model-selection/src/client/ModelSelect.tsx": {
-      "kind": "migration-debt",
-      "note": "feat(model-selection): refresh models and operators from the model menu"
-    },
     "packages/client/ui-model-selection/src/client/service.ts": {
       "kind": "migration-debt",
       "note": "feat(model-selection): refresh models and operators from the model menu"
@@ -157,6 +181,10 @@
     "packages/client/ui-model-selection/src/client/slots.ts": {
       "kind": "migration-debt",
       "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-primitives/src/ReadBlock.tsx": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
     },
     "packages/client/ui-primitives/src/markdown/CodeBlock.tsx": {
       "kind": "backport",
@@ -174,10 +202,6 @@
       "kind": "migration-debt",
       "note": "fix(markdown): try the math compatibility constructs before upstream math() so multi-line display-dollar TeX on the opening line parses as one block"
     },
-    "packages/client/ui-primitives/src/ReadBlock.tsx": {
-      "kind": "backport",
-      "note": "feat(desktop): backport selected official behaviors"
-    },
     "packages/client/ui-settings-models/src/client/store.ts": {
       "kind": "migration-debt",
       "note": "fix(remote): close release contract gaps; feat(runtime): promote subscription models"
@@ -189,26 +213,6 @@
     "packages/client/ui-sidebar/src/client/SidebarRoot.tsx": {
       "kind": "migration-debt",
       "note": "feat: ship dual-mode workbench orchestration"
-    },
-    "packages/client/ui-trajectory/src/client/index.ts": {
-      "kind": "migration-debt",
-      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
-    },
-    "packages/client/ui-trajectory/src/client/layout.ts": {
-      "kind": "migration-debt",
-      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
-    },
-    "packages/client/ui-trajectory/src/client/trajectory-contract.ts": {
-      "kind": "migration-debt",
-      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
-    },
-    "packages/client/ui-trajectory/src/client/trajectory-record.ts": {
-      "kind": "migration-debt",
-      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
-    },
-    "packages/client/ui-trajectory/src/client/trajectory-snapshot-builder.ts": {
-      "kind": "migration-debt",
-      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
     },
     "packages/client/ui-trajectory/src/client/TrajectoryCell.module.css": {
       "kind": "migration-debt",
@@ -235,6 +239,26 @@
       "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
     },
     "packages/client/ui-trajectory/src/client/TrajectoryView.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/layout.ts": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-contract.ts": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-record.ts": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-snapshot-builder.ts": {
       "kind": "migration-debt",
       "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
     },
@@ -272,7 +296,11 @@
     },
     "packages/core/tools/src/index.ts": {
       "kind": "migration-debt",
-      "note": "fix(tools): carry code mode contract into Desktop 2.9.1; fix(prompt): preserve generated SDK template literals"
+      "note": "fix(tools): carry code mode contract into Desktop 2.9.1; fix(prompt): preserve generated SDK template literals; expose captured delegation metadata and monotonic execution guards for plugin-owned recipient policy"
+    },
+    "packages/core/tools/src/schema.ts": {
+      "kind": "seam",
+      "note": "Expose captured owner-registered delegation metadata on ToolExecution without adding it to model tool arguments."
     },
     "packages/extensions/cordis-client-runner/src/client/index.ts": {
       "kind": "migration-debt",
@@ -382,6 +410,10 @@
       "kind": "migration-debt",
       "note": "feat(deepseek): add native V4 Flash Vision route"
     },
+    "packages/llm/llm/src/error.ts": {
+      "kind": "seam",
+      "note": "Expose an explicit insufficient-balance failure code so the kennel dispatcher can distinguish balance exhaustion from quota, authentication and transport failures before selecting Codex."
+    },
     "packages/llm/llm/src/index.ts": {
       "kind": "migration-debt",
       "note": "feat: add Web coordination and live catalog refresh"
@@ -414,6 +446,18 @@
       "kind": "migration-debt",
       "note": "feat(physical-operator): detect, verify, and update native Codex and Claude Code CLIs; fix(physical-operator): preserve effective execution routes"
     },
+    "packages/subagent/subagent-in-process-driver/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
+    "packages/subagent/subagent/src/child-agent.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
+    "packages/subagent/subagent/src/continuation.ts": {
+      "kind": "migration-debt",
+      "note": "fix(subagent): children follow the parent's live model selection; record the descriptor of a child that fails before its first pre-step"
+    },
     "packages/subagent/subagent/src/index.ts": {
       "kind": "migration-debt",
       "note": "feat(orchestration): account native RLM usage; feat: require subscription auth for physical operators"
@@ -421,6 +465,14 @@
     "packages/subagent/subagent/src/types.ts": {
       "kind": "migration-debt",
       "note": "feat(orchestration): account native RLM usage; feat: require subscription auth for physical operators"
+    },
+    "packages/subagent/tool-subagent-control/src/index.ts": {
+      "kind": "seam",
+      "note": "Tag dispatching control actions with owner-registered subagent delegation metadata for tool guards."
+    },
+    "packages/subagent/tool-subagent/src/index.ts": {
+      "kind": "seam",
+      "note": "Tag the subagent dispatch tool with owner-registered delegation metadata for tool guards."
     },
     "packages/terminal/terminal-bash/src/sanitize.ts": {
       "kind": "migration-debt",
@@ -430,9 +482,17 @@
       "kind": "migration-debt",
       "note": "test(snapshot): normalize loaded-runner timeout diagnostics; test(acp-snapshot): stabilize timeout diagnostics"
     },
+    "packages/test-support/client-runtime/src/sessions.ts": {
+      "kind": "seam",
+      "note": "Keep the test sessions face aligned with the workspace-scoped create declaration and fail loud rather than simulate independent Host creation; see .agents/notes/implemented/bug-fix/2026-10-04-kennel-workspace-navigation.md."
+    },
     "packages/typert/generator/src/cordis-catalog.ts": {
       "kind": "migration-debt",
       "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/typert/generator/src/emitter.ts": {
+      "kind": "seam",
+      "note": "Preserve canonical declaration text for single exported interfaces at the model-to-runtime catalog seam; retain structural rendering for merged, private, and class declarations."
     },
     "packages/util/atomic-write/src/index.ts": {
       "kind": "migration-debt",

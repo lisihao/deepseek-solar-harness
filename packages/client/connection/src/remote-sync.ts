@@ -22,9 +22,9 @@ export const REMOTE_SYNC_RPC_CHANNEL = '/remote-sync'
 export const REMOTE_SYNC_EVENTS_PATH = '/remote-sync/events'
 
 /** First independently versioned Server/Frontend projection protocol. */
-export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 4 })
+export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 5 })
 
-/** Oldest projection-only minor accepted during a rolling 1.4 deployment. */
+/** Oldest projection-only minor accepted during a rolling 1.5 deployment. */
 export const REMOTE_SYNC_COMPATIBLE_MINOR = 3
 
 /** Negotiated same-major protocol carried by descriptions and snapshots. */
@@ -133,6 +133,21 @@ export interface RemoteResidentProviderStatus {
   readonly protocolHash: string
   readonly models: readonly RemoteResidentModelOption[]
   readonly quotaPools?: readonly RemoteResidentQuotaPool[]
+  /** Host implements isolated exact-base mutation capture and durable return. */
+  readonly supportsWorkspaceMutationReturn?: boolean
+  /** Host accepts version 1 current-input bundles for isolated readers and writers. */
+  readonly supportsWorkspaceSnapshotInput?: boolean
+  /** Receiving Native driver enforces the serialized file authority. */
+  readonly supportsGovernedWorkspacePolicy?: boolean
+  /** Receiving Native driver enforces the serialized generation bounds. */
+  readonly supportsGenerationLimits?: boolean
+  /** Persisted default project advertised only by an actual Gouzi member host. */
+  readonly gouziWorkspace?: {
+    readonly gouziId: string
+    readonly generation: number
+    readonly projectId: string
+    readonly projectScopes: readonly string[]
+  }
 }
 /* jscpd:ignore-end */
 
@@ -146,6 +161,19 @@ export interface RemoteWorkspaceIdentityV1 {
   /** Optional repository-relative directory used as the execution cwd. */
   readonly subdir?: string
 }
+
+/** Host-registered actual project directory selected for a Gouzi execution. */
+export interface RemoteGouziWorkspaceIdentityV1 {
+  readonly version: 1
+  readonly kind: 'gouzi-project'
+  /** Lowercase SHA-256 identity of a project registered by the receiving host. */
+  readonly projectId: string
+  /** Optional normalized project-relative execution directory. */
+  readonly subdir?: string
+}
+
+/** Receiver workspace selection: immutable Git checkout or registered Gouzi project. */
+export type RemoteExecutionWorkspaceIdentityV1 = RemoteWorkspaceIdentityV1 | RemoteGouziWorkspaceIdentityV1
 
 /**
  * Normalize HTTPS and SSH Git origins to one credential-free host/path identity.
@@ -184,7 +212,11 @@ function canonicalRepositoryParts(host: string, path: string): string {
 export interface RemoteResidentExecuteRequest {
   readonly commandId: string
   readonly operatorId: string
-  readonly workspaceIdentity: RemoteWorkspaceIdentityV1
+  /** Exact current source inputs for an isolated read or write; independently versioned from projection traffic. */
+  readonly workspaceSnapshotInput?: { readonly version: 1; readonly baseSha: string; readonly baseBundle: string }
+  /** Request a durable patch from an isolated Git execution only. */
+  readonly workspaceMutationReturn?: { readonly version: 1; readonly baseSha: string; readonly baseBundle?: string }
+  readonly workspaceIdentity: RemoteExecutionWorkspaceIdentityV1
   readonly laneId: string
   readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
@@ -192,8 +224,29 @@ export interface RemoteResidentExecuteRequest {
   /** Exact current-task context; new Servers materialize this instead of the redundant compatibility fields. */
   readonly contextEnvelope?: OperatorContextEnvelopeV1
   readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
-  /** Sealed native product-tool authority. Protocol 1.4 only. */
-  readonly nativeToolPolicy?: 'inherit' | 'disabled'
+  /** Sealed native product-tool authority, introduced in protocol 1.4. */
+  readonly nativeToolPolicy?: 'inherit' | 'disabled' | 'dsh-tools-authoritative'
+  /** Explicit bounds for receiving-host direct model generation. */
+  readonly generationLimits?: { readonly maxTokens: number; readonly maxOutputBytes: number; readonly maxToolCalls?: number }
+  /** Serializable file authority; the receiving Native driver relocates scopes to its actual execution cwd. */
+  readonly governedWorkspacePolicy?: {
+    readonly version: 1
+    readonly sourceWorkspace: string
+    readonly readScopes: readonly string[]
+    readonly writeScopes: readonly string[]
+    readonly forbiddenScopes: readonly string[]
+    readonly limits: {
+      readonly maxToolCalls: number
+      readonly maxFileBytes: number
+      readonly maxOutputBytes: number
+      readonly maxSearchFiles: number
+    }
+  }
+  /**
+   * Execution grant for a `gouzi` credential; opaque here and parsed by the Server with `parseGouziGrant`. It is
+   * never part of {@link gouziRequestHash}, which the grant itself seals.
+   */
+  readonly gouziGrant?: unknown
 }
 
 /** Durable turn projection returned by the remote control plane. */
@@ -219,6 +272,12 @@ export interface RemoteResidentTurnSnapshot {
       readonly costUsd?: number
     }
     readonly resultRef?: string
+    readonly workspaceMutation?: {
+      readonly repository?: string
+      readonly projectId?: string
+      readonly baseSha: string
+      readonly patch: string
+    }
   }
   readonly error?: { readonly code: string; readonly message: string }
 }
@@ -239,6 +298,12 @@ export interface RemoteResidentEventPage {
     readonly data: Readonly<Record<string, unknown>>
   }[]
   readonly nextSequence: number
+}
+
+/** A local feature preflight rejected the request before any remote execution command was sent. */
+export class RemoteResidentCapabilityError extends Error {
+  /** Stable preflight refusal code; no execution command has been sent. */
+  readonly code = 'REMOTE_OPERATOR_FEATURE_UNSUPPORTED'
 }
 
 /** Product-neutral Resident commands over any authenticated remote-sync transport. */
@@ -262,7 +327,23 @@ export class RemoteResidentProtocolClient {
    * @param signal - optional transport cancellation signal.
    * @returns the accepted durable turn identity.
    */
-  execute(request: RemoteResidentExecuteRequest, signal?: AbortSignal): Promise<RemoteResidentAcceptedTurn> {
+  async execute(request: RemoteResidentExecuteRequest, signal?: AbortSignal): Promise<RemoteResidentAcceptedTurn> {
+    if (request.workspaceMutationReturn !== undefined || request.workspaceSnapshotInput !== undefined
+      || request.governedWorkspacePolicy !== undefined || request.generationLimits !== undefined) {
+      const provider = (await this.providers(signal)).find(value => value.operatorId === request.operatorId)
+      if (request.workspaceMutationReturn !== undefined && provider?.supportsWorkspaceMutationReturn !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support isolated workspace mutation return')
+      }
+      if (request.workspaceSnapshotInput !== undefined && provider?.supportsWorkspaceSnapshotInput !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support sealed current workspace snapshot inputs')
+      }
+      if (request.governedWorkspacePolicy !== undefined && provider?.supportsGovernedWorkspacePolicy !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support governed workspace file authority')
+      }
+      if (request.generationLimits !== undefined && provider?.supportsGenerationLimits !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support direct generation limits')
+      }
+    }
     return this.call('operator.execute', { ...request, protocol: REMOTE_SYNC_PROTOCOL }, signal)
       .then(parseRemoteResidentAcceptedTurn)
   }
@@ -619,6 +700,11 @@ export function parseRemoteResidentProviders(value: unknown): RemoteResidentProv
       productVersion: nonEmptyString(record.productVersion, `${label}.productVersion`),
       protocolHash: nonEmptyString(record.protocolHash, `${label}.protocolHash`),
       models,
+      ...(record.supportsWorkspaceMutationReturn === true ? { supportsWorkspaceMutationReturn: true } : {}),
+      ...(record.supportsWorkspaceSnapshotInput === true ? { supportsWorkspaceSnapshotInput: true } : {}),
+      supportsGovernedWorkspacePolicy: record.supportsGovernedWorkspacePolicy === true,
+      supportsGenerationLimits: record.supportsGenerationLimits === true,
+      ...(record.gouziWorkspace === undefined ? {} : { gouziWorkspace: gouziWorkspace(record.gouziWorkspace, label) }),
       ...(record.quotaPools === undefined ? {} : {
         quotaPools: arrayValue(record.quotaPools, `${label}.quotaPools`).map((pool, poolIndex) => {
           const poolLabel = `${label}.quotaPools[${poolIndex}]`
@@ -637,6 +723,21 @@ export function parseRemoteResidentProviders(value: unknown): RemoteResidentProv
       }),
     }
   })
+}
+
+function gouziWorkspace(value: unknown, label: string): NonNullable<RemoteResidentProviderStatus['gouziWorkspace']> {
+  const record = objectRecord(value, `${label}.gouziWorkspace`)
+  const projectId = nonEmptyString(record.projectId, `${label}.gouziWorkspace.projectId`)
+  if (!/^[a-f0-9]{64}$/u.test(projectId)) throw new Error(`${label}.gouziWorkspace.projectId must be a lowercase SHA-256 identity`)
+  return {
+    gouziId: nonEmptyString(record.gouziId, `${label}.gouziWorkspace.gouziId`),
+    generation: nonnegativeInteger(record.generation, `${label}.gouziWorkspace.generation`),
+    projectId,
+    // Older endpoints advertise project identity without verified directories; they cannot authorize project selection.
+    projectScopes: record.projectScopes === undefined ? []
+      : arrayValue(record.projectScopes, `${label}.gouziWorkspace.projectScopes`)
+        .map((scope, index) => nonEmptyString(scope, `${label}.gouziWorkspace.projectScopes[${index}]`)),
+  }
 }
 
 /**
@@ -739,11 +840,24 @@ export function parseRemoteResidentResult(
   if (!Array.isArray(result.output)) throw new Error('remote Resident turn result.output must be an array')
   const usage = result.usage === undefined ? undefined : residentUsage(result.usage, 'result.usage')
   return {
+    ...(result.workspaceMutation === undefined ? {} : { workspaceMutation: parseWorkspaceMutation(result.workspaceMutation) }),
     output: result.output as ContentBlock[],
     stopReason: residentStopReason(result.stopReason, 'result.stopReason'),
     ...usage === undefined ? {} : { usage },
     ...(typeof result.resultRef === 'string' ? { resultRef: result.resultRef } : {}),
   }
+}
+
+function parseWorkspaceMutation(value: unknown): NonNullable<NonNullable<RemoteResidentTurnSnapshot['result']>['workspaceMutation']> {
+  const record = objectRecord(value, 'workspaceMutation')
+  const binding = record.projectId === undefined
+    ? { repository: canonicalRemoteRepositoryIdentity(nonEmptyString(record.repository, 'workspaceMutation.repository')) }
+    : { projectId: nonEmptyString(record.projectId, 'workspaceMutation.projectId') }
+  if ('projectId' in binding && !/^[a-f0-9]{64}$/u.test(binding.projectId)) throw new Error('invalid mutation project identity')
+  const baseSha = nonEmptyString(record.baseSha, 'workspaceMutation.baseSha')
+  if (!/^[a-f0-9]{40}$/u.test(baseSha) || typeof record.patch !== 'string'
+    || new TextEncoder().encode(record.patch).byteLength > 1024 * 1024) throw new Error('invalid remote workspace mutation')
+  return { ...binding, baseSha, patch: record.patch }
 }
 
 /**
@@ -816,7 +930,7 @@ function isoInstant(value: unknown, label: string): string {
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
-  if (value === 'cockpit' || value === 'pocket' || value === 'admin') return value
+  if (value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi') return value
   throw new Error(`remote sync scope is invalid: ${String(value)}`)
 }
 

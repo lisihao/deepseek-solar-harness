@@ -18,6 +18,11 @@ flowchart LR
   pkg_llm_replay["llm-replay"]
   pkg_agent_loop["agent-loop"]
   pkg_compaction_basic["compaction-basic"]
+  pkg_model_catalog_local["model-catalog-local"]
+  svc_modelCatalogs["ctx.modelCatalogs<br/>Persistent account model catalog"]
+  pkg_host_apiproxy["host-apiproxy"]
+  pkg_tool_physical_operator["tool-physical-operator"]
+  pkg_physical_operator_chatgpt_web["physical-operator-chatgpt-web"]
   pkg_token_meter["token-meter"]
   svc_tokenMeter["ctx.tokenMeter<br/>Replay token measurement"]
   pkg_compaction_tool_result_pruner["compaction-tool-result-pruner"]
@@ -58,7 +63,6 @@ flowchart LR
   svc_physicalOperators["ctx.physicalOperators<br/>Physical operator registry"]
   pkg_physical_operator_subagent["physical-operator-subagent"]
   pkg_physical_operator_resident["physical-operator-resident"]
-  pkg_tool_physical_operator["tool-physical-operator"]
   pkg_resident_operator["resident-operator"]
   svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
   pkg_resident_operator_local["resident-operator-local"]
@@ -82,6 +86,9 @@ flowchart LR
   pkg_model_worker["model-worker"]
   svc_modelWorkers["ctx.modelWorkers<br/>One-shot model worker registry"]
   pkg_model_worker_deepseek["model-worker-deepseek"]
+  pkg_scheduling_evidence["scheduling-evidence"]
+  svc_schedulingEvidence["ctx.schedulingEvidence<br/>Scheduling evidence collector gateway"]
+  pkg_scheduling_evidence_rpc["scheduling-evidence-rpc"]
   pkg_rlm_strategy["rlm-strategy"]
   svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
   pkg_rlm_strategy_local["rlm-strategy-local"]
@@ -92,6 +99,9 @@ flowchart LR
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
   pkg_ui_orchestration["ui-orchestration"]
+  svc_orchestrationRecipients["ctx.orchestrationRecipients<br/>User-selected orchestration recipient resolver"]
+  pkg_ui_gouzi["ui-gouzi"]
+  svc_gouziHost["ctx.gouziHost<br/>Gouzi member process host"]
   pkg_remote_auth["remote-auth"]
   svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
   pkg_connection["connection"]
@@ -138,7 +148,6 @@ flowchart LR
   svc_commands["ctx.commands<br/>Human command registry"]
   pkg_session_projection["session-projection"]
   svc_sessionProjections["ctx.sessionProjections<br/>Session projection units"]
-  pkg_host_apiproxy["host-apiproxy"]
   pkg_session_projection_cache["session-projection-cache"]
   svc_sessionProjectionCache["ctx.sessionProjectionCache<br/>Persisted projection cache"]
   pkg_skill["skill"]
@@ -294,9 +303,11 @@ flowchart LR
   pkg_message_feedback --> svc_messageFeedback
   pkg_model_allocation --> svc_modelAllocation
   pkg_model_allocation_local --> svc_modelAllocation
+  pkg_model_catalog_local --> svc_modelCatalogs
   pkg_model_worker --> svc_modelWorkers
   pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_orchestrationRecipients
   pkg_orchestration --> svc_orchestrations
   pkg_orchestration_local --> svc_capabilityCapsules
   pkg_orchestration_local --> svc_contextCompiler
@@ -318,6 +329,7 @@ flowchart LR
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
+  pkg_scheduling_evidence --> svc_schedulingEvidence
   pkg_session --> svc_sessions
   pkg_session_persistence --> svc_sessionPersistence
   pkg_session_persistence_jsonl --> svc_sessionPersistence
@@ -362,6 +374,8 @@ flowchart LR
   pkg_token_meter --> svc_tokenMeter
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
+  pkg_ui_gouzi --> svc_gouziHost
+  pkg_ui_gouzi --> svc_orchestrationRecipients
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
   pkg_web_fetch_http --> svc_web
@@ -399,6 +413,7 @@ flowchart LR
   svc_e2b --> pkg_fs_e2b
   svc_e2b --> pkg_subprocess_e2b
   svc_fs --> pkg_tool_fs
+  svc_gouziHost --> pkg_ui_gouzi
   svc_invariants --> pkg_agent
   svc_invariants --> pkg_agent_loop
   svc_invariants --> pkg_scope
@@ -411,7 +426,12 @@ flowchart LR
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
   svc_modelAllocation --> pkg_orchestration_local
+  svc_modelCatalogs --> pkg_host_apiproxy
+  svc_modelCatalogs --> pkg_llm_deepseek
+  svc_modelCatalogs --> pkg_physical_operator_chatgpt_web
+  svc_modelCatalogs --> pkg_tool_physical_operator
   svc_modelWorkers --> pkg_orchestration_local
+  svc_orchestrationRecipients --> pkg_tool_orchestration
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
@@ -425,6 +445,8 @@ flowchart LR
   svc_sandboxPolicy --> pkg_bash_sandbox
   svc_sandboxPolicy --> pkg_fs_sandbox
   svc_sandboxPolicy --> pkg_terminal_bash
+  svc_schedulingEvidence --> pkg_scheduling_evidence_rpc
+  svc_schedulingEvidence --> pkg_tool_physical_operator
   svc_sessionPersistence --> pkg_agent_loop
   svc_sessionPersistence --> pkg_hooks_claude_code
   svc_sessionPersistence --> pkg_hooks_codex
@@ -509,6 +531,7 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- | --- |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | `host-runtime`, [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | The host commits accepted images before session events; provider adapters resolve authorized durable references into provider-native content. |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | Adapters register provider implementations; the loop and compaction call the provider-neutral stream service. |
+| `ctx.modelCatalogs` | `core` | [`model-catalog-local`](../packages/llm/model-catalog-local) | - | [`host-apiproxy`](../packages/host/apiproxy), [`llm-deepseek`](../packages/llm/llm-deepseek), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`physical-operator-chatgpt-web`](../packages/physical-operator/physical-operator-chatgpt-web) | - | Discovery plugins register sources; the SQLite service stores complete inventories and the host projects available menu shortcuts. |
 | `ctx.tokenMeter` | `core` | [`token-meter`](../packages/llm/token-meter) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | Owns isolated per-session replay folds; pressure consumers share immutable revisioned measurements. |
 | `ctx.toolResultPruner` | `core` | [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner) | - | [`compaction-basic`](../packages/compaction/compaction-basic) | - | Rewrites oversized current tool results through replayable single-node surface replacements before summary compaction. |
 | `ctx.sessions` | `core` | [`session`](../packages/core/session) | - | [`agent-loop`](../packages/core/agent-loop), [`agent`](../packages/core/agent), [`session-persistence`](../packages/session/session-persistence), [`session-query`](../packages/session-query/session-query), [`session-query-sqlite`](../packages/session-query/session-query-sqlite), `subagent-inprocess`, [`invariants`](../packages/runtime-diagnostics/invariants), [`message-feedback`](../packages/feedback/message-feedback) | - | Owns append-only Session instances and emits the durable session event feed. |
@@ -529,9 +552,12 @@ flowchart LR
 | `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | Registers trusted TypeScript modules and invokes only an explicitly allowed module/callable pair; generated harness content cannot create executable code at runtime. |
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Selects qualified subscription-first execution offers and recommends parallelism without dispatching work. |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |
+| `ctx.schedulingEvidence` | `core` | [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | - | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`scheduling-evidence-rpc`](../packages/orchestration/scheduling-evidence-rpc) | - | Runs the Radar and AI Frontier collectors as bounded child processes, returns their stored JSON documents, and, once the owner turns Radar on, keeps the stored generation current and hands the allocator its evidence. |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
+| `ctx.orchestrationRecipients` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | [`tool-orchestration`](../packages/orchestration/tool-orchestration) | - | Resolves the current human request to an enabled member generation and available execution entries before sealing TaskGraph admission. |
+| `ctx.gouziHost` | `seam` | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | Starts, adopts, and stops execution-member processes on the machine that runs the Server; the Desktop product provides it and the roster only consumes it. |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |

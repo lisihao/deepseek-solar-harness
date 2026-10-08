@@ -21,3 +21,6 @@
 
     - id: ui-orchestration
       name: '@deepseek-ai/dsh-ui-orchestration'
+
+    - id: ui-gouzi
+      name: '@deepseek-ai/dsh-ui-gouzi'
