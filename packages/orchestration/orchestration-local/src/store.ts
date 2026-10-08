@@ -199,6 +199,8 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;')
     const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version ?? 0)
     if (version > ORCHESTRATION_STATE_SCHEMA_VERSION) {
+      // The constructor fails, so no caller holds a handle to close; an open file would stay locked on Windows.
+      this.db.close()
       throw new OrchestrationError(
         `orchestration state schema ${String(version)} is newer than supported ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)}`,
         'ORCHESTRATION_UNAVAILABLE',
