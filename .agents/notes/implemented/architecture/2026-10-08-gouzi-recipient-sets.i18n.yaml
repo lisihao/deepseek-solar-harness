@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-08-gouzi-recipient-sets.md
+2026-10-08-gouzi-recipient-sets.md: 0a7469dc24e14f4cc8cf955e7fddee05e5289501
+2026-10-08-gouzi-recipient-sets.zh.md: 65414feff883956c2ef04dc3a8e34433605c67cf

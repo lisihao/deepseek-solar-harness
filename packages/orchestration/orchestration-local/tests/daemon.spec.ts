@@ -798,6 +798,96 @@ describe('orchestration daemon', () => {
     expect(new Set(calls)).toEqual(new Set(['operator.providers']))
   })
 
+  it('binds a graph to a set of Gouzi recipients and refuses a set that no longer holds', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-recipients-'))
+    const root = join(home, 'orchestrations')
+    const registry = new OrchestrationStore(root)
+    registry.gouzi.pairHost({ hostId: GouziHostId('host-1'), label: 'Host', authorityEpoch: GouziAuthorityEpoch('epoch-1'), credentialRef: 'HOST_TOKEN' })
+    const ports: Record<string, number> = { dog: 13301, cat: 13302 }
+    for (const [id, port] of Object.entries(ports)) {
+      registry.gouzi.create({ gouziId: GouziId(id), ownerId: GouziOwnerId('owner'), hostId: GouziHostId('host-1'), name: id, avatarId: 'shiba', role: 'development', grantDeadlineMs: 60_000 })
+      registry.gouzi.setMembership(GouziId(id), 'enabled')
+      registry.gouzi.setEndpoint(GouziId(id), `http://127.0.0.1:${String(port)}`)
+    }
+    const scopes: Record<string, string[]> = { dog: [home, await realpath(home)], cat: [home, await realpath(home)] }
+    const operators: Record<string, string[]> = { dog: ['codex', 'claude'], cat: ['codex'] }
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      calls.push(call.method)
+      if (call.method !== 'operator.providers') throw new Error(`unexpected side effect ${call.method}`)
+      const id = String(input).includes(`:${String(ports.cat)}`) ? 'cat' : 'dog'
+      const value = operators[id]!.map(operatorId => ({
+        operatorId, product: 'codex', displayName: 'Native', description: 'Native', tags: ['coding'], maxConcurrency: 1,
+        gouziWorkspace: { gouziId: id, generation: 1, projectId: 'a'.repeat(64), projectScopes: scopes[id] },
+        injectionBoundaries: [], available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
+        models: [{ model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Worker', supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true }],
+      }))
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }))
+    const local = new FakeResidentClient()
+    const daemon = createDaemon(root, home, local, 60_000)
+    await daemon.start()
+    cleanup.push(async () => { registry.close(); await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const dog = { gouziId: GouziId('dog'), generation: 1, operatorIds: ['gouzi.dog.codex'] as never }
+    const cat = { gouziId: GouziId('cat'), generation: 1, operatorIds: ['gouzi.cat.codex'] as never }
+    const admission = {
+      policy: 'direct' as const, route: 'taskgraph' as const, sourceSessionId: 'source', rlm: 'disabled' as const,
+      autonomous: 'disabled' as const, optimization: 'quality' as const, gouziRecipients: [dog, cat],
+    }
+    const split = {
+      ...graph(home),
+      nodes: graph(home).nodes.map(node => ({
+        ...node, operator: { preferredIds: [node.id === 'code' ? 'gouzi.dog.codex' : 'gouzi.cat.codex'], fallbackIds: [] },
+      })),
+    }
+    const request = { intent: { request: 'Recipient set fixture.' }, graph: split, admission }
+
+    // Each node runs on a different member, and both members are confirmed for the run.
+    const compilation = await client.compile(request)
+    expect(compilation.admission).toEqual(admission)
+
+    // A node may use only the entries the set names, with no fallback.
+    for (const preferredIds of [['gouzi.dog.claude'], ['codex'], ['gouzi.cat.codex', 'gouzi.dog.claude']]) {
+      const nodes = split.nodes.map(node => ({ ...node, operator: { preferredIds, fallbackIds: [] } }))
+      await expect(client.compile({ ...request, graph: { ...split, nodes } })).rejects.toThrow('selected Gouzi execution entries')
+    }
+    // One member keeps the singular field; the set names two distinct members with distinct entries.
+    const catAgain = { ...cat, operatorIds: ['gouzi.dog.codex'] as never }
+    for (const malformed of [
+      { ...admission, gouziRecipient: dog }, { ...admission, gouziRecipients: [dog] }, { ...admission, gouziRecipients: [] },
+      { ...admission, gouziRecipients: [dog, dog] }, { ...admission, gouziRecipients: [dog, catAgain] },
+      { ...admission, gouziRecipients: dog }, { ...admission, gouziRecipients: [dog, null] },
+      { ...admission, gouziRecipients: [dog, { ...cat, generation: 0 }] },
+    ]) {
+      await expect(client.compile({ ...request, admission: malformed } as never)).rejects.toThrow('admission is invalid')
+    }
+    // Every member of the set must still be registered, current, and hold the workspace.
+    for (const unavailable of [
+      { ...admission, gouziRecipients: [dog, { ...cat, generation: 2 }] },
+      { ...admission, gouziRecipients: [dog, { ...cat, gouziId: GouziId('other') }] },
+      { ...admission, gouziRecipients: [dog, { ...cat, operatorIds: ['gouzi.cat.codex', 'gouzi.cat.fake'] as never }] },
+    ]) {
+      await expect(client.compile({ ...request, admission: unavailable })).rejects.toThrow('unavailable')
+    }
+    scopes.cat = ['/srv/elsewhere']
+    await expect(client.compile(request)).rejects.toThrow('unavailable')
+    scopes.cat = [home, await realpath(home)]
+
+    // Starting binds the run to the whole set; nothing dispatches before approval.
+    const pending = await client.compile({ ...request, graph: { ...split, risk: 'medium' } })
+    const started = await client.start({ compilationId: pending.compilationId, commandId: 'set-start' })
+    expect(started).toMatchObject({ state: 'awaiting_approval', admission })
+    await client.gouziSetMembership('cat', 'retiring')
+    await expect(startCompilation(client, compilation.compilationId)).rejects.toThrow('unavailable')
+    expect(await client.start({ compilationId: pending.compilationId, commandId: 'set-start' })).toEqual(started)
+    expect(registry.listRuns()).toHaveLength(1)
+    expect(local.requests).toEqual([])
+    expect(new Set(calls)).toEqual(new Set(['operator.providers']))
+  })
+
   it('queries registered Gouzi execution entries freshly without changing member state or dispatching', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-catalog-'))
     const root = join(home, 'orchestrations')

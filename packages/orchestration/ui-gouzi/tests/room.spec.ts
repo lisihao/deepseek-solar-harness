@@ -76,6 +76,18 @@ describe('Gouzi room', () => {
     f.execution.length = 0
     expect((await gouziRoom(f.service, f.control, 'session-a', dashboard, 250)).tasks[0]!.nodes[0]!.gouziId).toBeUndefined()
   })
+  it('attributes a sealed result to the member of a recipient set whose recorded operators include it', async () => {
+    const recipients = [
+      { gouziId: GouziId('first-member'), generation: 2, operatorIds: [PhysicalOperatorId('first.provider')] },
+      { gouziId: GouziId('second-member'), generation: 5, operatorIds: [PhysicalOperatorId('actual.provider')] },
+    ]
+    const f = fixture([{ ...run, admission: { ...run.admission!, gouziRecipients: recipients } }])
+    f.execution.length = 0
+    expect((await gouziRoom(f.service, f.control, 'session-a', dashboard, 250)).tasks[0]!.nodes[0]).toMatchObject({ gouziId: 'second-member' })
+    const excluded = fixture([{ ...run, admission: { ...run.admission!, gouziRecipients: [recipients[0]!, { ...recipients[1]!, operatorIds: [PhysicalOperatorId('other.provider')] }] } }])
+    excluded.execution.length = 0
+    expect((await gouziRoom(excluded.service, excluded.control, 'session-a', dashboard, 250)).tasks[0]!.nodes[0]!.gouziId).toBeUndefined()
+  })
   it('returns only retained evidence within this room and never reads a rejected artifact', async () => {
     const f = fixture()
     expect(await gouziRoomEvidence(f.service, 'session-b', String(runId), String(ref))).toBeUndefined()

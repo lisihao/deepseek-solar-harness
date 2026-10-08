@@ -1,5 +1,5 @@
 /** Read-only projection of source-session tasks and their current sealed execution results. */
-import { OrchestrationArtifactRef, type GouziControl, type OrchestrationService, type OrchestrationEvent, type OrchestrationNodeSnapshot, type OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
+import { admissionGouziRecipients, OrchestrationArtifactRef, type GouziControl, type OrchestrationService, type OrchestrationEvent, type OrchestrationNodeSnapshot, type OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
 import type { GouziDashboardV1, GouziRoomNodeV1, GouziRoomSnapshotV1 } from './contracts.ts'
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -42,9 +42,8 @@ async function projectNode(service: OrchestrationService, run: OrchestrationRunS
     || typeof result.data.outputPreview !== 'string') return projected
   const members = execution.filter(member => member.operators.some(value => value.operatorId === operator.operatorId))
   const member = members.length === 1 ? members.at(0) : undefined
-  const recipient = run.admission?.gouziRecipient
-  const gouziId = recipient?.operatorIds.some(id => String(id) === operator.operatorId)
-    ? String(recipient.gouziId) : member?.gouziId
+  const recipient = admissionGouziRecipients(run.admission).find(value => value.operatorIds.some(id => String(id) === operator.operatorId))
+  const gouziId = recipient === undefined ? member?.gouziId : String(recipient.gouziId)
   return { ...projected, ...gouziId === undefined ? {} : { gouziId }, result: {
     time: result.time, sequence: result.sequence, evidenceRef: result.data.evidenceRef, outputPreview: result.data.outputPreview,
     accepted: result.type === 'node.evidence.accepted', operatorId: operator.operatorId,

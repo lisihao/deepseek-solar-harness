@@ -3,7 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 import { createUserMessage, HarnessError, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { PhysicalOperatorExecutionId, PhysicalOperatorId } from '@deepseek-ai/dsh-physical-operator'
-import { GouziId, OrchestrationRunId, type LogicalTaskGraphV1, type OrchestrationNodeSpecV1, type OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
+import { admissionGouziRecipients, GouziId, OrchestrationRunId, type LogicalTaskGraphV1, type OrchestrationNodeSpecV1, type OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
 import { decodeKennelMessage } from './recipient-message.ts'
 import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { generateDispatchModel, type DispatchModelConfig, type DispatchModelRecord } from './dispatch-model.ts'
@@ -207,8 +207,8 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
           }))
       })
       const runs = (await ctx.orchestrations.list()).filter(run => run.admission?.sourceSessionId === String(agent.id)
-        && (!decoded.recipient || String(run.admission.gouziRecipient?.gouziId) === decoded.recipient.gouziId
-          && run.admission.gouziRecipient?.generation === decoded.recipient.generation))
+        && (!decoded.recipient || admissionGouziRecipients(run.admission).some(value => String(value.gouziId) === decoded.recipient?.gouziId
+          && value.generation === decoded.recipient.generation)))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, config.maxRunCandidates)
       const candidates: KennelDispatchCandidate[] = [...workCandidates, ...runs.flatMap(runChoices)]
       agent.session.append('kennel/dispatch-request', { messageId: message.id, message, candidates }, { ignorable: true })
