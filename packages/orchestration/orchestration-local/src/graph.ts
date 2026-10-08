@@ -24,6 +24,16 @@ function optionalPositiveInteger(value: unknown, name: string, maximum: number):
   }
 }
 
+function positiveLimits(value: unknown, keys: readonly string[], name: string, allowZero: readonly string[] = []): void {
+  if (!isRecord(value)) throw new OrchestrationError(`${name} must be an object`, 'GRAPH_INVALID')
+  for (const key of keys) {
+    const number = value[key]
+    if (!Number.isSafeInteger(number) || Number(number) < (allowZero.includes(key) ? 0 : 1)) {
+      throw new OrchestrationError(`${name}.${key} must be a bounded integer`, 'GRAPH_INVALID')
+    }
+  }
+}
+
 function validateAutonomousEndCondition(value: unknown, node: OrchestrationNodeSpecV1): void {
   if (!isRecord(value) || value.version !== 1) {
     throw new OrchestrationError(`node ${node.id} autonomous endCondition version must be 1`, 'GRAPH_INVALID')
@@ -89,12 +99,13 @@ export function validateGraph(value: unknown): string[] {
   if (graph.baseSha !== undefined && !/^[a-f0-9]{7,64}$/iu.test(graph.baseSha)) {
     throw new OrchestrationError('graph.baseSha must be a 7 to 64 character hexadecimal Git id', 'GRAPH_INVALID')
   }
-  if (graph.workspaceIsolation !== undefined && !['shared', 'git-worktree'].includes(graph.workspaceIsolation)) {
+  if (graph.workspaceIsolation !== undefined && !['shared', 'git-worktree', 'directory-snapshot'].includes(graph.workspaceIsolation)) {
     throw new OrchestrationError('graph.workspaceIsolation is unsupported', 'GRAPH_INVALID')
   }
   if (graph.workspaceIsolation === 'git-worktree' && graph.baseSha === undefined) {
     throw new OrchestrationError('git-worktree isolation requires graph.baseSha', 'GRAPH_INVALID')
   }
+  if (graph.workspaceIsolation === 'directory-snapshot') positiveLimits(graph.workspaceSnapshotLimits, ['maxFiles', 'maxBytes', 'maxBundleBytes', 'timeoutMs'], 'graph.workspaceSnapshotLimits')
   if (!Number.isSafeInteger(graph.maxParallel) || graph.maxParallel < 1 || graph.maxParallel > 64) {
     throw new OrchestrationError('graph.maxParallel must be an integer from 1 through 64', 'GRAPH_INVALID')
   }
@@ -110,6 +121,18 @@ export function validateGraph(value: unknown): string[] {
       throw new OrchestrationError(`graph.nodes[${String(index)}] must be an object`, 'GRAPH_INVALID')
     }
     const node = candidate as unknown as OrchestrationNodeSpecV1
+    if (node.generationLimits !== undefined) {
+      positiveLimits(node.generationLimits, ['maxTokens', 'maxOutputBytes'], 'node.generationLimits')
+      if (node.generationLimits.maxToolCalls !== undefined) positiveLimits(node.generationLimits, ['maxToolCalls'], 'node.generationLimits', ['maxToolCalls'])
+    }
+    if (node.workspaceToolLimits !== undefined) {
+      positiveLimits(node.workspaceToolLimits, ['maxToolCalls', 'maxFileBytes', 'maxOutputBytes', 'maxSearchFiles'], 'node.workspaceToolLimits')
+      if (node.generationLimits === undefined) throw new OrchestrationError('governed file tools require generation limits', 'GRAPH_INVALID')
+      const effects = candidate.effectBudget as Partial<OrchestrationNodeSpecV1['effectBudget']> | undefined
+      if (effects?.execute?.length || effects?.network?.length) {
+        throw new OrchestrationError('governed file tools cannot grant command or network effects', 'GRAPH_INVALID')
+      }
+    }
     requiredString(node.id, `graph.nodes[${String(index)}].id`)
     requiredString(node.title, `graph.nodes[${String(index)}].title`)
     requiredString(node.task, `graph.nodes[${String(index)}].task`)
@@ -143,6 +166,16 @@ export function validateGraph(value: unknown): string[] {
       || !Number.isSafeInteger(node.contextPolicy.maxTokens)
       || node.contextPolicy.maxTokens < 1) {
       throw new OrchestrationError(`node ${node.id} context maxTokens must be positive`, 'GRAPH_INVALID')
+    }
+    const rawAcceptance = candidate.acceptance
+    const acceptance: readonly unknown[] = Array.isArray(rawAcceptance) ? rawAcceptance : []
+    if (!Array.isArray(rawAcceptance) || acceptance.some(requirement => !isRecord(requirement)
+      || typeof requirement.id !== 'string' || typeof requirement.description !== 'string'
+      || !['operator-completed', 'artifact-present', 'human-review', 'model-verdict'].includes(String(requirement.kind)))) {
+      throw new OrchestrationError('node acceptance requirements are invalid', 'GRAPH_INVALID')
+    }
+    if (acceptance.some(requirement => isRecord(requirement) && requirement.kind === 'model-verdict') && node.phase !== 'verification') {
+      throw new OrchestrationError('model-verdict acceptance requires a verification node', 'GRAPH_INVALID')
     }
     if (candidate.autonomous !== undefined) {
       if (!isRecord(candidate.autonomous) || !['auto', 'enabled', 'disabled'].includes(node.autonomous?.mode ?? '')) {

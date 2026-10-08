@@ -11,6 +11,8 @@ import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-p
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import type {
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorGenerationLimits,
+  PhysicalOperatorGovernedWorkspacePolicy,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorNativeToolPolicy,
 } from '@deepseek-ai/dsh-physical-operator'
@@ -366,6 +368,8 @@ export class ResidentDaemonClient {
     profile?: PhysicalOperatorExecutionPreference
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1
     nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
+    generationLimits?: PhysicalOperatorGenerationLimits
+    governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy
     signal: AbortSignal
   }): Promise<{
     turnId: string
@@ -390,6 +394,8 @@ export class ResidentDaemonClient {
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { model_tool_bridge: request.modelToolBridge },
       native_tool_policy: request.nativeToolPolicy ?? 'inherit',
+      ...request.generationLimits === undefined ? {} : { generation_limits: request.generationLimits },
+      ...request.governedWorkspacePolicy === undefined ? {} : { governed_workspace_policy: request.governedWorkspacePolicy },
       bridge_admission_timeout_ms: this.options.connectTimeoutMs,
     }, request.signal)
     let settled = false

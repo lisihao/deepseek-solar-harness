@@ -81,7 +81,7 @@ const DIRECTORY_PROVIDER = {
   operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code', tags: [],
   maxConcurrency: 1, injectionBoundaries: [], available: true, authentication: 'native-subscription',
   productVersion: '1', protocolHash: 'h', models: [],
-  gouziWorkspace: { gouziId: String(GOUZI), generation: 1, projectId: PROJECT },
+  gouziWorkspace: { gouziId: String(GOUZI), generation: 1, projectId: PROJECT, projectScopes: ['/srv/default-project'] },
 }
 
 
@@ -162,6 +162,30 @@ describe('gouziOperatorServer', () => {
 })
 
 describe('RemotePhysicalOperator for a gouzi member', () => {
+  it.each(['member', 'generic', 'wrong-member'] as const)('exposes project roots only for the registered Gouzi binding: %s', async (kind) => {
+    const store = await registered()
+    try {
+      const provider = { ...DIRECTORY_PROVIDER, gouziWorkspace: {
+        ...DIRECTORY_PROVIDER.gouziWorkspace, gouziId: kind === 'wrong-member' ? 'other-member' : String(GOUZI),
+      } }
+      const memberServer = gouziOperatorServer({ store, gouziId: GOUZI })
+      const { gouzi: _binding, ...genericServer } = memberServer
+      const server = kind === 'generic' ? genericServer : memberServer
+      const request: typeof fetch = (_input, init) => {
+        if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+        const call = JSON.parse(init.body) as { rpcId: string; method: string }
+        expect(call.method).toBe('operator.providers')
+        return Promise.resolve(Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value: [provider] } }))
+      }
+      const operator = new RemotePhysicalOperator(server, provider as never, store, request)
+      const catalog = await operator.residentCatalog()
+      if (kind === 'member') expect(catalog.gouziWorkspace).toEqual(provider.gouziWorkspace)
+      else expect(catalog.gouziWorkspace).toBeUndefined()
+    } finally {
+      store.close()
+    }
+  })
+
   it('does not post execution when a sealed member changes generation during project qualification', async () => {
     const store = await registered()
     const record = store.getRun('run-1')

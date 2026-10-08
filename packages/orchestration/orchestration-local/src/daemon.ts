@@ -144,7 +144,9 @@ import {
   type OrchestrationClusterConfig,
   type OrchestrationClusterPeerTransport,
 } from './cluster.ts'
+import { verificationVerdictFailure } from './verification-verdict.ts'
 import { GitWorktreeManager } from './git-worktrees.ts'
+import { WorkspaceSnapshotManager, type WorkspaceSnapshot } from './workspace-snapshot.ts'
 import { dependsTransitively, graphCertificate, nodesConflict, validateGraph } from './graph.ts'
 import {
   BasicContextCompiler,
@@ -1554,10 +1556,15 @@ export class OrchestrationDaemon {
     }
     const entries = await this.gouziExecutionOperators()
     const member = entries.find(value => value.gouziId === recipient.gouziId && value.generation === recipient.generation)
-    if (member === undefined
+    if (member === undefined || !member.projectScopes.includes(graph.workspace)
       || recipient.operatorIds.some(id => !member.operators.some(operator => operator.operatorId === id && operator.available))) {
       throw new OrchestrationError('selected Gouzi generation or execution entry is unavailable', 'RUN_STATE_CONFLICT')
     }
+  }
+
+  private workspaceSnapshots(graph: LogicalTaskGraphV1): WorkspaceSnapshotManager {
+    if (graph.workspaceSnapshotLimits === undefined) throw new OrchestrationError('directory snapshot limits are missing', 'GRAPH_INVALID')
+    return new WorkspaceSnapshotManager({ ownedRoot: join(this.options.root, 'workspace-snapshots'), ...graph.workspaceSnapshotLimits })
   }
 
   private async compile(request: Parameters<Context['orchestrations']['compile']>[0]): Promise<OrchestrationCompilationV1> {
@@ -1565,13 +1572,34 @@ export class OrchestrationDaemon {
     validateAdmissionRuntimeContext(request.admission)
     validateAdmissionStrategy(request.admission)
     await this.validateGouziRecipient(request.admission, request.graph)
-    const workspace = await realpath(request.graph.workspace).catch(() => {
+    const selectedMember = request.admission?.gouziRecipient === undefined ? undefined
+      : this.store.gouzi.read(request.admission.gouziRecipient.gouziId)
+    const remoteRead = selectedMember !== undefined && String(selectedMember.hostId) !== 'local'
+      && request.graph.nodes.every(node => node.writeScopes.length === 0 && node.effectBudget.write.length === 0)
+      && (request.graph.workspaceIsolation === undefined || request.graph.workspaceIsolation === 'shared')
+    // The authenticated member catalog has already verified this exact project on its own host.
+    const workspace = remoteRead ? request.graph.workspace : await realpath(request.graph.workspace).catch(() => {
       throw new OrchestrationError(`graph workspace does not exist: ${request.graph.workspace}`, 'GRAPH_INVALID')
     })
     const graph = structuredClone({ ...request.graph, workspace })
     if (graph.workspaceIsolation === 'git-worktree') {
       await this.worktrees.verifyRepository(workspace, graph.baseSha as string)
     }
+    if (graph.workspaceIsolation === 'directory-snapshot') {
+      const recipient = request.admission?.gouziRecipient
+      const member = recipient === undefined ? undefined : this.store.gouzi.read(recipient.gouziId)
+      if (member !== undefined && (String(member.hostId) !== 'local' || member.endpoint === undefined
+        || !['127.0.0.1', '[::1]'].includes(new URL(member.endpoint).hostname))) {
+        throw new OrchestrationError('完整目录快照仅允许本机狗子；远程传输需要明确授权。', 'GRAPH_INVALID')
+      }
+    }
+    const sourceSnapshot = graph.workspaceIsolation === 'directory-snapshot'
+      ? await this.workspaceSnapshots(graph).prepare(workspace, request.admission?.sourceMessageId === undefined
+        ? randomUUID() : canonicalSha256({
+          graph, sourceSessionId: request.admission.sourceSessionId, sourceMessageId: request.admission.sourceMessageId,
+        }))
+      : undefined
+    const workspaceSnapshotRef = sourceSnapshot === undefined ? undefined : this.store.putArtifact(sourceSnapshot)
     const intent = await this.ctx.intentCompiler.compile(structuredClone(request.intent))
     await this.validateGouziRecipient(request.admission, graph)
     const intentRef = this.store.putArtifact(intent)
@@ -1581,7 +1609,7 @@ export class OrchestrationDaemon {
     const blockers: OrchestrationBlocker[] = intent.requiresClarification
       ? [{ code: 'INTENT_CLARIFICATION_REQUIRED', message: intent.ambiguities.join('; ') }]
       : []
-    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, certificate, admission: request.admission }).slice(0, 32)}`
+    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, workspaceSnapshotRef, certificate, admission: request.admission }).slice(0, 32)}`
     const compilation: OrchestrationCompilationV1 = {
       version: 1,
       compilationId,
@@ -1590,13 +1618,14 @@ export class OrchestrationDaemon {
       ...requirementRef === undefined ? {} : { requirementRef },
       graphRef,
       graph,
+      ...workspaceSnapshotRef === undefined ? {} : { workspaceSnapshotRef },
       ...request.admission === undefined ? {} : { admission: structuredClone(request.admission) },
       certificate,
       requiresClarification: intent.requiresClarification,
       blockers,
     }
     this.store.saveCompilation(compilation)
-    for (const ref of [intentRef, requirementRef, graphRef].filter(value => value !== undefined)) {
+    for (const ref of [intentRef, requirementRef, graphRef, workspaceSnapshotRef].filter(value => value !== undefined)) {
       this.store.recordArtifact('compilation_artifacts', { ref: String(ref) })
     }
     return compilation
@@ -1657,6 +1686,7 @@ export class OrchestrationDaemon {
       intentRef: compilation.intentRef,
       ...compilation.requirementRef === undefined ? {} : { requirementRef: compilation.requirementRef },
       graphRef: compilation.graphRef,
+      ...compilation.workspaceSnapshotRef === undefined ? {} : { workspaceSnapshotRef: compilation.workspaceSnapshotRef },
       ...approvalRef === undefined ? {} : { approvalRef },
       retryAfter: {},
     }
@@ -1680,6 +1710,7 @@ export class OrchestrationDaemon {
   private controlUnchecked(request: OrchestrationControlRequest): OrchestrationRunSnapshot {
     const record = this.expectRevision(request.runId, request.expectedRevision)
     const current = record.snapshot.state
+    if (record.snapshot.delivery?.state === 'applying') throw new OrchestrationError('任务正在最终回写，已进入不可中断阶段；请查看原任务结果。', 'RUN_STATE_CONFLICT')
     let state = current
     if (request.action === 'pause' && current === 'running') state = 'paused'
     else if (request.action === 'resume' && current === 'paused') state = 'running'
@@ -1997,9 +2028,15 @@ export class OrchestrationDaemon {
       return {
         gouziId: member.gouziId,
         generation: member.generation,
+        projectScopes: [...new Set(catalogs.filter(catalog => operatorIds.has(String(catalog.operatorId))
+          && catalog.gouziWorkspace?.gouziId === String(member.gouziId)
+          && catalog.gouziWorkspace.generation === member.generation)
+          .flatMap(catalog => catalog.gouziWorkspace?.projectScopes ?? []))],
         operators: catalogs.filter(catalog => operatorIds.has(String(catalog.operatorId))).map(catalog => ({
           operatorId: String(catalog.operatorId),
           available: catalog.available,
+          supportsGenerationLimits: catalog.supportsGenerationLimits === true,
+          supportsGovernedWorkspacePolicy: catalog.supportsGovernedWorkspacePolicy === true,
           ...catalog.unavailableReason === undefined ? {} : { unavailableReason: catalog.unavailableReason },
           models: catalog.models.map(model => model.model),
         })),
@@ -2285,9 +2322,9 @@ export class OrchestrationDaemon {
     const required = record.graph.nodes.filter(node => node.requiredForCompletion)
     const requiredStates = required.map(spec => record.snapshot.nodes.find(node => node.id === spec.id)?.state)
     const anyLive = record.snapshot.nodes.some(node => ['pending', 'ready', 'running', 'retry_wait', 'awaiting_approval'].includes(node.state))
-    if (requiredStates.every(state => state === 'passed') && !anyLive) this.finishRun(record, 'completed')
+    if (requiredStates.every(state => state === 'passed') && !anyLive) await this.finishRun(record, 'completed')
     else if (!anyLive && requiredStates.some(state => ['failed', 'blocked', 'cancelled', 'indeterminate'].includes(state ?? 'blocked'))) {
-      this.finishRun(record, requiredStates.includes('indeterminate') ? 'indeterminate' : 'failed')
+      await this.finishRun(record, requiredStates.includes('indeterminate') ? 'indeterminate' : 'failed')
     }
   }
 
@@ -2364,10 +2401,14 @@ export class OrchestrationDaemon {
       this.blockNode(runId, nodeId, blockers)
       return undefined
     }
-    const executionWorkspace: NodeExecutionPlanV1['executionWorkspace'] = record.graph.workspaceIsolation === 'git-worktree'
+    const snapshotWorkspace = record.workspaceSnapshotRef === undefined ? undefined
+      : this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot
+    const authorityWorkspace = snapshotWorkspace?.workspace ?? record.snapshot.workspace
+    const executionWorkspace: NodeExecutionPlanV1['executionWorkspace'] = (record.graph.workspaceIsolation === 'git-worktree'
+      || record.graph.workspaceIsolation === 'directory-snapshot')
       && (capabilityPlan.effectiveWriteScopes.length > 0 || capabilityPlan.effectiveEffects.write.length > 0)
-      ? await this.worktrees.prepare(record.snapshot.workspace, runId, nodeId, attempt)
-      : { mode: 'shared', path: record.snapshot.workspace }
+      ? await this.worktrees.prepare(authorityWorkspace, runId, nodeId, attempt)
+      : { mode: 'shared', path: authorityWorkspace }
     if (executionWorkspace.mode === 'git-worktree') {
       this.store.saveRun(record, [event(record.snapshot.runId, 'worktree.prepared', {
         path: executionWorkspace.path,
@@ -2595,7 +2636,7 @@ export class OrchestrationDaemon {
         operatorId,
         mode: selectedProvider === undefined ? 'model-worker' as const : 'resident' as const,
         ...allocation.profile === undefined ? {} : { profile: allocation.profile },
-        nativeToolPolicy: nativeToolPolicy(capabilityPlan),
+        nativeToolPolicy: spec.workspaceToolLimits === undefined ? nativeToolPolicy(capabilityPlan) : 'dsh-tools-authoritative',
         injectionBoundaries: selectedProvider?.injectionBoundaries ?? [],
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
@@ -2730,6 +2771,10 @@ export class OrchestrationDaemon {
       }
       const nodePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan)
       const contextEnvelope = taskGraphContextEnvelope(plan, nodePrompt)
+      const workspaceSnapshotInput = record.workspaceSnapshotRef === undefined ? undefined
+        : await this.workspaceSnapshots(record.graph).captureInput(
+          (this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot).snapshotId,
+        )
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -2740,7 +2785,17 @@ export class OrchestrationDaemon {
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
         ...browserBinding === undefined ? {} : { modelToolBridge: browserBinding.descriptor },
-        nativeToolPolicy: requiresBrowser ? 'dsh-tools-authoritative' : plan.operatorPlan.nativeToolPolicy,
+        ...plan.effectiveWriteScopes.length === 0 || plan.executionWorkspace.mode !== 'git-worktree'
+          || plan.executionWorkspace.startSha === undefined ? {}
+          : { workspaceMutationReturn: { baseSha: plan.executionWorkspace.startSha } },
+        ...workspaceSnapshotInput === undefined ? {} : { workspaceSnapshotInput },
+        ...spec.generationLimits === undefined ? {} : { generationLimits: spec.generationLimits },
+        ...spec.workspaceToolLimits === undefined ? {} : { governedWorkspacePolicy: {
+          version: 1 as const, sourceWorkspace: record.snapshot.workspace,
+          readScopes: capabilityPlan.effectiveReadScopes, writeScopes: capabilityPlan.effectiveWriteScopes,
+          forbiddenScopes: spec.forbiddenScopes ?? [], limits: spec.workspaceToolLimits,
+        } },
+        nativeToolPolicy: requiresBrowser || spec.workspaceToolLimits !== undefined ? 'dsh-tools-authoritative' : plan.operatorPlan.nativeToolPolicy,
       })
       this.recordContextEnvelope(
         record,
@@ -2759,7 +2814,7 @@ export class OrchestrationDaemon {
         executionId: String(plan.executionId), turnId: receipt.turnId,
         operatorId: plan.operatorPlan.operatorId,
         laneId: String(plan.executionId),
-        contextIsolation: 'fresh-native-thread',
+        contextIsolation: spec.generationLimits === undefined ? 'fresh-native-thread' : 'bounded-model-request',
       }, next.snapshot.nodes.find(value => value.id === spec.id))])
       const key = `${String(record.snapshot.runId)}\0${spec.id}`
       const active: ActiveAttempt = {
@@ -4269,6 +4324,7 @@ export class OrchestrationDaemon {
       parent: fakeParent(workspace, String(record.snapshot.runId)),
       signal,
       ...residentProfile === undefined ? {} : { residentProfile },
+      ...spec.generationLimits === undefined ? {} : { generationLimits: spec.generationLimits },
       ...modelToolBridge === undefined ? {} : { modelToolBridge },
       ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
       ...residentLaneId === undefined ? {} : { residentLaneId },
@@ -4697,11 +4753,13 @@ export class OrchestrationDaemon {
       this.failAttempt(active, new OrchestrationError(`graph node disappeared: ${active.nodeId}`, 'GRAPH_INVALID'))
       return
     }
-    if (result.stopReason === 'completed') {
+    const acceptanceFailure = verificationVerdictFailure(spec, result)
+    if (result.stopReason === 'completed' && acceptanceFailure === undefined) {
       const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
       try {
         const integration = await this.worktrees.integrate(
-          record.snapshot.workspace,
+          record.workspaceSnapshotRef === undefined ? record.snapshot.workspace
+            : (this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot).workspace,
           plan.executionWorkspace,
           `${active.runId}:${active.nodeId}:${String(active.attempt)}`,
         )
@@ -4743,7 +4801,7 @@ export class OrchestrationDaemon {
       return
     }
     const humanReview = spec.acceptance.some(value => value.kind === 'human-review')
-    const passed = result.stopReason === 'completed'
+    const passed = result.stopReason === 'completed' && acceptanceFailure === undefined
     const pendingUpdates = this.store.capabilityUpdates(active.runId, active.nodeId)
       .filter(value => value.state === 'queued' && value.generation > active.generation)
     const nextGeneration = pendingUpdates.reduce((maximum, value) => Math.max(maximum, value.generation), active.generation)
@@ -4756,7 +4814,7 @@ export class OrchestrationDaemon {
       state,
       capabilityGeneration: continueNextTurn ? nextGeneration : value.capabilityGeneration,
       evidenceRefs: [...value.evidenceRefs, evidenceRef],
-      blockers: passed ? [] : [{ code: 'OPERATOR_STOPPED', message: `operator stopped with ${result.stopReason}`, nodeId: active.nodeId }],
+      blockers: passed ? [] : [{ code: acceptanceFailure === undefined ? 'OPERATOR_STOPPED' : 'VERIFICATION_REJECTED', message: acceptanceFailure ?? `operator stopped with ${result.stopReason}`, nodeId: active.nodeId }],
       updatedAt: now(),
     } : value)
     const next = withRevision(record, {
@@ -4940,10 +4998,35 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, 'node.blocked', { blockers }, nodes.find(value => value.id === nodeId))])
   }
 
-  private finishRun(record: RuntimeRunRecord, state: 'completed' | 'failed' | 'indeterminate'): void {
+  private async finishRun(record: RuntimeRunRecord, state: 'completed' | 'failed' | 'indeterminate'): Promise<void> {
     const current = this.store.getRun(String(record.snapshot.runId))
     if (current.snapshot.state !== 'running') return
-    const next = withRevision(current, { ...current.snapshot, state })
+    if (state === 'completed' && current.workspaceSnapshotRef !== undefined) {
+      const snapshot = this.store.readArtifact(current.workspaceSnapshotRef) as WorkspaceSnapshot
+      if (current.snapshot.delivery?.state === 'applying' || current.snapshot.delivery?.state === 'indeterminate') {
+        this.store.saveRun(withRevision(current, { ...current.snapshot, state: 'indeterminate', delivery: { state: 'indeterminate' } }),
+          [event(current.snapshot.runId, 'run.indeterminate', { code: 'COMMAND_INDETERMINATE', message: '需核对原回写结果，未重新回写。' })])
+        return
+      }
+      this.store.saveRun(withRevision(current, { ...current.snapshot, delivery: { state: 'applying' } }),
+        [event(current.snapshot.runId, 'workspace.snapshot.delivery_started', { snapshotRef: String(current.workspaceSnapshotRef) })])
+      try {
+        const changedPaths = await this.workspaceSnapshots(current.graph).conditionalApply(snapshot.snapshotId, snapshot.workspace)
+        this.store.appendEvents([event(current.snapshot.runId, 'workspace.snapshot.applied', { snapshotRef: String(current.workspaceSnapshotRef), changedPaths })])
+      } catch (error) {
+        state = error instanceof Error && 'code' in error && error.code === 'COMMAND_INDETERMINATE' ? 'indeterminate' : 'failed'
+        const blocker = { code: error instanceof Error && 'code' in error ? String(error.code) : 'INTEGRATION_FAILED', message: renderError(error) }
+        const latest = this.store.getRun(String(current.snapshot.runId))
+        if (latest.snapshot.state !== 'running' || latest.snapshot.delivery?.state !== 'applying') return
+        this.store.saveRun(withRevision(latest, { ...latest.snapshot, state, delivery: { state: state === 'indeterminate' ? 'indeterminate' : 'failed' }, blockers: [...latest.snapshot.blockers, blocker] }),
+          [event(latest.snapshot.runId, `run.${state}`, blocker)])
+        return
+      }
+    }
+    const latest = this.store.getRun(String(current.snapshot.runId))
+    if (latest.snapshot.state !== 'running') return
+    const next = withRevision(latest, { ...latest.snapshot, state,
+      ...state === 'completed' && latest.workspaceSnapshotRef !== undefined ? { delivery: { state: 'applied' as const } } : {} })
     this.store.saveRun(next, [event(next.snapshot.runId, `run.${state}`, {})])
   }
 

@@ -8,6 +8,7 @@ import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attac
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import LlmRuntime, { createUserMessage,
   CONTEXT_WINDOW_EXCEEDED_CODE,
+  INSUFFICIENT_BALANCE_CODE,
   ProviderRequestId,
   QUOTA_EXCEEDED_CODE,
   ReasoningEffortId,
@@ -495,6 +496,47 @@ describe('DeepSeekAdapter against a mock server', () => {
     expect(httpErrorCode(429, { code: 'insufficient_quota', message: 'account credits exhausted' }))
       .toBe(QUOTA_EXCEEDED_CODE)
     expect(httpErrorCode(429, { message: 'request rate limit exceeded' })).toBe('RATE_LIMIT')
+  })
+
+  it.each([
+    [402, undefined],
+    [402, { message: 'Payment required' }],
+    [400, { code: 'insufficient_balance' }],
+    [429, { message: 'Insufficient Balance' }],
+    [400, { type: 'insufficient_balance' }],
+    [400, { message: '账号余额不足' }],
+  ])('identifies explicit balance exhaustion for HTTP %s and %j', (status, error) => {
+    expect(httpErrorCode(status, error)).toBe(INSUFFICIENT_BALANCE_CODE)
+  })
+
+  it.each([
+    [401, { message: 'Insufficient Balance' }, 'AUTH'],
+    [403, { code: 'insufficient_balance' }, 'AUTH'],
+    [413, { message: '余额不足' }, 'INVALID_REQUEST'],
+    [408, { message: 'Insufficient Balance' }, 'HTTP_408'],
+    [500, { code: 'insufficient_balance' }, 'SERVER'],
+    [504, { message: '余额不足' }, 'SERVER'],
+    [429, { message: 'request rate limit exceeded' }, 'RATE_LIMIT'],
+    [429, { code: 'usage_limit_exceeded' }, QUOTA_EXCEEDED_CODE],
+    [429, { code: 'insufficient_quota' }, QUOTA_EXCEEDED_CODE],
+    [400, { message: 'account balance depleted' }, QUOTA_EXCEEDED_CODE],
+    [400, { message: 'invalid temperature' }, 'INVALID_REQUEST'],
+    [503, { message: 'server overloaded' }, 'SERVER'],
+  ])('keeps HTTP %s and %j classified as %s', (status, error, code) => {
+    expect(httpErrorCode(status, error)).toBe(code)
+  })
+
+  it('retains balance failure code and status through an assembled model request', async () => {
+    const server = await mockServer([{
+      kind: 'http-error', status: 402,
+      body: JSON.stringify({ error: { message: 'Insufficient Balance' } }),
+    }])
+    const ctx = await harness(server.url)
+    const result = await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(result.finish).toEqual({
+      kind: 'error',
+      failure: { message: 'Insufficient Balance', code: INSUFFICIENT_BALANCE_CODE, status: 402 },
+    })
   })
 
   it('keeps the status-line message for JSON error bodies without a message', async () => {

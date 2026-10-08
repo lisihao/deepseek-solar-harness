@@ -37,16 +37,19 @@ import {
 import { gouziRoom, gouziRoomEvidence } from './room.ts'
 import './host-service.ts'
 import type { GouziProjectSource } from './host-service.ts'
+import { installKennelDispatch, type KennelDispatchConfig } from './dispatcher.ts'
 import { GouziRecipientResolver, installKennelRecipientGuard } from './recipient.ts'
 
 export * from './contracts.ts'
 export { GouziHostService, type GouziProcessInfo, type GouziProjectSource, type GouziProvisionInput, type GouziSshTarget } from './host-service.ts'
 
 export const name = 'ui-gouzi'
-export const inject = ['orchestrations', 'webServer']
+export const inject = ['orchestrations', 'webServer', 'sessions']
 
 /** Gouzi plugin configuration. */
 export interface Config {
+  /** AI routing of real user messages in kennel sessions. */
+  readonly dispatcher?: KennelDispatchConfig
   /** Browser room read interval in integer milliseconds. */
   readonly roomPollIntervalMs?: number
   /** How long after issue an execution grant may start work, in milliseconds. */
@@ -54,6 +57,38 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
+  dispatcher: z.object({
+    enabled: z.boolean().default(true),
+    jev: z.union([z.object({ provider: z.string().required(), model: z.string().required() })]),
+    jevProvider: z.string().default('Jev'),
+    deepseek: z.object({ provider: z.string().default('DeepSeek'), model: z.string().default('deepseek-v4-flash') }),
+    codex: z.object({ operatorId: z.string().default('codex'), model: z.string() }),
+    maxTokens: z.number().step(1).min(1).default(512),
+    timeoutMs: z.number().step(1).min(1_000).max(300_000).default(60_000),
+    maxOutputBytes: z.number().step(1).min(1).default(65_536),
+    maxInputBytes: z.number().step(1).min(1).default(65_536),
+    contextTokens: z.number().step(1).min(1).default(8_192),
+    taskTimeoutMs: z.number().step(1).min(1_000).max(86_400_000).default(600_000),
+    taskGenerationLimits: z.object({
+      maxTokens: z.number().step(1).min(1).default(4096),
+      maxOutputBytes: z.number().step(1).min(1).default(262144),
+      maxToolCalls: z.number().step(1).min(0).default(40),
+    }),
+    workspaceToolLimits: z.object({
+      maxToolCalls: z.number().step(1).min(1).default(40),
+      maxFileBytes: z.number().step(1).min(1).default(1048576),
+      maxOutputBytes: z.number().step(1).min(1).default(262144),
+      maxSearchFiles: z.number().step(1).min(1).default(2000),
+    }),
+    workspaceSnapshotLimits: z.object({
+      maxFiles: z.number().step(1).min(1).default(20000),
+      maxBytes: z.number().step(1).min(1).default(268435456),
+      maxBundleBytes: z.number().step(1).min(1).default(67108864),
+      timeoutMs: z.number().step(1).min(1000).default(120000),
+    }),
+    maxRunCandidates: z.number().step(1).min(1).max(100).default(20),
+    titleMaxChars: z.number().step(1).min(1).default(160),
+  }),
   roomPollIntervalMs: GOUZI_ROOM_POLL_INTERVAL_SCHEMA,
   grantDeadlineMs: z.number().step(1).min(60_000).max(24 * 60 * 60_000).default(2 * 60 * 60_000),
 })
@@ -486,7 +521,9 @@ function failure(error: unknown): Reply {
  * @param config - grant lifetime given to every new member.
  */
 export function apply(ctx: Context, config: Config = {}): void {
-  new GouziRecipientResolver(ctx)
+  const resolved = Config(config)
+  new GouziRecipientResolver(ctx, resolved.dispatcher?.enabled === true)
+  if (resolved.dispatcher) installKennelDispatch(ctx, resolved.dispatcher)
   installKennelRecipientGuard(ctx)
   const grantDeadlineMs = config.grantDeadlineMs ?? 2 * 60 * 60_000
   const roomPollIntervalMs = GOUZI_ROOM_POLL_INTERVAL_SCHEMA(config.roomPollIntervalMs)

@@ -38,11 +38,19 @@ Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStor
 
 `gouziOperatorServer` 把已注册且已启用的成员投影为远端 Server，其算子地址为 `gouzi.<gouziId>.<operatorId>`。对每一次 attempt，它读取成员、其宿主以及该 attempt 封存的节点执行计划，并签发 `GouziExecutionGrant`：run、node、attempt、执行 ID、generation、权威纪元、来自计划的读、写与 effect 范围、截止时间，以及等于随后所发请求的 `gouziRequestHash` 的 `planHash`。它拒绝未 `enabled` 的成员，也拒绝不是顶层 TaskGraph attempt 的执行 ID，所以成员不会运行 RLM 子任务或 Auto-Refine 阶段。第一版不支持在主实例不可达时运行，所以 `offlineUntil` 等于 `deadline`；截止时间是成员自己的 `grantDeadlineMs`（60 秒到 24 小时，创建时设定）。每次远端刷新时，daemon 会注册每个 `enabled` 成员，并按宿主的 `credentialRef` 从 `ctx.credentials` 读取宿主凭据（回环或隧道端点不需要凭据），把 `connection` 记为 `online` 或 `unreachable`，并在该成员有 attempt 处于 accepted 或 running 时把 `activity` 记为 `working`。
 
-`GouziControl.executionOperators()` 使用协议 7 的只读查询 `gouzi.execution_operators`。只有成员身份、generation、宿主、属主与端点仍匹配时，它才将已启用的注册表成员关联到实际远程注册，再读取最新 Resident catalog 中的完整算子 id、可用状态、原因和模型。缺少注册或注册已过期时，算子列表为空；仅有 `connection: online` 不能证明执行入口可用。查询不会启动成员，也不改变 membership、授权或调度状态。[狗窝房间](../ui-gouzi/README.md)使用这些数据展示状态并接纳点名的标准 TaskGraph。编译和启动会对照当前目录校验 `admission.gouziRecipient`：每个节点只能使用已接纳的算子 id，不能使用 fallback、RLM 或 Autonomous Mode。对象不可用或 generation 改变时会失败，不会改选其他路由。
+`GouziControl.executionOperators()` 使用协议 7 的只读查询 `gouzi.execution_operators`。只有成员身份、generation、宿主、属主与端点仍匹配时，它才将已启用的注册表成员关联到实际远程注册，再读取最新 Resident catalog 中的完整算子 id、可用状态、原因和模型。查询还从匹配的最新 Resident catalog 的 `gouziWorkspace` 返回 `projectScopes`：只有经 `registeredDirectory` 解析和核验的持久化默认项目才提供成员本地真实路径。非本地成员的只读共享项目图使用这一经过认证的接收宿主目录路径；编译不要求同一路径能在调度 Mac 上通过 `realpath` 解析。旧端点缺少字段时返回 `[]`；普通算子、generation 不匹配或不可达的注册不提供目录访问依据。缺少注册或注册已过期时，算子列表为空；仅有 `connection: online` 不能证明执行入口可用。查询不会启动成员，也不改变 membership、授权或调度状态。[狗窝房间](../ui-gouzi/README.md)使用这些数据展示状态并接纳点名的标准 TaskGraph。编译和启动会对照当前目录校验 `admission.gouziRecipient`：每个节点只能使用已接纳的算子 id，不能使用 fallback、RLM 或 Autonomous Mode。对象不可用或 generation 改变时会失败，不会改选其他路由。
 
 `./remote-host` 入口只挂载远端执行宿主服务，所以狗子成员无需 TaskGraph daemon、调度器或集群选举，也能在已注册目录执行。持久化的 `remoteExecution.projects` 将不透明项目 ID 映射到确切选中的 Server 本地目录，`defaultProjectId` 选择初始项目。`gouzi-project` 工作区身份发送项目 ID，不发送源宿主路径，也不伪造 commit；可选 origin 信息不授予目录访问权。执行要求挂载成员 service，并提供与成员身份、generation 和请求 hash 匹配的授权。直接目录执行保留未跟踪文件、尚无提交的仓库和没有 origin 的仓库。共享目录锁和执行回执位于选中项目之外；结算只释放执行元数据，不删除项目文件。冲突或未解决的命令会阻止复用，未知结果不会自动重试。见[目录领养决策](../../../.agents/notes/implemented/feature/2026-10-06-gouzi-directory-adoption.md)。
 
 配置了项目的狗子成员使用持久化的默认项目及确切选中的真实目录。仅配置 repositories 的成员使用干净精确提交的 Git 物化；两种模式都检查授权和成员 generation。目录资格检查核对配置与目录可用性，不把目录当前忙碌当成资格失败。持久化租约检查只读；已知原生回执允许恢复原 turn，存在租约但没有原生回执则保持 indeterminate。目录锁仅在结算得到证明，或关联的命令拒绝后成功查询确认没有回执时释放；未解决结果保留锁，不重放。
+
+## Directory snapshot delivery
+
+`workspaceIsolation: directory-snapshot` 将普通、尚无提交或含未提交修改的目录捕获到任务自有 Git 检查点，排除 `.git` 并保留原 index 和 HEAD。狗子修改任务的准入要求注册为 `hostId: local` 且端点为回环地址；此路由不授权远端完整快照传输。接收执行器必须重新证明支持生成限制、受治理文件策略和工作区修改返回。审批后，工作在隔离 checkout 中执行；独立验证接收当前修改的 bundle，而不是只有原始基线。
+
+新建私有检查点仓库与接收 bundle 的仓库在初始化后持久化 `core.autocrlf=false`，并向 `.git/info/attributes` 写入 `* -text -eol -filter -ident -working-tree-encoding`，使捕获、checkout 及关联执行者 worktree 保留文件字节，不应用换行、filter、ident 或编码转换。快照修改 diff 使用 `--no-textconv`。这些设置属于任务自有 Git 元数据，不修改源目录的 `.git`、index、HEAD 或用户 `.gitattributes`。已有回执保留原快照，未解决的快照或接收工作区身份不会自动重建。
+
+验证节点的 `model-verdict` 要求严格 JSON，包含 `accepted`、非空 `reason` 以及非空字符串 `evidence` 条目。否定或缺失的结论、字段格式错误及无证据都会阻止原目录应用。通用文件测试检查权限与修改机制，不能证明验证者的语义判断质量。最终应用在修改文件前对照检查点核验受影响的源路径及其父目录。交付在原目录修改前持久化 `applying`，并在这一关键阶段拒绝暂停／取消；此前已接受的取消会阻止应用。未知交付转为 indeterminate，要求核对原 effect。
 
 ## Model Experience
 

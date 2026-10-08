@@ -829,6 +829,39 @@ export class ResidentStore {
   }
 
   /**
+   * Fence one turn whose file or provider effect has no proven durable outcome.
+   * @param commandId - admitted durable command identity.
+   * @param message - bounded caller-redacted diagnostic.
+   * @returns the indeterminate receipt, requiring explicit reconciliation before replay.
+   */
+  markTurnIndeterminate(commandId: string, message: string): TurnInspection {
+    return this.transaction(() => {
+      const receipt = this.requireReceipt(commandId)
+      if (receipt.state === 'indeterminate') return this.inspectTurn(receipt.turn_id)
+      if (receipt.state === 'settled') {
+        throw new ResidentOperatorError(`command ${commandId} is already settled`, 'COMMAND_CONFLICT')
+      }
+      const now = new Date().toISOString()
+      this.db.prepare(`
+        UPDATE command_receipts
+        SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, updated_at = ?
+        WHERE command_id = ?
+      `).run(message, now, commandId)
+      this.db.prepare(`
+        UPDATE resident_sessions
+        SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed',
+            active_turn_id = NULL, revision = revision + 1, updated_at = ?
+        WHERE id = ?
+      `).run(now, receipt.session_id)
+      this.db.prepare('DELETE FROM session_leases WHERE session_id = ?').run(receipt.session_id)
+      this.appendEvent(receipt.session_id, 'turn.indeterminate', {
+        commandId, turnId: receipt.turn_id, reason: 'external_outcome_unproven',
+      }, now)
+      return this.inspectTurn(receipt.turn_id)
+    })
+  }
+
+  /**
    * Settle one product or infrastructure failure after caller-side diagnostic redaction.
    * @param commandId - admitted durable command identity.
    * @param code - stable failure code.
@@ -839,7 +872,7 @@ export class ResidentStore {
   fail(commandId: string, code: string, message: string, stopReason: ResidentStopReason = 'error'): TurnInspection {
     return this.transaction(() => {
       const receipt = this.requireReceipt(commandId)
-      if (receipt.state === 'settled') return this.inspectTurn(receipt.turn_id)
+      if (receipt.state === 'settled' || receipt.state === 'indeterminate') return this.inspectTurn(receipt.turn_id)
       const now = new Date().toISOString()
       const result: ResidentTurnResult = { output: [], stopReason }
       this.db.prepare(`

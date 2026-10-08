@@ -10,6 +10,7 @@ import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physica
 import { createCodexRlmToolHandler } from '../src/drivers.ts'
 import { JsonRpcLineTransport, LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
 import type {
+  ResidentTurnResult,
   ResidentDriverExecuteRequest,
   ResidentDriverCompactRequest,
   ResidentProductDriver,
@@ -276,7 +277,7 @@ class MemoryDriver implements ResidentProductDriver {
     })
   }
 
-  async execute(request: ResidentDriverExecuteRequest) {
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId?: string }> {
     this.commandIds.push(String(request.commandId))
     this.profiles.push(request.profile)
     this.systemPrompts.push(request.systemPrompt)
@@ -1346,6 +1347,7 @@ describe('ResidentDaemon', () => {
     await daemon.start()
     const request = {
       commandId: 'private-admission', operatorId: 'codex', workspace: alias,
+      profile: { model: 'gpt-test', effort: 'medium' as const },
       prompt: [{ type: 'text' as const, text: 'private sender task /private/tmp/source' }],
       systemPrompt: 'private receiver system', nativeContext: { version: 1 as const, digest: 'e'.repeat(64) },
       nativeToolPolicy: 'disabled' as const, signal: new AbortController().signal,
@@ -1441,6 +1443,7 @@ describe('ResidentDaemon', () => {
     const connected = client(root)
     const first = await connected.execute({
       commandId: 'no-tools', operatorId: 'codex', workspace,
+      profile: { model: 'gpt-test', effort: 'medium' },
       prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'disabled',
       signal: new AbortController().signal,
     })
@@ -1448,6 +1451,7 @@ describe('ResidentDaemon', () => {
     expect(driver.nativeToolPolicies).toEqual(['disabled'])
     await expect(connected.execute({
       commandId: 'no-tools', operatorId: 'codex', workspace,
+      profile: { model: 'gpt-test', effort: 'medium' },
       prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'inherit',
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
@@ -1459,6 +1463,7 @@ describe('ResidentDaemon', () => {
     }
     const bridged = await connected.execute({
       commandId: 'rlm-tools', operatorId: 'codex', workspace, laneId: 'rlm-tools',
+      profile: { model: 'gpt-test', effort: 'medium' },
       prompt: [{ type: 'text', text: 'reason with the repl' }], nativeToolPolicy: 'disabled', modelToolBridge,
       signal: new AbortController().signal,
     })
@@ -1547,6 +1552,7 @@ it.each(['dsh-tools-authoritative', 'disabled'] as const)('reattaches %s native 
   const ownerSignal = new AbortController()
   const request = {
     commandId: 'bridge-owner-reattach', operatorId: 'codex', workspace,
+    profile: { model: 'gpt-test', effort: 'medium' as const },
     prompt: [{ type: 'text', text: 'two calls across Host restart' }],
     nativeToolPolicy: policy,
   }
@@ -1574,4 +1580,61 @@ it.each(['dsh-tools-authoritative', 'disabled'] as const)('reattaches %s native 
     await oldOwner.server.dispose()
     await newOwner.server.dispose()
   }
+})
+
+describe('Codex direct-model daemon admission', () => {
+  it('forwards sealed generation/workspace budgets without native qualification or invented session identity', async () => {
+    const root = temporaryRoot()
+    const workspace = temporaryRoot()
+    const driver = new MemoryDriver()
+    const qualify = vi.spyOn(driver, 'qualify')
+    const execute = vi.spyOn(driver, 'execute').mockImplementation(async (request) => {
+      expect(request.profile).toEqual({ model: 'already-qualified-model', effort: 'high' })
+      expect(request.generationLimits).toEqual({ maxTokens: 100, maxOutputBytes: 4096, maxToolCalls: 3 })
+      expect(request.governedWorkspacePolicy).toMatchObject({ version: 1, readScopes: ['input.txt'], writeScopes: ['output.txt'] })
+      expect(request.governedToolRoot).toBe(join(root, 'model-tools'))
+      request.onRunning()
+      return { output: [{ type: 'text' as const, text: 'direct API result' }], stopReason: 'completed' as const }
+    })
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const request = {
+      commandId: ResidentOperatorCommandId('governed-task'), operatorId: 'codex', workspace, laneId: 'new-governed-lane',
+      prompt: [{ type: 'text' as const, text: 'work within declared scopes' }], profile: { model: 'already-qualified-model', effort: 'high' as const },
+      nativeToolPolicy: 'dsh-tools-authoritative' as const,
+      generationLimits: { maxTokens: 100, maxOutputBytes: 4096, maxToolCalls: 3 },
+      governedWorkspacePolicy: { version: 1 as const, sourceWorkspace: '/original/source', readScopes: ['input.txt'], writeScopes: ['output.txt'], forbiddenScopes: [],
+        limits: { maxToolCalls: 3, maxFileBytes: 1024, maxOutputBytes: 4096, maxSearchFiles: 20 } },
+      signal: new AbortController().signal,
+    }
+    try {
+      const turn = await connected.execute(request)
+      await expect(turn.result).resolves.toMatchObject({ output: [{ type: 'text', text: 'direct API result' }] })
+      expect(qualify).not.toHaveBeenCalled()
+      expect((await connected.inspect(turn.sessionId)).nativeSessionId).toBeUndefined()
+      await expect(connected.execute({ ...request, generationLimits: { ...request.generationLimits, maxTokens: 101 } }))
+        .rejects.toBeInstanceOf(ResidentCommandRefusal)
+      await expect(connected.execute({ ...request, governedWorkspacePolicy: { ...request.governedWorkspacePolicy, writeScopes: ['different.txt'] } })).rejects.toBeInstanceOf(ResidentCommandRefusal)
+      expect(execute).toHaveBeenCalledTimes(1)
+    } finally { await daemon.close() }
+  })
+
+  it('requires an explicit direct-model identity instead of filling model or effort through native qualification', async () => {
+    const root = temporaryRoot()
+    const workspace = temporaryRoot()
+    const driver = new MemoryDriver()
+    const qualify = vi.spyOn(driver, 'qualify')
+    const execute = vi.spyOn(driver, 'execute')
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    try {
+      await expect(client(root).execute({ commandId: ResidentOperatorCommandId('no-profile'), operatorId: 'codex', workspace,
+        prompt: [{ type: 'text', text: 'hello' }], nativeToolPolicy: 'disabled', generationLimits: { maxTokens: 100, maxOutputBytes: 4096 },
+        signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'EXECUTION_PROFILE_UNSUPPORTED' })
+      expect(qualify).not.toHaveBeenCalled()
+      expect(execute).not.toHaveBeenCalled()
+    } finally { await daemon.close() }
+  })
 })

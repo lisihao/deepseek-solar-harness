@@ -24,7 +24,7 @@ export function currentKennelRecipient(events: readonly SessionEvent[]): KennelR
 
 /** The Host confirms registration again for every directed start. */
 export class GouziRecipientResolver extends Service implements OrchestrationRecipientResolver {
-  constructor(ctx: Context) { super(ctx, 'orchestrationRecipients') }
+  constructor(ctx: Context, readonly automaticDispatch = false) { super(ctx, 'orchestrationRecipients') }
 
   async resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined> {
     const selected = currentKennelRecipient(events)

@@ -29,7 +29,7 @@ export {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
   bindRemoteResidentProtocol, canonicalRemoteRepositoryIdentity, RemoteResidentProtocolClient,
   parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
-  parseRemoteResidentProviders, parseRemoteResidentResult, parseRemoteResidentTurn,
+  parseRemoteResidentProviders, parseRemoteResidentResult, parseRemoteResidentTurn, RemoteResidentCapabilityError,
   parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
 } from '../remote-sync.ts'

@@ -1,4 +1,5 @@
-// Real built plugins and HTTP; fixtures supply external catalog/execution reads and keyless model responses.
+// Real built plugins and HTTP; fixtures supply catalog/execution reads and keyless model responses.
+// Browser UI/skin fixtures disable AI dispatch; the ACP snapshot owns AI-to-daemon acceptance.
 import { lstat, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -22,8 +23,8 @@ const members = ['g1', 'g2'].map((gouziId, i) => ({
   gouziId, name: '同名', avatarId: 'shiba', role: 'development', hostId: 'h' + String(i),
   membership: 'enabled', connection: 'online', activity: 'resting', createdAt: '2026-10-01T00:00:00Z', generation: 1,
 }))
-const execution = members.map(m => ({ gouziId: m.gouziId, generation: 1,
-  operators: [{ operatorId: m.gouziId + '.actual', available: true, models: [] }],
+const execution = members.map(m => ({ gouziId: m.gouziId, generation: 1, projectScopes: [] as string[],
+  operators: [{ operatorId: m.gouziId + '.actual', available: true, supportsGenerationLimits: true, models: [] }],
 }))
 describe('web e2e: composed kennel room', () => {
   let scaffold: WebScaffold
@@ -47,6 +48,7 @@ describe('web e2e: composed kennel room', () => {
   }))
   beforeAll(async () => {
     scaffold = await launchWebScaffold({ agentPresets: { roots: [{ path: SHIPPED_PRESETS, trust: 'system' }, { path: PRESETS, trust: 'system' }], default: 'standard' } })
+    for (const entry of execution) entry.projectScopes = [scaffold.workspaceCwd]
     const control = { list: async () => {
       reads++
       if (failRead) throw new Error('catalog temporarily offline')
@@ -71,7 +73,7 @@ describe('web e2e: composed kennel room', () => {
       await symlink(fileURLToPath(new URL('../../../packages/orchestration/ui-gouzi', import.meta.url)), moduleLink)
       fixtureLink = moduleLink
     }
-    await scaffold.ctx.loader.create({ name: '@deepseek-ai/dsh-ui-gouzi', config: { roomPollIntervalMs: 250 } })
+    await scaffold.ctx.loader.create({ name: '@deepseek-ai/dsh-ui-gouzi', config: { roomPollIntervalMs: 250, dispatcher: { enabled: false } } })
     await scaffold.ctx.loader.await()
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
@@ -81,7 +83,7 @@ describe('web e2e: composed kennel room', () => {
     await connectFreshWorkspace(page, scaffold.workspaceCwd)
     await page.getByRole('button', { name: '狗窝', exact: true }).click()
     await page.getByRole('heading', { name: '狗窝', exact: true }).waitFor()
-    await page.getByRole('button', { name: '点名 · 标准任务', exact: true }).nth(1).waitFor({ timeout: 10_000 })
+    await page.getByRole('button', { name: '发给 同名 · 机器1 · 开发', exact: true }).waitFor({ timeout: 10_000 })
     const roomRequest = await page.waitForRequest(request => request.url().includes('/api/gouzi?session_id='))
     roomSession = new URL(roomRequest.url()).searchParams.get('session_id') ?? ''
     expect(roomSession.length).toBeGreaterThan(0)
@@ -137,12 +139,14 @@ describe('web e2e: composed kennel room', () => {
     await writeFile(join(tmpdir(), 'dsh-chatroom-polling.json'), JSON.stringify({ configuredMs: 250, intervalsMs: intervals }, null, 2) + '\n')
   })
   it('filters independently from recipient while preserving the draft', async () => {
-    await page.getByRole('button', { name: '点名 · 标准任务', exact: true }).first().click()
+    expect(await page.getByText('自动分派', { exact: true }).count()).toBe(1)
+    await page.getByRole('button', { name: '发给 同名 · 机器0 · 开发', exact: true }).click()
     await page.getByRole('textbox', { name: '消息', exact: true }).fill('保留这条草稿')
-    await page.getByRole('button', { name: '筛选 同名 · 机器1 · 开发', exact: true }).click()
-    expect(await page.getByText('发送对象：同名 · 机器0 · 开发 · 标准任务', { exact: true }).count()).toBe(1)
+    await page.getByRole('button', { name: '查看 同名 · 机器1 · 开发 的消息', exact: true }).click()
+    expect(await page.getByText('发给 同名', { exact: true }).count()).toBe(1)
     expect(await page.getByRole('textbox', { name: '消息', exact: true }).inputValue()).toBe('保留这条草稿')
-    expect(await page.getByRole('button', { name: '点名 · 标准任务', exact: true }).count()).toBe(2)
+    expect(await page.getByRole('button', { name: /^发给 同名 · 机器/ }).count()).toBe(2)
+    expect(await page.getByRole('button', { name: '发给 同名 · 机器0 · 开发', exact: true }).getAttribute('aria-pressed')).toBe('true')
     await page.getByRole('button', { name: '全部', exact: true }).click()
   })
   it('answers a real question carrier and restores the room draft and recipient', async () => {
@@ -160,7 +164,7 @@ describe('web e2e: composed kennel room', () => {
     expect(await answered).toMatchObject({ answers: [{ id: 'color', selected: ['Blue'] }] })
     await expect.poll(() => page.getByRole('textbox', { name: '消息', exact: true }).count(), { timeout: 10_000 }).toBe(1)
     expect(await page.getByRole('textbox', { name: '消息', exact: true }).inputValue()).toBe('保留这条草稿')
-    expect(await page.getByText('发送对象：同名 · 机器0 · 开发 · 标准任务', { exact: true }).count()).toBe(1)
+    expect(await page.getByText('发给 同名', { exact: true }).count()).toBe(1)
     expect(await page.locator('textarea:visible').count()).toBe(1)
   })
   it('answers a real approval carrier and restores the room composer', async () => {
@@ -247,16 +251,30 @@ describe('web e2e: composed kennel room', () => {
     failRead = true
     await expect.poll(() => send.isDisabled(), { timeout: 10_000 }).toBe(true)
     expect(await page.getByRole('textbox', { name: '消息', exact: true }).inputValue()).toBe('保留这条草稿')
-    expect(await page.getByText('发送对象：同名 · 机器0 · 开发 · 标准任务', { exact: true }).count()).toBe(1)
+    expect(await page.getByText('发给 同名', { exact: true }).count()).toBe(1)
     failRead = false
     await expect.poll(() => send.isEnabled(), { timeout: 10_000 }).toBe(true)
+    const session = scaffold.ctx.agents.get(SessionId(roomSession))!.session
+    session.append('turn/start', { turn: 3 })
+    session.append('turn/end', { turn: 3, reason: { kind: 'error', error: {
+      message: '执行入口拒绝当前仓库', code: 'UNKNOWN',
+    } } })
+    const failure = page.getByRole('log').getByRole('alert')
+    await failure.waitFor()
+    expect(await failure.textContent()).toBe('执行入口拒绝当前仓库（UNKNOWN）')
+    const warningStart = tripwire.warnings.length
+    await page.reload({ waitUntil: 'load' })
+    acknowledgeReloadConnectionLoss(tripwire, warningStart)
+    await page.getByRole('heading', { name: '狗窝', exact: true }).waitFor()
+    await failure.waitFor()
+    expect(await failure.textContent()).toBe('执行入口拒绝当前仓库（UNKNOWN）')
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   })
 })
 
 // Own a replay cursor and Session so the layout/carrier fixtures never consume a model turn.
-describe('web e2e: kennel room real send', () => {
+describe('web e2e: kennel room replay send UI', () => {
   it('contains Blue Fantasy frost through a real kennel send and retains usable controls after reload', async () => {
     const prompt = 'Reply exactly KENNEL_ROOM_SEND_OK and stop.'
     const reply = 'KENNEL_ROOM_SEND_OK'
@@ -270,6 +288,7 @@ describe('web e2e: kennel room real send', () => {
     let skinLink: string | undefined
     const failures: unknown[] = []
     try {
+      for (const entry of execution) entry.projectScopes = [scaffold.workspaceCwd]
       scaffold.ctx.provide('orchestrations', {
         gouzi: { list: async () => ({ members, hosts: [{ hostId: 'h0', label: '机器0' }, { hostId: 'h1', label: '机器1' }] }), executionOperators: async () => execution },
         list: async () => [],
@@ -281,7 +300,7 @@ describe('web e2e: kennel room real send', () => {
         await symlink(fileURLToPath(new URL('../../../packages/orchestration/ui-gouzi', import.meta.url)), moduleLink)
         fixtureLink = moduleLink
       }
-      await scaffold.ctx.loader.create({ name: '@deepseek-ai/dsh-ui-gouzi', config: { roomPollIntervalMs: 250 } })
+      await scaffold.ctx.loader.create({ name: '@deepseek-ai/dsh-ui-gouzi', config: { roomPollIntervalMs: 250, dispatcher: { enabled: false } } })
       const skinModuleLink = join(scaffold.harnessHome, 'profiles/node_modules', BLUE_FANTASY_ID)
       try { await lstat(skinModuleLink) }
       catch (error) {
@@ -338,7 +357,14 @@ describe('web e2e: kennel room real send', () => {
         expect(sidebar).not.toBeNull(); expect(membersPanel).not.toBeNull()
         expect(geometry.x).toBeGreaterThanOrEqual(sidebar!.x + sidebar!.width)
         expect(geometry.x + geometry.width).toBeLessThanOrEqual(membersPanel!.x + 1)
-        const filter = page.getByRole('button', { name: '筛选 同名 · 机器1 · 开发', exact: true })
+        const recipient = page.getByRole('button', { name: '发给 同名 · 机器0 · 开发', exact: true })
+        await recipient.click()
+        expect(await recipient.getAttribute('aria-pressed')).toBe('true')
+        expect(await page.getByText('发给 同名', { exact: true }).count()).toBe(1)
+        await page.getByRole('button', { name: '清除点名', exact: true }).click()
+        expect(await recipient.getAttribute('aria-pressed')).toBe('false')
+        expect(await page.getByText('自动分派', { exact: true }).count()).toBe(1)
+        const filter = page.getByRole('button', { name: '查看 同名 · 机器1 · 开发 的消息', exact: true })
         await filter.click()
         expect(await filter.getAttribute('aria-pressed')).toBe('true')
         await page.getByRole('button', { name: '全部', exact: true }).click()
@@ -391,10 +417,11 @@ describe('web e2e: kennel room real send', () => {
       expect(userEvents).toHaveLength(1)
       expect(userEvents[0]).toMatchObject({ data: { content: [{ type: 'text', text: prompt }] } })
       expect(agent.session.events.filter(event => event.type === 'assistant/message')).toHaveLength(1)
+      expect(agent.session.events.some(event => event.type === 'request/context')).toBe(true)
+      expect(await log.getByText(/context · 序号|rawdiagnostic/).count()).toBe(0)
       expect(await log.locator('article').allTextContents()).toMatchInlineSnapshot(`
         [
           "我Reply exactly KENNEL_ROOM_SEND_OK and stop.",
-          "执行记录context · 序号 10",
           "总管KENNEL_ROOM_SEND_OK",
         ]
       `)
@@ -410,7 +437,6 @@ describe('web e2e: kennel room real send', () => {
       expect(await log.locator('article').allTextContents()).toMatchInlineSnapshot(`
         [
           "我Reply exactly KENNEL_ROOM_SEND_OK and stop.",
-          "执行记录context · 序号 10",
           "总管KENNEL_ROOM_SEND_OK",
         ]
       `)

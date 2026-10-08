@@ -11,6 +11,7 @@ import {
 import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentCommandRefusal } from '@deepseek-ai/dsh-resident-operator'
 import { RemoteSyncHub, RemoteSyncJournal } from '../src/remote-sync-host.ts'
+import type { RemoteResidentExecuteRequest, RemoteResidentTurnSnapshot } from '../src/remote-sync.ts'
 import { RemoteOperatorHostService } from '../src/remote-operator-host.ts'
 import { buildOperatorContextEnvelope, materializeOperatorContextEnvelopeNative } from '@deepseek-ai/dsh-system-prompt'
 
@@ -35,6 +36,9 @@ describe('generic RemoteOperatorHostService defaults', () => {
     await fiber.await()
     const host = ctx.remoteOperatorHost
     try {
+      expect(host.supportsWorkspaceMutationReturn()).toBe(false)
+      expect(host.supportsWorkspaceSnapshotInput()).toBe(false)
+      await expect(host.captureWorkspaceMutation('execution')).resolves.toBeUndefined()
       await expect(host.gouziWorkspace()).resolves.toBeUndefined()
       await expect(host.inspectWorkspace('execution')).rejects.toThrow('remote execution workspace inspection is unsupported')
     } finally { await fiber.dispose() }
@@ -334,13 +338,13 @@ describe('RemoteSyncHub', () => {
     }))
     const resident = { providers: async () => [provider], execute, inspectCommand: async () => undefined }
     const host = {
-      inspectWorkspace: async () => undefined, gouziWorkspace: async () => ({ projectId }),
+      inspectWorkspace: async () => undefined, gouziWorkspace: async () => ({ projectId, projectScopes: ['/srv/user-project'] }),
       qualification: async () => ({ available: true }),
       materializeWorkspace: async () => ({ version: 1, identity, path: '/srv/user-project' }),
     }
     const member = { hello: () => ({ gouziId: 'gouzi-1', generation: 2 }) }
     const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never, () => member as never)
-    expect(await hub.operatorProviders()).toEqual([{ ...provider, gouziWorkspace: { gouziId: 'gouzi-1', generation: 2, projectId } }])
+    expect(await hub.operatorProviders()).toEqual([{ ...provider, gouziWorkspace: { gouziId: 'gouzi-1', generation: 2, projectId, projectScopes: ['/srv/user-project'] } }])
     await hub.operatorExecute({ commandId: 'c', operatorId: 'codex', laneId: 'l', prompt: [], workspaceIdentity: identity })
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
       workspace: '/srv/user-project',
@@ -444,6 +448,20 @@ describe('RemoteSyncHub', () => {
       } finally { await hub.close() }
     },
   )
+
+  it.each([false, true])('refuses unsupported mutation hosts or a mismatched Git base before native execution (%s)', async (supported) => {
+    const execute = vi.fn()
+    const materializeWorkspace = vi.fn()
+    const host = { supportsWorkspaceMutationReturn: () => supported, materializeWorkspace }
+    const hub = new RemoteSyncHub(api(), 4, undefined, { execute } as never, undefined, () => host as never)
+    try {
+      await expect(hub.operatorExecute({ commandId: 'denied', operatorId: 'codex', laneId: 'lane', prompt: [],
+        workspaceIdentity: { version: 1, repository: 'github.com/owner/repo', commit: 'a'.repeat(40) },
+        workspaceMutationReturn: { version: 1, baseSha: supported ? 'b'.repeat(40) : 'a'.repeat(40) } })).rejects.toThrow('supported isolated exact-base')
+      expect(materializeWorkspace).not.toHaveBeenCalled()
+      expect(execute).not.toHaveBeenCalled()
+    } finally { await hub.close() }
+  })
 
   it('uses the receiver project subdirectory as the authoritative prompt cwd', async () => {
     const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId: 'a'.repeat(64), subdir: 'packages/core' }
@@ -885,4 +903,103 @@ describe('RemoteSyncHub', () => {
     }, { timeout: 500 })
     await hub.close()
   })
+})
+
+/** External Resident and workspace seams driven through the actual Remote Sync host. */
+function isolatedHostFixture() {
+  const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId: 'a'.repeat(64) }
+  const materializeWorkspace = vi.fn(async (...args: Parameters<RemoteOperatorHostService['materializeWorkspace']>) => ({
+    version: 1 as const, identity: args[0], path: '/srv/private-checkout',
+  }))
+  const captureWorkspaceMutation = vi.fn(async (): ReturnType<RemoteOperatorHostService['captureWorkspaceMutation']> => ({
+    projectId: identity.projectId, baseSha: 'a'.repeat(40), patch: 'retained patch',
+  }))
+  const inspectTurn = vi.fn(async (): Promise<RemoteResidentTurnSnapshot> => ({
+    commandId: 'isolated-command', sessionId: 'session', turnId: 'turn', state: 'settled', stateRevision: 2,
+    updatedAt: '2026-10-08T00:00:00.000Z', result: { output: [], stopReason: 'completed' },
+  }))
+  const execute = vi.fn(async (_request: ResidentExecuteRequest) => ({
+    sessionId: 'session', turnId: 'turn', stateRevision: 1, dispose: async () => undefined,
+  }))
+  const host = {
+    supportsWorkspaceMutationReturn: vi.fn(() => true), supportsWorkspaceSnapshotInput: vi.fn(() => true),
+    qualification: async () => ({ available: true }), inspectWorkspace: async () => undefined,
+    gouziWorkspace: async () => ({ projectId: identity.projectId }), materializeWorkspace, captureWorkspaceMutation,
+    renewWorkspace: vi.fn(async () => undefined), releaseWorkspace: vi.fn(async () => undefined),
+  }
+  const resident = { providers: async () => [{ operatorId: 'codex' }], inspectCommand: async () => undefined, inspectTurn, execute }
+  const member = { hello: () => ({ gouziId: 'dog', generation: 1 }) }
+  const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never, () => member as never)
+  const request: RemoteResidentExecuteRequest = { commandId: 'isolated-command', operatorId: 'codex', laneId: 'lane', prompt: [], workspaceIdentity: identity }
+  return { hub, host, request, execute, inspectTurn, materializeWorkspace, captureWorkspaceMutation }
+}
+it('advertises host-supported snapshot/mutation capabilities with an empty absent project-scope list', async () => {
+  const f = isolatedHostFixture()
+  try {
+    expect(await f.hub.operatorProviders()).toEqual([{ operatorId: 'codex', supportsWorkspaceMutationReturn: true,
+      supportsWorkspaceSnapshotInput: true, gouziWorkspace: { gouziId: 'dog', generation: 1, projectId: 'a'.repeat(64), projectScopes: [] } }])
+    f.host.supportsWorkspaceMutationReturn.mockReturnValue(false); f.host.supportsWorkspaceSnapshotInput.mockReturnValue(false)
+    const provider = (await f.hub.operatorProviders())[0]!
+    expect(provider).not.toHaveProperty('supportsWorkspaceMutationReturn'); expect(provider).not.toHaveProperty('supportsWorkspaceSnapshotInput')
+  } finally { await f.hub.close() }
+})
+it.each(['git', 'unsupported', 'mismatched-base'] as const)('rejects %s snapshot inputs before materialization or Native admission', async (reason) => {
+  const f = isolatedHostFixture()
+  try {
+    if (reason === 'unsupported') f.host.supportsWorkspaceSnapshotInput.mockReturnValue(false)
+    await expect(f.hub.operatorExecute({ ...f.request,
+      ...reason === 'git' ? { workspaceIdentity: { version: 1 as const, repository: 'github.com/owner/project', commit: 'a'.repeat(40) } } : {},
+      workspaceSnapshotInput: { version: 1, baseSha: 'a'.repeat(40), baseBundle: 'YWJj' },
+      ...reason === 'mismatched-base' ? { workspaceMutationReturn: { version: 1 as const, baseSha: 'b'.repeat(40) } } : {},
+    })).rejects.toMatchObject({ status: 409 })
+    expect(f.materializeWorkspace).not.toHaveBeenCalled(); expect(f.execute).not.toHaveBeenCalled()
+  } finally { await f.hub.close() }
+})
+it.each([false, true])('forwards sealed snapshot input and optional matching mutation base to the workspace provider (%s)', async (mutates) => {
+  const f = isolatedHostFixture()
+  const snapshot = { version: 1 as const, baseSha: 'a'.repeat(40), baseBundle: 'YWJj' }
+  const mutation = mutates ? { version: 1 as const, baseSha: snapshot.baseSha } : undefined
+  const governedWorkspacePolicy = { version: 1 as const, sourceWorkspace: '/source', readScopes: ['src'], writeScopes: [], forbiddenScopes: [],
+    limits: { maxToolCalls: 2, maxFileBytes: 4096, maxOutputBytes: 8192, maxSearchFiles: 8 } }
+  const generationLimits = { maxTokens: 32, maxOutputBytes: 1024, maxToolCalls: 2 }
+  try {
+    await expect(f.hub.operatorExecute({ ...f.request, workspaceSnapshotInput: snapshot,
+      ...mutation === undefined ? {} : { workspaceMutationReturn: mutation },
+      governedWorkspacePolicy, generationLimits })).resolves.toMatchObject({ sessionId: 'session', turnId: 'turn' })
+    expect(f.materializeWorkspace).toHaveBeenCalledWith(f.request.workspaceIdentity, 'isolated-command', mutation, snapshot)
+    expect(f.execute.mock.calls[0]![0]).toMatchObject({ workspace: '/srv/private-checkout', governedWorkspacePolicy, generationLimits })
+    expect(f.execute.mock.calls[0]![0].systemPrompt).toContain('isolated exact-base Git checkout')
+  } finally { await f.hub.close() }
+})
+it('passes an exact-base Git mutation lease without inventing snapshot input', async () => {
+  const f = isolatedHostFixture()
+  const identity = { version: 1 as const, repository: 'github.com/owner/project', commit: 'a'.repeat(40) }
+  const mutation = { version: 1 as const, baseSha: identity.commit }
+  try {
+    await f.hub.operatorExecute({ ...f.request, workspaceIdentity: identity, workspaceMutationReturn: mutation })
+    expect(f.materializeWorkspace).toHaveBeenCalledWith(identity, 'isolated-command', mutation)
+  } finally { await f.hub.close() }
+})
+it('returns the captured terminal mutation on repeated inspection without executing a new Native command', async () => {
+  const f = isolatedHostFixture()
+  try {
+    const first = await f.hub.operatorInspectTurn('turn')
+    const repeated = await f.hub.operatorInspectTurn('turn')
+    expect(first.result?.workspaceMutation).toEqual({ projectId: 'a'.repeat(64), baseSha: 'a'.repeat(40), patch: 'retained patch' })
+    expect(repeated).toEqual(first)
+    expect(f.host.releaseWorkspace).toHaveBeenCalledWith('isolated-command')
+    expect(f.execute).not.toHaveBeenCalled()
+  } finally { await f.hub.close() }
+})
+it('refuses mutation inspection with no terminal result; preserves ordinary read results when capture is undefined', async () => {
+  const f = isolatedHostFixture()
+  try {
+    const turn = await f.inspectTurn()
+    const { result: _result, ...withoutResult } = turn
+    f.inspectTurn.mockResolvedValueOnce(withoutResult)
+    await expect(f.hub.operatorInspectTurn('turn')).rejects.toThrow('omitted its terminal result')
+    f.captureWorkspaceMutation.mockResolvedValue(undefined)
+    await expect(f.hub.operatorInspectTurn('turn')).resolves.toEqual(turn)
+    expect(f.execute).not.toHaveBeenCalled()
+  } finally { await f.hub.close() }
 })

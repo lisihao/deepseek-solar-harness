@@ -155,6 +155,8 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
+      ...request.generationLimits === undefined ? {} : { generationLimits: request.generationLimits },
+      ...request.governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy: request.governedWorkspacePolicy },
       signal: request.signal,
     })
     return {

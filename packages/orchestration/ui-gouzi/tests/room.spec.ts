@@ -29,7 +29,7 @@ function fixture(runs: OrchestrationRunSnapshot[] = [run], log: OrchestrationEve
     events: afterSequence === 0 ? log : [], nextSequence: log.at(-1)?.sequence ?? 0,
   }))
   const service = { list, readArtifact, readEvents } as unknown as OrchestrationService
-  const execution = [{ gouziId: GouziId('member'), generation: 8, operators: [{ operatorId: 'actual.provider', available: false, models: ['native'], unavailableReason: 'signed out' }] }]
+  const execution = [{ gouziId: GouziId('member'), generation: 8, projectScopes: ['/registered/project'], operators: [{ operatorId: 'actual.provider', available: false, models: ['native'], unavailableReason: 'signed out' }] }]
   const control = { executionOperators: vi.fn(() => Promise.resolve(execution)) } as unknown as GouziControl
   return { service, control, readArtifact, execution, list }
 }

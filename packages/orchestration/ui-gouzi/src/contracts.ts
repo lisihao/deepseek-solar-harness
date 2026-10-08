@@ -249,9 +249,13 @@ export interface GouziRoomSnapshotV1 {
   readonly execution: readonly {
     readonly gouziId: string
     readonly generation: number
+    /** Project roots observed from the execution member; an empty list cannot authorize project selection. */
+    readonly projectScopes: readonly string[]
     readonly operators: readonly {
       readonly operatorId: string
       readonly available: boolean
+      readonly supportsGenerationLimits?: boolean
+      readonly supportsGovernedWorkspacePolicy?: boolean
       readonly models: readonly string[]
       readonly unavailableReason?: string
     }[]

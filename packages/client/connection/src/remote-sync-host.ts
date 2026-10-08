@@ -49,6 +49,11 @@ import {
   receiveOperatorContextEnvelope,
 } from '@deepseek-ai/dsh-system-prompt'
 
+type RemoteOperatorHostFacilities = Pick<RemoteOperatorHostService,
+  'qualification' | 'gouziWorkspace' | 'inspectWorkspace' | 'materializeWorkspace'
+  | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'>
+  & Partial<Pick<RemoteOperatorHostService, 'supportsWorkspaceMutationReturn' | 'supportsWorkspaceSnapshotInput' | 'captureWorkspaceMutation'>>
+
 type SourceStream = 'mux' | 'host'
 
 interface Subscriber {
@@ -206,10 +211,7 @@ export class RemoteSyncHub {
       OrchestrationService,
       'clusterStatus' | 'clusterRequestVote' | 'clusterHeartbeat' | 'clusterExportReplica' | 'clusterInstallReplica'
     > | undefined,
-    private readonly remoteOperatorHost?: () => Pick<
-      RemoteOperatorHostService,
-      'qualification' | 'gouziWorkspace' | 'inspectWorkspace' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
-    > | undefined,
+    private readonly remoteOperatorHost?: () => RemoteOperatorHostFacilities | undefined,
     private readonly gouziMember?: () => Pick<GouziMemberService, 'hello'> | undefined,
   ) {
     this.journal = new RemoteSyncJournal(capacity)
@@ -376,11 +378,19 @@ export class RemoteSyncHub {
     const providers = await this.expectResident().providers()
     const member = this.gouziMember?.()
     const host = this.remoteOperatorHost?.()
-    if (member === undefined || host === undefined) return providers
+    const qualified = providers.map(provider => ({
+      ...provider,
+      ...host?.supportsWorkspaceMutationReturn?.() === true ? { supportsWorkspaceMutationReturn: true } : {},
+      ...host?.supportsWorkspaceSnapshotInput?.() === true ? { supportsWorkspaceSnapshotInput: true } : {},
+    }))
+    if (member === undefined || host === undefined) return qualified
     const workspace = await host.gouziWorkspace()
-    if (workspace === undefined) return providers
+    if (workspace === undefined) return qualified
     const { gouziId, generation } = member.hello()
-    return providers.map(provider => ({ ...provider, gouziWorkspace: { gouziId, generation, projectId: workspace.projectId } }))
+    return qualified.map(provider => ({
+      ...provider,
+      gouziWorkspace: { gouziId, generation, projectId: workspace.projectId, projectScopes: workspace.projectScopes ?? [] },
+    }))
   }
 
   /**
@@ -391,6 +401,18 @@ export class RemoteSyncHub {
   async operatorExecute(
     request: RemoteResidentExecuteRequest,
   ): Promise<RemoteResidentAcceptedTurn> {
+    if (request.workspaceSnapshotInput !== undefined
+      && (!('kind' in request.workspaceIdentity)
+        || this.expectRemoteOperatorHost().supportsWorkspaceSnapshotInput?.() !== true
+        || (request.workspaceMutationReturn !== undefined
+          && request.workspaceMutationReturn.baseSha !== request.workspaceSnapshotInput.baseSha))) {
+      throw new ConnectionRpcHttpError(409, 'snapshot input requires a supported registered project and matching mutation base')
+    }
+    if (request.workspaceMutationReturn !== undefined
+      && ((!('kind' in request.workspaceIdentity) && request.workspaceIdentity.commit !== request.workspaceMutationReturn.baseSha)
+        || this.expectRemoteOperatorHost().supportsWorkspaceMutationReturn?.() !== true)) {
+      throw new ConnectionRpcHttpError(409, 'workspace mutation requires supported isolated exact-base Git execution')
+    }
     if ('kind' in request.workspaceIdentity) {
       if (this.stopSources.signal.aborted) throw new Error('remote sync host is closed')
       const hash = gouziRequestHash(request)
@@ -420,7 +442,7 @@ export class RemoteSyncHub {
     }
     const qualification = await host.qualification()
     if (!qualification.available) throw new Error(qualification.reason ?? 'remote execution host is unavailable')
-    const workspace = await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
+    const workspace = await this.materializeRemoteWorkspace(host, request)
     try {
       return await this.executeWorkspace(request, workspace)
     } catch (error) {
@@ -437,6 +459,21 @@ export class RemoteSyncHub {
     }
   }
 
+  private materializeRemoteWorkspace(
+    host: RemoteOperatorHostFacilities,
+    request: RemoteResidentExecuteRequest,
+  ): Promise<RemoteMaterializedWorkspaceV1> {
+    if (request.workspaceSnapshotInput !== undefined) {
+      return host.materializeWorkspace(
+        request.workspaceIdentity, request.commandId, request.workspaceMutationReturn, request.workspaceSnapshotInput,
+      )
+    }
+    if (request.workspaceMutationReturn !== undefined) {
+      return host.materializeWorkspace(request.workspaceIdentity, request.commandId, request.workspaceMutationReturn)
+    }
+    return host.materializeWorkspace(request.workspaceIdentity, request.commandId)
+  }
+
   private async executeWorkspace(
     request: RemoteResidentExecuteRequest,
     existingWorkspace?: RemoteMaterializedWorkspaceV1,
@@ -446,10 +483,10 @@ export class RemoteSyncHub {
       const qualification = await host.qualification()
       if (!qualification.available) throw new Error(qualification.reason ?? 'remote execution host is unavailable')
     }
-    const materializedWorkspace = existingWorkspace ?? await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
+    const materializedWorkspace = existingWorkspace ?? await this.materializeRemoteWorkspace(host, request)
     const {
       commandId, operatorId, laneId, taskLabel, prompt, systemPrompt,
-      contextEnvelope, profile, nativeToolPolicy,
+      contextEnvelope, profile, nativeToolPolicy, governedWorkspacePolicy, generationLimits,
     } = request
     const materializedContext = contextEnvelope === undefined
       ? undefined
@@ -457,6 +494,7 @@ export class RemoteSyncHub {
     const executionSystemPrompt = this.remoteWorkspaceSystemPrompt(
       materializedContext?.systemPrompt ?? systemPrompt,
       materializedWorkspace,
+      request.workspaceMutationReturn !== undefined || request.workspaceSnapshotInput !== undefined,
     )
     const turn = await this.expectResident().execute({
       commandId: commandId as never,
@@ -471,6 +509,8 @@ export class RemoteSyncHub {
         : { nativeContext: { version: 1, digest: contextEnvelope.digest } },
       ...profile === undefined ? {} : { profile },
       ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
+      ...governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy },
+      ...generationLimits === undefined ? {} : { generationLimits },
       signal: new AbortController().signal,
     })
     const accepted = this.acceptedReceipt(request, turn)
@@ -512,16 +552,22 @@ export class RemoteSyncHub {
    * @param turnId - durable Resident turn identity.
    * @returns the current terminal or in-flight turn projection.
    */
-  async operatorInspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
+  async operatorInspectTurn(turnId: string): Promise<import('./remote-sync.ts').RemoteResidentTurnSnapshot> {
     const turn = await this.expectResident().inspectTurn(turnId)
+    const mutation = turn.state === 'settled' ? await this.remoteOperatorHost?.()?.captureWorkspaceMutation?.(String(turn.commandId)) : undefined
     await this.observeWorkspace(turn)
-    return turn
+    if (mutation === undefined) return turn
+    if (turn.result === undefined) throw new Error('settled mutation execution omitted its terminal result')
+    return { ...turn, result: { ...turn.result, workspaceMutation: mutation } }
   }
 
   private async observeWorkspace(turn: ResidentTurnSnapshot): Promise<void> {
     const host = this.remoteOperatorHost?.()
     if (host !== undefined) {
-      if (turn.state === 'settled') await host.releaseWorkspace(String(turn.commandId))
+      if (turn.state === 'settled') {
+        await host.captureWorkspaceMutation?.(String(turn.commandId))
+        await host.releaseWorkspace(String(turn.commandId))
+      }
       else await host.renewWorkspace(String(turn.commandId))
     }
   }
@@ -651,6 +697,7 @@ export class RemoteSyncHub {
   private remoteWorkspaceSystemPrompt(
     systemPrompt: string | undefined,
     workspace: RemoteMaterializedWorkspaceV1,
+    isolatedMutation = false,
   ): string {
     const identity = workspace.identity
     const directory = 'kind' in identity
@@ -659,7 +706,7 @@ export class RemoteSyncHub {
       JSON.stringify(directory
         ? { cwd: workspace.path, kind: identity.kind, projectId: identity.projectId }
         : { cwd: workspace.path, repository: identity.repository, commit: identity.commit }),
-      ...directory ? ['Execution uses the selected actual project directory. Existing files, including untracked files, are accessible. Releasing the execution lease does not delete user project files.'] : [],
+      ...isolatedMutation ? ['Execution uses an isolated exact-base Git checkout. This checkout contains the current sealed task inputs; the registered project directory remains unchanged. Only a mutation-return execution returns edits as a base-bound patch.'] : directory ? ['Execution uses the selected actual project directory. Existing files, including untracked files, are accessible. Releasing the execution lease does not delete user project files.'] : [],
       'The current native execution cwd above is authoritative for this execution. Workspace paths in sender context refer to the source host. Existing relative read and write scopes apply unchanged within this cwd. This supplement does not expand permissions.',
     ].join('\n')
     return systemPrompt === undefined ? supplement : `${systemPrompt}\n\n${supplement}`
@@ -670,10 +717,7 @@ export class RemoteSyncHub {
     return this.resident
   }
 
-  private expectRemoteOperatorHost(): Pick<
-    RemoteOperatorHostService,
-    'qualification' | 'gouziWorkspace' | 'inspectWorkspace' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
-  > {
+  private expectRemoteOperatorHost(): RemoteOperatorHostFacilities {
     const service = this.remoteOperatorHost?.()
     if (service === undefined) throw new Error('remote operator workspace and artifact host is unavailable')
     return service

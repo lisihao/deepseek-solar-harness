@@ -42,7 +42,7 @@ Round 投影按角色独立，而不是全有或全无。已结算的 proposer �
 
 `OrchestrationRecipientResolver` 只从按序保存的 durable Session 事件中解析当前逻辑 turn 的显式用户选择。Host 确认所选成员仍存在、已启用且 generation 与选择时相同，再查询 `GouziControl.executionOperators()`，获取经过新鲜资格检查的已注册入口。`operatorIds` 包含该查询返回的完整实际执行 ID，绝不根据成员名或固定的原生 Provider 后缀推断 ID。查询后，解析器再次确认 membership 和 generation；所选成员缺失、换代、未启用或不可用时会失败，不会改选其他成员。
 
-`OrchestrationAdmissionTraceV1.gouziRecipient` 将确认后的成员身份、选择时的 generation 和执行 ID 带入编译。每个 Graph 节点都固定使用这些入口，不允许 fallback。固定接收者支持关闭 RLM 和 Autonomous 的 Standard 执行。daemon 在编译时和新 Run 启动前验证 Graph 限制、当前 generation 与可用性；派发时也会拒绝已经不匹配的成员或注册入口。这项选择不会增加 scope、effect、模型许可或并行容量。
+`OrchestrationAdmissionTraceV1.gouziRecipient` 将确认后的成员身份、选择时的 generation 和执行 ID 带入编译。每个 Graph 节点都固定使用这些入口，不允许 fallback。固定接收者支持关闭 RLM 和 Autonomous 的 Standard 执行。daemon 在编译时和新 Run 启动前验证 Graph 限制、当前 generation 与可用性；派发时也会拒绝已经不匹配的成员或注册入口。这项选择不会增加 scope、effect、模型许可或并行容量。 `sourceMessageId` 标识用于新建持久源检查点的原始用户消息；`automaticDispatch` 表示 Host 在普通执行前消费狗窝用户消息。
 
 源码：[`orchestration/src/index.ts`](../../packages/orchestration/orchestration/src/index.ts) · [`orchestration/src/recipient-resolver.ts`](../../packages/orchestration/orchestration/src/recipient-resolver.ts) · [`ui-gouzi/src/recipient.ts`](../../packages/orchestration/ui-gouzi/src/recipient.ts)
 
@@ -63,6 +63,8 @@ interface OrchestrationAdmissionTraceV1 {
   /** Fixed recipient; every graph node must use only these actual member execution entries. */
   readonly gouziRecipient?: OrchestrationGouziRecipientV1
   readonly sourceSessionId: string
+  /** Original user-message identity for a fresh, durable source checkpoint. */
+  readonly sourceMessageId?: string
   /** Current-request dynamic contexts captured before crossing into the daemon. */
   readonly runtimeContext?: OrchestrationRuntimeContextV1
   /** Independent user/system choice; RLM is a node strategy, not an operator. */
@@ -83,6 +85,8 @@ interface OrchestrationAdmissionTraceV1 {
 ```ts type-equiv
 /** Resolves only the current logical turn's explicit user selection. */
 interface OrchestrationRecipientResolver {
+  /** Whether kennel user messages are consumed by Host AI dispatch before ordinary execution. */
+  readonly automaticDispatch?: boolean
   /**
    * Confirm the selected member and its available execution entries.
    * @param events - ordered durable Session events.
@@ -617,7 +621,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:670`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:689`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

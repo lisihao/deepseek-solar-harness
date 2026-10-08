@@ -67,7 +67,7 @@ export type {
 export { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 export {
   REMOTE_SYNC_COMPATIBLE_MINOR, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
-  bindRemoteResidentProtocol, canonicalRemoteRepositoryIdentity, RemoteResidentProtocolClient,
+  bindRemoteResidentProtocol, canonicalRemoteRepositoryIdentity, RemoteResidentProtocolClient, RemoteResidentCapabilityError,
   parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
   parseRemoteResidentProviders, parseRemoteResidentResult, parseRemoteResidentTurn,
   parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
@@ -499,6 +499,29 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
             }
             const profile = body.profile === undefined ? undefined : residentProfile(body.profile)
             const request: RemoteResidentExecuteRequest = {
+              ...body.workspaceSnapshotInput === undefined ? {} : { workspaceSnapshotInput: (() => {
+                const input = recordPayload(body.workspaceSnapshotInput)
+                const baseSha = requiredString(input.baseSha, 'workspaceSnapshotInput.baseSha')
+                if (input.version !== 1 || !/^[a-f0-9]{40}$/u.test(baseSha)
+                  || typeof input.baseBundle !== 'string' || input.baseBundle.length > 12 * 1024 * 1024
+                  || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(input.baseBundle)) {
+                  throw new ConnectionRpcHttpError(400, 'invalid or oversized workspace snapshot input')
+                }
+                return { version: 1 as const, baseSha, baseBundle: input.baseBundle }
+              })() },
+              ...body.workspaceMutationReturn === undefined ? {} : { workspaceMutationReturn: (() => {
+                const mutation = recordPayload(body.workspaceMutationReturn)
+                if (mutation.version !== 1) throw new ConnectionRpcHttpError(400, 'unsupported workspace mutation return version')
+                const baseSha = requiredString(mutation.baseSha, 'workspaceMutationReturn.baseSha')
+                if (!/^[a-f0-9]{40}$/u.test(baseSha)) throw new ConnectionRpcHttpError(400, 'invalid mutation base SHA')
+                if (mutation.baseBundle !== undefined && (typeof mutation.baseBundle !== 'string'
+                  || mutation.baseBundle.length > 12 * 1024 * 1024
+                  || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(mutation.baseBundle))) {
+                  throw new ConnectionRpcHttpError(400, 'invalid or oversized snapshot base bundle')
+                }
+                return { version: 1 as const, baseSha,
+                  ...mutation.baseBundle === undefined ? {} : { baseBundle: mutation.baseBundle } }
+              })() },
               commandId: requiredString(body.commandId, 'commandId'),
               operatorId: requiredString(body.operatorId, 'operatorId'),
               workspaceIdentity: remoteWorkspaceIdentity(body.workspaceIdentity),
@@ -510,9 +533,16 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
                 ? {}
                 : { contextEnvelope: remoteOperatorContextEnvelope(body.contextEnvelope) },
               ...profile === undefined ? {} : { profile },
+              ...body.governedWorkspacePolicy === undefined
+                ? {}
+                : { governedWorkspacePolicy: remoteGovernedWorkspacePolicy(body.governedWorkspacePolicy) },
+              ...body.generationLimits === undefined ? {} : { generationLimits: remoteGenerationLimits(body.generationLimits) },
               ...body.nativeToolPolicy === undefined
                 ? {}
                 : { nativeToolPolicy: residentNativeToolPolicy(body.nativeToolPolicy) },
+            }
+            if (request.nativeToolPolicy === 'dsh-tools-authoritative' && request.governedWorkspacePolicy === undefined) {
+              throw new ConnectionRpcHttpError(400, 'remote DSH file tools require a governed workspace policy')
             }
             // A host that mounts the member gate is a member host: every caller, including a loopback owner or a
             // tunnel endpoint, needs a grant. Without the gate the `gouzi` scope cannot execute at all.
@@ -529,6 +559,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
               grant = parseGouziGrant(body.gouziGrant)
             } catch (error) {
               throw new ConnectionRpcHttpError(400, error instanceof Error ? error.message : String(error))
+            }
+            if (request.governedWorkspacePolicy !== undefined
+              && (request.governedWorkspacePolicy.readScopes.some(scope => !grant.scopes.read.includes(scope))
+                || request.governedWorkspacePolicy.writeScopes.some(scope => !grant.scopes.write.includes(scope)))) {
+              throw new ConnectionRpcHttpError(403, 'GOUZI_SCOPE_MISMATCH: governed file policy exceeds its execution grant')
             }
             if (grant.executionId !== request.commandId) {
               throw new ConnectionRpcHttpError(403, 'GOUZI_EXECUTION_MISMATCH: grant execution id differs from the command id')
@@ -888,9 +923,42 @@ function residentProfile(value: unknown): NonNullable<ResidentExecuteRequest['pr
   return { model, ...effort === undefined ? {} : { effort } }
 }
 
-function residentNativeToolPolicy(value: unknown): 'inherit' | 'disabled' {
-  if (value !== 'inherit' && value !== 'disabled') {
-    throw new ConnectionRpcHttpError(400, 'nativeToolPolicy must be inherit or disabled')
+function remoteGenerationLimits(value: unknown): NonNullable<RemoteResidentExecuteRequest['generationLimits']> {
+  const record = recordPayload(value)
+  return {
+    maxTokens: boundedInteger(record.maxTokens, 'generationLimits.maxTokens', 1, Number.MAX_SAFE_INTEGER),
+    maxOutputBytes: boundedInteger(record.maxOutputBytes, 'generationLimits.maxOutputBytes', 1, Number.MAX_SAFE_INTEGER),
+    ...record.maxToolCalls === undefined ? {} : { maxToolCalls: boundedInteger(record.maxToolCalls, 'generationLimits.maxToolCalls', 1, Number.MAX_SAFE_INTEGER) },
+  }
+}
+
+function remoteGovernedWorkspacePolicy(value: unknown): NonNullable<RemoteResidentExecuteRequest['governedWorkspacePolicy']> {
+  const record = recordPayload(value)
+  if (record.version !== 1) throw new ConnectionRpcHttpError(400, 'unsupported governed workspace policy version')
+  const scopes = (field: string): string[] => {
+    const values = record[field]
+    if (!Array.isArray(values) || values.some(scope => typeof scope !== 'string' || scope.length === 0)) {
+      throw new ConnectionRpcHttpError(400, `${field} must be a list of non-empty scope strings`)
+    }
+    return values as string[]
+  }
+  const limits = recordPayload(record.limits)
+  return {
+    version: 1,
+    sourceWorkspace: requiredString(record.sourceWorkspace, 'governedWorkspacePolicy.sourceWorkspace'),
+    readScopes: scopes('readScopes'), writeScopes: scopes('writeScopes'), forbiddenScopes: scopes('forbiddenScopes'),
+    limits: {
+      maxToolCalls: boundedInteger(limits.maxToolCalls, 'governedWorkspacePolicy.maxToolCalls', 1, Number.MAX_SAFE_INTEGER),
+      maxFileBytes: boundedInteger(limits.maxFileBytes, 'governedWorkspacePolicy.maxFileBytes', 1, Number.MAX_SAFE_INTEGER),
+      maxOutputBytes: boundedInteger(limits.maxOutputBytes, 'governedWorkspacePolicy.maxOutputBytes', 1, Number.MAX_SAFE_INTEGER),
+      maxSearchFiles: boundedInteger(limits.maxSearchFiles, 'governedWorkspacePolicy.maxSearchFiles', 1, Number.MAX_SAFE_INTEGER),
+    },
+  }
+}
+
+function residentNativeToolPolicy(value: unknown): 'inherit' | 'disabled' | 'dsh-tools-authoritative' {
+  if (value !== 'inherit' && value !== 'disabled' && value !== 'dsh-tools-authoritative') {
+    throw new ConnectionRpcHttpError(400, 'nativeToolPolicy must be inherit, disabled, or dsh-tools-authoritative')
   }
   return value
 }

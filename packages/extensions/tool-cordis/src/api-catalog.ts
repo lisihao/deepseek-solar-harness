@@ -1279,6 +1279,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Resolves only the current logical turn\'s explicit user selection.',
     methods: [
       {
+        signature: 'readonly automaticDispatch?: boolean',
+        description: 'Whether kennel user messages are consumed by Host AI dispatch before ordinary execution.',
+        parameters: [],
+      },
+      {
         signature: 'resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined>',
         description: 'Confirm the selected member and its available execution entries.',
         parameters: [{ name: 'events', description: 'ordered durable Session events.' }],
@@ -4785,7 +4790,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziControl',
-    declaration: 'export interface GouziControl {\n    list(): Promise<{\n        readonly hosts: readonly GouziHostRecord[];\n        readonly members: readonly GouziMemberView[];\n    }>;\n    executionOperators(): Promise<readonly {\n        readonly gouziId: GouziId;\n        readonly generation: number;\n        readonly operators: readonly GouziOperatorCapability[];\n    }[]>;\n    pairHost(host: Omit<GouziHostRecord, \'pairedAt\'>): Promise<GouziHostRecord>;\n    create(input: GouziCreateInput): Promise<GouziMemberView>;\n    edit(gouziId: GouziId, edit: GouziMemberEdit): Promise<GouziMemberView>;\n    setMembership(gouziId: GouziId, membership: Exclude<GouziMembership, \'archived\'>): Promise<GouziMemberView>;\n    setEndpoint(gouziId: GouziId, endpoint: string): Promise<GouziMemberView>;\n    archive(gouziId: GouziId, evidence: GouziArchiveEvidence): Promise<GouziMemberView>;\n}',
+    declaration: 'export interface GouziControl {\n    list(): Promise<{\n        readonly hosts: readonly GouziHostRecord[];\n        readonly members: readonly GouziMemberView[];\n    }>;\n    executionOperators(): Promise<readonly {\n        readonly gouziId: GouziId;\n        readonly generation: number;\n        readonly projectScopes: readonly string[];\n        readonly operators: readonly GouziOperatorCapability[];\n    }[]>;\n    pairHost(host: Omit<GouziHostRecord, \'pairedAt\'>): Promise<GouziHostRecord>;\n    create(input: GouziCreateInput): Promise<GouziMemberView>;\n    edit(gouziId: GouziId, edit: GouziMemberEdit): Promise<GouziMemberView>;\n    setMembership(gouziId: GouziId, membership: Exclude<GouziMembership, \'archived\'>): Promise<GouziMemberView>;\n    setEndpoint(gouziId: GouziId, endpoint: string): Promise<GouziMemberView>;\n    archive(gouziId: GouziId, evidence: GouziArchiveEvidence): Promise<GouziMemberView>;\n}',
   },
   {
     name: 'GouziCreateInput',
@@ -4829,7 +4834,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziOperatorCapability',
-    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n}',
+    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n}',
   },
   {
     name: 'GouziOwnerId',
@@ -5061,7 +5066,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LogicalTaskGraphV1',
-    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly baseSha?: string;\n    readonly workspaceIsolation?: \'shared\' | \'git-worktree\';\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly qualityPolicy?: {\n        readonly independentVerification: \'required\' | \'advisory\';\n    };\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
+    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly baseSha?: string;\n    readonly workspaceIsolation?: \'shared\' | \'git-worktree\' | \'directory-snapshot\';\n    readonly workspaceSnapshotLimits?: {\n        readonly maxFiles: number;\n        readonly maxBytes: number;\n        readonly maxBundleBytes: number;\n        readonly timeoutMs: number;\n    };\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly qualityPolicy?: {\n        readonly independentVerification: \'required\' | \'advisory\';\n    };\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
   },
   {
     name: 'LspHover',
@@ -5361,11 +5366,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationAcceptanceRequirement',
-    declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\';\n}',
+    declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\' | \'model-verdict\';\n}',
   },
   {
     name: 'OrchestrationAdmissionTraceV1',
-    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly gouziRecipient?: OrchestrationGouziRecipientV1;\n    readonly sourceSessionId: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly gouziRecipient?: OrchestrationGouziRecipientV1;\n    readonly sourceSessionId: string;\n    readonly sourceMessageId?: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
   },
   {
     name: 'OrchestrationArtifactRef',
@@ -5413,7 +5418,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationCompilationV1',
-    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
+    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly workspaceSnapshotRef?: OrchestrationArtifactRef;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
   },
   {
     name: 'OrchestrationCompileRequest',
@@ -5453,7 +5458,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationNodeSpecV1',
-    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly autonomous?: RlmAutonomousConfigV1;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly fallbackIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly generationLimits?: PhysicalOperatorGenerationLimits;\n    readonly workspaceToolLimits?: PhysicalOperatorGovernedWorkspacePolicy[\'limits\'];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly autonomous?: RlmAutonomousConfigV1;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly fallbackIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
   },
   {
     name: 'OrchestrationNodeState',
@@ -5469,7 +5474,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationRunSnapshot',
-    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly maxParallel?: number;\n    readonly effectiveParallelism?: number;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly delivery?: {\n        readonly state: \'applying\' | \'applied\' | \'failed\' | \'indeterminate\';\n    };\n    readonly maxParallel?: number;\n    readonly effectiveParallelism?: number;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'OrchestrationRunState',
@@ -5536,6 +5541,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorExecutionPreference {\n    readonly model?: string;\n    readonly effort?: PhysicalOperatorReasoningEffort;\n}',
   },
   {
+    name: 'PhysicalOperatorGenerationLimits',
+    declaration: 'export interface PhysicalOperatorGenerationLimits {\n    readonly maxTokens: number;\n    readonly maxOutputBytes: number;\n    readonly maxToolCalls?: number;\n}',
+  },
+  {
+    name: 'PhysicalOperatorGovernedWorkspacePolicy',
+    declaration: 'export interface PhysicalOperatorGovernedWorkspacePolicy {\n    readonly version: 1;\n    readonly sourceWorkspace: string;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly forbiddenScopes: readonly string[];\n    readonly limits: {\n        readonly maxToolCalls: number;\n        readonly maxFileBytes: number;\n        readonly maxOutputBytes: number;\n        readonly maxSearchFiles: number;\n    };\n}',
+  },
+  {
     name: 'PhysicalOperatorId',
     declaration: 'export type PhysicalOperatorId = Branded<\'PhysicalOperatorId\'>;',
   },
@@ -5560,6 +5573,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorProgressPage {\n    readonly events: readonly PhysicalOperatorProgressEvent[];\n    readonly nextSequence: number;\n}',
   },
   {
+    name: 'PhysicalOperatorProviderResponse',
+    declaration: 'export interface PhysicalOperatorProviderResponse {\n    readonly provider: string;\n    readonly model: string;\n    readonly responseId?: string;\n}',
+  },
+  {
     name: 'PhysicalOperatorProviderRun',
     declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly contextReceipt?: OperatorContextEnvelopeReceiptV1;\n    readonly receipt?: PhysicalOperatorAcceptedReceipt;\n    readEvents?(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage>;\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
   },
@@ -5581,7 +5598,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorResidentCatalog',
-    declaration: 'export interface PhysicalOperatorResidentCatalog {\n    readonly operatorId: PhysicalOperatorId;\n    readonly product: string;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly supportsModelToolBridge: boolean;\n    readonly location: \'local\' | \'remote\';\n    readonly supportsWorkspaceMutationReturn: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly PhysicalOperatorResidentModel[];\n    readonly quotaPools?: readonly PhysicalOperatorQuotaPool[];\n}',
+    declaration: 'export interface PhysicalOperatorResidentCatalog {\n    readonly operatorId: PhysicalOperatorId;\n    readonly product: string;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly supportsModelToolBridge: boolean;\n    readonly location: \'local\' | \'remote\';\n    readonly supportsWorkspaceMutationReturn: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n    readonly supportsGenerationLimits?: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly PhysicalOperatorResidentModel[];\n    readonly quotaPools?: readonly PhysicalOperatorQuotaPool[];\n    readonly gouziWorkspace?: {\n        readonly gouziId: string;\n        readonly generation: number;\n        readonly projectId: string;\n        readonly projectScopes: readonly string[];\n    };\n}',
   },
   {
     name: 'PhysicalOperatorResidentCatalogOptions',
@@ -5593,7 +5610,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorResult',
-    declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
+    declaration: 'export interface PhysicalOperatorResult {\n    readonly providerResponse?: PhysicalOperatorProviderResponse;\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
   },
   {
     name: 'PhysicalOperatorRun',
@@ -5601,7 +5618,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly contextEnvelope?: OperatorContextEnvelopeV1;\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly contextEnvelope?: OperatorContextEnvelopeV1;\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly workspaceSnapshotInput?: {\n        readonly baseSha: string;\n        readonly baseBundle: string;\n    };\n    readonly workspaceMutationReturn?: {\n        readonly baseSha: string;\n        readonly baseBundle?: string;\n    };\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly generationLimits?: PhysicalOperatorGenerationLimits;\n    readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -5801,7 +5818,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly nativeContext?: NativeContext;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly nativeContext?: NativeContext;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly generationLimits?: PhysicalOperatorGenerationLimits;\n    readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',
@@ -5853,7 +5870,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentProviderStatus',
-    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly unavailableCode?: ResidentProviderUnavailableCode;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly supportsExplicitAuthentication?: boolean;\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly unavailableCode?: ResidentProviderUnavailableCode;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly supportsExplicitAuthentication?: boolean;\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
   },
   {
     name: 'ResidentProviderUnavailableCode',
@@ -5889,7 +5906,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentTurnResult',
-    declaration: 'export interface ResidentTurnResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly resultRef?: string;\n}',
+    declaration: 'export interface ResidentTurnResult {\n    readonly providerResponse?: PhysicalOperatorProviderResponse;\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly resultRef?: string;\n}',
   },
   {
     name: 'ResidentTurnSnapshot',

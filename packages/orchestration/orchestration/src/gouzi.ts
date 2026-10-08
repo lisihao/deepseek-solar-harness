@@ -107,6 +107,10 @@ export interface GouziOperatorCapability {
   /** Why the operator cannot run, such as a missing login. */
   readonly unavailableReason?: string
   readonly models: readonly string[]
+  /** Actual execution endpoint supports bounded model-only requests. */
+  readonly supportsGenerationLimits?: boolean
+  /** Actual execution endpoint supports scoped file-tool requests. */
+  readonly supportsGovernedWorkspacePolicy?: boolean
 }
 
 /** What a Gouzi can do now. A new task re-checks it; an expired snapshot is not evidence. */
@@ -286,11 +290,13 @@ export interface GouziControl {
    * Read enabled members' registered execution entries with fresh provider availability and model checks. Connection
    * status alone does not qualify an entry; absent or stale-generation registrations produce an empty operator list.
    * This query neither starts members nor changes membership, grants, or task scheduling.
-   * @returns current member generations and full registered operator IDs, availability reasons, and native models.
+   * @returns current member generations, observed project roots, and full registered operator IDs, availability reasons, and native models.
    */
   executionOperators(): Promise<readonly {
     readonly gouziId: GouziId
     readonly generation: number
+    /** Project roots confirmed by the current member registration; empty when no valid observation exists. */
+    readonly projectScopes: readonly string[]
     readonly operators: readonly GouziOperatorCapability[]
   }[]>
   /**

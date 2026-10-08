@@ -64,6 +64,12 @@
     },
     {
       "path": "../../orchestration/scheduling-evidence"
+    },
+    {
+      "path": "../../preset/agent-presets"
+    },
+    {
+      "path": "../../orchestration/orchestration"
     }
   ]
 }

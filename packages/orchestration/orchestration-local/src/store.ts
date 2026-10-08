@@ -45,6 +45,7 @@ export interface RuntimeRunRecord {
   readonly intentRef: OrchestrationArtifactRef
   readonly requirementRef?: OrchestrationArtifactRef
   readonly graphRef: OrchestrationArtifactRef
+  readonly workspaceSnapshotRef?: OrchestrationArtifactRef
   readonly approvalRef?: string
   readonly retryAfter: Readonly<Record<string, string>>
 }

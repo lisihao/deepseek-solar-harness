@@ -1,6 +1,12 @@
 /** Remote Resident Provider over the authenticated DSH Server control plane. */
 
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
+import { promisify } from 'node:util'
+const execGit = promisify(execFile)
 import {
   PhysicalOperatorError,
   PhysicalOperatorId,
@@ -12,7 +18,7 @@ import {
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
 import {
-  parseRemoteResidentResult,
+  parseRemoteResidentResult, RemoteResidentCapabilityError,
   type RemoteResidentAcceptedTurn,
   type RemoteResidentExecuteRequest,
   type RemoteResidentProviderStatus,
@@ -32,17 +38,25 @@ import { identifyRemoteWorkspace } from './remote-execution-host.ts'
 const REMOTE_ARTIFACT_TRANSFER_TIMEOUT_MS = 15_000
 import type { OrchestrationStore } from './store.ts'
 
+interface MutationTarget {
+  readonly path: string
+  readonly baseSha: string
+  readonly identity: RemoteExecutionWorkspaceIdentityV1
+}
+
 const WORKSPACE_IDENTITY_TIMEOUT_MS = 10_000
 
 type RemoteResultStore = Pick<
   OrchestrationStore,
-  'putArtifact' | 'readArtifact' | 'recordArtifact'
+  'root' | 'putArtifact' | 'readArtifact' | 'recordArtifact'
 >
 
 /** Binding that turns a remote Server into a Gouzi execution member. */
 export interface RemotePhysicalOperatorGouzi {
   /** Stable member identity; the operator id becomes `gouzi.<gouziId>.<operatorId>`. */
   readonly gouziId: string
+  /** Internal authority qualification for a local member at a verified loopback endpoint; never user configuration. */
+  readonly allowLocalWorkspaceSnapshot?: true
   /**
    * Seal one attempt as an execution grant. Runs once per `start`, with the exact request that will be sent.
    * @param plan - the Resident execution request without a grant.
@@ -132,7 +146,9 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       injectionBoundaries: current.injectionBoundaries,
       supportsModelToolBridge: false,
       location: 'remote',
-      supportsWorkspaceMutationReturn: false,
+      supportsWorkspaceMutationReturn: current.supportsWorkspaceMutationReturn === true,
+      supportsGovernedWorkspacePolicy: current.supportsGovernedWorkspacePolicy === true,
+      supportsGenerationLimits: current.supportsGenerationLimits === true,
       available: current.available && this.unavailableReason === undefined,
       ...this.unavailableReason === undefined
         ? current.unavailableReason === undefined ? {} : { unavailableReason: current.unavailableReason }
@@ -142,6 +158,8 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       productVersion: current.productVersion,
       protocolHash: current.protocolHash,
       models: current.models,
+      ...this.server.gouzi === undefined || this.unavailableReason !== undefined || current.gouziWorkspace === undefined
+        || current.gouziWorkspace.gouziId !== this.server.gouzi.gouziId ? {} : { gouziWorkspace: current.gouziWorkspace },
       ...current.quotaPools === undefined ? {} : {
         quotaPools: current.quotaPools.map(pool => ({
           ...pool,
@@ -152,13 +170,20 @@ export class RemotePhysicalOperator implements PhysicalOperator {
   }
 
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
+    if (request.workspaceSnapshotInput !== undefined || request.workspaceMutationReturn?.baseBundle !== undefined) {
+      const hostname = new URL(this.server.endpoint).hostname
+      if (this.server.gouzi?.allowLocalWorkspaceSnapshot !== true
+        || !['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostname)) {
+        throw new PhysicalOperatorError('complete workspace snapshots require an authority-qualified local member and loopback endpoint', 'WORKSPACE_INVALID')
+      }
+    }
     if (request.modelToolBridge !== undefined) {
       throw new PhysicalOperatorError(
         'remote physical operators do not expose an owner-local model-tool socket',
         'OPERATOR_MODE_UNSUPPORTED',
       )
     }
-    if (request.nativeToolPolicy === 'dsh-tools-authoritative') {
+    if (request.nativeToolPolicy === 'dsh-tools-authoritative' && request.governedWorkspacePolicy === undefined) {
       throw new PhysicalOperatorError(
         'remote physical operators cannot use an owner-local DSH tool bridge as authority',
         'OPERATOR_MODE_UNSUPPORTED',
@@ -204,7 +229,27 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         )
       }
     }
+    if (request.governedWorkspacePolicy !== undefined || request.generationLimits !== undefined) {
+      const current = (await this.client.operatorProviders(request.signal)).find(value => value.operatorId === this.provider.operatorId)
+      if (current === undefined
+        || (request.governedWorkspacePolicy !== undefined && current.supportsGovernedWorkspacePolicy !== true)
+        || (request.generationLimits !== undefined && current.supportsGenerationLimits !== true)) {
+        throw new PhysicalOperatorError('remote Native driver does not support the requested governed file policy or generation limits', 'OPERATOR_MODE_UNSUPPORTED')
+      }
+      this.provider = current
+    }
+    let mutationTarget: MutationTarget | undefined
+    if (request.workspaceMutationReturn !== undefined) {
+      if (this.provider.supportsWorkspaceMutationReturn !== true) throw new PhysicalOperatorError('remote host cannot return workspace mutations', 'WORKSPACE_INVALID')
+      const cwd = request.parent.session.header.cwd
+      if (cwd === undefined) throw new PhysicalOperatorError('mutation requires caller execution workspace', 'WORKSPACE_INVALID')
+      await verifyMutationTarget(cwd, request.workspaceMutationReturn.baseSha)
+      mutationTarget = { path: cwd, baseSha: request.workspaceMutationReturn.baseSha, identity: workspaceIdentity }
+    }
     const plan: RemoteResidentExecuteRequest = {
+      ...request.workspaceSnapshotInput === undefined ? {} : { workspaceSnapshotInput: { version: 1, ...request.workspaceSnapshotInput } },
+      ...request.workspaceMutationReturn === undefined
+        ? {} : { workspaceMutationReturn: { version: 1, ...request.workspaceMutationReturn } },
       commandId: String(request.executionId),
       operatorId: this.provider.operatorId,
       workspaceIdentity,
@@ -215,8 +260,19 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       ...request.contextEnvelope === undefined ? {} : { contextEnvelope: request.contextEnvelope },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
+      ...request.generationLimits === undefined ? {} : { generationLimits: request.generationLimits },
+      ...request.governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy: request.governedWorkspacePolicy },
     }
     const gouziGrant = this.server.gouzi?.issue(plan, request, gouziWorkspace)
+    if (request.workspaceMutationReturn !== undefined) {
+      await mkdir(join(this.resultStore.root, 'remote-mutation-targets'), { recursive: true, mode: 0o700 })
+      try {
+        await writeFile(this.mutationTargetPath(plan.commandId), JSON.stringify({ path: request.parent.session.header.cwd, baseSha: request.workspaceMutationReturn.baseSha, identity: workspaceIdentity }), { flag: 'wx', mode: 0o600 })
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code === 'EEXIST') throw new PhysicalOperatorError('remote mutation command already has an unresolved local binding; reattach its original receipt', 'COMMAND_INDETERMINATE', { cause })
+        throw cause
+      }
+    }
     let accepted: RemoteResidentAcceptedTurn
     try {
       accepted = await this.client.operatorExecute(
@@ -226,6 +282,9 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       this.unavailableReason = undefined
     } catch (error) {
       this.unavailableReason = `${this.server.label} admission failed: ${renderError(error)}`
+      if (error instanceof RemoteResidentCapabilityError) {
+        throw new PhysicalOperatorError(error.message, 'OPERATOR_MODE_UNSUPPORTED', { cause: error })
+      }
       if (error instanceof RemoteSyncRejectedError) {
         throw new PhysicalOperatorError(error.message, 'OPERATOR_UNAVAILABLE', { cause: error })
       }
@@ -253,7 +312,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         )
       }
     }
-    return this.observe(accepted, request.signal)
+    return this.observe(accepted, request.signal, mutationTarget)
   }
 
   async reattach(turnId: string): Promise<PhysicalOperatorProviderRun> {
@@ -268,11 +327,18 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       throw new PhysicalOperatorError(renderError(error), 'OPERATOR_UNAVAILABLE', { cause: error })
     }
     this.unavailableReason = undefined
+    let target: MutationTarget | undefined
+    try { target = parseMutationTarget(JSON.parse(await readFile(this.mutationTargetPath(turn.commandId), 'utf8')) as unknown) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     return this.observe({
       sessionId: turn.sessionId,
       turnId: turn.turnId,
       stateRevision: turn.stateRevision,
-    })
+    }, undefined, target)
+  }
+
+  private mutationTargetPath(commandId: string): string {
+    return join(this.resultStore.root, 'remote-mutation-targets', createHash('sha256').update(`${this.server.id}\0${commandId}`).digest('hex'))
   }
 
   interrupt(receipt: PhysicalOperatorAcceptedReceipt): Promise<void> {
@@ -282,6 +348,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
   private observe(
     accepted: RemoteResidentAcceptedTurn,
     executionSignal?: AbortSignal,
+    mutationTarget?: MutationTarget,
   ): PhysicalOperatorProviderRun {
     const polling = new AbortController()
     const interrupt = (): void => {
@@ -290,7 +357,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
     executionSignal?.addEventListener('abort', interrupt, { once: true })
     if (executionSignal?.aborted === true) interrupt()
 
-    const result = this.settle(accepted.turnId, polling.signal)
+    const result = this.settle(accepted.turnId, polling.signal, mutationTarget)
       .finally(() => { executionSignal?.removeEventListener('abort', interrupt) })
     return {
       ...accepted.contextReceipt === undefined ? {} : { contextReceipt: accepted.contextReceipt },
@@ -312,7 +379,11 @@ export class RemotePhysicalOperator implements PhysicalOperator {
     }
   }
 
-  private async settle(turnId: string, signal: AbortSignal): Promise<PhysicalOperatorResult> {
+  private async settle(
+    turnId: string,
+    signal: AbortSignal,
+    mutationTarget?: MutationTarget,
+  ): Promise<PhysicalOperatorResult> {
     while (true) {
       let turn: RemoteResidentTurnSnapshot
       try {
@@ -336,7 +407,26 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         if (turn.result === undefined) {
           throw new PhysicalOperatorError('remote settled turn omitted its terminal result', 'INVALID_RESULT')
         }
-        const result = await this.materializeResult(turn, signal)
+        const materialized = await this.materializeResult(turn, signal)
+        const result = {
+          ...materialized,
+          ...turn.result.workspaceMutation === undefined ? {} : { workspaceMutation: turn.result.workspaceMutation },
+        }
+        if (mutationTarget !== undefined) {
+          const mutation = result.workspaceMutation
+          if (mutation === undefined || mutation.baseSha !== mutationTarget.baseSha
+            || ('kind' in mutationTarget.identity ? mutation.projectId !== mutationTarget.identity.projectId : mutation.repository !== mutationTarget.identity.repository)) {
+            throw new PhysicalOperatorError('remote execution omitted or mismatched its base-bound workspace patch', 'COMMAND_INDETERMINATE')
+          }
+          const appliedPath = `${this.mutationTargetPath(turn.commandId)}.applied`
+          let applied = false
+          try { applied = await readFile(appliedPath, 'utf8') === createHash('sha256').update(mutation.patch).digest('hex') }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+          if (!applied) {
+            await applyMutation(mutationTarget.path, mutationTarget.baseSha, mutation.patch)
+            await writeFile(appliedPath, createHash('sha256').update(mutation.patch).digest('hex'), { flag: 'wx', mode: 0o600 })
+          }
+        }
         const localRef = this.resultStore.putArtifact({
           version: 1,
           kind: 'remote-physical-operator-result',
@@ -402,6 +492,49 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       )
     }
   }
+}
+
+function parseMutationTarget(value: unknown): MutationTarget {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid persisted mutation target')
+  const record = value as Record<string, unknown>
+  const identity = record.identity
+  if (typeof record.path !== 'string' || !isAbsolute(record.path)
+    || typeof record.baseSha !== 'string' || !/^[a-f0-9]{40}$/u.test(record.baseSha)
+    || identity === null || typeof identity !== 'object' || Array.isArray(identity)) throw new Error('invalid persisted mutation target')
+  const binding = identity as Record<string, unknown>
+  if (binding.version !== 1 || (binding.subdir !== undefined && typeof binding.subdir !== 'string')) {
+    throw new Error('invalid persisted mutation workspace identity')
+  }
+  if ('kind' in binding) {
+    if (binding.kind !== 'gouzi-project' || typeof binding.projectId !== 'string' || !/^[a-f0-9]{64}$/u.test(binding.projectId)) {
+      throw new Error('invalid persisted mutation project identity')
+    }
+  } else if (typeof binding.repository !== 'string' || binding.repository.length === 0 || binding.commit !== record.baseSha) {
+    throw new Error('invalid persisted mutation Git identity')
+  }
+  return value as MutationTarget
+}
+
+async function verifyMutationTarget(cwd: string, baseSha: string): Promise<void> {
+  const options = { cwd, encoding: 'utf8' as const, timeout: WORKSPACE_IDENTITY_TIMEOUT_MS }
+  const head = await execGit('git', ['rev-parse', 'HEAD'], options)
+  const status = await execGit('git', ['status', '--porcelain=v1', '-uall'], options)
+  if (head.stdout.trim() !== baseSha || status.stdout.length > 0) throw new PhysicalOperatorError('workspace mutation target must remain clean at the exact execution base', 'WORKSPACE_INVALID')
+}
+
+async function applyMutation(cwd: string, baseSha: string, patch: string): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-return-patch-'))
+  const path = join(directory, 'mutation.patch')
+  try {
+    await verifyMutationTarget(cwd, baseSha)
+    if (patch.length === 0) return
+    await writeFile(path, patch, { mode: 0o600 })
+    const options = { cwd, timeout: WORKSPACE_IDENTITY_TIMEOUT_MS }
+    await execGit('git', ['apply', '--check', '--', path], options)
+    await execGit('git', ['apply', '--', path], options)
+  } catch (cause) {
+    throw new PhysicalOperatorError('remote patch could not be integrated into the execution workspace', 'COMMAND_INDETERMINATE', { cause })
+  } finally { await rm(directory, { recursive: true, force: true }) }
 }
 
 function renderError(error: unknown): string {

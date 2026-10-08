@@ -30,9 +30,13 @@ function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapsho
     && ['provisioning', 'enabled', 'retiring', 'archived'].includes(String(member.membership))
     && ['online', 'unreachable'].includes(String(member.connection)))
   const execution = value.execution.every((entry: unknown) => record(entry) && id(entry.gouziId)
-    && integer(entry.generation) && entry.generation > 0 && Array.isArray(entry.operators)
+    && integer(entry.generation) && entry.generation > 0 && strings(entry.projectScopes)
+    && entry.projectScopes.every(id) && Array.isArray(entry.operators)
     && entry.operators.every((operator: unknown) => record(operator) && id(operator.operatorId)
-      && typeof operator.available === 'boolean' && strings(operator.models)))
+      && typeof operator.available === 'boolean'
+      && (operator.supportsGenerationLimits === undefined || typeof operator.supportsGenerationLimits === 'boolean')
+      && (operator.supportsGovernedWorkspacePolicy === undefined || typeof operator.supportsGovernedWorkspacePolicy === 'boolean')
+      && strings(operator.models)))
   const tasks = value.tasks.every((task: unknown) => record(task) && id(task.runId) && typeof task.title === 'string'
     && typeof task.state === 'string' && integer(task.revision) && typeof task.createdAt === 'string'
     && typeof task.updatedAt === 'string' && Array.isArray(task.nodes) && task.nodes.every((node: unknown) => {
