@@ -270,6 +270,11 @@
       "name": "Kennel private snapshot byte preservation and qualified dispatcher CI repairs",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "c07d1b0fc55b278859f40c19b23518caf51f2f4d"
+    },
+    {
+      "name": "Kennel registered DeepSeek provider ID and available Flash dispatch model",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "828cdbfd0e7730f9e16dd0e3a7d418059ee7ccc7"
     }
   ],
   "sourcePackages": {
@@ -481,7 +486,7 @@
     "dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz": "074f755f4aeee4dc135c68889414ae996bc0be6ed2a4d04d62049e39b37a4b7f",
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "531cde167a6d9fd6963491551779945a3fae7cf287858b169980ff7f525d2c20",
     "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "5c6d138cd8147da3ece6d7142c4171d777fd28e95660f4986e19e70f7719dbdd",
-    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "02023fc949b6572b7183219f8fa9ffbc073a9fdfde6daf59dd032cd91f2496c4",
+    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "d30a2381237a17c8d4a6492d3a13c0eb668a2b3a2b89ff0ca4b075e2e48996f7",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "f9ecb9781bd709faa4b3c905b5695917af78436bd5007afc79ddfa5311b1cee6",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "4f2d66548e49d8b1bdfbf72a01b90d171fa69190a6d7c057ed9824a8ef26b852",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "97c9e6e8ac3698e464f98493d6c13b68be32a0202a6d5119c50d5440b22d6c12",
