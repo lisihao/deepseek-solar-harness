@@ -1385,6 +1385,26 @@ export function runCoordinatorContract(name: string, makeFixture: () => Promise<
       }
     })
 
+    it('still loads a log written while Debate was a Session-wide execution mode', async () => {
+      const fix = await makeFixture()
+      const { ctx, fiber } = await freshCtx(fix)
+      try {
+        const legacy = meta('retired-debate-events', WORK)
+        await ctx.sessionPersistence.create(legacy)
+        const base = oneTurnLog().length
+        await ctx.sessionPersistence.append(legacy.id, [
+          ...oneTurnLog(),
+          { type: 'debate/preferences', seq: base, time: 90, data: { mode: 'enabled' }, ignorable: true },
+          { type: 'debate/dispatch', seq: base + 1, time: 91, data: { commandId: 'c', promptMessageId: 'm', turn: 1, step: 1 }, ignorable: true },
+        ] as unknown as SessionEvent[])
+        const loaded = await ctx.sessionPersistence.load(legacy.id)
+        expect(loaded.events.map(event => event.type as string).slice(-2)).toEqual(['debate/preferences', 'debate/dispatch'])
+      } finally {
+        await fiber.dispose()
+        await fix.cleanup()
+      }
+    })
+
     it('round-trips a header with parentSession (fork lineage)', async () => {
       const fix = await makeFixture()
       const { ctx, fiber } = await freshCtx(fix)

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -127,9 +127,7 @@ interface FixtureOptions {
   directoryFailures?: Array<{ id: string; name: string; message: string }>
   request?: BrowserRequest
   rlm?: 'auto' | 'enabled' | 'disabled'
-  debate?: 'auto' | 'enabled' | 'disabled'
   autonomous?: 'auto' | 'enabled' | 'disabled'
-  plan?: { active: boolean; pending: boolean }
 }
 
 function createFixture(options: FixtureOptions) {
@@ -143,10 +141,8 @@ function createFixture(options: FixtureOptions) {
   const select = vi.fn(async () => null)
   const selectProfile = vi.fn(async () => null)
   const selectOrchestrationStrategy = vi.fn(async () => null)
-  const selectDebateMode = vi.fn(async () => null)
   const props = {
     useProjection: (key: string) => {
-      if (key === 'plan') return options.plan
       if (key === 'physicalOperatorRouting') {
         return { currentValue: options.policy ?? 'auto', options: ROUTING_OPTIONS }
       }
@@ -163,9 +159,6 @@ function createFixture(options: FixtureOptions) {
           executionPreference: 'luna-first',
         }
       }
-      if (key === 'debateExecutionPreferences' && options.debate !== undefined) {
-        return { mode: options.debate, options: ['auto', 'enabled', 'disabled'] }
-      }
       return undefined
     },
     session: { removed: false },
@@ -177,9 +170,8 @@ function createFixture(options: FixtureOptions) {
     select,
     selectProfile,
     selectOrchestrationStrategy,
-    selectDebateMode,
   } as unknown as PhysicalOperatorRoutingControlProps
-  return { directory, props, refreshModels, select, selectProfile, selectOrchestrationStrategy, selectDebateMode }
+  return { directory, props, refreshModels, select, selectProfile, selectOrchestrationStrategy }
 }
 
 async function openPanel(): Promise<void> {
@@ -353,7 +345,6 @@ describe('physical primary routing control', () => {
     expect(fixture.select).not.toHaveBeenCalled()
     expect(fixture.selectProfile).not.toHaveBeenCalled()
     expect(fixture.selectOrchestrationStrategy).not.toHaveBeenCalled()
-    expect(fixture.selectDebateMode).not.toHaveBeenCalled()
   })
 
   it('reports a centralized Web catalog failure while preserving the selected native model and profile', async () => {
@@ -488,7 +479,6 @@ describe('physical primary routing control', () => {
       policy: 'claude-code',
       request: requestMock,
       rlm: 'auto',
-      debate: 'disabled',
     })
 
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
@@ -499,39 +489,6 @@ describe('physical primary routing control', () => {
     expect(screen.queryByRole('button', { name: /优先 Claude Code/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '高级调度' }))
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '模型分配目标' }).disabled).toBe(true)
-  })
-
-  it('makes Debate own the direct turn, suppresses native profile polling, and restores session routing explicitly', async () => {
-    window.history.replaceState({}, '', '/')
-    const requestMock = vi.fn(async () => dashboardResponse([nativeProvider('codex')]))
-    const fixture = createFixture({
-      current: physicalPrimary('codex'),
-      policy: 'claude-code',
-      request: requestMock,
-      rlm: 'auto',
-      debate: 'enabled',
-    })
-
-    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
-    expect(screen.getByRole('button', { name: '协作 · Debate（多 Agent 辩论）' })).toBeTruthy()
-
-    await openPanel()
-    expect(requestMock).not.toHaveBeenCalled()
-    expect(screen.getByText('当前生效：Debate')).toBeTruthy()
-    expect(screen.getByText('下一条直接消息将由 Debate 阵容执行；保存的主模型和协作偏好在 Debate 期间不生效。退出后，下一条消息按当前主模型和协作偏好恢复会话路由。')).toBeTruthy()
-    expect(screen.queryByText('当前主模型：Codex')).toBeNull()
-    expect(screen.queryByRole('combobox', { name: '执行模型' })).toBeNull()
-    openAdvanced()
-    expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: '基础' }))
-
-    fireEvent.click(screen.getByRole('button', { name: '退出 Debate（恢复会话路由）' }))
-    await waitFor(() => {
-      expect(fixture.selectDebateMode).toHaveBeenCalledWith('disabled')
-      expect(fixture.selectOrchestrationStrategy).toHaveBeenCalledWith(
-        'disabled', 'auto', 'auto', 'balanced', 'codex-sol', 'luna-first',
-      )
-    })
   })
 
   it('refreshes the live catalog and profile owner when the shared primary-model store switches native products', async () => {
@@ -603,7 +560,6 @@ describe('physical primary routing control', () => {
       policy: 'codex',
       request: requestMock,
       rlm: 'auto',
-      debate: 'auto',
     })
     const view = render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
@@ -631,25 +587,20 @@ describe('physical primary routing control', () => {
     expect(fixture.select).not.toHaveBeenCalled()
     expect(fixture.selectProfile).not.toHaveBeenCalled()
     expect(fixture.selectOrchestrationStrategy).not.toHaveBeenCalled()
-    expect(fixture.selectDebateMode).not.toHaveBeenCalled()
   })
 
-  it('prevents direct Debate during Plan and preserves model-invoked planning settings', async () => {
-    const fixture = createFixture({ current: apiPrimary(), rlm: 'auto', debate: 'disabled', plan: { active: true, pending: false } })
+  it('offers only the automatic, standard, and RLM execution mechanisms', async () => {
+    const fixture = createFixture({ current: apiPrimary(), rlm: 'auto' })
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
-    expect(screen.getByRole('option', { name: 'Debate（多 Agent 辩论）' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByText('Plan 与直接 Debate 不能同时执行')).toBeTruthy()
-    fireEvent.change(screen.getByRole('combobox', { name: '执行机制' }), { target: { value: 'debate' } })
-    expect(fixture.selectDebateMode).not.toHaveBeenCalled()
-    expect(fixture.selectOrchestrationStrategy).not.toHaveBeenCalled()
+    const mechanism = screen.getByRole('combobox', { name: '执行机制' })
+    expect(within(mechanism).getAllByRole('option').map(option => option.textContent))
+      .toEqual(['自动（系统选择）', '标准（关闭 RLM）', 'RLM（仅 TaskGraph 节点）'])
+    expect(screen.queryByText(/Debate/u)).toBeNull()
   })
 
-  it.each([
-    { current: physicalPrimary('chatgpt-web'), debate: 'disabled' as const },
-    { current: apiPrimary(), debate: 'enabled' as const },
-  ])('keeps TaskGraph preferences inactive for browser or Debate direct execution', async (selection) => {
-    const fixture = createFixture({ ...selection, rlm: 'auto' })
+  it('keeps TaskGraph preferences inactive for browser direct execution', async () => {
+    const fixture = createFixture({ current: physicalPrimary('chatgpt-web'), rlm: 'auto' })
     render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
     fireEvent.click(screen.getByRole('button', { name: '高级调度' }))
@@ -660,7 +611,7 @@ describe('physical primary routing control', () => {
   })
 
   it('closes explicit autonomous execution when Standard is chosen and disallows re-enabling it with RLM disabled', async () => {
-    const fixture = createFixture({ current: apiPrimary(), rlm: 'enabled', debate: 'disabled', autonomous: 'enabled' })
+    const fixture = createFixture({ current: apiPrimary(), rlm: 'enabled', autonomous: 'enabled' })
     const view = render(<PhysicalOperatorRoutingControl {...fixture.props} />)
     await openPanel()
     fireEvent.change(screen.getByRole('combobox', { name: '执行机制' }), { target: { value: 'standard' } })
@@ -669,7 +620,7 @@ describe('physical primary routing control', () => {
         'disabled', 'disabled', 'auto', 'balanced', 'codex-sol', 'luna-first',
       )
     })
-    const disabled = createFixture({ current: apiPrimary(), rlm: 'disabled', debate: 'disabled' })
+    const disabled = createFixture({ current: apiPrimary(), rlm: 'disabled' })
     view.rerender(<PhysicalOperatorRoutingControl {...disabled.props} />)
     fireEvent.click(screen.getByRole('button', { name: '高级调度' }))
     expect(screen.getByRole('option', { name: '自主闭环' }).hasAttribute('disabled')).toBe(true)

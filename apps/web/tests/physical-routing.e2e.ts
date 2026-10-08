@@ -95,14 +95,6 @@ export function apply(ctx) {
 
     - id: tool-orchestration
       name: '@deepseek-ai/dsh-tool-orchestration'
-
-    - id: debate-orchestration
-      name: '@deepseek-ai/dsh-debate-orchestration'
-      config:
-        dshHome: !!js process.env.DSH_HOME
-
-    - id: tool-debate
-      name: '@deepseek-ai/dsh-tool-debate'
 `)
   return path
 }
@@ -153,7 +145,7 @@ describe('web e2e: physical operator qualification and routing', () => {
     return dialog
   }
 
-  async function setMechanism(dialog: Locator, value: 'debate' | 'standard', expectedLabel: string): Promise<void> {
+  async function setMechanism(dialog: Locator, value: 'standard', expectedLabel: string): Promise<void> {
     const mechanism = dialog.getByRole('combobox', { name: '执行机制' })
     await mechanism.waitFor({ timeout: 10_000 })
     await mechanism.selectOption(value)
@@ -200,7 +192,6 @@ describe('web e2e: physical operator qualification and routing', () => {
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible(), { timeout: 10_000 }).toBe(true)
     await showPage(dialog, '基础')
-    await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
     await setMechanism(dialog, 'standard', '协作 · Codex')
     await showPage(dialog, '高级调度')
     await expectSelectedRoute(dialog, /优先 Codex/)
@@ -212,7 +203,6 @@ describe('web e2e: physical operator qualification and routing', () => {
       await dialog.getByRole('button', { name: route.option }).click()
       await expectSelectedRoute(dialog, route.option)
       await showPage(dialog, '基础')
-      await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
       await setMechanism(dialog, 'standard', route.label)
       await showPage(dialog, '高级调度')
       await expectSelectedRoute(dialog, route.option)
@@ -248,22 +238,6 @@ describe('web e2e: physical operator qualification and routing', () => {
       webAdvisorDisabled: await webOption.isDisabled(),
       webAdvisorSelected: await webOption.getAttribute('data-selected'),
       primaryProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型', exact: true }).count(),
-    }
-    await showPage(selectedPanel, '基础')
-    await setMechanism(selectedPanel, 'debate', '协作 · Debate（多 Agent 辩论）')
-    await showPage(selectedPanel, '高级调度')
-    const debate = {
-      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
-      claudeAdvisorDisabled: await claudeOption.isDisabled(),
-      nativeProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型', exact: true }).count(),
-    }
-    await showPage(selectedPanel, '基础')
-    await selectedPanel.getByRole('button', { name: '退出 Debate（恢复会话路由）' }).click()
-    await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
-    await showPage(selectedPanel, '高级调度')
-    const restored = {
-      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
-      claudeAdvisorDisabled: await claudeOption.isDisabled(),
     }
     await selectedPanel.getByRole('button', { name: '关闭协作方式' }).click()
     await page.getByRole('button', { name: /^Select model/ }).click()
@@ -305,7 +279,7 @@ describe('web e2e: physical operator qualification and routing', () => {
       webEfforts: await webEffort.locator('option').allTextContents(),
     }
 
-    const transcript = `${JSON.stringify({ native, debate, restored, webDirect }, null, 2)}\n`
+    const transcript = `${JSON.stringify({ native, webDirect }, null, 2)}\n`
     if (scaffold.mode === 'refresh') await writeFile(ROUTE_SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(ROUTE_SNAPSHOT, 'utf8'))
     expect(tripwire.pageErrors).toEqual([])

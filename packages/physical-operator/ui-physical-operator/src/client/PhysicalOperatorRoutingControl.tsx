@@ -23,7 +23,6 @@ import type {
   RlmAutonomousMode,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-tool-orchestration/client'
-import type { DebateExecutionMode } from '@deepseek-ai/dsh-tool-debate/client'
 import type { DesktopResidentDashboard } from '../contracts.ts'
 import { loadResidentDashboard, type BrowserRequest } from './ResidentOperatorsPanel.tsx'
 import { WebModelSetup } from './WebModelSetup.tsx'
@@ -51,8 +50,6 @@ export interface PhysicalOperatorRoutingInjected extends Pick<ModelSelectInjecte
     plannerVerifierPreference: PlannerVerifierPreference,
     executionPreference: ExecutionModelPreference,
   ) => Promise<string | null>
-  /** Persist the per-Session Debate admission mode through the host command boundary. */
-  selectDebateMode: (mode: DebateExecutionMode) => Promise<string | null>
 }
 
 /** Full props for the additive composer-row execution strategy selector. */
@@ -80,61 +77,23 @@ const AUTONOMOUS_MODE_LABELS: Record<RlmAutonomousMode, string> = {
 }
 
 /** User-visible mutually exclusive execution mechanism. */
-export type OrchestrationExecutionMechanism = 'auto' | 'standard' | 'rlm' | 'debate'
+export type OrchestrationExecutionMechanism = 'auto' | 'standard' | 'rlm'
 
 const EXECUTION_MECHANISM_LABELS: Record<OrchestrationExecutionMechanism, string> = {
   auto: '自动（系统选择）',
-  standard: '标准（关闭 RLM / Debate）',
+  standard: '标准（关闭 RLM）',
   rlm: 'RLM（仅 TaskGraph 节点）',
-  debate: 'Debate（多 Agent 辩论）',
 }
 
-/** Collapse independently persisted RLM and Debate modes into one human-facing choice. */
-export function orchestrationExecutionMechanism(
-  rlm: RlmExecutionMode,
-  debate: DebateExecutionMode,
-): OrchestrationExecutionMechanism {
-  if (debate === 'enabled') return 'debate'
+/** Map the persisted RLM mode to the human-facing execution mechanism. */
+export function orchestrationExecutionMechanism(rlm: RlmExecutionMode): OrchestrationExecutionMechanism {
   if (rlm === 'enabled') return 'rlm'
-  if (rlm === 'disabled' && debate === 'disabled') return 'standard'
-  return 'auto'
+  return rlm === 'disabled' ? 'standard' : 'auto'
 }
 
 /** Stable Chinese label for one unified execution mechanism. */
 export function orchestrationExecutionMechanismLabel(mode: OrchestrationExecutionMechanism): string {
   return EXECUTION_MECHANISM_LABELS[mode]
-}
-
-/** Resolve the mechanism that owns the next direct message when both preference projections are available.
- * @param rlm - persisted RLM execution preference, when its projection is loaded.
- * @param debate - persisted Debate execution preference, when its projection is loaded.
- * @returns effective mechanism, or undefined while one preference projection is absent.
- */
-export function physicalOperatorEffectiveExecutionMechanism(
-  rlm: RlmExecutionMode | undefined,
-  debate: DebateExecutionMode | undefined,
-): OrchestrationExecutionMechanism | undefined {
-  if (debate === 'enabled') return 'debate'
-  if (rlm === undefined || debate === undefined) return undefined
-  return orchestrationExecutionMechanism(rlm, debate)
-}
-
-/** Render the effective mechanism instead of implying that the selected primary model owns a Debate turn.
- * @param policy - selected physical-operator policy shown by the primary route control.
- * @param rlm - persisted RLM execution preference, when its projection is loaded.
- * @param debate - persisted Debate execution preference, when its projection is loaded.
- * @param directory - shared primary-model directory, when its projection has loaded.
- * @returns a compact label for the next direct message.
- */
-export function physicalOperatorEffectiveExecutionLabel(
-  policy: PhysicalOperatorRoutingPolicy,
-  rlm: RlmExecutionMode | undefined,
-  debate: DebateExecutionMode | undefined,
-  directory?: ModelDirectoryState,
-): string {
-  const mechanism = physicalOperatorEffectiveExecutionMechanism(rlm, debate)
-  if (mechanism === 'debate') return orchestrationExecutionMechanismLabel(mechanism)
-  return physicalOperatorRoutingSummary(physicalOperatorMainModel(directory) ?? policy)
 }
 
 /** Resolve the explicitly selected physical primary model, when the shared directory reports one. */
@@ -174,52 +133,18 @@ async function executionModeStep(
 }
 
 /**
- * Persist one unified choice without ever enabling RLM and Debate together.
- * The non-target mechanism is closed before the target mechanism is enabled;
- * a failed step is returned verbatim so the controlled select can be retried.
+ * Persist one execution-mechanism choice.
+ * A failed save is returned verbatim so the controlled select can be retried.
  */
 export async function changeOrchestrationExecutionMechanism(
-  current: { readonly rlm: RlmExecutionMode; readonly debate: DebateExecutionMode; readonly autonomous?: RlmAutonomousMode },
+  current: { readonly rlm: RlmExecutionMode; readonly autonomous?: RlmAutonomousMode },
   target: OrchestrationExecutionMechanism,
   saveRlm: SaveExecutionSubmode,
-  saveDebate: SaveExecutionSubmode,
 ): Promise<string | null> {
-  let rlm = current.rlm
-  let debate = current.debate
-  const setRlm = async (mode: RlmExecutionMode, label: string): Promise<string | null> => {
-    if (rlm === mode && !(mode === 'disabled' && current.autonomous === 'enabled')) return null
-    const failure = await executionModeStep(label, () => saveRlm(mode))
-    if (failure === null) rlm = mode
-    return failure
-  }
-  const setDebate = async (mode: DebateExecutionMode, label: string): Promise<string | null> => {
-    if (debate === mode) return null
-    const failure = await executionModeStep(label, () => saveDebate(mode))
-    if (failure === null) debate = mode
-    return failure
-  }
-
-  if (target === 'rlm') {
-    return await setDebate('disabled', '关闭 Debate')
-      ?? await setRlm('enabled', '启用 RLM')
-  }
-  if (target === 'debate') {
-    return await setRlm('disabled', '关闭 RLM')
-      ?? await setDebate('enabled', '启用 Debate')
-  }
-  if (target === 'standard') {
-    return await setDebate('disabled', '关闭 Debate')
-      ?? await setRlm('disabled', '启用标准模式')
-  }
-
-  const closeExplicit = rlm === 'enabled'
-    ? await setRlm('disabled', '关闭 RLM')
-    : debate === 'enabled'
-      ? await setDebate('disabled', '关闭 Debate')
-      : null
-  return closeExplicit
-    ?? await setRlm('auto', '启用 RLM 自动选择')
-    ?? await setDebate('auto', '启用 Debate 自动选择')
+  const mode: RlmExecutionMode = target === 'rlm' ? 'enabled' : target === 'standard' ? 'disabled' : 'auto'
+  // Standard mode also closes Autonomous Mode, so an enabled Autonomous Mode makes a repeat save meaningful.
+  if (current.rlm === mode && !(mode === 'disabled' && current.autonomous === 'enabled')) return null
+  return await executionModeStep(mode === 'enabled' ? '启用 RLM' : mode === 'disabled' ? '启用标准模式' : '启用 RLM 自动选择', () => saveRlm(mode))
 }
 
 /** User-facing execution-mechanism label; `auto` remains the product default. */
@@ -303,7 +228,6 @@ export function PhysicalOperatorRoutingControl({
   select,
   selectProfile,
   selectOrchestrationStrategy,
-  selectDebateMode,
 }: PhysicalOperatorRoutingControlProps) {
   const routing = useProjection('physicalOperatorRouting')
   const modelDirectory = useSyncExternalStore(
@@ -312,9 +236,6 @@ export function PhysicalOperatorRoutingControl({
   )
   const profileProjection = useProjection('physicalOperatorProfiles')
   const orchestrationPreferences = useProjection('orchestrationExecutionPreferences')
-  const debatePreferences = useProjection('debateExecutionPreferences')
-  const plan = useProjection('plan')
-  const planSelected = plan !== undefined && (plan.pending ? !plan.active : plan.active)
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -332,21 +253,14 @@ export function PhysicalOperatorRoutingControl({
   // A Codex primary takes its model and effort from the model menu entry, so
   // only a Claude Code primary still reads a primary-owned native profile.
   const selectedProfileOwner = selectedMainModel === 'claude-code' ? selectedMainModel : undefined
-  const effectiveMechanism = physicalOperatorEffectiveExecutionMechanism(
-    orchestrationPreferences?.rlm,
-    debatePreferences?.mode,
-  )
   const savedProfileOwner = routing?.currentValue === 'codex' || routing?.currentValue === 'claude-code'
     ? routing.currentValue
     : undefined
   const webPrimary = selectedMainModel === 'chatgpt-web'
-  const profileOwner = effectiveMechanism === 'debate'
-    ? undefined
-    : selectedProfileOwner
-      ?? (selectedMainModel === undefined ? savedProfileOwner : undefined)
+  const profileOwner = selectedProfileOwner
+    ?? (selectedMainModel === undefined ? savedProfileOwner : undefined)
   const dashboardEligible = open
     && profileOwner !== undefined
-    && effectiveMechanism !== 'debate'
     && modelDirectory.status !== 'idle'
     && modelDirectory.status !== 'loading'
 
@@ -409,14 +323,9 @@ export function PhysicalOperatorRoutingControl({
   if (routing === undefined) return null
 
   const locked = session.removed || input.phase !== 'plain' || saving
-  const taskGraphInactive = effectiveMechanism === 'debate' || webPrimary
-  const routingPreferencesLocked = locked || webPrimary || effectiveMechanism === 'debate'
-  const currentLabel = physicalOperatorEffectiveExecutionLabel(
-    routing.currentValue,
-    orchestrationPreferences?.rlm,
-    debatePreferences?.mode,
-    modelDirectory,
-  )
+  const taskGraphInactive = webPrimary
+  const routingPreferencesLocked = locked || webPrimary
+  const currentLabel = physicalOperatorRoutingSummary(physicalOperatorMainModel(modelDirectory) ?? routing.currentValue)
   const provider = profileOwner === undefined
     ? undefined
     : dashboard?.providers.find(candidate => candidate.operatorId === profileOwner)
@@ -503,17 +412,9 @@ export function PhysicalOperatorRoutingControl({
     ))
   }
   const chooseExecutionMechanism = (target: OrchestrationExecutionMechanism): void => {
-    if (locked || debatePreferences === undefined
-      || (target === 'debate' && planSelected)
-      || (target === 'rlm' && taskGraphInactive)) return
-    if (orchestrationPreferences === undefined) {
-      if (target === 'standard' && debatePreferences.mode !== 'disabled') {
-        persist(() => selectDebateMode('disabled'))
-      }
-      return
-    }
+    if (locked || orchestrationPreferences === undefined || (target === 'rlm' && taskGraphInactive)) return
     persist(() => changeOrchestrationExecutionMechanism(
-      { rlm: orchestrationPreferences.rlm, debate: debatePreferences.mode, autonomous: orchestrationPreferences.autonomous },
+      { rlm: orchestrationPreferences.rlm, autonomous: orchestrationPreferences.autonomous },
       target,
       mode => selectOrchestrationStrategy(
         mode,
@@ -525,7 +426,6 @@ export function PhysicalOperatorRoutingControl({
         orchestrationPreferences.plannerVerifierPreference,
         orchestrationPreferences.executionPreference,
       ),
-      selectDebateMode,
     ))
   }
   const refreshModelsAndOperators = (): void => {
@@ -650,7 +550,7 @@ export function PhysicalOperatorRoutingControl({
                   {routingOptions(pinnedRoutingOptions)}
                 </div>
               </div>
-              {selectedMainModel !== undefined && effectiveMechanism !== 'debate' && (
+              {selectedMainModel !== undefined && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
                   {webPrimary
                     ? (
@@ -678,22 +578,7 @@ export function PhysicalOperatorRoutingControl({
                   refreshVersion={webRefreshVersion}
                 />
               )}
-              {effectiveMechanism === 'debate' && (
-                <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
-                  <div>
-                    <strong>当前生效：Debate</strong>
-                    <small>下一条直接消息将由 Debate 阵容执行；保存的主模型和协作偏好在 Debate 期间不生效。退出后，下一条消息按当前主模型和协作偏好恢复会话路由。</small>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={locked}
-                    onClick={() => { chooseExecutionMechanism('standard') }}
-                  >
-                    退出 Debate（恢复会话路由）
-                  </button>
-                </div>
-              )}
-              {profileOwner !== undefined && effectiveMechanism !== 'debate' && (
+              {profileOwner !== undefined && (
                 <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'advanced'}>
                   <div>
                     <strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 模型偏好</strong>
@@ -759,18 +644,12 @@ export function PhysicalOperatorRoutingControl({
                           : <p>{model?.displayName ?? '按任务推荐'}：{model?.description ?? '由系统按任务与配额选择。'}{model?.supportsAdaptiveThinking === true ? ' 支持原生自适应思考。' : ''}</p>}
                 </div>
               )}
-              {planSelected && (
-                <div className="dshDesktopOperatorProfilePreferences" role="status">
-                  <strong>Plan 与直接 Debate 不能同时执行</strong>
-                  <small>Plan 需要由主模型提交计划并等待批准。请先退出 Plan 再启用 Debate；已启用 Debate 时请退出 Debate 后继续计划。</small>
-                </div>
-              )}
-              {orchestrationPreferences !== undefined && debatePreferences !== undefined && (
+              {orchestrationPreferences !== undefined && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" data-page={page}>
                   <div>
                     <strong>{page === 'basic' ? '执行机制' : 'TaskGraph 高级调度'}</strong>
                     <small>{page === 'basic'
-                      ? '标准关闭 RLM 和 Debate，但保留协作路由；RLM 只控制 TaskGraph 节点，Debate 接管直接消息。'
+                      ? '标准关闭 RLM，但保留协作路由；RLM 只控制 TaskGraph 节点。'
                       : taskGraphInactive
                         ? '当前路径不使用这些设置；已保存的 TaskGraph 偏好保留，当前不可编辑。'
                         : '仅在 TaskGraph 节点执行时使用，不决定普通聊天的回答模型。'}</small>
@@ -779,7 +658,7 @@ export function PhysicalOperatorRoutingControl({
                     <span>执行机制</span>
                     <select
                       aria-label="执行机制"
-                      value={orchestrationExecutionMechanism(orchestrationPreferences.rlm, debatePreferences.mode)}
+                      value={orchestrationExecutionMechanism(orchestrationPreferences.rlm)}
                       disabled={locked}
                       onChange={(event) => {
                         chooseExecutionMechanism(event.currentTarget.value as OrchestrationExecutionMechanism)
@@ -788,7 +667,6 @@ export function PhysicalOperatorRoutingControl({
                       <option value="auto">{orchestrationExecutionMechanismLabel('auto')}</option>
                       <option value="standard">{orchestrationExecutionMechanismLabel('standard')}</option>
                       <option value="rlm" disabled={taskGraphInactive}>{orchestrationExecutionMechanismLabel('rlm')}</option>
-                      <option value="debate" disabled={planSelected}>{orchestrationExecutionMechanismLabel('debate')}</option>
                     </select>
                   </label>
                   <label>

@@ -494,7 +494,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     const result = await next()
     if (!firstDecision
       || decision.route !== 'taskgraph-candidate'
-      || debateEnabled(agent.session.events)
       || result.kind !== 'enter'
       || !ctx.tools.schemas(agent).some(schema => schema.name === ORCHESTRATION_TOOL)) {
       return result
@@ -513,9 +512,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     const selectedPrimary = selection.installed
       ? selectedPhysicalMainOperator(selection.selection)
       : undefined
-    if (route === undefined && base.provider === ROUTER_PROVIDER && debateEnabled(agent.session.events)) {
-      return base
-    }
     if (route === undefined && base.provider === ROUTER_PROVIDER && selectedPrimary !== undefined) {
       const promptMessage = latestUserPromptMessage(agent.session.events)
       if (promptMessage === undefined) {
@@ -1128,14 +1124,6 @@ async function decideHostRoute(
     }
   }
   if (current === undefined) return undefined
-  if (debateEnabled(agent.session.events)) {
-    return {
-      policy,
-      route: 'taskgraph-candidate',
-      requestedByMessageId: current.id,
-      reason: '当前会话已明确启用 Debate，由 Debate Consumer 通过唯一 TaskGraph 调度器接管',
-    }
-  }
   const text = textContent(current.content)
   if (selectedPrimary !== undefined) {
     if (isContinuation(text)
@@ -1496,15 +1484,6 @@ function creditBlockedOffers(events: readonly SessionEvent[]): ReadonlySet<strin
 /** Native preferences can constrain TaskGraph workers without replacing a selected primary model. */
 function taskGraphPreferredOperator(policy: PhysicalOperatorRoutingPolicy): PhysicalOperatorProfileOwner | undefined {
   return policy === 'codex' || policy === 'claude-code' ? policy : undefined
-}
-
-function debateEnabled(events: readonly SessionEvent[]): boolean {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index] as { readonly type: string; readonly data: unknown }
-    if (event.type !== 'debate/preferences') continue
-    return (event.data as { readonly mode?: unknown }).mode === 'enabled'
-  }
-  return false
 }
 
 function operatorDecision(

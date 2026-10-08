@@ -75,10 +75,6 @@ export function apply(ctx: ClientContext): void {
             )
             return commandFailure(result, '/orchestration-strategy')
           },
-          selectDebateMode: async (mode) => {
-            const result = await scope.remote.commands.execute(sessionId, `/debate-mode ${mode}`)
-            return commandFailure(result, '/debate-mode')
-          },
         }
       },
     }, PhysicalOperatorRoutingControl))

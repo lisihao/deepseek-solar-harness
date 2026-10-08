@@ -557,42 +557,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orchestration/tool-debate/src/index.ts)
-
-<a id="debatedispatch--log-only"></a>
-
-#### `debate/dispatch` — log-only
-
-```ts persistence-catalog
-/**
- * Durable host admission for one user message while Debate is explicitly enabled.
- * @param commandId Idempotent Debate command identity.
- * @param promptMessageId User message owned by this admission.
- * @param turn Agent turn receiving the message.
- * @param step Agent step replaced by the Debate host adapter.
- * @param planModeActive Effective Plan state captured for this host step.
- */
-'debate/dispatch': {
-  readonly commandId: string
-  readonly promptMessageId: string
-  readonly turn: number
-  readonly step: number
-  readonly planModeActive?: boolean
-}
-```
-
-来源：[`packages/orchestration/tool-debate/src/index.ts:140`](../packages/orchestration/tool-debate/src/index.ts)
-
-<a id="debatepreferences--log-only"></a>
-
-#### `debate/preferences` — log-only
-
-```ts persistence-catalog
-/** Whole-value strategy for future Debate admissions in this Session. */
-'debate/preferences': DebateExecutionPreferences
-```
-
-来源：[`packages/orchestration/tool-debate/src/index.ts:124`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:71`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -607,7 +572,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:152`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:82`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 

@@ -1,7 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import CommandRuntime from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import DebateService, {
   validateDebatePolicy,
   type DebateControlRequestV1,
@@ -12,10 +11,8 @@ import DebateService, {
   type DebateRunSummaryV1,
   type DebateStartRequestV1,
 } from '@deepseek-ai/dsh-debate'
-import LlmRuntime, { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
-import PlanModeController from '@deepseek-ai/dsh-plan-mode'
+import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -171,36 +168,12 @@ class ScriptedDebates extends DebateService {
   }
 }
 
-function deferred<T>() {
-  let resolve: (value: T) => void = () => undefined
-  const promise = new Promise<T>((next) => { resolve = next })
-  return { promise, resolve }
-}
-
-function textDeltas(agent: Agent): string[] {
-  return agent.session.events
-    .filter((event): event is Extract<typeof event, { type: 'assistant/chunk' }> => event.type === 'assistant/chunk')
-    .map(event => event.data.chunk)
-    .filter((chunk): chunk is Extract<typeof chunk, { type: 'text-delta' }> => chunk.type === 'text-delta')
-    .map(chunk => chunk.text)
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 2_000
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error('timed out waiting for Debate stream progress')
-    await new Promise<void>(resolve => setTimeout(resolve, 10))
-  }
-}
-
 async function setup() {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LlmRuntime)
-  await ctx.plugin(SessionProjectionRegistry)
-  await ctx.plugin(CommandRuntime)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(ScriptedDebates)
@@ -210,33 +183,15 @@ async function setup() {
   return { ctx, agent, provider: ctx.debates as ScriptedDebates }
 }
 
-async function setupAutomatic(
-  route: { readonly provider: string; readonly model: string } = {
-    provider: 'unavailable-primary',
-    model: 'unavailable-primary',
-  },
-  options: { readonly plan?: boolean } = {},
-) {
-  const ctx = new Context()
-  contexts.push(ctx)
-  await ctx.plugin(LlmRuntime)
-  await ctx.plugin(SessionStore)
-  await ctx.plugin(SessionProjectionRegistry)
-  await ctx.plugin(CommandRuntime)
-  await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRuntime)
-  if (options.plan === true) await ctx.plugin(PlanModeController, { section: 'Plan mode test guidance.' })
-  await ctx.plugin(AgentRegistry)
-  await ctx.plugin(AgentLoop, { agents: [] })
-  await ctx.plugin(ScriptedDebates)
-  const toolFiber = ctx.plugin(tool)
-  await toolFiber.await()
-  const agent = ctx.agentLoop.create(
-    SessionId('session-debate-automatic'),
-    route,
-    { cwd: '/workspace' },
-  )
-  return { ctx, agent, provider: ctx.debates as ScriptedDebates, toolFiber }
+/** Write an event whose type this build no longer declares, as an older build did. */
+function appendRetiredEvent(agent: Agent, type: string, data: unknown): void {
+  (agent.session as unknown as { append(type: string, data: unknown, options: object): void })
+    .append(type, data, { ignorable: true })
+}
+
+/** Make the Session a kennel Session, the only place a Debate may start. */
+function markKennel(agent: Agent): void {
+  agent.session.append('agent-preset/selected', { agentPreset: 'kennel' })
 }
 
 let calls = 0
@@ -317,553 +272,8 @@ describe('debate model Consumer', () => {
     expect(validateDebatePolicy(explicitPolicy).budget).toMatchObject({ maxRounds: 1, maxCostUsd: 7 })
   })
 
-  it('lets an explicitly enabled Debate own the user turn without calling a primary model', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
-    provider.controlResult = snapshot({ revision: 3 })
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Should DSH adopt this architecture?' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    expect(provider.starts, JSON.stringify(agent.session.events, null, 2)).toHaveLength(1)
-    expect(provider.starts[0]).toMatchObject({
-      prompt: 'Should DSH adopt this architecture?',
-      objective: 'Should DSH adopt this architecture?',
-      workspace: '/workspace',
-      sourceSessionId: 'session-debate-automatic',
-      execution: { version: 1, kind: 'standalone' },
-      policy: { mode: 'enabled' },
-    })
-    const dispatch = agent.session.events.find(event => event.type === 'debate/dispatch')
-    if (dispatch?.type !== 'debate/dispatch') throw new Error('missing debate dispatch')
-    expect(provider.starts[0]?.commandId).toBe(
-      `debate-host:session-debate-automatic:${dispatch.data.promptMessageId}`,
-    )
-    expect(provider.controls).toHaveLength(1)
-    expect(provider.controls[0]).toMatchObject({
-      runId: 'debate-run-1',
-      expectedRevision: 2,
-      action: 'approve',
-      reason: 'The user explicitly selected Debate for this Session and submitted this request.',
-    })
-    expect(provider.controls[0]?.commandId).toMatch(/^debate-approval-[a-f0-9]{32}$/u)
-    expect(dispatch.ignorable).toBe(true)
-    expect(typeof dispatch.data.promptMessageId).toBe('string')
-    expect(dispatch.data.turn).toBe(1)
-    expect(dispatch.data.step).toBe(1)
-    expect(agent.session.events.find(event => event.type === 'debate/admission')).toMatchObject({
-      ignorable: true,
-      data: { runId: 'debate-run-1', state: 'completed' },
-    })
-    const header = [...agent.session.events].reverse().find(event => event.type === 'request/header')
-    if (header?.type !== 'request/header') throw new Error('missing Debate request header')
-    expect(header.data.header.config).toMatchObject({ provider: 'dsh-debate-host', model: 'debate' })
-    const assistant = [...agent.session.events].reverse().find(event => event.type === 'assistant/message')
-    if (assistant?.type !== 'assistant/message') throw new Error('missing assistant response')
-    expect(assistant.data.message.source).toMatchObject({ provider: 'dsh-debate-host', model: 'debate' })
-    const response = assistant.data.message.content[0]
-    expect(response?.type).toBe('text')
-    expect(response?.type === 'text' ? response.text : '').toContain('Decision summary')
-  })
-
-  it('rejects enabling host Debate while Plan has a pending entry', async () => {
-    const { ctx, agent, provider } = await setupAutomatic(
-      { provider: 'unavailable-primary', model: 'unavailable-primary' },
-      { plan: true },
-    )
-    agent.session.append('turn/start', { turn: 1 })
-    expect(ctx.planMode.set(agent, true)).toBe('queued')
-    expect(ctx.planMode.get(agent)).toEqual({ active: false, pending: true })
-
-    const changed = await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    expect(changed?.result.kind).toBe('error')
-    if (changed?.result.kind !== 'error') throw new Error('expected Plan conflict')
-    expect(changed.result.text).toContain('Exit Plan mode with /plan off or disable Debate.')
-    expect(tool.foldDebatePreferences(agent.session.events)).toEqual({ mode: 'disabled' })
-    expect(provider.starts).toHaveLength(0)
-  })
-
-  it('blocks a host Debate request when Plan is enabled after Debate selection', async () => {
-    const { ctx, agent, provider } = await setupAutomatic(
-      { provider: 'unavailable-primary', model: 'unavailable-primary' },
-      { plan: true },
-    )
-    const errors: Error[] = []
-    ctx.on('agent/error', ({ error }) => {
-      if (error instanceof Error) errors.push(error)
-    })
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    expect(ctx.planMode.set(agent, true)).toBe('committed')
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'This host Debate must be blocked while planning.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    expect(provider.starts).toHaveLength(0)
-    expect(agent.session.events.filter(event => event.type === 'debate/dispatch')).toHaveLength(0)
-    expect(errors.some(error => error.message.includes('Exit Plan mode with /plan off or disable Debate.'))).toBe(true)
-  })
-
-  it('keeps an admitted host Debate turn when Plan is queued mid-step', async () => {
-    const { ctx, agent, provider } = await setupAutomatic(
-      { provider: 'unavailable-primary', model: 'unavailable-primary' },
-      { plan: true },
-    )
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    let queued = false
-    ctx.on('agent/request', async ({ agent: subject }, next) => {
-      const base = await next()
-      if (subject === agent && !queued) {
-        queued = true
-        expect(ctx.planMode.set(agent, true)).toBe('queued')
-      }
-      return base
-    })
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Keep this already admitted Debate turn running.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    expect(provider.starts).toHaveLength(1)
-    const dispatch = agent.session.events.find(event => event.type === 'debate/dispatch')
-    expect(dispatch?.type === 'debate/dispatch' && dispatch.data.planModeActive).toBe(false)
-    expect(ctx.planMode.get(agent)).toEqual({ active: false, pending: true })
-  })
-
-  it('allows host Debate after Plan mode is turned off', async () => {
-    const { ctx, agent, provider } = await setupAutomatic(
-      { provider: 'unavailable-primary', model: 'unavailable-primary' },
-      { plan: true },
-    )
-    expect(ctx.planMode.set(agent, true)).toBe('committed')
-    expect(ctx.planMode.set(agent, false)).toBe('committed')
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Run this Debate after leaving Plan mode.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    expect(provider.starts).toHaveLength(1)
-  })
-
-  it('keeps model-invoked Debate available while Plan mode is active', async () => {
-    const { ctx, agent, provider } = await setupAutomatic(
-      { provider: 'unavailable-primary', model: 'unavailable-primary' },
-      { plan: true },
-    )
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    expect(ctx.planMode.set(agent, true)).toBe('committed')
-    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
-    provider.controlResult = snapshot({ revision: 3 })
-
-    const started = await call(ctx, agent, { action: 'start', prompt: 'Use the model-owned Debate tool during planning.' })
-
-    expect(started.isError).toBe(false)
-    expect(provider.starts).toHaveLength(1)
-  })
-
-  it.each(['auto', 'disabled'] as const)('does not resurrect a prior Debate host route after an explicit %s switch', async (mode) => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
-    provider.controlResult = snapshot({ revision: 3 })
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Use Debate once.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-    expect(provider.starts).toHaveLength(1)
-
-    await ctx.commands.execute(agent, `/debate-mode ${mode}`, new AbortController().signal)
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Use the selected primary model.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    expect(provider.starts).toHaveLength(1)
-    expect(agent.session.events.filter(event => event.type === 'debate/dispatch')).toHaveLength(1)
-  })
-
-  it('durably admits a turn when a legacy Session selected the internal Debate route as its primary model', async () => {
-    const { ctx, agent, provider } = await setupAutomatic({
-      provider: 'dsh-debate-host',
-      model: 'debate',
-    })
-
-    const message = createUserMessage({
-      content: [{ type: 'text', text: 'Debate this decision.' }],
-      source: { kind: 'user' },
-    })
-    agent.followup(message)
-    await agent.whenIdle()
-
-    expect(provider.starts).toHaveLength(1)
-    expect(provider.starts[0]?.commandId).toBe(
-      `debate-host:session-debate-automatic:${message.id}`,
-    )
-    expect(agent.session.events.find(event => event.type === 'debate/dispatch')).toMatchObject({
-      ignorable: true,
-      data: {
-        commandId: `debate-host:session-debate-automatic:${message.id}`,
-        promptMessageId: message.id,
-        turn: 1,
-        step: 1,
-      },
-    })
-    expect(agent.session.events.find(event => event.type === 'turn/end')).toMatchObject({
-      data: { reason: { kind: 'completed' } },
-    })
-    await expect(ctx.llm.listModels('dsh-debate-host')).resolves.toEqual([])
-  })
-
-  it('streams durable roster, agent output previews, convergence, and the final host summary', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    const template = snapshot()
-    const round = template.rounds[0]
-    if (round === undefined) throw new Error('missing Debate fixture round')
-    const turn = round.turns[0]
-    if (turn === undefined) throw new Error('missing Debate fixture turn')
-    const { convergence: _convergence, ...roundWithoutConvergence } = round
-    const { outputRef: _outputRef, outputPreview: _outputPreview, ...turnWithoutOutput } = turn
-    const secondTurn = {
-      ...turn,
-      round: 2,
-      slotId: 'slot-falsifier',
-      role: 'skeptical-falsifier' as const,
-      operatorId: 'codex',
-      model: 'gpt-5.6-sol',
-      attempt: 1,
-      routing: {
-        version: 1 as const,
-        requestedOperatorId: 'claude-code',
-        requestedModel: 'claude-fable-5',
-        actualOperatorId: 'codex',
-        actualModel: 'gpt-5.6-sol',
-        fallbackReasonCode: 'provider-unavailable',
-        allocationPlanRef: 'artifact:allocation-falsifier',
-      },
-      outputRef: 'artifact:falsifier-output',
-      outputPreview: 'Falsifier output summary',
-    }
-    const running = snapshot({
-      state: 'round_running',
-      revision: 5,
-      currentRound: 1,
-      rounds: [{
-        ...roundWithoutConvergence,
-        state: 'running',
-        turns: [{
-          ...turnWithoutOutput,
-          state: 'planned',
-        }],
-      }],
-    })
-    const dispatched = snapshot({
-      state: 'round_running',
-      revision: 6,
-      currentRound: 1,
-      rounds: [{
-        ...roundWithoutConvergence,
-        state: 'running',
-        turns: [{
-          ...turnWithoutOutput,
-          state: 'dispatched',
-        }],
-      }],
-    })
-    const firstCompleted = snapshot({
-      state: 'reviewing',
-      revision: 7,
-      currentRound: 1,
-      rounds: [{ ...round, state: 'completed', turns: [turn] }],
-    })
-    const secondRound = snapshot({
-      state: 'reviewing',
-      revision: 8,
-      currentRound: 2,
-      rounds: [
-        { ...round, state: 'completed', turns: [turn] },
-        { ...roundWithoutConvergence, round: 2, state: 'completed', turns: [secondTurn] },
-      ],
-    })
-    const completed = snapshot({
-      revision: 10,
-      state: 'completed',
-      currentRound: 2,
-      rounds: [
-        { ...round, state: 'completed', turns: [turn] },
-        { ...round, round: 2, state: 'completed', turns: [secondTurn] },
-      ],
-      synthesis: {
-        ...template.synthesis!,
-        artifactRef: 'artifact:judge-output',
-        outputPreview: 'Final host decision summary',
-      },
-    })
-    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
-    const approval = deferred<DebateRunSnapshotV1>()
-    provider.controlGate = approval.promise
-    provider.inspectFallback = firstCompleted
-    provider.inspectSnapshots.push(running, dispatched, firstCompleted)
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Should DSH adopt this architecture?' }],
-      source: { kind: 'user' },
-    }))
-    const idle = agent.whenIdle()
-    await waitFor(() => textDeltas(agent).some(text => text.includes('# 主题帖')))
-    expect(agent.session.events.some(event => event.type === 'assistant/message')).toBe(false)
-
-    await waitFor(() => {
-      const text = textDeltas(agent).join('')
-      return text.includes('公开发言')
-        && text.includes('Proposal output summary')
-    })
-    provider.inspectFallback = secondRound
-    await waitFor(() => {
-      const text = textDeltas(agent).join('')
-      return text.includes('第 2 轮')
-        && text.includes('Falsifier output summary')
-    })
-    provider.inspectFallback = completed
-    approval.resolve(completed)
-    await idle
-
-    const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('建设性提案者')
-    expect(streamText).toContain('**初始计划：** 4 轮（请求明确涉及深度分析、系统设计、架构或多项约束。）')
-    expect(streamText).toContain('主题帖状态更新')
-    expect(streamText.indexOf('# 主题帖')).toBeLessThan(streamText.indexOf('第 1 轮'))
-    expect(streamText.indexOf('Proposal output summary')).toBeLessThan(streamText.indexOf('第 2 轮'))
-    expect(streamText.indexOf('第 2 轮')).toBeLessThan(streamText.indexOf('Falsifier output summary'))
-    expect(streamText.indexOf('本轮收敛判断')).toBeLessThan(streamText.lastIndexOf('本轮收敛判断'))
-    expect(streamText.indexOf('本轮收敛判断')).toBeLessThan(streamText.indexOf('Final host decision summary'))
-    expect(streamText).toContain('### 2 楼 · 怀疑式证伪者')
-    expect(streamText.match(/### 1 楼/g)).toHaveLength(1)
-    expect(streamText.match(/Proposal output summary/g)).toHaveLength(1)
-    expect(streamText.match(/Final host decision summary/g)).toHaveLength(1)
-    expect(streamText).toContain('**执行者：** Codex · GPT-5.6 Sol（已从 Claude Code · Claude Fable 5 自动回退）')
-    expect(streamText).toContain('## 置顶 · 主持人总结')
-    expect(streamText).toContain('Final host decision summary')
-    expect(streamText).not.toContain('| 角色 | 职责 | 执行算子 | 模型 | 启动状态 |')
-    expect(streamText).not.toMatch(/\n\| ---/u)
-    expect(streamText).toContain('**建设性提案者**')
-    expect(streamText).toContain('**怀疑式证伪者**')
-    expect(streamText).toContain('**证据审计员**')
-    expect(streamText).toContain('**决策裁判（主持人）**')
-    expect(streamText).toContain('职责 · 提出可执行的正向方案，并明确前提。')
-    expect(streamText).toContain('执行 · Codex · GPT-5.6 Sol')
-    expect(streamText).toContain('启动状态 · 等待分派')
-    expect(streamText).not.toContain('<details>')
-    expect(streamText).not.toContain('<summary>')
-    expect(streamText).not.toContain('角色 ID')
-    expect(streamText).not.toContain('Slot：')
-    expect(streamText).not.toContain('sha256:')
-    expect(streamText).not.toContain('reasoning')
-
-    const chunks = agent.session.events
-      .filter((event): event is Extract<typeof event, { type: 'assistant/chunk' }> => event.type === 'assistant/chunk')
-      .map(event => event.data.chunk)
-    const blockEnd = chunks.find(chunk => chunk.type === 'block-end')
-    if (blockEnd?.type !== 'block-end' || blockEnd.block.type !== 'text') {
-      throw new Error('missing Debate text block-end')
-    }
-    expect(blockEnd.block.text).toBe(streamText)
-  })
-
-  it('emits a roster status update when terminal statuses become available', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    const template = snapshot()
-    const round = template.rounds[0]
-    if (round === undefined) throw new Error('missing Debate fixture round')
-    const proposer = round.turns[0]
-    if (proposer === undefined) throw new Error('missing Debate fixture turn')
-    const { convergence: _convergence, ...roundWithoutConvergence } = round
-    const { outputRef: _outputRef, outputPreview: _outputPreview, ...proposerWithoutOutput } = proposer
-    provider.startResult = snapshot({
-      state: 'round_running',
-      revision: 5,
-      currentRound: 1,
-      rounds: [{
-        ...roundWithoutConvergence,
-        state: 'running',
-        turns: [{
-          ...proposerWithoutOutput,
-          state: 'dispatched',
-        }],
-      }],
-    })
-    const settled = snapshot({
-      state: 'completed',
-      revision: 7,
-      currentRound: 1,
-      rounds: [{
-        ...roundWithoutConvergence,
-        state: 'completed',
-        turns: [{
-          ...proposerWithoutOutput,
-          state: 'settled',
-          outputRef: 'artifact:proposer-output',
-          outputPreview: 'Settled proposer output',
-        }],
-      }],
-    })
-    const completion = deferred<DebateRunSnapshotV1>()
-    provider.controlGate = completion.promise
-    provider.inspectFallback = settled
-
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Start this Debate for status change.' }],
-      source: { kind: 'user' },
-    }))
-    completion.resolve({ ...settled, state: 'completed' })
-    await agent.whenIdle()
-
-    const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('## 参与者名册')
-    expect(streamText).toContain('**参与者状态更新：** 建设性提案者：已完成')
-  })
-
-  it('treats ANSI/SGR and trailing [1m] markers as equivalent in route comparisons', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    const template = snapshot()
-    const round = template.rounds[0]
-    const turn = round?.turns[0]
-    if (round === undefined || turn === undefined) throw new Error('missing Debate fixture turn')
-    const { convergence: _convergence, ...roundWithoutConvergence } = round
-    const { outputRef: _outputRef, outputPreview: _outputPreview, ...proposerWithoutOutput } = turn
-    const completed = snapshot({
-      state: 'completed',
-      revision: 9,
-      currentRound: 1,
-      rounds: [{
-        ...roundWithoutConvergence,
-        state: 'completed',
-        turns: [{
-          ...proposerWithoutOutput,
-          state: 'settled',
-          routing: {
-            version: 1 as const,
-            requestedOperatorId: 'codex',
-            requestedModel: 'claude-fable-5',
-            actualOperatorId: 'codex',
-            actualModel: '\u001b[1mclaude-fable-5[1m',
-          },
-        }],
-      }],
-    })
-    const completion = deferred<DebateRunSnapshotV1>()
-    provider.controlGate = completion.promise
-    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 4, currentRound: 0, rounds: [] })
-    provider.inspectFallback = completed
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'How should route matching handle ANSI markers?' }],
-      source: { kind: 'user' },
-    }))
-    const idle = agent.whenIdle()
-    await waitFor(() => textDeltas(agent).some(text => text.includes('### 1 楼')))
-    completion.resolve(completed)
-    await idle
-
-    const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('### 1 楼 · 建设性提案者')
-    expect(streamText).toContain('**执行者：** Codex · Claude Fable 5')
-    expect(streamText).not.toContain('（已从')
-  })
-
-  it('renders the current user topic and structured public posts without internal identifiers', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    const template = snapshot()
-    const round = template.rounds[0]
-    const turn = round?.turns[0]
-    if (round === undefined || turn === undefined) throw new Error('missing Debate fixture turn')
-    const claim = {
-      version: 1 as const,
-      claimId: 'claim-verify',
-      statement: 'P0：未通过证据校验的节点不得进入完成状态。',
-      status: 'supported' as const,
-      severity: 'high' as const,
-      confidence: 0.9,
-      supportingSlotIds: [turn.slotId],
-      opposingSlotIds: [],
-      evidenceRefs: [],
-    }
-    const ledger = { ...template.claimLedger, claims: [claim] }
-    const { objective: _objective, ...templateWithoutObjective } = template
-    const budgetLimited: DebateRunSnapshotV1 = {
-      ...templateWithoutObjective,
-      state: 'budget_limited',
-      rounds: [{
-        ...round,
-        claimLedger: ledger,
-        turns: [{
-          ...turn,
-          outputPreview: '立场：先补可靠性。 P0：证据校验必须阻断未验证完成。 P1：使用租约隔离并发写入。 P2：再扩展新的执行入口。',
-          claimIds: [claim.claimId],
-        }],
-        convergence: { ...round.convergence!, status: 'budget_limited' as const },
-      }],
-      claimLedger: ledger,
-      synthesis: {
-        ...template.synthesis!,
-        outputPreview: '结论：先补可靠性。 P0：完成证据门禁。 P1：验证恢复。',
-      },
-    }
-    provider.startResult = budgetLimited
-    provider.controlResult = budgetLimited
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: '本轮真正的用户议题是什么？' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('## 本轮真正的用户议题是什么？')
-    expect(streamText).not.toContain('| 角色 | 职责 | 执行算子 | 模型 | 启动状态 |')
-    expect(streamText).not.toMatch(/\n\| ---/u)
-    expect(streamText).toContain('**建设性提案者**')
-    expect(streamText).toContain('**怀疑式证伪者**')
-    expect(streamText).toContain('**证据审计员**')
-    expect(streamText).toContain('**决策裁判（主持人）**')
-    expect(streamText).toContain('职责 · 提出可执行的正向方案，并明确前提。')
-    expect(streamText).toContain('执行 · Codex · GPT-5.6 Sol')
-    expect(streamText).toContain('启动状态 · 等待分派')
-    expect(streamText).toContain('**立场**：先补可靠性。')
-    expect(streamText).toContain('**P0**：证据校验必须阻断未验证完成。')
-    expect(streamText).toContain('**P1**：使用租约隔离并发写入。')
-    expect(streamText).toContain('**P2**：再扩展新的执行入口。')
-    expect(streamText).toContain('**本楼主张：**')
-    expect(streamText).toContain('1. P0：未通过证据校验的节点不得进入完成状态。')
-    expect(streamText).toContain('预算已达上限，主持人总结已完成')
-    expect(streamText).not.toContain('预算停止')
-    expect(streamText).not.toContain('<details>')
-    expect(streamText).not.toContain('<summary>')
-    expect(streamText).not.toContain('constructive-proposer')
-    expect(streamText).not.toContain('slot-proposer')
-    expect(streamText).not.toContain('sha256:')
-  })
-
   it('projects every durable public Debate event into separately replayable Session trace facts', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
+    const { ctx, agent, provider } = await setup()
     const template = snapshot()
     const round = template.rounds[0]
     const turn = round?.turns[0]
@@ -915,8 +325,7 @@ describe('debate model Consumer', () => {
       }],
       claimLedger: ledger,
     })
-    provider.startResult = traced
-    provider.controlResult = traced
+    provider.inspectFallback = traced
     provider.events.push(
       { version: 1, sequence: 1, runId: traced.runId, revision: 1, generation: 1, type: 'debate.planned', createdAt: traced.createdAt, data: {} },
       { version: 1, sequence: 2, runId: traced.runId, revision: 2, generation: 2, type: 'debate.round.started', createdAt: traced.updatedAt, round: 1, data: {} },
@@ -927,12 +336,12 @@ describe('debate model Consumer', () => {
       { version: 1, sequence: 7, runId: traced.runId, revision: 7, generation: 7, type: 'debate.synthesis.started', createdAt: traced.updatedAt, round: 1, data: {} },
       { version: 1, sequence: 8, runId: traced.runId, revision: 8, generation: 8, type: 'debate.synthesis.settled', createdAt: traced.updatedAt, round: 1, data: {} },
     )
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Trace every Debate participant.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
+    agent.session.append('turn/start', { turn: 1 })
+    agent.session.append('step/start', { turn: 1, step: 1 })
+    agent.session.append('tool/call', {
+      turn: 1, step: 1, callId: CallId('trace-inspect'), name: 'debate', arguments: '{}',
+    })
+    await call(ctx, agent, { action: 'inspect', run_id: traced.runId }, 'trace-inspect')
 
     const traces = agent.session.events.filter((event): event is Extract<typeof event, { type: 'debate/trace' }> => event.type === 'debate/trace')
     expect(traces.map(event => event.data.sourceSequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
@@ -968,223 +377,7 @@ describe('debate model Consumer', () => {
     expect(traces[6]?.data.synthesis?.artifactRef).toBeUndefined()
     expect(traces[7]?.data.synthesis).toMatchObject({ state: 'settled', outputPreview: 'Decision summary' })
     expect(new Set(traces.map(event => event.data.sourceSequence)).size).toBe(traces.length)
-    expect(agent.session.events.filter(event => event.type === 'assistant/message')).toHaveLength(1)
     expect(JSON.stringify(traces)).not.toContain('slot-proposer')
-  })
-
-  it('streams the durable blocker when a roster slot was never dispatched', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    const template = snapshot()
-    const round = template.rounds[0]
-    if (round === undefined) throw new Error('missing Debate fixture round')
-    const { synthesis: _synthesis, ...withoutSynthesis } = template
-    const { convergence: _convergence, ...withoutConvergence } = round
-    provider.startResult = {
-      ...withoutSynthesis,
-      state: 'failed',
-      rounds: [{
-        ...withoutConvergence,
-        state: 'failed',
-        turns: [{
-          version: 1,
-          round: 1,
-          slotId: 'decision-judge',
-          role: 'decision-judge',
-          operatorId: 'claude-code',
-          model: 'claude-opus-5',
-          state: 'blocked',
-          attempt: 0,
-          routing: {
-            version: 1,
-            requestedOperatorId: 'claude-code',
-            requestedModel: 'claude-opus-5',
-          },
-          blockers: [{
-            code: 'DEPENDENCY_FAILED',
-            message: 'participant execution did not complete',
-            nodeId: 'debate-r1-decision-judge',
-          }, {
-            code: 'DEPENDENCY_FAILED',
-            message: 'evidence audit execution did not complete',
-            nodeId: 'debate-r1-evidence-auditor',
-          }, {
-            code: 'DEPENDENCY_FAILED',
-            message: 'participant execution did not complete',
-            nodeId: 'debate-r1-decision-judge',
-          }],
-          claimIds: [],
-          evidenceRefs: [],
-        }],
-      }],
-    }
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Debate this blocked decision.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('楼 · 决策裁判（主持人）')
-    expect(streamText).toContain('主持人状态')
-    expect(streamText).toContain('已阻断：participant execution did not complete')
-    expect(streamText).toContain('evidence audit execution did not complete')
-    expect(streamText.match(/participant execution did not complete/g)).toHaveLength(2)
-  })
-
-  it('renders terminal participant turns from a stopped active round with contiguous floors', async () => {
-    const { ctx, agent, provider } = await setupAutomatic()
-    const template = snapshot()
-    const round = template.rounds[0]
-    const proposer = round?.turns[0]
-    if (round === undefined || proposer === undefined) throw new Error('missing Debate fixture turn')
-    const { synthesis: _synthesis, ...withoutSynthesis } = template
-    const { convergence: _convergence, ...withoutConvergence } = round
-    const { outputRef: _outputRef, outputPreview: _outputPreview, ...proposerWithoutOutput } = proposer
-    const proposerBlocker = { code: 'DEBATE_INTERRUPTED', message: 'active stop', nodeId: 'node-stop' }
-    const proposerTurn = {
-      ...proposerWithoutOutput,
-      state: 'failed' as const,
-      attempt: 1,
-      errorCode: 'DEBATE_INTERRUPTED',
-      blockers: [proposerBlocker, proposerBlocker, { ...proposerBlocker, message: 'second active failure', nodeId: 'node-second' }],
-    }
-    const falsifierTurn = {
-      ...proposer,
-      slotId: 'slot-falsifier',
-      role: 'skeptical-falsifier' as const,
-      model: 'claude-fable-5',
-      state: 'settled' as const,
-      outputRef: 'artifact:falsifier-stop',
-      outputPreview: 'Falsifier output after stop.',
-    }
-    const judgeTurn = {
-      ...proposerWithoutOutput,
-      slotId: 'slot-judge',
-      role: 'decision-judge' as const,
-      state: 'failed' as const,
-      errorCode: 'DEBATE_INTERRUPTED',
-      blockers: [{ code: 'DEBATE_INTERRUPTED', message: 'judge interrupted', nodeId: 'node-judge' }],
-    }
-    provider.startResult = {
-      ...withoutSynthesis,
-      state: 'stopped',
-      currentRound: 1,
-      rounds: [{
-        ...withoutConvergence,
-        state: 'running',
-        turns: [proposerTurn, falsifierTurn, judgeTurn],
-      }],
-    }
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Stop this active Debate.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('### 1 楼 · 建设性提案者')
-    expect(streamText).toContain('### 2 楼 · 怀疑式证伪者')
-    expect(streamText).toContain('### 3 楼 · 决策裁判（主持人）')
-    expect(streamText).toContain('未完成：judge interrupted')
-    expect(streamText.match(/未完成：active stop/g)).toHaveLength(1)
-    expect(streamText.match(/未完成：second active failure/g)).toHaveLength(1)
-    expect(streamText).not.toContain('未完成：DEBATE_INTERRUPTED')
-    expect(streamText).toContain('主持人状态')
-    expect(streamText).toContain('已完成轮次：0')
-  })
-
-  it('uses configured personas and renders each terminal lifecycle deterministically without a judge floor', async () => {
-    const states = ['completed', 'budget_limited', 'max_rounds', 'stopped', 'failed', 'indeterminate'] as const
-    for (const state of states) {
-      const execute = async (): Promise<string> => {
-        const { ctx, agent, provider } = await setupAutomatic()
-        const template = snapshot()
-        provider.startResult = {
-          ...template,
-          state,
-          roster: template.roster.map(role => role.role === 'constructive-proposer'
-            ? { ...role, persona: { ...role.persona, title: 'Fixture Architect', mandate: 'Audit exactly the configured fixture boundary.' } }
-            : role),
-        }
-        await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-        agent.followup(createUserMessage({
-          content: [{ type: 'text', text: `Replay ${state} Debate state.` }],
-          source: { kind: 'user' },
-        }))
-        await agent.whenIdle()
-        return textDeltas(agent).join('')
-      }
-      const first = await execute()
-      const replay = await execute()
-      expect(first).toBe(replay)
-      expect(first).toContain('Fixture Architect')
-      expect(first).toContain('Audit exactly the configured fixture boundary.')
-      expect(first).not.toContain('楼 · 决策裁判（主持人）')
-      expect(first.match(/置顶 · 主持人总结/g)).toHaveLength(1)
-    }
-  })
-
-  it('re-registers after HMR without duplicating durable dispatch, floors, or moderator output', async () => {
-    const { ctx, agent, provider, toolFiber } = await setupAutomatic()
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Debate before HMR.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-    expect(provider.starts).toHaveLength(1)
-
-    await toolFiber.dispose()
-    const reloadedToolFiber = ctx.plugin(tool)
-    await reloadedToolFiber.await()
-
-    agent.followup(createUserMessage({
-      content: [{ type: 'text', text: 'Debate after HMR.' }],
-      source: { kind: 'user' },
-    }))
-    await agent.whenIdle()
-
-    expect(provider.starts).toHaveLength(2)
-    expect(provider.starts[1]).toMatchObject({
-      prompt: 'Debate after HMR.',
-      objective: 'Debate after HMR.',
-    })
-    expect(new Set(provider.starts.map(start => start.commandId))).toHaveLength(2)
-    const latestAssistant = [...agent.session.events].reverse()
-      .find(event => event.type === 'assistant/message')
-    if (latestAssistant?.type !== 'assistant/message') throw new Error('missing assistant response after HMR')
-    const content = latestAssistant.data.message.content[0]
-    if (content?.type !== 'text') throw new Error('missing Debate text response after HMR')
-    expect(content.text.match(/### 1 楼/g)).toHaveLength(1)
-    expect(content.text.match(/Proposal output summary/g)).toHaveLength(1)
-    expect(content.text.match(/置顶 · 主持人总结/g)).toHaveLength(1)
-    expect(content.text.match(/Decision summary/g)).toHaveLength(1)
-  })
-
-  it('keeps legacy Sessions disabled and persists an ignorable whole-value mode', async () => {
-    const { ctx, agent } = await setup()
-    expect(tool.foldDebatePreferences([])).toEqual({ mode: 'disabled' })
-    expect(tool.foldDebatePreferences([{ type: 'debate/preferences', data: { mode: 'future-mode' } }]))
-      .toEqual({ mode: 'disabled' })
-    expect(ctx.sessionProjections.snapshot(agent.session).values.debateExecutionPreferences).toEqual({
-      mode: 'disabled',
-      options: ['auto', 'enabled', 'disabled'],
-    })
-
-    const changed = await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    expect(changed?.result).toEqual({ kind: 'success', text: 'debate mode enabled' })
-    expect(agent.session.events.find(event => event.type === 'debate/preferences')).toMatchObject({
-      data: { mode: 'enabled' },
-      ignorable: true,
-    })
-    expect(ctx.sessionProjections.snapshot(agent.session).values.debateExecutionPreferences?.mode).toBe('enabled')
-
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
-    expect(agent.session.events.filter(event => event.type === 'debate/preferences')).toHaveLength(1)
   })
 
   it('advertises a provider-neutral tool and a bounded subscription-first roster', async () => {
@@ -1213,14 +406,18 @@ describe('debate model Consumer', () => {
     expect(tool.debateGuidance).toContain('does not replace the DSH TaskGraph Scheduler')
   })
 
-  it('fails closed while disabled, then starts with stable identity, workspace, and Session lineage', async () => {
+  it('refuses to start outside a kennel Session, then starts with stable identity, workspace, and Session lineage', async () => {
     const { ctx, agent, provider } = await setup()
-    const disabled = await call(ctx, agent, { action: 'start', prompt: 'Choose A or B.' }, 'same-call')
-    expect(disabled.isError).toBe(true)
-    expect(disabled.content.some(block => block.type === 'text'
-      && block.text.includes('Debate is disabled'))).toBe(true)
+    const refused = await call(ctx, agent, { action: 'start', prompt: 'Choose A or B.' }, 'same-call')
+    expect(refused.isError).toBe(true)
+    expect(refused.content.some(block => block.type === 'text'
+      && block.text.includes('only from a kennel Session'))).toBe(true)
+    expect(provider.starts).toHaveLength(0)
+    // A legacy preference event no longer opens the tool outside the kennel.
+    appendRetiredEvent(agent, 'debate/preferences', { mode: 'enabled' })
+    expect((await call(ctx, agent, { action: 'start', prompt: 'Choose A or B.' }, 'same-call')).isError).toBe(true)
 
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    markKennel(agent)
     provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
     provider.controlResult = snapshot({ revision: 3 })
     const started = await call(ctx, agent, { action: 'start', prompt: 'Choose A or B.', objective: 'Choose safely.' }, 'same-call')
@@ -1286,7 +483,7 @@ describe('debate model Consumer', () => {
       },
       { version: 1, sequence: 4, runId: completed.runId, revision: 4, generation: 4, type: 'debate.agent.settled', createdAt: completed.updatedAt, round: 1, slotId: 'slot-proposer', data: {} },
     )
-    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    markKennel(agent)
     agent.session.append('turn/start', { turn: 1 })
     agent.session.append('step/start', { turn: 1, step: 1 })
 

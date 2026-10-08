@@ -752,9 +752,6 @@ importers:
       '@deepseek-ai/dsh-tool-cordis':
         specifier: workspace:*
         version: link:../packages/extensions/tool-cordis
-      '@deepseek-ai/dsh-tool-debate':
-        specifier: workspace:*
-        version: link:../packages/orchestration/tool-debate
       '@deepseek-ai/dsh-tool-fs':
         specifier: workspace:*
         version: link:../packages/fs/tool-fs
@@ -6599,39 +6596,24 @@ importers:
       '@deepseek-ai/dsh-agent':
         specifier: workspace:^
         version: link:../../core/agent
-      '@deepseek-ai/dsh-agent-loop':
+      '@deepseek-ai/dsh-agent-presets':
         specifier: workspace:^
-        version: link:../../core/agent-loop
-      '@deepseek-ai/dsh-commands':
-        specifier: workspace:^
-        version: link:../../interaction/commands
+        version: link:../../preset/agent-presets
       '@deepseek-ai/dsh-debate':
         specifier: workspace:^
         version: link:../debate
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
-      '@deepseek-ai/dsh-llm':
-        specifier: workspace:^
-        version: link:../../llm/llm
-      '@deepseek-ai/dsh-plan-mode':
-        specifier: workspace:^
-        version: link:../../plan/plan-mode
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
-      '@deepseek-ai/dsh-session-projection':
-        specifier: workspace:^
-        version: link:../../session/session-projection
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:^
         version: link:../../core/system-prompt
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../core/tools
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
 
   packages/orchestration/tool-orchestration:
     devDependencies:
@@ -7182,9 +7164,6 @@ importers:
       '@deepseek-ai/dsh-resident-operator':
         specifier: workspace:^
         version: link:../resident-operator
-      '@deepseek-ai/dsh-tool-debate':
-        specifier: workspace:^
-        version: link:../../orchestration/tool-debate
       '@deepseek-ai/dsh-tool-orchestration':
         specifier: workspace:^
         version: link:../../orchestration/tool-orchestration
