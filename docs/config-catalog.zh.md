@@ -3664,7 +3664,7 @@ export interface DispatchModelConfig {
 
 依赖： [`LogicalTaskGraphV1`](../packages/orchestration/orchestration/src/index.ts) · [`OrchestrationNodeSpecV1`](../packages/orchestration/orchestration/src/index.ts)
 
-来源： [`packages/orchestration/ui-gouzi/src/index.ts:50`](../packages/orchestration/ui-gouzi/src/index.ts)
+来源： [`packages/orchestration/ui-gouzi/src/index.ts:51`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 
