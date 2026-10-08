@@ -5370,7 +5370,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationAdmissionTraceV1',
-    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly gouziRecipient?: OrchestrationGouziRecipientV1;\n    readonly sourceSessionId: string;\n    readonly sourceMessageId?: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly gouziRecipient?: OrchestrationGouziRecipientV1;\n    readonly gouziRecipients?: readonly OrchestrationGouziRecipientV1[];\n    readonly sourceSessionId: string;\n    readonly sourceMessageId?: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
   },
   {
     name: 'OrchestrationArtifactRef',

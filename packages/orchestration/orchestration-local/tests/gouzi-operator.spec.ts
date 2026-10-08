@@ -137,6 +137,32 @@ describe('gouziOperatorServer', () => {
     store.close()
   })
 
+  it('issues a grant to a member named in a recipient set and refuses one the set does not name', async () => {
+    const store = await registered()
+    const record = store.getRun('run-1')
+    const bind = (gouziRecipients: { gouziId: string; generation: number; operatorIds: string[] }[]) => {
+      store.saveRun({ ...record, snapshot: { ...record.snapshot, admission: {
+        policy: 'direct', route: 'taskgraph', sourceSessionId: 'source', gouziRecipients: gouziRecipients as never,
+      } } })
+    }
+    const own = { gouziId: String(GOUZI), generation: 1, operatorIds: ['gouzi.gouzi-1.codex'] }
+    const other = { gouziId: 'other', generation: 1, operatorIds: ['gouzi.other.codex'] }
+    const server = gouziOperatorServer({ store, gouziId: GOUZI, validateRecipientOperator: id => id === 'gouzi.gouzi-1.codex' })
+    const start = {} as PhysicalOperatorProviderStartRequest
+
+    bind([own, other])
+    expect(server.gouzi!.issue(PLAN, start)).toMatchObject({ generation: 1, gouziId: GOUZI })
+    // The set lists this member's codex entry only.
+    expect(() => server.gouzi!.issue({ ...PLAN, operatorId: 'claude' }, start)).toThrow('unavailable at grant issuance')
+    // A set that omits this member cannot be used to run on it.
+    bind([other, { gouziId: 'third', generation: 1, operatorIds: ['gouzi.third.codex'] }])
+    expect(() => server.gouzi!.issue(PLAN, start)).toThrow('unavailable at grant issuance')
+    // A stale generation for this member in the set is refused like a single recipient.
+    bind([{ ...own, generation: 2 }, other])
+    expect(() => server.gouzi!.issue(PLAN, start)).toThrow('unavailable at grant issuance')
+    store.close()
+  })
+
   it('binds a directory grant to the qualified member generation and default project', async () => {
     const store = await registered()
     const server = gouziOperatorServer({ store, gouziId: GOUZI, now: () => NOW })

@@ -169,6 +169,32 @@ it('offers only inspect for indeterminate runs and excludes another recipient ge
   await expect(f.run([addressed])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
   expect(f.control).not.toHaveBeenCalled()
 })
+it('offers an addressed room the runs of a recipient set that names the addressed member and generation', async () => {
+  const f = await fixture()
+  const named = (id: string, members: { gouziId: string; generation: number }[]) => ({
+    ...existingRun(),
+    runId: OrchestrationRunId(id),
+    admission: {
+      ...existingRun().admission!,
+      gouziRecipient: undefined,
+      gouziRecipients: members.map(value => ({ gouziId: GouziId(value.gouziId), generation: value.generation, operatorIds: [] })),
+    },
+  })
+  f.list.mockResolvedValue([named('set-with-dog', [{ gouziId: 'dog', generation: 2 }, { gouziId: 'cat', generation: 1 }]),
+    named('set-wrong-generation', [{ gouziId: 'dog', generation: 1 }, { gouziId: 'cat', generation: 1 }]),
+    named('set-without-dog', [{ gouziId: 'cat', generation: 1 }, { gouziId: 'bird', generation: 1 }])] as never)
+  f.generate.mockImplementation((options) => {
+    const block = options.messages[0]!.content[0]!
+    if (block.type !== 'text') throw new Error('fixture expects text')
+    const input = JSON.parse(block.text) as { candidates: { kind: string; runId?: string }[] }
+    expect([...new Set(input.candidates.filter(choice => choice.kind === 'control').map(choice => choice.runId))]).toEqual(['set-with-dog'])
+    return '{"candidateId":"clarify"}'
+  })
+  const addressed = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text',
+    text: encodeKennelMessage('status', { gouziId: 'dog', generation: 2, mode: 'standard' }) }] })
+  await expect(f.run([addressed])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  expect(f.generate).toHaveBeenCalledOnce()
+})
 it('refuses a revision change between selection and inspection', async () => {
   const f = await fixture(); f.list.mockResolvedValue([existingRun()]); f.inspect.mockResolvedValue(existingRun('running', 'agent', 4))
   f.generate.mockReturnValue(JSON.stringify({ candidateId: JSON.stringify(['run', 'existing', 3, 'pause']) }))

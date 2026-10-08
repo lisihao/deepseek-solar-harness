@@ -1,6 +1,7 @@
 /** Projects one Gouzi execution member as Physical Operators that attach an execution grant to every attempt. */
 
 import {
+  admissionGouziRecipients,
   OrchestrationArtifactRef,
   OrchestrationRunId,
   type GouziExecutionGrant,
@@ -92,10 +93,12 @@ export function gouziOperatorServer(options: GouziOperatorOptions): RemotePhysic
           )
         }
         const nodePlan = store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
-        const recipient = store.getRun(attempt.runId).snapshot.admission?.gouziRecipient
-        if (recipient !== undefined) {
+        const recipients = admissionGouziRecipients(store.getRun(attempt.runId).snapshot.admission)
+        if (recipients.length > 0) {
           const operatorId = `gouzi.${String(gouziId)}.${plan.operatorId}`
-          if (recipient.gouziId !== gouziId || recipient.generation !== current.generation
+          // The run names this member, or the grant is refused; a set of members binds each member separately.
+          const recipient = recipients.find(value => value.gouziId === gouziId)
+          if (recipient === undefined || recipient.generation !== current.generation
             || member.generation !== current.generation || member.hostId !== current.hostId
             || member.ownerId !== current.ownerId || member.endpoint !== current.endpoint
             || nodePlan.operatorPlan.operatorId !== operatorId || !recipient.operatorIds.some(id => String(id) === operatorId)

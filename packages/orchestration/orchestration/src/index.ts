@@ -304,6 +304,12 @@ export interface OrchestrationAdmissionTraceV1 {
   readonly route: 'taskgraph'
   /** Fixed recipient; every graph node must use only these actual member execution entries. */
   readonly gouziRecipient?: OrchestrationGouziRecipientV1
+  /**
+   * Fixed set of at least two distinct members, for a graph whose nodes run on different members. Every node must
+   * use only the union of their actual execution entries, and every member must hold the graph workspace. Mutually
+   * exclusive with {@link OrchestrationAdmissionTraceV1.gouziRecipient}, which stays the form for one member.
+   */
+  readonly gouziRecipients?: readonly OrchestrationGouziRecipientV1[]
   readonly sourceSessionId: string
   /** Original user-message identity for a fresh, durable source checkpoint. */
   readonly sourceMessageId?: string
@@ -321,6 +327,18 @@ export interface OrchestrationAdmissionTraceV1 {
   readonly plannerVerifierPreference?: PlannerVerifierPreference
   /** Prefer Codex Luna for execution leaves when qualified, or use ordinary balanced scoring. */
   readonly executionPreference?: ExecutionModelPreference
+}
+
+/**
+ * Read the members a run is bound to, whichever admission field names them.
+ * @param admission - collaboration trace of a compilation or run, when it has one.
+ * @returns the single recipient as a one-element list, the recipient set, or an empty list when the run is unbound.
+ */
+export function admissionGouziRecipients(
+  admission: Pick<OrchestrationAdmissionTraceV1, 'gouziRecipient' | 'gouziRecipients'> | undefined,
+): readonly OrchestrationGouziRecipientV1[] {
+  if (admission?.gouziRecipients !== undefined) return admission.gouziRecipients
+  return admission?.gouziRecipient === undefined ? [] : [admission.gouziRecipient]
 }
 
 /** Immutable compilation result that may be started after approval. */

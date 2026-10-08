@@ -67,6 +67,8 @@ import LocalRlmRuntime from '@deepseek-ai/dsh-rlm-runtime-local'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
+  admissionGouziRecipients,
+  GOUZI_MEMBER_LIMIT,
   GouziAuthorityEpoch,
   GouziHostId,
   GouziId,
@@ -996,15 +998,25 @@ function validateAdmissionWire(value: unknown): asserts value is OrchestrationAd
       if (typeof fields.name !== 'string' || typeof fields.text !== 'string') fail()
     }
   }
-  const recipient = admission.gouziRecipient
-  if (recipient !== undefined) {
-    if (recipient === null || typeof recipient !== 'object' || Array.isArray(recipient)) fail()
+  const validRecipient = (recipient: unknown): string => {
+    if (recipient === null || typeof recipient !== 'object' || Array.isArray(recipient)) return fail()
     const fields = recipient as Record<string, unknown>
     if (typeof fields.gouziId !== 'string' || fields.gouziId.trim() !== fields.gouziId || fields.gouziId.length === 0
       || !Number.isSafeInteger(fields.generation) || Number(fields.generation) < 1
       || !Array.isArray(fields.operatorIds) || fields.operatorIds.length === 0
       || fields.operatorIds.some(id => typeof id !== 'string' || id.length === 0 || id.trim() !== id)
-      || new Set(fields.operatorIds).size !== fields.operatorIds.length) fail()
+      || new Set(fields.operatorIds).size !== fields.operatorIds.length) return fail()
+    return fields.gouziId
+  }
+  if (admission.gouziRecipient !== undefined) validRecipient(admission.gouziRecipient)
+  const recipients = admission.gouziRecipients
+  if (recipients !== undefined) {
+    // One member keeps the singular field, so a run never has two encodings of the same binding.
+    if (admission.gouziRecipient !== undefined || !Array.isArray(recipients) || recipients.length < 2
+      || recipients.length > GOUZI_MEMBER_LIMIT) fail()
+    const members = (recipients as unknown[]).map(validRecipient)
+    const operators = (recipients as { operatorIds: string[] }[]).flatMap(recipient => recipient.operatorIds)
+    if (new Set(members).size !== members.length || new Set(operators).size !== operators.length) fail()
   }
 }
 
@@ -1537,12 +1549,13 @@ export class OrchestrationDaemon {
     admission: OrchestrationAdmissionTraceV1 | undefined,
     graph: LogicalTaskGraphV1,
   ): Promise<void> {
-    const recipient = admission?.gouziRecipient
-    if (recipient === undefined) return
+    const recipients = admissionGouziRecipients(admission)
+    if (recipients.length === 0) return
+    const allowed = new Set(recipients.flatMap(recipient => recipient.operatorIds.map(String)))
     for (const node of graph.nodes) {
       const preferred = node.operator?.preferredIds
       if (!Array.isArray(preferred) || preferred.length === 0
-        || preferred.some((id: string) => !recipient.operatorIds.includes(PhysicalOperatorId(id)))
+        || preferred.some((id: string) => !allowed.has(id))
         || (node.operator?.fallbackIds?.length ?? 0) !== 0) {
         throw new OrchestrationError(`node ${node.id} must use only the selected Gouzi execution entries without fallback`, 'GRAPH_INVALID')
       }
@@ -1555,10 +1568,12 @@ export class OrchestrationDaemon {
       }
     }
     const entries = await this.gouziExecutionOperators()
-    const member = entries.find(value => value.gouziId === recipient.gouziId && value.generation === recipient.generation)
-    if (member === undefined || !member.projectScopes.includes(graph.workspace)
-      || recipient.operatorIds.some(id => !member.operators.some(operator => operator.operatorId === id && operator.available))) {
-      throw new OrchestrationError('selected Gouzi generation or execution entry is unavailable', 'RUN_STATE_CONFLICT')
+    for (const recipient of recipients) {
+      const member = entries.find(value => value.gouziId === recipient.gouziId && value.generation === recipient.generation)
+      if (member === undefined || !member.projectScopes.includes(graph.workspace)
+        || recipient.operatorIds.some(id => !member.operators.some(operator => operator.operatorId === id && operator.available))) {
+        throw new OrchestrationError('selected Gouzi generation or execution entry is unavailable', 'RUN_STATE_CONFLICT')
+      }
     }
   }
 
@@ -1572,9 +1587,10 @@ export class OrchestrationDaemon {
     validateAdmissionRuntimeContext(request.admission)
     validateAdmissionStrategy(request.admission)
     await this.validateGouziRecipient(request.admission, request.graph)
-    const selectedMember = request.admission?.gouziRecipient === undefined ? undefined
-      : this.store.gouzi.read(request.admission.gouziRecipient.gouziId)
-    const remoteRead = selectedMember !== undefined && String(selectedMember.hostId) !== 'local'
+    const selectedMembers = admissionGouziRecipients(request.admission)
+      .flatMap(recipient => this.store.gouzi.read(recipient.gouziId) ?? [])
+    // A graph with any member on this machine still needs the local directory to exist.
+    const remoteRead = selectedMembers.length > 0 && selectedMembers.every(member => String(member.hostId) !== 'local')
       && request.graph.nodes.every(node => node.writeScopes.length === 0 && node.effectBudget.write.length === 0)
       && (request.graph.workspaceIsolation === undefined || request.graph.workspaceIsolation === 'shared')
     // The authenticated member catalog has already verified this exact project on its own host.
@@ -1586,9 +1602,7 @@ export class OrchestrationDaemon {
       await this.worktrees.verifyRepository(workspace, graph.baseSha as string)
     }
     if (graph.workspaceIsolation === 'directory-snapshot') {
-      const recipient = request.admission?.gouziRecipient
-      const member = recipient === undefined ? undefined : this.store.gouzi.read(recipient.gouziId)
-      if (member !== undefined && (String(member.hostId) !== 'local' || member.endpoint === undefined
+      if (selectedMembers.some(member => String(member.hostId) !== 'local' || member.endpoint === undefined
         || !['127.0.0.1', '[::1]'].includes(new URL(member.endpoint).hostname))) {
         throw new OrchestrationError('完整目录快照仅允许本机狗子；远程传输需要明确授权。', 'GRAPH_INVALID')
       }
