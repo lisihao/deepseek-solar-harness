@@ -334,13 +334,13 @@ describe('RemoteSyncHub', () => {
     }))
     const resident = { providers: async () => [provider], execute, inspectCommand: async () => undefined }
     const host = {
-      inspectWorkspace: async () => undefined, gouziWorkspace: async () => ({ projectId }),
+      inspectWorkspace: async () => undefined, gouziWorkspace: async () => ({ projectId, projectScopes: ['/srv/user-project'] }),
       qualification: async () => ({ available: true }),
       materializeWorkspace: async () => ({ version: 1, identity, path: '/srv/user-project' }),
     }
     const member = { hello: () => ({ gouziId: 'gouzi-1', generation: 2 }) }
     const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => host as never, () => member as never)
-    expect(await hub.operatorProviders()).toEqual([{ ...provider, gouziWorkspace: { gouziId: 'gouzi-1', generation: 2, projectId } }])
+    expect(await hub.operatorProviders()).toEqual([{ ...provider, gouziWorkspace: { gouziId: 'gouzi-1', generation: 2, projectId, projectScopes: ['/srv/user-project'] } }])
     await hub.operatorExecute({ commandId: 'c', operatorId: 'codex', laneId: 'l', prompt: [], workspaceIdentity: identity })
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
       workspace: '/srv/user-project',
@@ -444,6 +444,20 @@ describe('RemoteSyncHub', () => {
       } finally { await hub.close() }
     },
   )
+
+  it.each([false, true])('refuses unsupported mutation hosts or a mismatched Git base before native execution (%s)', async (supported) => {
+    const execute = vi.fn()
+    const materializeWorkspace = vi.fn()
+    const host = { supportsWorkspaceMutationReturn: () => supported, materializeWorkspace }
+    const hub = new RemoteSyncHub(api(), 4, undefined, { execute } as never, undefined, () => host as never)
+    try {
+      await expect(hub.operatorExecute({ commandId: 'denied', operatorId: 'codex', laneId: 'lane', prompt: [],
+        workspaceIdentity: { version: 1, repository: 'github.com/owner/repo', commit: 'a'.repeat(40) },
+        workspaceMutationReturn: { version: 1, baseSha: supported ? 'b'.repeat(40) : 'a'.repeat(40) } })).rejects.toThrow('supported isolated exact-base')
+      expect(materializeWorkspace).not.toHaveBeenCalled()
+      expect(execute).not.toHaveBeenCalled()
+    } finally { await hub.close() }
+  })
 
   it('uses the receiver project subdirectory as the authoritative prompt cwd', async () => {
     const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId: 'a'.repeat(64), subdir: 'packages/core' }

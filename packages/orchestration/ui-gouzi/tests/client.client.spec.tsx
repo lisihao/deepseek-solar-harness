@@ -791,7 +791,7 @@ function registeredRoom(sessionId: string): GouziRoomSnapshotV1 {
   return {
     version: 1, sessionId, roomPollIntervalMs: 2_000, generatedAt: '2026-10-06T00:00:00.000Z',
     dashboard: dashboard([member()]),
-    execution: [{ gouziId: 'g1', generation: 1, operators: [{ operatorId: 'real.operator', available: true, models: [] }] }],
+    execution: [{ gouziId: 'g1', generation: 1, projectScopes: ['/work/alpha'], operators: [{ operatorId: 'real.operator', available: true, models: [] }] }],
     tasks: [],
   }
 }

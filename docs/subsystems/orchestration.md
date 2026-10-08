@@ -42,7 +42,7 @@ This contract refines the model-allocation fallback paragraph in [TaskGraph-nati
 
 `OrchestrationRecipientResolver` resolves only the current logical turn's explicit user selection from ordered durable Session events. The Host confirms that the selected member still exists, is enabled, and has the selected generation, then queries `GouziControl.executionOperators()` for freshly qualified registered entries. `operatorIds` contains the full actual execution IDs returned by that query, never IDs inferred from a member name or a fixed native provider suffix. The resolver confirms membership and generation again after the query; a missing, changed, disabled, or unavailable selection fails rather than choosing another member.
 
-`OrchestrationAdmissionTraceV1.gouziRecipient` carries the confirmed member identity, selection generation, and execution IDs into compilation. Every graph node is pinned to those entries with no fallback. Fixed recipients support Standard execution with RLM and Autonomous disabled. The daemon validates the graph restrictions and current generation and availability during compilation and before a new Run starts; dispatch also rejects a member or registered entry that no longer matches. This selection grants no additional scope, effect, model permission, or parallel capacity.
+`OrchestrationAdmissionTraceV1.gouziRecipient` carries the confirmed member identity, selection generation, and execution IDs into compilation. Every graph node is pinned to those entries with no fallback. Fixed recipients support Standard execution with RLM and Autonomous disabled. The daemon validates the graph restrictions and current generation and availability during compilation and before a new Run starts; dispatch also rejects a member or registered entry that no longer matches. This selection grants no additional scope, effect, model permission, or parallel capacity. `sourceMessageId` identifies the original user message used for a fresh durable source checkpoint; `automaticDispatch` indicates that the Host consumes kennel user messages before ordinary execution.
 
 Source: [`orchestration/src/index.ts`](../../packages/orchestration/orchestration/src/index.ts) · [`orchestration/src/recipient-resolver.ts`](../../packages/orchestration/orchestration/src/recipient-resolver.ts) · [`ui-gouzi/src/recipient.ts`](../../packages/orchestration/ui-gouzi/src/recipient.ts)
 
@@ -63,6 +63,8 @@ interface OrchestrationAdmissionTraceV1 {
   /** Fixed recipient; every graph node must use only these actual member execution entries. */
   readonly gouziRecipient?: OrchestrationGouziRecipientV1
   readonly sourceSessionId: string
+  /** Original user-message identity for a fresh, durable source checkpoint. */
+  readonly sourceMessageId?: string
   /** Current-request dynamic contexts captured before crossing into the daemon. */
   readonly runtimeContext?: OrchestrationRuntimeContextV1
   /** Independent user/system choice; RLM is a node strategy, not an operator. */
@@ -83,6 +85,8 @@ interface OrchestrationAdmissionTraceV1 {
 ```ts type-equiv
 /** Resolves only the current logical turn's explicit user selection. */
 interface OrchestrationRecipientResolver {
+  /** Whether kennel user messages are consumed by Host AI dispatch before ordinary execution. */
+  readonly automaticDispatch?: boolean
   /**
    * Confirm the selected member and its available execution entries.
    * @param events - ordered durable Session events.
@@ -617,7 +621,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:670`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:689`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

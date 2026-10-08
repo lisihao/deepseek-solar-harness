@@ -720,6 +720,7 @@ describe('orchestration daemon', () => {
     registry.gouzi.setEndpoint(GouziId('dog'), 'http://127.0.0.1:13301')
     const provider = {
       product: 'codex', displayName: 'Native', description: 'Native', tags: ['coding'], maxConcurrency: 1,
+      gouziWorkspace: { gouziId: 'dog', generation: 1, projectId: 'a'.repeat(64), projectScopes: [home, await realpath(home)] },
       injectionBoundaries: [], available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
       models: [{ model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Worker', supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true }],
     }
@@ -770,6 +771,13 @@ describe('orchestration daemon', () => {
     expect(compilation.admission).toEqual(admission)
     expect(compilation.graph).toEqual({ ...fixed, workspace: await realpath(home) })
     expect(compilation.graph.maxParallel).toBe(fixed.maxParallel)
+    const registeredScopes = provider.gouziWorkspace.projectScopes
+    const remoteProject = '/srv/qualified-remote-project'
+    provider.gouziWorkspace.projectScopes = [remoteProject]
+    const remoteGraph = { ...fixed, workspace: remoteProject, nodes: fixed.nodes.map(node => ({ ...node, writeScopes: [] })) }
+    expect((await client.compile({ ...request, graph: remoteGraph })).graph.workspace).toBe(remoteProject)
+    await expect(client.compile({ ...request, graph: { ...remoteGraph, workspace: '/srv/unregistered' } })).rejects.toThrow('unavailable')
+    provider.gouziWorkspace.projectScopes = registeredScopes
     const approvalCompilation = await client.compile({ ...request, graph: { ...fixed, risk: 'medium' } })
     const started = await client.start({ compilationId: approvalCompilation.compilationId, commandId: 'fixed-start' })
     expect(started).toMatchObject({ state: 'awaiting_approval', admission })
@@ -819,6 +827,7 @@ describe('orchestration daemon', () => {
     let unreachable = false
     const provider = {
       operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Member Codex',
+      gouziWorkspace: { gouziId: 'gouzi-1', generation: 1, projectId: 'a'.repeat(64), projectScopes: ['/srv/registered-project'] },
       tags: ['coding'], maxConcurrency: 1, injectionBoundaries: ['pre-dispatch', 'next-turn'],
       available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
       models: [{
@@ -859,20 +868,32 @@ describe('orchestration daemon', () => {
     const events = watcher.db.prepare('SELECT COUNT(*) AS count FROM orchestration_events').get()
     const entries = await client.gouziExecutionOperators()
     expect(entries).toEqual([
-      { gouziId: 'gouzi-1', generation: 1, operators: [{
+      { gouziId: 'gouzi-1', generation: 1, projectScopes: ['/srv/registered-project'], operators: [{
         operatorId: 'gouzi.gouzi-1.claude', available: true, models: ['gpt-5.6-luna'],
+        supportsGenerationLimits: false, supportsGovernedWorkspacePolicy: false,
       }] },
-      { gouziId: 'gouzi-2', generation: 1, operators: [] },
+      { gouziId: 'gouzi-2', generation: 1, projectScopes: [], operators: [] },
     ])
+    provider.gouziWorkspace.generation = 2
+    expect((await client.gouziExecutionOperators())[0]?.projectScopes).toEqual([])
+    provider.gouziWorkspace.generation = 1
+    const scopes = provider.gouziWorkspace.projectScopes
+    Reflect.deleteProperty(provider.gouziWorkspace, 'projectScopes')
+    expect((await client.gouziExecutionOperators())[0]?.projectScopes).toEqual([])
+    provider.gouziWorkspace.projectScopes = scopes
+    expect((await client.gouziExecutionOperators())[0]?.projectScopes).toEqual(scopes)
     provider.available = false
     Object.assign(provider, { unavailableReason: 'native login missing' })
     provider.models[0]!.model = 'fresh-model'
     expect((await client.gouziExecutionOperators())[0]?.operators).toEqual([{
       operatorId: 'gouzi.gouzi-1.claude', available: false,
       unavailableReason: 'native login missing', models: ['fresh-model'],
+      supportsGenerationLimits: false, supportsGovernedWorkspacePolicy: false,
     }])
     unreachable = true
-    const unavailable = (await client.gouziExecutionOperators())[0]?.operators[0]
+    const unreachableEntry = (await client.gouziExecutionOperators())[0]
+    expect(unreachableEntry?.projectScopes).toEqual([])
+    const unavailable = unreachableEntry?.operators[0]
     expect(unavailable?.available).toBe(false)
     expect(unavailable?.unavailableReason).toContain('operator.providers transport failed')
     expect(await client.gouziList()).toEqual(before)
@@ -881,9 +902,9 @@ describe('orchestration daemon', () => {
     expect(new Set(methods)).toEqual(new Set(['operator.providers']))
     expect(local.requests).toHaveLength(0)
     watcher.db.prepare('UPDATE gouzi_members SET generation = 2 WHERE gouzi_id = ?').run('gouzi-1')
-    expect((await client.gouziExecutionOperators())[0]).toEqual({ gouziId: 'gouzi-1', generation: 2, operators: [] })
+    expect((await client.gouziExecutionOperators())[0]).toEqual({ gouziId: 'gouzi-1', generation: 2, projectScopes: [], operators: [] })
     await client.gouziSetMembership('gouzi-1', 'retiring')
-    expect(await client.gouziExecutionOperators()).toEqual([{ gouziId: 'gouzi-2', generation: 1, operators: [] }])
+    expect(await client.gouziExecutionOperators()).toEqual([{ gouziId: 'gouzi-2', generation: 1, projectScopes: [], operators: [] }])
   })
 
   it.each([false, true])('registers an enabled Gouzi member, sends a sealed grant, and tracks its state (fixed recipient: %s)', async (bound) => {
@@ -957,6 +978,7 @@ describe('orchestration daemon', () => {
     await run('git', ['add', '.'], { cwd: workspace })
     await run('git', ['commit', '-m', 'fixture'], { cwd: workspace })
     await run('git', ['remote', 'add', 'origin', 'https://github.com/lisihao/gouzi-fixture.git'], { cwd: workspace })
+    Object.assign(provider, { gouziWorkspace: { gouziId: 'gouzi-1', generation: 1, projectId: 'a'.repeat(64), projectScopes: [workspace] } })
     const fixture = graph(workspace)
     const compilation = await client.compile({
       intent: { request: 'Analyze the fixture on a member.' },

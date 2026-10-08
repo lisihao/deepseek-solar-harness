@@ -1,7 +1,9 @@
 /** Host-local execution facilities consumed by authenticated Remote Sync. */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { RemoteResidentArtifactDocument, RemoteExecutionWorkspaceIdentityV1 } from './remote-sync.ts'
+import type { RemoteResidentArtifactDocument, RemoteExecutionWorkspaceIdentityV1, RemoteResidentTurnSnapshot } from './remote-sync.ts'
+
+type WorkspaceMutation = NonNullable<NonNullable<RemoteResidentTurnSnapshot['result']>['workspaceMutation']>
 
 /** Server-local result of resolving an execution workspace. */
 export interface RemoteMaterializedWorkspaceV1 {
@@ -34,16 +36,37 @@ export abstract class RemoteOperatorHostService extends Service {
   }
 
   /**
-   * Prove at least one configured repository can be resolved on this Server.
+   * Advertise durable mutation capture from isolated Git checkouts.
+   * @returns whether this receiving host implements version 1 mutation return.
+   */
+  supportsWorkspaceMutationReturn(): boolean { return false }
+
+  /**
+   * Advertise sealed current-input bundles for isolated read and write execution.
+   * @returns whether this host implements version 1 snapshot input materialization.
+   */
+  supportsWorkspaceSnapshotInput(): boolean { return false }
+
+  /**
+   * Capture or recover the terminal patch before releasing an isolated checkout.
+   * @param _executionId - durable command owning the checkout.
+   * @returns the exact base-bound patch, or undefined for read execution.
+   */
+  captureWorkspaceMutation(_executionId: string): Promise<WorkspaceMutation | undefined> {
+    return Promise.resolve(undefined)
+  }
+
+  /**
+   * Prove at least one configured repository or project can be resolved on this Server.
    * @returns bounded readiness without exposing source URLs or credentials.
    */
   abstract qualification(): Promise<RemoteOperatorHostQualification>
 
   /**
    * Read the persisted default project for this Gouzi host.
-   * @returns the registered project identity, or undefined on a generic host.
+   * @returns the registered project identity and verified default project roots, or undefined on a generic host.
    */
-  gouziWorkspace(): Promise<{ projectId: string } | undefined> {
+  gouziWorkspace(): Promise<{ projectId: string; readonly projectScopes?: readonly string[] } | undefined> {
     return Promise.resolve(undefined)
   }
 
@@ -61,11 +84,15 @@ export abstract class RemoteOperatorHostService extends Service {
    * Resolve an allowed Git commit or a registered Gouzi project directory.
    * @param identity - receiving-host workspace selection and optional subdirectory.
    * @param executionId - idempotent physical execution identity owning the workspace lease.
+   * @param mutationReturn - optional base commit and bundle retained for returning isolated edits.
+   * @param snapshotInput - optional self-contained current input bundle for a local member.
    * @returns a Server-local execution cwd.
    */
   abstract materializeWorkspace(
     identity: RemoteExecutionWorkspaceIdentityV1,
     executionId: string,
+    mutationReturn?: { readonly baseSha: string; readonly baseBundle?: string },
+    snapshotInput?: { readonly baseSha: string; readonly baseBundle: string },
   ): Promise<RemoteMaterializedWorkspaceV1>
 
   /**

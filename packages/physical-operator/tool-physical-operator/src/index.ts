@@ -9,7 +9,9 @@
 
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-model-catalog-local'
+import type {} from '@deepseek-ai/dsh-orchestration'
 import { assembleContextFor, readModelSelection, type Agent, type ModelSelection, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   isAgentLoopRequest,
@@ -1095,6 +1097,7 @@ async function decideHostRoute(
   agent: Agent,
   messages: readonly HostRouteMessage[],
 ): Promise<HostRoutingDecision | undefined> {
+  if (ctx.get('orchestrationRecipients')?.automaticDispatch && resolveSessionPreset(agent.session) === 'kennel') return undefined
   const current = [...messages].reverse().find(message => message.source.kind === 'user')
   const resume = [...messages].reverse().find(message => (
     message.source.kind === 'plugin' && message.source.plugin === RESUME_SOURCE

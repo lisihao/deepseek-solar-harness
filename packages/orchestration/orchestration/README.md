@@ -14,6 +14,8 @@ The `gouzi` module defines the records that tie a long-lived execution member to
 
 `GouziControl.executionOperators()` distinguishes registry membership and connection status from actual execution registration. Providers return the current member generation and full registered operator ids with freshly checked availability, unavailable reasons, and model lists; missing or stale registrations carry no operators. This read does not start processes or mutate registry or scheduling state. The optional recipient resolver confirms the member identity and generation recorded in an addressed user message and returns qualified operator ids for the model-facing [orchestration Consumer](../tool-orchestration/README.md); the [room projection](../ui-gouzi/README.md) owns session filtering and result presentation.
 
+Verification nodes may declare `model-verdict` acceptance: a normal operator completion alone is insufficient. The Provider validates strict JSON containing affirmative `accepted`, a nonempty `reason`, and a nonempty list of nonempty string `evidence` entries. Missing, negative, or invalid verdicts fail acceptance. Directory-snapshot delivery and its persistent application state belong to the [local Provider](../orchestration-local/README.md#directory-snapshot-delivery).
+
 ## Model Experience
 
 Indirectly, through the model-facing orchestration Consumer. This Service Definition does not register tools or prompt text.

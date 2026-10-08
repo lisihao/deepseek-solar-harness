@@ -133,8 +133,21 @@ export interface RemoteResidentProviderStatus {
   readonly protocolHash: string
   readonly models: readonly RemoteResidentModelOption[]
   readonly quotaPools?: readonly RemoteResidentQuotaPool[]
+  /** Host implements isolated exact-base mutation capture and durable return. */
+  readonly supportsWorkspaceMutationReturn?: boolean
+  /** Host accepts version 1 current-input bundles for isolated readers and writers. */
+  readonly supportsWorkspaceSnapshotInput?: boolean
+  /** Receiving Native driver enforces the serialized file authority. */
+  readonly supportsGovernedWorkspacePolicy?: boolean
+  /** Receiving Native driver enforces the serialized generation bounds. */
+  readonly supportsGenerationLimits?: boolean
   /** Persisted default project advertised only by an actual Gouzi member host. */
-  readonly gouziWorkspace?: { readonly gouziId: string; readonly generation: number; readonly projectId: string }
+  readonly gouziWorkspace?: {
+    readonly gouziId: string
+    readonly generation: number
+    readonly projectId: string
+    readonly projectScopes: readonly string[]
+  }
 }
 /* jscpd:ignore-end */
 
@@ -199,6 +212,10 @@ function canonicalRepositoryParts(host: string, path: string): string {
 export interface RemoteResidentExecuteRequest {
   readonly commandId: string
   readonly operatorId: string
+  /** Exact current source inputs for an isolated read or write; independently versioned from projection traffic. */
+  readonly workspaceSnapshotInput?: { readonly version: 1; readonly baseSha: string; readonly baseBundle: string }
+  /** Request a durable patch from an isolated Git execution only. */
+  readonly workspaceMutationReturn?: { readonly version: 1; readonly baseSha: string; readonly baseBundle?: string }
   readonly workspaceIdentity: RemoteExecutionWorkspaceIdentityV1
   readonly laneId: string
   readonly taskLabel?: string
@@ -208,7 +225,23 @@ export interface RemoteResidentExecuteRequest {
   readonly contextEnvelope?: OperatorContextEnvelopeV1
   readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
   /** Sealed native product-tool authority, introduced in protocol 1.4. */
-  readonly nativeToolPolicy?: 'inherit' | 'disabled'
+  readonly nativeToolPolicy?: 'inherit' | 'disabled' | 'dsh-tools-authoritative'
+  /** Explicit bounds for receiving-host direct model generation. */
+  readonly generationLimits?: { readonly maxTokens: number; readonly maxOutputBytes: number; readonly maxToolCalls?: number }
+  /** Serializable file authority; the receiving Native driver relocates scopes to its actual execution cwd. */
+  readonly governedWorkspacePolicy?: {
+    readonly version: 1
+    readonly sourceWorkspace: string
+    readonly readScopes: readonly string[]
+    readonly writeScopes: readonly string[]
+    readonly forbiddenScopes: readonly string[]
+    readonly limits: {
+      readonly maxToolCalls: number
+      readonly maxFileBytes: number
+      readonly maxOutputBytes: number
+      readonly maxSearchFiles: number
+    }
+  }
   /**
    * Execution grant for a `gouzi` credential; opaque here and parsed by the Server with `parseGouziGrant`. It is
    * never part of {@link gouziRequestHash}, which the grant itself seals.
@@ -239,6 +272,12 @@ export interface RemoteResidentTurnSnapshot {
       readonly costUsd?: number
     }
     readonly resultRef?: string
+    readonly workspaceMutation?: {
+      readonly repository?: string
+      readonly projectId?: string
+      readonly baseSha: string
+      readonly patch: string
+    }
   }
   readonly error?: { readonly code: string; readonly message: string }
 }
@@ -259,6 +298,12 @@ export interface RemoteResidentEventPage {
     readonly data: Readonly<Record<string, unknown>>
   }[]
   readonly nextSequence: number
+}
+
+/** A local feature preflight rejected the request before any remote execution command was sent. */
+export class RemoteResidentCapabilityError extends Error {
+  /** Stable preflight refusal code; no execution command has been sent. */
+  readonly code = 'REMOTE_OPERATOR_FEATURE_UNSUPPORTED'
 }
 
 /** Product-neutral Resident commands over any authenticated remote-sync transport. */
@@ -282,7 +327,23 @@ export class RemoteResidentProtocolClient {
    * @param signal - optional transport cancellation signal.
    * @returns the accepted durable turn identity.
    */
-  execute(request: RemoteResidentExecuteRequest, signal?: AbortSignal): Promise<RemoteResidentAcceptedTurn> {
+  async execute(request: RemoteResidentExecuteRequest, signal?: AbortSignal): Promise<RemoteResidentAcceptedTurn> {
+    if (request.workspaceMutationReturn !== undefined || request.workspaceSnapshotInput !== undefined
+      || request.governedWorkspacePolicy !== undefined || request.generationLimits !== undefined) {
+      const provider = (await this.providers(signal)).find(value => value.operatorId === request.operatorId)
+      if (request.workspaceMutationReturn !== undefined && provider?.supportsWorkspaceMutationReturn !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support isolated workspace mutation return')
+      }
+      if (request.workspaceSnapshotInput !== undefined && provider?.supportsWorkspaceSnapshotInput !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support sealed current workspace snapshot inputs')
+      }
+      if (request.governedWorkspacePolicy !== undefined && provider?.supportsGovernedWorkspacePolicy !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support governed workspace file authority')
+      }
+      if (request.generationLimits !== undefined && provider?.supportsGenerationLimits !== true) {
+        throw new RemoteResidentCapabilityError('remote operator does not support direct generation limits')
+      }
+    }
     return this.call('operator.execute', { ...request, protocol: REMOTE_SYNC_PROTOCOL }, signal)
       .then(parseRemoteResidentAcceptedTurn)
   }
@@ -639,6 +700,10 @@ export function parseRemoteResidentProviders(value: unknown): RemoteResidentProv
       productVersion: nonEmptyString(record.productVersion, `${label}.productVersion`),
       protocolHash: nonEmptyString(record.protocolHash, `${label}.protocolHash`),
       models,
+      ...(record.supportsWorkspaceMutationReturn === true ? { supportsWorkspaceMutationReturn: true } : {}),
+      ...(record.supportsWorkspaceSnapshotInput === true ? { supportsWorkspaceSnapshotInput: true } : {}),
+      supportsGovernedWorkspacePolicy: record.supportsGovernedWorkspacePolicy === true,
+      supportsGenerationLimits: record.supportsGenerationLimits === true,
       ...(record.gouziWorkspace === undefined ? {} : { gouziWorkspace: gouziWorkspace(record.gouziWorkspace, label) }),
       ...(record.quotaPools === undefined ? {} : {
         quotaPools: arrayValue(record.quotaPools, `${label}.quotaPools`).map((pool, poolIndex) => {
@@ -668,6 +733,10 @@ function gouziWorkspace(value: unknown, label: string): NonNullable<RemoteReside
     gouziId: nonEmptyString(record.gouziId, `${label}.gouziWorkspace.gouziId`),
     generation: nonnegativeInteger(record.generation, `${label}.gouziWorkspace.generation`),
     projectId,
+    // Older endpoints advertise project identity without verified directories; they cannot authorize project selection.
+    projectScopes: record.projectScopes === undefined ? []
+      : arrayValue(record.projectScopes, `${label}.gouziWorkspace.projectScopes`)
+        .map((scope, index) => nonEmptyString(scope, `${label}.gouziWorkspace.projectScopes[${index}]`)),
   }
 }
 
@@ -771,11 +840,24 @@ export function parseRemoteResidentResult(
   if (!Array.isArray(result.output)) throw new Error('remote Resident turn result.output must be an array')
   const usage = result.usage === undefined ? undefined : residentUsage(result.usage, 'result.usage')
   return {
+    ...(result.workspaceMutation === undefined ? {} : { workspaceMutation: parseWorkspaceMutation(result.workspaceMutation) }),
     output: result.output as ContentBlock[],
     stopReason: residentStopReason(result.stopReason, 'result.stopReason'),
     ...usage === undefined ? {} : { usage },
     ...(typeof result.resultRef === 'string' ? { resultRef: result.resultRef } : {}),
   }
+}
+
+function parseWorkspaceMutation(value: unknown): NonNullable<NonNullable<RemoteResidentTurnSnapshot['result']>['workspaceMutation']> {
+  const record = objectRecord(value, 'workspaceMutation')
+  const binding = record.projectId === undefined
+    ? { repository: canonicalRemoteRepositoryIdentity(nonEmptyString(record.repository, 'workspaceMutation.repository')) }
+    : { projectId: nonEmptyString(record.projectId, 'workspaceMutation.projectId') }
+  if ('projectId' in binding && !/^[a-f0-9]{64}$/u.test(binding.projectId)) throw new Error('invalid mutation project identity')
+  const baseSha = nonEmptyString(record.baseSha, 'workspaceMutation.baseSha')
+  if (!/^[a-f0-9]{40}$/u.test(baseSha) || typeof record.patch !== 'string'
+    || new TextEncoder().encode(record.patch).byteLength > 1024 * 1024) throw new Error('invalid remote workspace mutation')
+  return { ...binding, baseSha, patch: record.patch }
 }
 
 /**

@@ -10,6 +10,9 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorGenerationLimits,
+  PhysicalOperatorGovernedWorkspacePolicy,
+  PhysicalOperatorProviderResponse,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorProgressPage,
@@ -218,6 +221,10 @@ export interface ResidentCliUpdateResult {
 
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
+  /** Driver implements a direct model-only path with explicit generation limits. */
+  readonly supportsGenerationLimits?: boolean
+  /** Driver enforces sealed file scopes without inherited native tools. */
+  readonly supportsGovernedWorkspacePolicy?: boolean
   readonly operatorId: string
   readonly product: string
   readonly displayName: string
@@ -243,6 +250,8 @@ export interface ResidentProviderStatus {
 
 /** One native product invocation after durable daemon admission. */
 export interface ResidentDriverExecuteRequest {
+  /** Daemon-owned private tool endpoint root; never supplied over external wire. */
+  readonly governedToolRoot?: string
   /** Outer durable command identity used to namespace native model-tool receipts. */
   readonly commandId: ResidentOperatorCommandId
   readonly workspace: string
@@ -258,6 +267,10 @@ export interface ResidentDriverExecuteRequest {
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1 | undefined
   /** Daemon-normalized native product tool policy; direct Driver callers inherit when omitted. */
   readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
+  /** Explicit limits for direct model generation. */
+  readonly generationLimits?: PhysicalOperatorGenerationLimits
+  /** Sealed file authority mapped to the driver execution directory. */
+  readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
   /** Persist a bounded product-neutral progress phase for reconnecting observers. */
   readonly onProgress: (phase: ResidentProgressPhase) => void
@@ -297,7 +310,7 @@ export interface ResidentProductDriver {
    * @param request - canonical workspace, prompt, prior native Session, signal, and progress callbacks.
    * @returns bounded final result and authoritative native Session identity.
    */
-  execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId: string }>
+  execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId?: string }>
   /** Compact one idle native Session without changing its continuation identity. */
   compact?(request: ResidentDriverCompactRequest): Promise<{ readonly nativeSessionId: string }>
 }
@@ -380,11 +393,17 @@ export interface ResidentExecuteRequest {
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
   /** Native product tool policy; absence preserves the existing native tool surface. */
   readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
+  /** Explicit limits for direct model generation. */
+  readonly generationLimits?: PhysicalOperatorGenerationLimits
+  /** Sealed file authority mapped to the driver execution directory. */
+  readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy
   readonly signal: AbortSignal
 }
 
 /** Bounded final product result or content-addressed reference. */
 export interface ResidentTurnResult {
+  /** Actual provider response provenance; distinct from a native session identity. */
+  readonly providerResponse?: PhysicalOperatorProviderResponse
   readonly output: ContentBlock[]
   readonly stopReason: ResidentStopReason
   readonly usage?: PhysicalOperatorUsage

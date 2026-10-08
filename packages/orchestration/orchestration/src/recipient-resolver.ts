@@ -4,6 +4,8 @@ import type { OrchestrationGouziRecipientV1 } from './index.ts'
 
 /** Resolves only the current logical turn's explicit user selection. */
 export interface OrchestrationRecipientResolver {
+  /** Whether kennel user messages are consumed by Host AI dispatch before ordinary execution. */
+  readonly automaticDispatch?: boolean
   /**
    * Confirm the selected member and its available execution entries.
    * @param events - ordered durable Session events.

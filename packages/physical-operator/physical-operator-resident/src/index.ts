@@ -111,6 +111,8 @@ class DualModePhysicalOperator implements PhysicalOperator {
           supportsModelToolBridge: true,
           location: 'local',
           supportsWorkspaceMutationReturn: true,
+          supportsGenerationLimits: provider.supportsGenerationLimits === true,
+          supportsGovernedWorkspacePolicy: provider.supportsGovernedWorkspacePolicy === true,
           available: provider.available,
           ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
           ...provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: provider.quotaUnavailableReason },
@@ -213,6 +215,8 @@ class DualModePhysicalOperator implements PhysicalOperator {
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
+      ...request.generationLimits === undefined ? {} : { generationLimits: request.generationLimits },
+      ...request.governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy: request.governedWorkspacePolicy },
       signal: request.signal,
     })
     return {
@@ -235,6 +239,7 @@ class DualModePhysicalOperator implements PhysicalOperator {
       },
       result: turn.result.then(result => ({
         output: result.output,
+        ...result.providerResponse === undefined ? {} : { providerResponse: result.providerResponse },
         stopReason: result.stopReason,
         // Preserve the native product counters across the Resident-to-physical
         // operator seam.  The Resident store already persists this optional

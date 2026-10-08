@@ -14,6 +14,8 @@ RLM 节点可以选择启用与 Prime 兼容的 Autonomous Mode。Graph 或 Run 
 
 `GouziControl.executionOperators()` 区分注册表成员、连接状态与实际执行注册。Provider 返回当前成员 generation，以及经重新检查的完整注册算子 id、可用状态、不可用原因和模型列表；缺失或过期的注册不携带算子。这项读取不启动进程，不修改注册表或调度状态。可选的对象解析器确认点名用户消息中记录的成员身份与 generation，并向面向模型的[编排 Consumer](../tool-orchestration/README.md)返回合格算子 id；[房间投影](../ui-gouzi/README.md)负责会话筛选和结果展示。
 
+验证节点可以声明 `model-verdict` 验收：算子正常完成本身不足以通过。Provider 校验严格 JSON，要求肯定的 `accepted`、非空 `reason` 及由非空字符串组成的非空 `evidence` 列表。结论缺失、否定或无效时验收失败。目录快照交付及其持久应用状态归[本地 Provider](../orchestration-local/README.md#directory-snapshot-delivery)所有。
+
 ## Model Experience
 
 间接产生影响：由面向模型的编排消费方呈现。此 Service Definition 不注册工具或提示词文本。

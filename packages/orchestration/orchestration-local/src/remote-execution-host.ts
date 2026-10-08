@@ -12,11 +12,14 @@ import {
   type RemoteMaterializedWorkspaceV1,
   type RemoteOperatorHostQualification,
   type RemoteResidentArtifactDocument,
+  type RemoteResidentTurnSnapshot,
   type RemoteWorkspaceIdentityV1,
   type RemoteExecutionWorkspaceIdentityV1,
   type RemoteGouziWorkspaceIdentityV1,
 } from '@deepseek-ai/dsh-client-connection'
 import { readOrchestrationClusterConfig, type OrchestrationClusterMember } from './cluster.ts'
+
+type WorkspaceMutation = NonNullable<NonNullable<RemoteResidentTurnSnapshot['result']>['workspaceMutation']>
 
 const execFileAsync = promisify(execFile)
 const MAX_GIT_OUTPUT_BYTES = 1024 * 1024
@@ -26,6 +29,8 @@ interface WorkspaceLeaseV1 {
   readonly version: 1
   readonly executionId: string
   readonly identity: RemoteExecutionWorkspaceIdentityV1
+  readonly mutationReturn?: { readonly baseSha: string; readonly bundleDigest?: string }
+  readonly snapshotInput?: { readonly baseSha: string; readonly bundleDigest: string }
   readonly leaseUntil: number
 }
 
@@ -97,6 +102,7 @@ export async function resolveRepositorySource(
 
 /** Host Provider for isolated Git checkouts and locked registered project directories. */
 export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
+  private readonly mutationCaptures = new Map<string, Promise<WorkspaceMutation | undefined>>()
   private readonly cacheMaterializations = new Map<string, Promise<string>>()
   private readonly orchestrationRoot: string
   private readonly cacheRoot: string
@@ -161,7 +167,7 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
     return value
   }
 
-  override async gouziWorkspace(): Promise<{ readonly projectId: string } | undefined> {
+  override async gouziWorkspace(): Promise<{ readonly projectId: string; readonly projectScopes: readonly string[] } | undefined> {
     const member = this.localMember()
     const projectId = member.remoteExecution?.defaultProjectId
     if (projectId === undefined) {
@@ -170,12 +176,22 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
     }
     const { root } = await this.registeredDirectory({ version: 1, kind: 'gouzi-project', projectId }, member)
     this.directoryLockPath(root)
-    return { projectId }
+    return { projectId, projectScopes: [root] }
   }
 
   override async inspectWorkspace(executionId: string): Promise<RemoteMaterializedWorkspaceV1 | undefined> {
     if (executionId.length === 0 || executionId.trim() !== executionId) {
       throw new Error('remote workspace executionId must be a non-blank trimmed string')
+    }
+    const isolatedLease = join(this.executionRoot, sha256(executionId), 'lease.json')
+    if (await exists(isolatedLease)) {
+      const lease = await this.readLease(isolatedLease)
+      if (lease.executionId !== executionId) throw new Error('remote workspace lease identity mismatch')
+      const checkout = join(this.executionRoot, sha256(executionId), 'checkout')
+      return {
+        version: 1, identity: lease.identity,
+        path: lease.identity.subdir === undefined ? checkout : await containedDirectory(checkout, lease.identity.subdir),
+      }
     }
     const lease = await this.directoryLease(executionId)
     if (lease === undefined) return undefined
@@ -186,14 +202,54 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
     return { version: 1, identity: lease.identity, path: selected.path }
   }
 
+  override supportsWorkspaceMutationReturn(): boolean { return true }
+  override supportsWorkspaceSnapshotInput(): boolean { return true }
+
+  override captureWorkspaceMutation(executionId: string): Promise<WorkspaceMutation | undefined> {
+    let capture = this.mutationCaptures.get(executionId)
+    if (capture === undefined) {
+      capture = this.captureMutation(executionId).finally(() => { this.mutationCaptures.delete(executionId) })
+      this.mutationCaptures.set(executionId, capture)
+    }
+    return capture
+  }
+
+  private async captureMutation(executionId: string): Promise<WorkspaceMutation | undefined> {
+    const receipt = join(this.executionRoot, `${sha256(executionId)}.mutation.json`)
+    if (await exists(receipt)) return parseMutationReceipt(JSON.parse(await readFile(receipt, 'utf8')) as unknown)
+    const directory = join(this.executionRoot, sha256(executionId))
+    if (!await exists(join(directory, 'lease.json'))) return undefined
+    const lease = await this.readLease(join(directory, 'lease.json'))
+    if (lease.executionId !== executionId) throw new Error('mutation workspace lease identity mismatch')
+    if (lease.mutationReturn === undefined) return undefined
+    const binding = 'kind' in lease.identity ? { projectId: lease.identity.projectId } : { repository: lease.identity.repository }
+    const checkout = join(directory, 'checkout')
+    await this.verifyCommit(checkout, lease.mutationReturn.baseSha, JSON.stringify(binding))
+    await this.git(['add', '--all', '--', '.'], checkout)
+    const patch = await this.git(['diff', '--cached', '--binary', '--no-ext-diff', lease.mutationReturn.baseSha, '--'], checkout)
+    const mutation = { ...binding, baseSha: lease.mutationReturn.baseSha, patch }
+    const temporary = `${receipt}.${randomUUID()}.tmp`
+    await writeFile(temporary, JSON.stringify(mutation), { flag: 'wx', mode: 0o600 })
+    await rename(temporary, receipt)
+    return mutation
+  }
+
   async materializeWorkspace(
     identity: RemoteExecutionWorkspaceIdentityV1,
     executionId: string,
+    mutationReturn?: { readonly baseSha: string; readonly baseBundle?: string },
+    snapshotInput?: { readonly baseSha: string; readonly baseBundle: string },
   ): Promise<RemoteMaterializedWorkspaceV1> {
+    if (mutationReturn !== undefined && (!('kind' in identity) && identity.commit !== mutationReturn.baseSha)) throw new Error('mutation requires exact-base isolated Git workspace')
+    if (mutationReturn?.baseBundle !== undefined && !('kind' in identity)) throw new Error('snapshot bundle requires a registered project binding')
     if (executionId.length === 0 || executionId.trim() !== executionId) {
       throw new Error('remote workspace executionId must be a non-blank trimmed string')
     }
-    if ('kind' in identity) return this.materializeDirectory(identity, executionId)
+    if (snapshotInput !== undefined && (!('kind' in identity)
+      || (mutationReturn !== undefined && mutationReturn.baseSha !== snapshotInput.baseSha))) throw new Error('snapshot input requires a matching registered project mutation base')
+    if ('kind' in identity) return mutationReturn === undefined && snapshotInput === undefined
+      ? this.materializeDirectory(identity, executionId)
+      : this.materializeProjectMutation(identity, executionId, mutationReturn, snapshotInput)
     if (await this.directoryLease(executionId) !== undefined) throw new Error('remote workspace execution identity conflicts with directory command')
     const normalized = normalizeIdentity(identity)
     const member = this.localMember()
@@ -212,7 +268,8 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
     const leasePath = join(executionDirectory, 'lease.json')
     if (await exists(executionDirectory)) {
       const lease = await this.readLease(leasePath)
-      if (lease.executionId !== executionId || canonicalIdentity(lease.identity) !== canonicalIdentity(normalized)) {
+      if (lease.executionId !== executionId || canonicalIdentity(lease.identity) !== canonicalIdentity(normalized)
+        || lease.mutationReturn?.baseSha !== mutationReturn?.baseSha) {
         throw new Error(`remote workspace execution identity conflicts with existing command ${executionId}`)
       }
       await this.writeLease(leasePath, { ...lease, leaseUntil: Date.now() + this.options.workspaceLeaseMs })
@@ -229,6 +286,7 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
         version: 1,
         executionId,
         identity: normalized,
+        ...mutationReturn === undefined ? {} : { mutationReturn: { baseSha: mutationReturn.baseSha } },
         leaseUntil: Date.now() + this.options.workspaceLeaseMs,
       })
       try {
@@ -240,11 +298,68 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
       await rm(temporaryRoot, { recursive: true, force: true })
     }
     const installedLease = await this.readLease(leasePath)
+    if (installedLease.mutationReturn?.baseSha !== mutationReturn?.baseSha) throw new Error('remote mutation command conflicts with existing lease')
     if (installedLease.executionId !== executionId
       || canonicalIdentity(installedLease.identity) !== canonicalIdentity(normalized)) {
       throw new Error(`remote workspace execution identity conflicts with existing command ${executionId}`)
     }
     return this.materializedResult(normalized, checkout)
+  }
+
+  private async materializeProjectMutation(
+    identity: RemoteGouziWorkspaceIdentityV1,
+    executionId: string,
+    mutationReturn: { readonly baseSha: string; readonly baseBundle?: string } | undefined,
+    snapshotInput: { readonly baseSha: string; readonly baseBundle: string } | undefined,
+  ): Promise<RemoteMaterializedWorkspaceV1> {
+    const { root } = await this.registeredDirectory(identity, this.localMember())
+    const input = snapshotInput ?? mutationReturn
+    if (input === undefined) throw new Error('isolated project execution requires sealed inputs')
+    if (input.baseBundle === undefined) await this.verifyCommit(root, input.baseSha, identity.projectId)
+    const bundle = input.baseBundle === undefined ? undefined : Buffer.from(input.baseBundle, 'base64')
+    if (bundle !== undefined && (bundle.byteLength > 8 * 1024 * 1024 || bundle.toString('base64') !== input.baseBundle)) {
+      throw new Error('invalid or oversized snapshot base bundle')
+    }
+    const bundleDigest = bundle === undefined ? undefined : createHash('sha256').update(bundle).digest('hex')
+    const persistedMutation = mutationReturn === undefined ? undefined : { baseSha: mutationReturn.baseSha,
+      ...bundleDigest === undefined ? {} : { bundleDigest } }
+    const persistedInput = snapshotInput === undefined ? undefined
+      : { baseSha: snapshotInput.baseSha, bundleDigest: bundleDigest as string }
+    await prepareMetadataDirectory(this.executionRoot, root)
+    const directory = join(this.executionRoot, sha256(executionId))
+    const leasePath = join(directory, 'lease.json')
+    if (await exists(leasePath)) {
+      const lease = await this.readLease(leasePath)
+      if (lease.executionId !== executionId || canonicalIdentity(lease.identity) !== canonicalIdentity(identity)
+        || lease.mutationReturn?.baseSha !== mutationReturn?.baseSha
+        || lease.mutationReturn?.bundleDigest !== persistedMutation?.bundleDigest
+        || lease.snapshotInput?.baseSha !== persistedInput?.baseSha
+        || lease.snapshotInput?.bundleDigest !== persistedInput?.bundleDigest) throw new Error('remote project mutation conflicts with original command')
+    } else {
+      if (await exists(directory)) throw new Error('remote project mutation workspace is unresolved')
+      await mkdir(directory, { mode: 0o700 })
+      // Failure retains the command directory; an unknown execution cannot acquire a fresh checkout.
+      const checkout = join(directory, 'checkout')
+      if (bundle === undefined) await this.git(['clone', '--no-checkout', '--local', '--', root, checkout])
+      else {
+        await mkdir(checkout)
+        await this.git(['init', '--initial-branch=main'], checkout)
+        const bundlePath = join(directory, 'base.bundle')
+        await writeFile(bundlePath, bundle, { flag: 'wx', mode: 0o600 })
+        await this.git(['bundle', 'verify', bundlePath], checkout)
+        await this.git(['bundle', 'unbundle', bundlePath], checkout)
+        await this.verifyCommit(checkout, input.baseSha, identity.projectId)
+      }
+      await this.git(['checkout', '--detach', input.baseSha], checkout)
+      await this.writeLease(leasePath, {
+        version: 1, executionId, identity,
+        ...persistedMutation === undefined ? {} : { mutationReturn: persistedMutation },
+        ...persistedInput === undefined ? {} : { snapshotInput: persistedInput },
+        leaseUntil: Date.now() + this.options.workspaceLeaseMs,
+      })
+    }
+    const checkout = await realpath(join(directory, 'checkout'))
+    return { version: 1, identity, path: identity.subdir === undefined ? checkout : await containedDirectory(checkout, identity.subdir) }
   }
 
   async renewWorkspace(executionId: string): Promise<void> {
@@ -503,7 +618,7 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
       const directory = join(this.executionRoot, entry.name)
       try {
         const lease = await this.readLease(join(directory, 'lease.json'))
-        if (lease.leaseUntil <= Date.now()) await rm(directory, { recursive: true, force: true })
+        if (lease.mutationReturn === undefined && lease.leaseUntil <= Date.now()) await rm(directory, { recursive: true, force: true })
       } catch {
         // An incomplete execution directory is not authoritative and is safe to reap.
         await rm(directory, { recursive: true, force: true })
@@ -527,6 +642,15 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   private async git(args: readonly string[], cwd?: string): Promise<string> {
     return git(args, cwd, this.options.timeoutMs)
   }
+}
+
+function parseMutationReceipt(value: unknown): WorkspaceMutation {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid persisted mutation receipt')
+  const record = value as Record<string, unknown>
+  if (typeof record.baseSha !== 'string' || !/^[a-f0-9]{40}$/u.test(record.baseSha)
+    || typeof record.patch !== 'string' || Buffer.byteLength(record.patch, 'utf8') > MAX_GIT_OUTPUT_BYTES
+    || (typeof record.repository !== 'string' && typeof record.projectId !== 'string')) throw new Error('invalid persisted mutation receipt')
+  return value as WorkspaceMutation
 }
 
 function directoriesOverlap(first: string, second: string): boolean {

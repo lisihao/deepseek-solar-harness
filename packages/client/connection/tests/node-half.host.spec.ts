@@ -474,7 +474,7 @@ describe('connection node half', () => {
     class ProjectHost extends RemoteOperatorHostService {
       override async inspectWorkspace() { return undefined }
       async qualification() { return { available: true } }
-      override async gouziWorkspace() { return { projectId } }
+      override async gouziWorkspace() { return { projectId, projectScopes: [projectPath] } }
       materializeWorkspace = materializeWorkspace
       async renewWorkspace() {}
       async releaseWorkspace() {}

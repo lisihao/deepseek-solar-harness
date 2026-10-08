@@ -6,6 +6,8 @@ import { access, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from '
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { createRemotePhysicalOperators } from '../src/remote-physical-operator.ts'
+import { OrchestrationStore } from '../src/store.ts'
 import { describe, expect, it } from 'vitest'
 import { GouziMemberService } from '@deepseek-ai/dsh-client-connection'
 import {
@@ -54,6 +56,128 @@ async function serviceFixture() {
 }
 
 describe('LocalRemoteOperatorHostService', () => {
+  it.each([{ endpoint: 'http://127.0.0.1:13301', qualified: false }, { endpoint: 'https://remote.invalid', qualified: true }])(
+    'refuses complete snapshot transfer without both local authority qualification and loopback ($endpoint)', async ({ endpoint, qualified }) => {
+      const { source, dshHome } = await serviceFixture()
+      const store = new OrchestrationStore(join(dshHome, 'owner-store'))
+      const provider = { operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'fixture', tags: [],
+        maxConcurrency: 1, injectionBoundaries: [], available: true, authentication: 'native-subscription',
+        productVersion: 'fixture', protocolHash: 'fixture', models: [], supportsWorkspaceMutationReturn: true,
+        supportsWorkspaceSnapshotInput: true }
+      let sentAfterQualification = 0
+      const transport: typeof fetch = async (_url, init) => {
+        if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+        const call = JSON.parse(init.body) as { rpcId: string; method: string }
+        sentAfterQualification += 1
+        return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value: [provider] } })
+      }
+      const [operator] = await createRemotePhysicalOperators({ id: 'fixture', label: 'Fixture', endpoint,
+        gouzi: { gouziId: 'fixture', ...qualified ? { allowLocalWorkspaceSnapshot: true } : {},
+          issue: () => { throw new Error('grant issuance must not occur') } } }, store, transport)
+      sentAfterQualification = 0
+      await expect(operator!.start({ executionId: 'blocked-snapshot' as never, mode: 'resident', prompt: [],
+        parent: { session: { header: { cwd: source.root } } } as never, signal: new AbortController().signal,
+        workspaceSnapshotInput: { baseSha: source.commit, baseBundle: Buffer.from('fixture bytes').toString('base64') } }))
+        .rejects.toThrow('authority-qualified local member and loopback endpoint')
+      expect(sentAfterQualification).toBe(0)
+      store.close()
+    },
+  )
+
+  it('returns a real remote edit into the caller execution checkout and recovers the same patch without replaying it', async () => {
+    const { source, service, dshHome } = await serviceFixture()
+    const store = new OrchestrationStore(join(dshHome, 'owner-store'))
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'fixture', tags: [],
+      maxConcurrency: 1, injectionBoundaries: ['pre-dispatch'], available: true,
+      authentication: 'native-subscription', productVersion: 'fixture', protocolHash: 'fixture', models: [],
+      supportsWorkspaceMutationReturn: true,
+    }
+    let commandId = ''
+    let executes = 0
+    const transport: typeof fetch = async (_url, init) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string; payload: Record<string, unknown> }
+      let value: unknown
+      if (call.method === 'operator.providers') value = [provider]
+      else if (call.method === 'operator.execute') {
+        executes += 1
+        commandId = String(call.payload.commandId)
+        const workspace = await service.materializeWorkspace(
+          call.payload.workspaceIdentity as never, commandId, call.payload.workspaceMutationReturn as never,
+        )
+        await writeFile(join(workspace.path, 'packages/core/fixture.txt'), 'actually developed remotely\n')
+        await writeFile(join(workspace.path, 'new.txt'), 'actual new file\n')
+        value = { sessionId: 'session', turnId: 'turn', stateRevision: 1 }
+      } else if (call.method === 'operator.inspect') {
+        const mutation = await service.captureWorkspaceMutation(commandId)
+        await service.releaseWorkspace(commandId)
+        value = { commandId, sessionId: 'session', turnId: 'turn', stateRevision: 2,
+          state: 'settled', updatedAt: new Date().toISOString(), result: { output: [], stopReason: 'completed', workspaceMutation: mutation } }
+      } else throw new Error(`unexpected method ${call.method}`)
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }
+    const [operator] = await createRemotePhysicalOperators({ id: 'fixture', label: 'Fixture', endpoint: 'http://fixture.invalid' }, store, transport)
+    const run = await operator!.start({ executionId: 'write-command' as never, mode: 'resident', prompt: [],
+      parent: { session: { header: { cwd: source.root } } } as never, signal: new AbortController().signal,
+      nativeToolPolicy: 'inherit', workspaceMutationReturn: { baseSha: source.commit } })
+    await run.result
+    expect(await readFile(join(source.root, 'packages/core/fixture.txt'), 'utf8')).toBe('actually developed remotely\n')
+    expect(await readFile(join(source.root, 'new.txt'), 'utf8')).toBe('actual new file\n')
+    const [restarted] = await createRemotePhysicalOperators({ id: 'fixture', label: 'Fixture', endpoint: 'http://fixture.invalid' }, store, transport)
+    await (await restarted!.reattach('turn')).result
+    expect(executes).toBe(1)
+    store.close()
+  })
+
+  it('refuses a dirty caller mutation target before remote admission and preserves user bytes', async () => {
+    const { source, service, dshHome } = await serviceFixture()
+    const store = new OrchestrationStore(join(dshHome, 'owner-store'))
+    const provider = { operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'fixture', tags: [],
+      maxConcurrency: 1, injectionBoundaries: ['pre-dispatch'], available: true, authentication: 'native-subscription',
+      productVersion: 'fixture', protocolHash: 'fixture', models: [], supportsWorkspaceMutationReturn: true }
+    let executes = 0
+    const transport: typeof fetch = async (_url, init) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      if (call.method !== 'operator.providers') executes += 1
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value: [provider] } })
+    }
+    const [operator] = await createRemotePhysicalOperators({ id: 'fixture', label: 'Fixture', endpoint: 'http://fixture.invalid' }, store, transport)
+    await writeFile(join(source.root, 'packages/core/fixture.txt'), 'user dirty bytes\n')
+    await expect(operator!.start({ executionId: 'dirty-command' as never, mode: 'resident', prompt: [],
+      parent: { session: { header: { cwd: source.root } } } as never, signal: new AbortController().signal,
+      workspaceMutationReturn: { baseSha: source.commit } })).rejects.toThrow('clean Git workspace')
+    expect(executes).toBe(0)
+    expect(await readFile(join(source.root, 'packages/core/fixture.txt'), 'utf8')).toBe('user dirty bytes\n')
+    expect(await service.captureWorkspaceMutation('dirty-command')).toBeUndefined()
+    store.close()
+  })
+
+  it('captures actual tracked and untracked edits as a durable exact-base patch before release', async () => {
+    const { source, service } = await serviceFixture()
+    const identity = await identifyRemoteWorkspace(source.root, 10_000)
+    const workspace = await service.materializeWorkspace(identity, 'mutation', { baseSha: source.commit })
+    await writeFile(join(workspace.path, 'packages/core/fixture.txt'), 'real edited bytes\n')
+    execFileSync('git', ['add', '.'], { cwd: workspace.path })
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'native edit'],
+      { cwd: workspace.path })
+    await writeFile(join(workspace.path, 'new.txt'), 'new file\n')
+    const [mutation, concurrent] = await Promise.all([service.captureWorkspaceMutation('mutation'), service.captureWorkspaceMutation('mutation')])
+    expect(concurrent).toEqual(mutation)
+    expect(mutation).toMatchObject({ repository: identity.repository, baseSha: source.commit })
+    expect(mutation?.patch).toContain('real edited bytes')
+    expect(mutation?.patch).toContain('new file')
+    expect(await readFile(join(source.root, 'packages/core/fixture.txt'), 'utf8')).toBe('exact commit fixture\n')
+    await service.releaseWorkspace('mutation')
+    expect(await service.captureWorkspaceMutation('mutation')).toEqual(mutation)
+    const patch = join(source.root, '..', 'returned.patch')
+    await writeFile(patch, mutation!.patch)
+    execFileSync('git', ['apply', '--check', '--', patch], { cwd: source.root })
+    execFileSync('git', ['apply', '--', patch], { cwd: source.root })
+    expect(await readFile(join(source.root, 'new.txt'), 'utf8')).toBe('new file\n')
+  })
+
   it('maps a clean sender workspace to repository identity and materializes the exact commit and subdir', async () => {
     const { source, service } = await serviceFixture()
     const sender = await identifyRemoteWorkspace(join(source.root, 'packages', 'core'), 10_000)
@@ -184,7 +308,7 @@ describe('registered directory execution', () => {
       execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture'], { cwd: root })
       await writeFile(join(root, 'user.txt'), 'dirty current bytes')
     }
-    await expect(service.gouziWorkspace()).resolves.toEqual({ projectId: 'project' })
+    await expect(service.gouziWorkspace()).resolves.toEqual({ projectId: 'project', projectScopes: [await realpath(root)] })
     await expect(service.qualification()).resolves.toEqual({ available: true })
     const before = await readFile(join(root, 'user.txt'), 'utf8')
     const workspace = await service.materializeWorkspace(directoryIdentity, 'execution')
@@ -198,6 +322,29 @@ describe('registered directory execution', () => {
     expect(await readFile(join(root, 'new-file.txt'), 'utf8')).toBe('execution output')
     await expect(service.materializeWorkspace(directoryIdentity, 'next')).resolves.toMatchObject({ path: workspace.path })
     await service.releaseWorkspace('next')
+  })
+
+  it('isolates registered dirty Git projects without an origin and binds the returned patch to the project', async () => {
+    const { root, service } = await directoryFixture()
+    await writeFile(join(root, 'tracked.txt'), 'base\n')
+    execFileSync('git', ['init', '--initial-branch=main'], { cwd: root })
+    execFileSync('git', ['add', '.'], { cwd: root })
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'base'], { cwd: root })
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+    await writeFile(join(root, 'tracked.txt'), 'user dirty bytes\n')
+    await writeFile(join(root, 'private-untracked.txt'), 'user bytes\n')
+    const isolated = await service.materializeWorkspace(directoryIdentity, 'isolated-project', { baseSha })
+    expect(isolated.path).not.toBe(root)
+    expect(await readFile(join(isolated.path, 'tracked.txt'), 'utf8')).toBe('base\n')
+    await expect(readFile(join(isolated.path, 'private-untracked.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await writeFile(join(isolated.path, 'tracked.txt'), 'remote actual edit\n')
+    const mutation = await service.captureWorkspaceMutation('isolated-project')
+    expect(mutation).toMatchObject({ projectId: 'project', baseSha })
+    expect(mutation?.patch).toContain('remote actual edit')
+    await service.releaseWorkspace('isolated-project')
+    expect(await readFile(join(root, 'tracked.txt'), 'utf8')).toBe('user dirty bytes\n')
+    expect(await service.captureWorkspaceMutation('isolated-project')).toEqual(mutation)
+    await expect(service.materializeWorkspace(directoryIdentity, 'missing-base', { baseSha: 'a'.repeat(40) })).rejects.toThrow()
   })
 
   it('uses contained subdirectories and rejects unknown projects, traversal, escaping symlinks and changed replay paths', async () => {

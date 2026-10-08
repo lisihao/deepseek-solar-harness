@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSnapshotStore, EMPTY_CHAT_SNAPSHOT, type ConversationSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, EMPTY_CHAT_SNAPSHOT, type ConversationSnapshot, type ToolResultNode } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ChatNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
 import { KennelRoomAside, KennelRoomComposer, KennelRoomContent, KennelRoomHeader, type KennelRoomProps, type KennelRoomComposerProps } from '../src/client/KennelRoom.tsx'
 import { createKennelRoomStore } from '../src/client/room-store.ts'
@@ -12,7 +13,7 @@ import { encodeKennelMessage, type KennelRecipient } from '../src/recipient-mess
 import type { GouziRoomSnapshotV1 } from '../src/contracts.ts'
 afterEach(() => { cleanup(); vi.useRealTimers() })
 function room(): GouziRoomSnapshotV1 {
-  return { version: 1, sessionId: 's', roomPollIntervalMs: 2_000, generatedAt: 'now', dashboard: { version: 1, generatedAt: 'now', limit: 10, used: 2, canManage: true, hostAvailable: true, hosts: [], members: ['g1', 'g2'].map((gouziId, i) => ({ gouziId, name: '同名', avatarId: 'shiba', role: 'development', hostId: `h${i}`, hostLabel: `机器${i}`, membership: 'enabled', connection: 'online', activity: 'resting', state: 'resting', createdAt: 'now' })) }, execution: ['g1', 'g2'].map(gouziId => ({ gouziId, generation: 1, operators: [{ operatorId: `${gouziId}.real`, available: true, models: [] }] })), tasks: [] }
+  return { version: 1, sessionId: 's', roomPollIntervalMs: 2_000, generatedAt: 'now', dashboard: { version: 1, generatedAt: 'now', limit: 10, used: 2, canManage: true, hostAvailable: true, hosts: [], members: ['g1', 'g2'].map((gouziId, i) => ({ gouziId, name: '同名', avatarId: 'shiba', role: 'development', hostId: `h${i}`, hostLabel: `机器${i}`, membership: 'enabled', connection: 'online', activity: 'resting', state: 'resting', createdAt: 'now' })) }, execution: ['g1', 'g2'].map(gouziId => ({ gouziId, generation: 1, projectScopes: ['/project'], operators: [{ operatorId: `${gouziId}.real`, available: true, supportsGenerationLimits: true, models: [] }] })), tasks: [] }
 }
 function harness() {
   const state = createSnapshotStore<KennelRoomReadState>({ room: room(), loading: false, stale: false, error: null })
@@ -38,21 +39,143 @@ function all(h: ReturnType<typeof harness>) {
     <KennelRoomComposer {...h.props} /><KennelRoomAside {...h.props} />
   </>)
 }
-function point(index = 0) { fireEvent.click(screen.getAllByRole('button', { name: '点名 · 标准任务' })[index]!) }
+function point(index = 0) { fireEvent.click(screen.getAllByRole('button', { name: /^发给 同名 · 机器/ })[index]!) }
 function draft(text = '任务正文') { fireEvent.change(screen.getByRole('textbox', { name: '消息' }), { target: { value: text } }) }
 function sendButton() { return screen.getByRole('button', { name: '发送' }) }
 describe('kennel room interaction', () => {
+  it('selects the clicked member with its real generation while viewing messages only changes the filter', () => {
+    const h = harness()
+    patchRoom(h, current => ({ ...current, execution: current.execution.map(e => e.gouziId === 'g1' ? { ...e, generation: 7 } : e) }))
+    const { container } = all(h)
+    expect(screen.getByText('自动分派')).toBeTruthy()
+    fireEvent.click(screen.getAllByText('同名')[0]!)
+    expect(h.store.getSnapshot()).toMatchObject({ filter: 'all', recipient: { gouziId: 'g1', generation: 7, mode: 'standard' } })
+    expect(screen.getByText('发给 同名')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器1 · 开发 的消息' }))
+    expect(h.store.getSnapshot()).toMatchObject({ filter: 'g2', recipient: { gouziId: 'g1', generation: 7, mode: 'standard' } })
+    fireEvent.click(screen.getByRole('button', { name: '清除点名' }))
+    expect(h.store.getSnapshot()).toMatchObject({ filter: 'g2', recipient: null })
+    expect(screen.getByText('自动分派')).toBeTruthy()
+    expect(container.textContent).not.toContain('标准任务')
+    expect(h.send).not.toHaveBeenCalled()
+  })
+  it('keeps message filtering available when the member cannot be selected for execution', () => {
+    const h = harness()
+    patchRoom(h, current => ({ ...current, execution: current.execution.map(e => ({
+      ...e, operators: e.operators.map(o => ({ ...o, available: false })),
+    })) }))
+    all(h)
+    const member = screen.getByRole('button', { name: '发给 同名 · 机器0 · 开发' })
+    expect(member).toHaveProperty('disabled', true)
+    fireEvent.click(member)
+    expect(h.store.getSnapshot().recipient).toBe(null)
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器0 · 开发 的消息' }))
+    expect(h.store.getSnapshot()).toMatchObject({ filter: 'g1', recipient: null })
+  })
+  it('explains unconfirmed project scopes and prevents targeting an otherwise available operator', () => {
+    const h = harness()
+    patchRoom(h, current => ({ ...current, execution: current.execution.map(e => ({ ...e, projectScopes: [] })) }))
+    all(h)
+    expect(screen.getAllByText('项目尚未确认，暂不能向该成员发送。')).toHaveLength(2)
+    const member = screen.getByRole('button', { name: '发给 同名 · 机器0 · 开发' })
+    expect(member).toHaveProperty('disabled', true)
+    fireEvent.click(member)
+    expect(h.store.getSnapshot().recipient).toBe(null)
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器0 · 开发 的消息' }))
+    expect(h.store.getSnapshot()).toMatchObject({ filter: 'g1', recipient: null })
+    expect(h.send).not.toHaveBeenCalled()
+  })
+  it.each([false, undefined])('requires an available entry that explicitly supports execution limits (%s)', (supportsGenerationLimits) => {
+    const h = harness()
+    patchRoom(h, current => ({ ...current, execution: current.execution.map(e => ({ ...e, operators: [
+      {
+        operatorId: e.operators[0]!.operatorId, models: e.operators[0]!.models, available: true,
+        ...supportsGenerationLimits === undefined ? {} : { supportsGenerationLimits },
+      },
+      { ...e.operators[0]!, operatorId: 'unavailable-capable', available: false, supportsGenerationLimits: true },
+    ] })) }))
+    all(h)
+    expect(screen.getAllByText('当前执行入口不支持聊天任务所需的执行限制，暂不能点名发送。')).toHaveLength(2)
+    const member = screen.getByRole('button', { name: '发给 同名 · 机器0 · 开发' })
+    expect(member).toHaveProperty('disabled', true)
+    fireEvent.click(member)
+    expect(h.store.getSnapshot().recipient).toBe(null)
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器0 · 开发 的消息' }))
+    expect(h.store.getSnapshot().filter).toBe('g1')
+    expect(h.send).not.toHaveBeenCalled()
+  })
+  it('hides internal context and diagnostic events while retaining chat, terminal failures and sealed task results', () => {
+    const h = harness()
+    h.session.update((d) => {
+      d.nodes = [
+        { kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: '请检查任务' }], source: null },
+        { kind: 'context', seq: 121, time: 2, content: [{ type: 'text', text: '内部模型上下文' }], source: null, provenance: { role: 'inject', label: null }, form: null },
+        { kind: 'unknown', seq: 122, time: 3, type: 'system/diagnostic', data: '内部诊断' },
+        { kind: 'assistant', seq: 123, time: 4, turn: 1, step: 1, blocks: [{ kind: 'text', text: '总管回复' }] },
+        { kind: 'turn-error', seq: 132, time: 5, turn: 1, step: 1, message: '执行入口拒绝当前仓库', code: 'REPOSITORY_DENIED' },
+      ]
+    })
+    patchRoom(h, current => ({ ...current, tasks: [{ runId: 'run', title: '已封存任务', state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [{ nodeId: 'n', title: '执行节点', state: 'passed', attempt: 1, capabilityGeneration: 1, gouziId: 'g1', evidenceRefs: ['ref'], result: { sequence: 7, time: '2026-10-06T00:00:00.000Z', evidenceRef: 'ref', outputPreview: '狗子封存输出', accepted: true, operatorId: 'g1.real' } }] }] }))
+    const { container } = all(h)
+    expect(screen.getByText('请检查任务')).toBeTruthy()
+    expect(screen.getByText('总管回复')).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toBe('执行入口拒绝当前仓库（REPOSITORY_DENIED）')
+    expect(screen.getByText('狗子封存输出')).toBeTruthy()
+    expect(screen.getAllByText('执行结束 · 结果已接纳')).toHaveLength(2)
+    expect(screen.queryByText(/验收通过/)).toBe(null)
+    expect(container.textContent).not.toContain('内部模型上下文')
+    expect(container.textContent).not.toContain('内部诊断')
+    expect(container.textContent).not.toContain('序号')
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器0 · 开发 的消息' }))
+    expect(screen.getByRole('alert').textContent).toBe('执行入口拒绝当前仓库（REPOSITORY_DENIED）')
+    expect(screen.queryByText('总管回复')).toBe(null)
+    expect(screen.getByText('狗子封存输出')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '总管' }))
+    expect(screen.getByRole('alert').textContent).toContain('执行入口拒绝当前仓库')
+    expect(screen.queryByText('狗子封存输出')).toBe(null)
+  })
+  it('shows the actual terminal failure even when it has no code', () => {
+    const h = harness()
+    h.session.update((d) => { d.nodes = [{ kind: 'turn-error', seq: 132, time: 1, turn: 1, step: 1, message: '连接已关闭，任务未完成' }] })
+    all(h)
+    expect(screen.getByRole('alert').textContent).toBe('连接已关闭，任务未完成')
+    expect(screen.queryByText(/序号/)).toBe(null)
+  })
+  it('renders actual tool activity once and hides raw chat diagnostics', () => {
+    const h = harness()
+    const result: ToolResultNode = { kind: 'tool-result', seq: 7, time: 7, callId: 'call', call: { name: 'read', argsRaw: '{}' }, callTime: 2, content: [{ type: 'text', text: '真实工具结果' }], isError: false, callView: null, resultView: null, subCalls: [] }
+    const tool: ChatNode<'tool-call'> = { target: 'chat', key: 'tool:call', kind: 'tool-call', id: 'call', anchorSeq: 2, location: { kind: 'unresolved' }, visibility: 'visible', data: { root: result } }
+    const diagnostic = { target: 'chat' as const, key: 'raw', kind: 'raw-event', id: 'raw', anchorSeq: 3, location: { kind: 'unresolved' as const }, visibility: 'visible' as const, data: '内部事件' }
+    h.session.update((d) => {
+      d.nodes = [result]
+      d.chat = {
+        ...EMPTY_CHAT_SNAPSHOT, order: [tool.key, diagnostic.key], nodes: {
+          get: key => key === tool.key ? tool : key === diagnostic.key ? diagnostic : undefined,
+          values: () => [tool, diagnostic],
+        },
+      }
+    })
+    const { container } = all(h)
+    expect(screen.getByText('工具 · read')).toBeTruthy()
+    expect(screen.getAllByText('真实工具结果')).toHaveLength(1)
+    expect(container.textContent).not.toContain('raw-event')
+    expect(container.textContent).not.toContain('序号')
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器0 · 开发 的消息' }))
+    expect(screen.queryByText('真实工具结果')).toBe(null)
+    fireEvent.click(screen.getByRole('button', { name: '总管' }))
+    expect(screen.getByText('真实工具结果')).toBeTruthy()
+  })
   it('keeps two members visible and filters independently from stable recipient identity', () => {
     const h = harness(); all(h)
     expect(screen.getByRole('heading', { name: '狗窝' })).toBeTruthy()
     expect(screen.getByText('项目')).toBeTruthy()
-    point(); fireEvent.click(screen.getByRole('button', { name: '筛选 同名 · 机器1 · 开发' }))
+    point(); fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器1 · 开发 的消息' }))
     expect(h.store.getSnapshot()).toMatchObject({ filter: 'g2', recipient: { gouziId: 'g1', generation: 1 } })
-    expect(screen.getAllByRole('button', { name: '点名 · 标准任务' })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /^发给 同名 · 机器/ })).toHaveLength(2)
     act(() => { patchRoom(h, current => ({ ...current, dashboard: { ...current.dashboard, members: current.dashboard.members.map(m => m.gouziId === 'g1' ? { ...m, name: '改名' } : m) } })) })
-    expect(screen.getByText('发送对象：改名 · 机器0 · 开发 · 标准任务')).toBeTruthy()
+    expect(screen.getByText('发给 改名')).toBeTruthy()
   })
-  it.each(['disabled', 'generation', 'stale', 'unavailable'])('retains and blocks the confirmed target after %s', (change) => {
+  it.each(['disabled', 'generation', 'stale', 'unavailable', 'projectScopes', 'generationLimits'])('retains and blocks the confirmed target after %s', (change) => {
     const h = harness(); all(h); point(); draft()
     act(() => {
       if (change === 'stale') h.state.set({ ...h.state.getSnapshot(), stale: true, error: 'network lost' })
@@ -63,7 +186,8 @@ describe('kennel room interaction', () => {
           : current.dashboard,
         execution: current.execution.map(e => ({
           ...e, generation: change === 'generation' ? 2 : e.generation,
-          operators: e.operators.map(o => ({ ...o, available: change === 'unavailable' ? false : o.available })),
+          projectScopes: change === 'projectScopes' ? [] : e.projectScopes,
+          operators: e.operators.map(o => ({ ...o, available: change === 'unavailable' ? false : o.available, ...change === 'generationLimits' ? { supportsGenerationLimits: false } : {} })),
         })),
       }))
     })
@@ -71,22 +195,25 @@ describe('kennel room interaction', () => {
     expect(h.store.getSnapshot().recipient?.gouziId).toBe('g1')
     fireEvent.click(sendButton()); expect(h.send).not.toHaveBeenCalled()
     if (change === 'stale') expect(screen.getByRole('alert').textContent).toContain('network lost')
+    if (change === 'projectScopes') expect(screen.getByRole('status').textContent).toBe('原发送对象的项目尚未确认；目标已保留，暂不能发送。')
+    if (change === 'generationLimits') expect(screen.getByRole('status').textContent).toBe('原发送对象的执行入口不支持聊天任务所需的执行限制；目标已保留，暂不能发送。')
   })
   it('clears the accepted draft and exposes hidden-send notice without changing target', async () => {
-    const h = harness(); all(h); point(); fireEvent.click(screen.getByRole('button', { name: '筛选 同名 · 机器1 · 开发' })); draft()
+    const h = harness(); all(h); point(); fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器1 · 开发 的消息' })); draft()
     fireEvent.click(sendButton())
     await waitFor(() => { expect(h.store.getSnapshot().draft).toBe('') })
     expect(h.send).toHaveBeenCalledWith({ text: '任务正文', recipient: { gouziId: 'g1', generation: 1, mode: 'standard' } })
     expect(screen.getByText(/被当前筛选隐藏/)).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toContain('已提交点名请求：同名 · 机器0 · 开发，等待总管派单')
+    expect(screen.getByRole('status').textContent).toContain('消息已提交 · 发给 同名')
     expect(screen.queryByText(/已发送到/)).toBe(null)
     fireEvent.click(screen.getByRole('button', { name: '显示全部' }))
     expect(h.store.getSnapshot()).toMatchObject({ filter: 'all', recipient: { gouziId: 'g1' } })
   })
-  it('reports manager prompt submission without claiming task dispatch or completion', async () => {
+  it('reports accepted automatic dispatch submission without claiming running execution', async () => {
     const h = harness(); all(h); draft(); fireEvent.click(sendButton())
     await waitFor(() => { expect(h.store.getSnapshot().draft).toBe('') })
-    expect(screen.getByRole('status').textContent).toBe('已提交给总管')
+    expect(screen.getByRole('status').textContent).toBe('消息已提交 · 自动分派')
+    expect(screen.queryByText(/正在自动分派|正在安排给/)).toBe(null)
     expect(screen.queryByText(/已提交给总管。暂无可见日志记录/)).toBe(null)
     expect(screen.queryByText(/执行结束/)).toBe(null)
   })
@@ -104,7 +231,7 @@ describe('kennel room interaction', () => {
     patchRoom(h, current => ({ ...current, tasks: [{ runId: 'run', title: '真实任务', state: 'indeterminate', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [{ nodeId: 'n', title: '真实节点', state: 'indeterminate', attempt: 1, capabilityGeneration: 1, evidenceRefs: [] }] }] }))
     all(h)
     expect(screen.getByText('历史正文')).toBeTruthy()
-    expect(screen.getByText('发给同名 · 机器0 · 开发 · 标准任务')).toBeTruthy()
+    expect(screen.getByText('发给 同名')).toBeTruthy()
     expect(screen.getByText(/需核对原执行/)).toBeTruthy()
     expect(h.send).not.toHaveBeenCalled()
     act(() => {
@@ -121,7 +248,7 @@ describe('kennel room interaction', () => {
     fireEvent.click(screen.getByRole('button', { name: '全部' }))
     expect(screen.getByRole('button', { name: '收起证据' })).toBeTruthy()
     expect(h.readEvidence).toHaveBeenCalledExactlyOnceWith('run', 'ref')
-    expect(screen.getAllByText('执行结束 · 验收未通过')).toHaveLength(2)
+    expect(screen.getAllByText('执行结束 · 结果未接纳')).toHaveLength(2)
   })
   it('shows addressed user messages under the matching recipient filter', () => {
     const h = harness()
@@ -129,7 +256,7 @@ describe('kennel room interaction', () => {
       d.nodes = [{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text: encodeKennelMessage('定向历史', { gouziId: 'g1', generation: 1, mode: 'standard' }) }], source: null }]
     })
     all(h)
-    fireEvent.click(screen.getByRole('button', { name: '筛选 同名 · 机器0 · 开发' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器0 · 开发 的消息' }))
     expect(screen.getByText('定向历史')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '总管' }))
     expect(screen.queryByText('定向历史')).toBe(null)
@@ -183,7 +310,7 @@ describe('kennel room interaction', () => {
     await screen.findByText('排队消息 · 排队中')
     expect(screen.getByText('排队正文')).toBeTruthy()
     expect(container.textContent).not.toContain('[DSH kennel recipient]')
-    fireEvent.click(screen.getByRole('button', { name: '筛选 同名 · 机器1 · 开发' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器1 · 开发 的消息' }))
     expect(screen.queryByText('排队正文')).toBe(null)
     fireEvent.click(screen.getByRole('button', { name: '显示全部' }))
     expect(screen.getByText('排队正文')).toBeTruthy()

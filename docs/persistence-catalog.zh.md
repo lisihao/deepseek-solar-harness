@@ -690,6 +690,74 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-protocol/src/types.ts)
 
+### `kennel/*`
+
+<a id="kenneldispatch-admitted--log-only"></a>
+
+#### `kennel/dispatch-admitted` — log-only
+
+```ts persistence-catalog
+/** Admission receipt linking the user message to its actual run. */
+'kennel/dispatch-admitted': { messageId: string; runId: string }
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-control--log-only"></a>
+
+#### `kennel/dispatch-control` — log-only
+
+```ts persistence-catalog
+/** Revision-bound control receipt; never a new task admission. */
+'kennel/dispatch-control': { messageId: string; candidate: KennelControlCandidate; result: OrchestrationRunSnapshot }
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-decision--log-only"></a>
+
+#### `kennel/dispatch-decision` — log-only
+
+```ts persistence-catalog
+/** AI-selected fixed member; this record is not an execution receipt. */
+'kennel/dispatch-decision': { messageId: string; source: 'jev' | 'deepseek' | 'codex'; provider: string; model?: string; candidateId: string; fallbackReason?: string }
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-model--log-only"></a>
+
+#### `kennel/dispatch-model` — log-only
+
+```ts persistence-catalog
+/** Complete auxiliary model request and terminal output or failure. */
+'kennel/dispatch-model': { messageId: string; record: DispatchModelRecord }
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:66`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-request--log-only"></a>
+
+#### `kennel/dispatch-request` — log-only
+
+```ts persistence-catalog
+/** Immutable input and qualified choices retained before model invocation. */
+'kennel/dispatch-request': { messageId: string; message: UserMessage; candidates: readonly KennelDispatchCandidate[] }
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:64`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-submission--log-only"></a>
+
+#### `kennel/dispatch-submission` — log-only
+
+```ts persistence-catalog
+/** Compilation and stable submission identity committed before start. */
+'kennel/dispatch-submission': { messageId: string; compilationId: string; commandId: string }
+```
+
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
 ### `llm/*`
 
 <a id="llmretry--log-only"></a>
@@ -789,7 +857,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:131`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:133`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -813,7 +881,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:103`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:105`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -827,7 +895,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:126`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:128`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -841,7 +909,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:86`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -855,7 +923,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:90`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -873,7 +941,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:143`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -892,7 +960,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:93`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:95`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -913,7 +981,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:159`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:161`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -930,7 +998,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:118`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:120`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -949,7 +1017,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:187`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:189`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -974,7 +1042,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:171`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:173`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -990,7 +1058,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:152`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:154`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

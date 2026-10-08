@@ -48,6 +48,9 @@ import {
 } from '@deepseek-ai/dsh-subagent-codex'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { readFreshCodexCatalog } from './codex-catalog.ts'
+import { generateCodexJudgment } from './codex-judgment.ts'
+import { generateCodexBridgeTurn } from './codex-bridge-turn.ts'
+import { generateCodexGovernedTurn } from './codex-governed-turn.ts'
 import { openCodexDaemonStream } from './codex-transport.ts'
 import {
   callModelToolBridge,
@@ -803,18 +806,26 @@ export function claudeNativeToolOptions(policy?: PhysicalOperatorNativeToolPolic
 export function codexApprovalBehavior(
   policy?: PhysicalOperatorNativeToolPolicy,
 ): 'decline' | 'require' {
-  return policy === 'dsh-tools-authoritative' ? 'decline' : 'require'
+  return policy === 'disabled' || policy === 'dsh-tools-authoritative' ? 'decline' : 'require'
 }
 
 /**
- * Seal a read-only, no-approval native Codex environment while DSH tools remain dynamic functions.
+ * Seal a read-only, no-network native Codex environment without permission upgrades.
+ * Disabled execution fails before native startup: permission profiles do not disable inherited MCP servers.
  *
  * @param policy Sealed native product-tool authority for the turn.
- * @returns Codex execution boundary for DSH-authoritative turns, otherwise undefined.
+ * @returns Codex execution limits for DSH-authoritative native tools, otherwise undefined.
+ * @throws ResidentOperatorError when disabled native execution cannot be isolated from inherited external tools.
  */
 export function codexExecutionBoundary(
   policy?: PhysicalOperatorNativeToolPolicy,
 ): CodexAppServerExecutionBoundary | undefined {
+  if (policy === 'disabled') {
+    throw new ResidentOperatorError(
+      'Codex nativeToolPolicy=disabled cannot isolate inherited MCP servers; use a provider without native tools',
+      'INVALID_RESULT',
+    )
+  }
   return policy === 'dsh-tools-authoritative'
     ? { approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled' }
     : undefined
@@ -1362,6 +1373,8 @@ export class CodexResidentDriver implements ResidentProductDriver {
         operatorId: this.operatorId,
         product: this.operatorId,
         displayName: 'Codex',
+        supportsGenerationLimits: true,
+        supportsGovernedWorkspacePolicy: true,
         description: 'Persistent native Codex implementation, debugging, testing, and repository review.',
         tags: ['coding', 'implementation', 'debugging', 'testing', 'review', 'subscription'],
         maxConcurrency: 4,
@@ -1389,14 +1402,20 @@ export class CodexResidentDriver implements ResidentProductDriver {
     }
   }
 
-  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId?: string }> {
+    if (request.nativeToolPolicy === 'disabled' && request.modelToolBridge !== undefined) return generateCodexBridgeTurn(request)
+    if (request.nativeToolPolicy === 'disabled') return generateCodexJudgment(request)
+    if (request.governedWorkspacePolicy !== undefined) return generateCodexGovernedTurn(request)
+    if (request.generationLimits !== undefined) {
+      throw new ResidentOperatorError('Codex generation limits require model-only or governed workspace execution', 'INVALID_RESULT')
+    }
+    const executionBoundary = codexExecutionBoundary(request.nativeToolPolicy)
     const modelToolBridge = await admitModelToolBridge(request)
     await this.requireAvailable()
     const texts = textPrompt(request.prompt, 'Codex')
     request.onProgress('connecting')
     const stream = await this.openStream(request.signal)
     const dynamicTools = codexDynamicTools(request)
-    const executionBoundary = codexExecutionBoundary(request.nativeToolPolicy)
     const wire = new CodexAppServerWire(
       stream,
       stream,

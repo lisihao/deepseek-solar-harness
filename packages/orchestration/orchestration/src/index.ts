@@ -23,6 +23,8 @@ import type {
 import { HarnessError, type ContentBlock, type ContextSnapshotSection } from '@deepseek-ai/dsh-llm'
 import type { GouziControl, GouziId } from './gouzi.ts'
 import type {
+  PhysicalOperatorGenerationLimits,
+  PhysicalOperatorGovernedWorkspacePolicy,
   PhysicalOperatorExecutionId,
   PhysicalOperatorId,
   PhysicalOperatorExecutionPreference,
@@ -60,7 +62,7 @@ export interface OrchestrationRetryPolicy {
 export interface OrchestrationAcceptanceRequirement {
   readonly id: string
   readonly description: string
-  readonly kind: 'operator-completed' | 'artifact-present' | 'human-review'
+  readonly kind: 'operator-completed' | 'artifact-present' | 'human-review' | 'model-verdict'
 }
 
 /** User/system selection for Prime-compatible host-driven continuation. */
@@ -193,6 +195,10 @@ export interface OrchestrationNodeSpecV1 {
   readonly readScopes: readonly string[]
   readonly writeScopes: readonly string[]
   readonly approvedSecretRefs: readonly string[]
+  /** Explicit bounded generation for a model-only or governed file-tools execution. */
+  readonly generationLimits?: PhysicalOperatorGenerationLimits
+  /** Only DSH file tools may act, within effective certified filesystem scopes. */
+  readonly workspaceToolLimits?: PhysicalOperatorGovernedWorkspacePolicy['limits']
   /** Scopes explicitly excluded even when a broader read/write budget exists. */
   readonly forbiddenScopes?: readonly string[]
   readonly acceptance: readonly OrchestrationAcceptanceRequirement[]
@@ -228,7 +234,14 @@ export interface LogicalTaskGraphV1 {
   /** Optional Git commit the Workbench contract is based on. */
   readonly baseSha?: string
   /** Isolate mutating worker nodes in one Git worktree and branch per attempt. */
-  readonly workspaceIsolation?: 'shared' | 'git-worktree'
+  readonly workspaceIsolation?: 'shared' | 'git-worktree' | 'directory-snapshot'
+  /** Private checkpoint bounds required for directory-snapshot isolation. */
+  readonly workspaceSnapshotLimits?: {
+    readonly maxFiles: number
+    readonly maxBytes: number
+    readonly maxBundleBytes: number
+    readonly timeoutMs: number
+  }
   readonly maxParallel: number
   readonly risk: 'low' | 'medium' | 'high'
   /** Opt-in strict quality policy for code-changing Workbench graphs. */
@@ -292,6 +305,8 @@ export interface OrchestrationAdmissionTraceV1 {
   /** Fixed recipient; every graph node must use only these actual member execution entries. */
   readonly gouziRecipient?: OrchestrationGouziRecipientV1
   readonly sourceSessionId: string
+  /** Original user-message identity for a fresh, durable source checkpoint. */
+  readonly sourceMessageId?: string
   /** Current-request dynamic contexts captured before crossing into the daemon. */
   readonly runtimeContext?: OrchestrationRuntimeContextV1
   /** Independent user/system choice; RLM is a node strategy, not an operator. */
@@ -317,6 +332,8 @@ export interface OrchestrationCompilationV1 {
   readonly requirementRef?: OrchestrationArtifactRef
   readonly graphRef: OrchestrationArtifactRef
   readonly graph: LogicalTaskGraphV1
+  /** Daemon-owned source checkpoint, captured without changing the source index or HEAD. */
+  readonly workspaceSnapshotRef?: OrchestrationArtifactRef
   readonly admission?: OrchestrationAdmissionTraceV1
   readonly certificate: PlanCertificateV1
   readonly requiresClarification: boolean
@@ -460,6 +477,8 @@ export interface OrchestrationRunSnapshot {
   readonly state: OrchestrationRunState
   readonly revision: number
   readonly graphRevision: number
+  /** Persistent final file-delivery stage; applying cannot be cancelled or paused. */
+  readonly delivery?: { readonly state: 'applying' | 'applied' | 'failed' | 'indeterminate' }
   /** Certified graph-wide concurrency ceiling. */
   readonly maxParallel?: number
   /** Current quota- and capacity-aware concurrency ceiling, never above maxParallel. */

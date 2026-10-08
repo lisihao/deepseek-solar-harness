@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  canonicalRemoteRepositoryIdentity, REMOTE_RESIDENT_ARTIFACT_MAX_BYTES,
+  canonicalRemoteRepositoryIdentity, REMOTE_RESIDENT_ARTIFACT_MAX_BYTES, RemoteResidentProtocolClient,
   parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
   parseRemoteResidentProviders, parseRemoteResidentTurn, parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument,
   parseRemoteSessionReplicaList, parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame,
@@ -234,6 +234,25 @@ describe('Remote Sync wire parsing', () => {
     expect(payloads.get('operator.artifact.read')).toMatchObject({ protocol: { major: 1, minor: 5 } })
   })
 
+  it('keeps old 1.5 endpoints readable while refusing writes and current-input bundles without explicit capabilities', async () => {
+    const calls: string[] = []
+    const provider = { operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'fixture', tags: [],
+      maxConcurrency: 1, injectionBoundaries: [], available: true, authentication: 'native-subscription',
+      productVersion: 'legacy', protocolHash: 'legacy', models: [] }
+    const client = new RemoteResidentProtocolClient(async (method) => {
+      calls.push(method)
+      return method === 'operator.providers' ? [provider] : { sessionId: 'session', turnId: 'turn', stateRevision: 1 }
+    })
+    const request = { commandId: 'legacy-read', operatorId: 'codex', laneId: 'lane', prompt: [],
+      workspaceIdentity: { version: 1 as const, repository: 'github.com/fixture/legacy', commit: 'a'.repeat(40) } }
+    await expect(client.execute(request)).resolves.toMatchObject({ turnId: 'turn' })
+    await expect(client.execute({ ...request, workspaceMutationReturn: { version: 1, baseSha: 'a'.repeat(40) } }))
+      .rejects.toThrow('does not support isolated workspace mutation return')
+    await expect(client.execute({ ...request, workspaceSnapshotInput: { version: 1, baseSha: 'a'.repeat(40), baseBundle: 'Zml4dHVyZQ==' } }))
+      .rejects.toThrow('does not support sealed current workspace snapshot inputs')
+    expect(calls.filter(method => method === 'operator.execute')).toHaveLength(1)
+  })
+
   it('validates every remote replication and Resident wire variant', () => {
     const header = { version: 0, id: 'session-replica', createdAt: 1 }
     const events = [
@@ -321,9 +340,11 @@ describe('Remote Sync wire parsing', () => {
         { poolId: 'claude-secondary' },
       ],
     }])
-    const gouziWorkspace = { gouziId: 'gouzi-1', generation: 2, projectId: 'a'.repeat(64) }
+    const gouziWorkspace = { gouziId: 'gouzi-1', generation: 2, projectId: 'a'.repeat(64), projectScopes: ['/srv/default-project'] }
     expect(parseRemoteResidentProviders([{ ...provider, gouziWorkspace }])[0]?.gouziWorkspace).toEqual(gouziWorkspace)
-    for (const invalid of [{ ...gouziWorkspace, projectId: 'bad' }, { ...gouziWorkspace, generation: -1 }]) {
+    const { projectScopes: _scopes, ...legacyWorkspace } = gouziWorkspace
+    expect(parseRemoteResidentProviders([{ ...provider, gouziWorkspace: legacyWorkspace }])[0]?.gouziWorkspace?.projectScopes).toEqual([])
+    for (const invalid of [{ ...gouziWorkspace, projectScopes: [42] }, { ...gouziWorkspace, projectScopes: '' }, { ...gouziWorkspace, projectId: 'bad' }, { ...gouziWorkspace, generation: -1 }]) {
       expect(() => parseRemoteResidentProviders([{ ...provider, gouziWorkspace: invalid }])).toThrow()
     }
 

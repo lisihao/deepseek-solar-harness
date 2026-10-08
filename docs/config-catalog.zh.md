@@ -3274,7 +3274,7 @@ export interface LatestModelEntries {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:206`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:208`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
@@ -3593,19 +3593,78 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-ui-gouzi`
 
-依赖：`orchestrations` · `webServer`
+依赖： `orchestrations` · `webServer` · `sessions`
 
 ```ts config-catalog
 /** Gouzi plugin configuration. */
 export interface Config {
+  /** AI routing of real user messages in kennel sessions. */
+  readonly dispatcher?: KennelDispatchConfig
   /** Browser room read interval in integer milliseconds. */
   readonly roomPollIntervalMs?: number
   /** How long after issue an execution grant may start work, in milliseconds. */
   readonly grantDeadlineMs?: number
 }
+
+/** Deployment-owned automatic dispatch routes and request limits. */
+export interface KennelDispatchConfig extends DispatchModelConfig {
+  /** Registered product provider used when no explicit Jev model is configured. */
+  readonly jevProvider?: string
+  /** Consume real user messages in kennel sessions when enabled. */
+  readonly enabled: boolean
+  /** Maximum UTF-8 bytes of one user message before scheduling. */
+  readonly maxInputBytes: number
+  /** Maximum context tokens admitted to each assigned task. */
+  readonly contextTokens: number
+  /** Execution deadline for each task node, in milliseconds. */
+  readonly taskTimeoutMs: number
+  /** Maximum JavaScript string length of task titles. */
+  readonly titleMaxChars: number
+  /** Maximum existing room runs offered for model-selected control. */
+  readonly maxRunCandidates: number
+  /** Explicit aggregate model output and tool-call limits for each assigned node. */
+  readonly taskGenerationLimits: NonNullable<OrchestrationNodeSpecV1['generationLimits']>
+  /** File-tool limits applied to read and write nodes. */
+  readonly workspaceToolLimits: NonNullable<OrchestrationNodeSpecV1['workspaceToolLimits']>
+  /** Directory copy, bundle and timeout limits for isolated local writes. */
+  readonly workspaceSnapshotLimits: NonNullable<LogicalTaskGraphV1['workspaceSnapshotLimits']>
+}
+
+/** Deployment-owned routes; only an explicit DeepSeek balance failure permits Codex. */
+export interface DispatchModelConfig {
+  /** Explicit product Jev route; when present it runs before DeepSeek. */
+  readonly jev?: {
+    /** Registered provider name. */
+    readonly provider: string
+    /** Model identity offered by that provider. */
+    readonly model: string
+  }
+  /** Default scheduling route when no product Jev route is configured. */
+  readonly deepseek: {
+    /** Registered DeepSeek provider name. */
+    readonly provider: string
+    /** Scheduling model identity. */
+    readonly model: string
+  }
+  /** Subscription fallback used only for an explicit DeepSeek balance failure. */
+  readonly codex: {
+    /** Registered resident execution entry. */
+    readonly operatorId: string
+    /** Optional model; absence resolves the qualified catalog default. */
+    readonly model?: string
+  }
+  /** Maximum reported output tokens per scheduling judgment. */
+  readonly maxTokens: number
+  /** Scheduling request deadline, in milliseconds. */
+  readonly timeoutMs: number
+  /** Maximum retained output bytes per scheduling judgment. */
+  readonly maxOutputBytes: number
+}
 ```
 
-来源：[`packages/orchestration/ui-gouzi/src/index.ts:49`](../packages/orchestration/ui-gouzi/src/index.ts)
+依赖： [`LogicalTaskGraphV1`](../packages/orchestration/orchestration/src/index.ts) · [`OrchestrationNodeSpecV1`](../packages/orchestration/orchestration/src/index.ts)
+
+来源： [`packages/orchestration/ui-gouzi/src/index.ts:50`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

@@ -381,6 +381,8 @@ describe('Claude Code resident driver environment', () => {
     expect(nativeToolSystemPrompt('DSH authority', 'disabled')).toContain('DSH authority')
     expect(nativeToolSystemPrompt('DSH authority', 'inherit')).toBe('DSH authority')
     expect(codexApprovalBehavior('dsh-tools-authoritative')).toBe('decline')
+    expect(codexApprovalBehavior('disabled')).toBe('decline')
+    expect(() => codexExecutionBoundary('disabled')).toThrow(/cannot isolate inherited MCP servers/u)
     expect(codexApprovalBehavior('inherit')).toBe('require')
     expect(codexExecutionBoundary('dsh-tools-authoritative')).toEqual({
       approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled',
@@ -810,5 +812,38 @@ describe('Codex protocol qualification', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+
+describe('disabled Codex native execution', () => {
+  it.each([undefined, 'persistent-native-thread'])('rejects an unreachable legacy bridge without native qualification for session %s', async (nativeSessionId) => {
+    const driver = new CodexResidentDriver()
+    const qualify = vi.spyOn(driver, 'qualify')
+    const onRunning = vi.fn()
+    const onProgress = vi.fn()
+    const onObservation = vi.fn()
+    const execution = driver.execute({
+      commandId: 'no-effects' as Parameters<CodexResidentDriver['execute']>[0]['commandId'],
+      workspace: '/user-project',
+      prompt: [{ type: 'text', text: 'hello' }],
+      profile: { model: 'existing-model' },
+      ...nativeSessionId === undefined ? {} : { nativeSessionId },
+      nativeToolPolicy: 'disabled',
+      modelToolBridge: {
+        version: 1, socketPath: '/unreachable-bridge', sessionId: 'no-effects',
+        tools: [{ name: 'typescript_repl', description: 'Unreachable bridge', inputSchema: { type: 'object' } }],
+      },
+      signal: new AbortController().signal,
+      onRunning,
+      onProgress,
+      onObservation,
+    })
+    await expect(execution).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    await expect(execution).rejects.toThrow('Legacy REPL bridge is unavailable')
+    expect(qualify).not.toHaveBeenCalled()
+    expect(onRunning).not.toHaveBeenCalled()
+    expect(onProgress).not.toHaveBeenCalled()
+    expect(onObservation).not.toHaveBeenCalled()
   })
 })

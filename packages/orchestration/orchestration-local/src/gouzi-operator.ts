@@ -67,6 +67,7 @@ export function gouziOperatorServer(options: GouziOperatorOptions): RemotePhysic
     ...options.accessToken === undefined ? {} : { accessToken: options.accessToken },
     ...options.pollIntervalMs === undefined ? {} : { pollIntervalMs: options.pollIntervalMs },
     gouzi: {
+      ...String(member.hostId) !== 'local' || !['127.0.0.1', '[::1]'].includes(new URL(member.endpoint).hostname) ? {} : { allowLocalWorkspaceSnapshot: true as const },
       gouziId: String(gouziId),
       issue(plan: RemoteResidentExecuteRequest, _start, workspace?: RemoteResidentProviderStatus['gouziWorkspace']): GouziExecutionGrant {
         const current = store.gouzi.read(gouziId)
