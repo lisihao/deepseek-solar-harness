@@ -1,9 +1,14 @@
 /** Fixed route policy through the real registered LLM and physical services. */
 import { Context } from '@deepseek-ai/cordis'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as DeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { LlmAdapter, LlmError, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import PhysicalOperatorRuntime, { PhysicalOperatorExecutionId, PhysicalOperatorId, type PhysicalOperatorProviderStartRequest, type PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
 import { describe, expect, it, vi } from 'vitest'
+import { Config } from '../src/index.ts'
 import { generateDispatchModel, type DispatchModelConfig, type DispatchModelRecord } from '../src/dispatch-model.ts'
 const config: DispatchModelConfig = { deepseek: { provider: 'deepseek', model: 'chat' }, codex: { operatorId: 'exact.codex', model: 'codex-model' }, maxTokens: 20, maxOutputBytes: 1000, timeoutMs: 1000 }
 function success(text = '{"ok":true}'): StreamChunk[] {
@@ -177,4 +182,67 @@ it('resolves and logs the registered resident default when Codex model is omitte
   expect(await generateDispatchModel(f.ctx, { ...config, codex: { operatorId: 'exact.codex' } }, f.input)).toMatchObject({ model: 'qualified-account-model' })
   expect(f.starts[0]?.residentProfile).toEqual({ model: 'qualified-account-model' })
   expect(f.records.find(record => record.source === 'codex' && record.phase === 'request')).toMatchObject({ config: { codex: { model: 'qualified-account-model' } }, options: { model: 'qualified-account-model' } })
+})
+
+async function officialProvider(status: number) {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-kennel-official-route-'))
+  const f = await fixture()
+  vi.stubEnv('DSH_HOME', home)
+  vi.stubEnv('KENNEL_OFFICIAL_FIXTURE_KEY', 'keyless-fixture-key')
+  const requestBodies: unknown[] = []
+  const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+    if (typeof init?.body !== 'string') throw new Error('fixture requires a JSON model request')
+    requestBodies.push(JSON.parse(init.body) as unknown)
+    if (status !== 200) return Response.json({ error: { message: 'provider fixture failure', type: 'api_error' } }, { status })
+    const chunks = [
+      { choices: [{ delta: { role: 'assistant', content: null, reasoning_content: '' } }] },
+      { choices: [{ delta: { content: '{"candidateId":"chat"}' } }] },
+      { choices: [{ delta: { content: '' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 1 } },
+    ]
+    return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } })
+  })
+  vi.stubGlobal('fetch', fetch)
+  try {
+    await f.ctx.plugin(DeepSeek, { apiKeyEnv: 'KENNEL_OFFICIAL_FIXTURE_KEY', baseURL: 'https://deepseek.fixture.invalid', thinking: 'disabled', discoverModels: false })
+    const defaults = Config({}).dispatcher
+    if (defaults === undefined) throw new Error('dispatcher defaults missing')
+    return { ...f, fetch, requestBodies, defaults, cleanup: async () => {
+      await f.ctx.fiber.dispose(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); await rm(home, { recursive: true, force: true })
+    } }
+  } catch (error) {
+    await f.ctx.fiber.dispose(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); await rm(home, { recursive: true, force: true })
+    throw error
+  }
+}
+it('routes the default Config to the real official DeepSeek plugin registration instead of its display name', async () => {
+  const f = await officialProvider(200)
+  try {
+    expect(f.ctx.llm.listProviders()).toContainEqual({ id: 'deepseek-official', name: 'DeepSeek' })
+    expect(f.ctx.llm.listProviders().some(provider => provider.id === 'DeepSeek')).toBe(false)
+    const result = await generateDispatchModel(f.ctx, f.defaults, f.input)
+    expect(result).toEqual({ text: '{"candidateId":"chat"}', provider: 'deepseek-official', model: 'deepseek-flash', source: 'deepseek' })
+    expect(f.fetch).toHaveBeenCalledOnce()
+    expect(f.requestBodies[0]).toMatchObject({ model: 'deepseek-flash', max_tokens: 512 })
+    expect(f.records[0]).toMatchObject({ phase: 'request', options: { provider: 'deepseek-official' } })
+    expect(f.adapter.calls).toHaveLength(0)
+    expect(f.starts).toHaveLength(0)
+  } finally { await f.cleanup() }
+})
+it('preserves the official adapter balance-only Codex fallback and authentication refusal under the default route', async () => {
+  for (const status of [402, 401]) {
+    const f = await officialProvider(status)
+    try {
+      const actual = { ...f.defaults, codex: config.codex }
+      if (status === 402) {
+        expect(await generateDispatchModel(f.ctx, actual, f.input)).toMatchObject({ source: 'codex', fallbackReason: 'INSUFFICIENT_BALANCE' })
+        expect(f.starts).toHaveLength(1)
+      } else {
+        await expect(generateDispatchModel(f.ctx, actual, f.input)).rejects.toMatchObject({ code: 'AUTH' })
+        expect(f.starts).toHaveLength(0)
+      }
+      expect(f.fetch).toHaveBeenCalledOnce()
+      expect(f.adapter.calls).toHaveLength(0)
+    } finally { await f.cleanup() }
+  }
 })

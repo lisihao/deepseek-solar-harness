@@ -8,14 +8,14 @@ import type { PhysicalOperatorExecutionId, PhysicalOperatorResult, PhysicalOpera
 export interface DispatchModelConfig {
   /** Explicit product Jev route; when present it runs before DeepSeek. */
   readonly jev?: {
-    /** Registered provider name. */
+    /** Registered provider id. */
     readonly provider: string
     /** Model identity offered by that provider. */
     readonly model: string
   }
   /** Default scheduling route when no product Jev route is configured. */
   readonly deepseek: {
-    /** Registered DeepSeek provider name. */
+    /** Registered DeepSeek provider id. */
     readonly provider: string
     /** Scheduling model identity. */
     readonly model: string

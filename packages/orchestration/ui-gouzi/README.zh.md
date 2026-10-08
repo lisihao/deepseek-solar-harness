@@ -34,7 +34,7 @@
 
 ## 分派模型配置
 
-`dispatcher` 属于 DSH 插件配置，独立于普通会话模型和 Codex 设置。显式 `dispatcher.jev` 提供 `provider` 与 `model`，并且优先使用。否则，已注册的 `dispatcher.jevProvider`（默认 `Jev`）使用其首个配置模型；已注册却没有模型时以 `KENNEL_JEV_MODEL_MISSING` 失败。现有 `llm-pi-ai` 插件可以注册此提供方路由和模型。该路由不存在时，`dispatcher.deepseek` 选择配置的 DeepSeek 提供方／模型（默认 `DeepSeek` 和 `deepseek-v4-flash`）。Jev 失败不会回退。只有 DeepSeek HTTP 402 或归一为 `INSUFFICIENT_BALANCE` 的明确余额错误才允许使用 `dispatcher.codex`（默认算子 `codex`，可选模型）。鉴权、超时、传输和其他失败仍然失败。Codex 只通过订阅 Responses API 作调度判断，使用 `toolChoice: none`，不创建原生 Session。模型未指定时从实际注册模型目录解析。直接路径只读取既有已授权账号的认证，不加载原生配置或 MCP，也不刷新已过期登录。见[直接 Codex 执行](../../physical-operator/resident-operator-local/README.md#direct-codex-model-execution)规则。
+`dispatcher` 属于 DSH 插件配置，独立于普通会话模型和 Codex 设置。显式 `dispatcher.jev` 提供 `provider` 与 `model`，并且优先使用。否则，已注册的 `dispatcher.jevProvider`（默认 `Jev`）使用其首个配置模型；已注册却没有模型时以 `KENNEL_JEV_MODEL_MISSING` 失败。现有 `llm-pi-ai` 插件可以注册此提供方路由和模型。该路由不存在时，`dispatcher.deepseek` 选择配置的 DeepSeek 提供方／模型（默认 `deepseek-official` 和 `deepseek-flash`）。Jev 失败不会回退。只有 DeepSeek HTTP 402 或归一为 `INSUFFICIENT_BALANCE` 的明确余额错误才允许使用 `dispatcher.codex`（默认算子 `codex`，可选模型）。鉴权、超时、传输和其他失败仍然失败。Codex 只通过订阅 Responses API 作调度判断，使用 `toolChoice: none`，不创建原生 Session。模型未指定时从实际注册模型目录解析。直接路径只读取既有已授权账号的认证，不加载原生配置或 MCP，也不刷新已过期登录。见[直接 Codex 执行](../../physical-operator/resident-operator-local/README.md#direct-codex-model-execution)规则。
 
 限制属于 `dispatcher`；观察到字节或报告 token 用量超限时会停止分派。Codex SDK 不提供后端硬输出 token 上限。
 

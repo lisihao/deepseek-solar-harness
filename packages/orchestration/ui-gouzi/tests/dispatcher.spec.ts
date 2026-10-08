@@ -8,7 +8,7 @@ import { expect, it, vi } from 'vitest'
 import { Config } from '../src/index.ts'
 import { installKennelDispatch, kennelDispatchGraph, parseDispatchSelection, type KennelWorkCandidate, type KennelDispatchConfig } from '../src/dispatcher.ts'
 import { encodeKennelMessage } from '../src/recipient-message.ts'
-const config: KennelDispatchConfig = { ...Config({}).dispatcher!, deepseek: { provider: 'DeepSeek', model: 'fixture' }, timeoutMs: 1000 }
+const config: KennelDispatchConfig = { ...Config({}).dispatcher!, deepseek: { ...Config({}).dispatcher!.deepseek, model: 'fixture' }, timeoutMs: 1000 }
 const candidate: KennelWorkCandidate = { kind: 'work', id: '["dog",2,"/project","chat"]', gouziId: 'dog', generation: 2, name: 'Dog', role: 'research', activity: 'idle', workspace: '/project', mode: 'chat', operatorIds: ['gouzi.dog.codex'] }
 class Adapter extends LlmAdapter {
   constructor(readonly generate: (options: GenerateOptions) => string) { super() }
@@ -32,14 +32,14 @@ async function fixture(persisted = true) {
   if (persisted) ctx.on('session/flush', persist)
   ctx.provide('orchestrations', { gouzi: { list: async () => ({ members: [member], hosts: [] }), executionOperators: async () => [entry] }, compile, start, list, inspect, control } as never)
   const generate = vi.fn((_options: GenerateOptions) => JSON.stringify({ candidateId: candidate.id }))
-  ctx.llm.registerAdapter(['DeepSeek'], new Adapter(generate))
+  ctx.llm.registerAdapter(['deepseek-official'], new Adapter(generate))
   await ctx.plugin(Object.assign((child: Context) => { installKennelDispatch(child, config) }, { inject: ['sessions'] }))
   const controller = new AbortController(); const message = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] })
   const run = (messages: UserMessage[] = [message]) => ctx.waterfall('agent/pre-step', { agent, signal: controller.signal, turn: 1, step: 1 } as never, async () => ({ kind: 'enter' as const, messages }))
   return { ctx, agent, member, entry, compile, start, generate, controller, message, run, list, inspect, control, persist }
 }
 it('fills nested dispatcher defaults for Config({})', () => {
-  expect(Config({}).dispatcher).toMatchObject({ enabled: true, jevProvider: 'Jev', deepseek: { provider: 'DeepSeek', model: 'deepseek-v4-flash' }, codex: { operatorId: 'codex' } })
+  expect(Config({}).dispatcher).toMatchObject({ enabled: true, jevProvider: 'Jev', deepseek: { provider: 'deepseek-official', model: 'deepseek-flash' }, codex: { operatorId: 'codex' } })
 })
 it('accepts only a supplied identity or clarification', () => {
   expect(parseDispatchSelection('{"candidateId":"clarify"}', [candidate])).toBeNull()
@@ -309,4 +309,9 @@ it('offers only inspect during the persistent file-delivery applying stage', asy
   expect(await f.run()).toEqual({ kind: 'reject' })
   expect(f.control).not.toHaveBeenCalled(); expect(f.compile).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled()
   expect(f.agent.session.events.at(-1)?.type).toBe('kennel/dispatch-control')
+})
+
+it('preserves explicitly configured DeepSeek routes independently of the built-in default', () => {
+  expect(Config({ dispatcher: { ...config, deepseek: { provider: 'explicit-gateway', model: 'explicit-model' } } }).dispatcher?.deepseek)
+    .toEqual({ provider: 'explicit-gateway', model: 'explicit-model' })
 })

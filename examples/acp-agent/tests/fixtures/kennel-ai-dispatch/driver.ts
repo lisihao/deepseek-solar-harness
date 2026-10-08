@@ -107,7 +107,7 @@ class Judgment extends LlmAdapter {
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
 }
-ctx.llm.registerAdapter(['DeepSeek'], new Judgment())
+ctx.llm.registerAdapter(['deepseek-official'], new Judgment())
 const waitFor = async (check: () => Promise<boolean>) => {
   const deadline = Date.now() + 10000
   while (!await check()) {
