@@ -30,6 +30,8 @@ const MEMBERSHIP_FLOW: Readonly<Record<GouziMembership, readonly GouziMembership
 }
 
 const NAME_LIMIT = 40
+/** Longest native model id accepted; catalog ids are short, so this only bounds a malformed request. */
+const MODEL_LIMIT = 128
 /** Bounds for a member's grant lifetime: long enough for one task, short enough that a lost grant expires. */
 const GRANT_DEADLINE_MIN_MS = 60_000
 const GRANT_DEADLINE_MAX_MS = 24 * 60 * 60_000
@@ -44,6 +46,7 @@ interface MemberRow {
   role: string
   role_version: number
   policy_version: number
+  model: string | null
   membership: string
   connection: string
   activity: string
@@ -93,6 +96,14 @@ function checkRole(role: string): GouziRole {
   return role as GouziRole
 }
 
+function checkModel(model: string): string {
+  const trimmed = model.trim()
+  if (trimmed.length === 0 || trimmed.length > MODEL_LIMIT || /[\u0000-\u001f\u007f]/u.test(trimmed)) {
+    throw new OrchestrationError(`gouzi model must be 1 to ${String(MODEL_LIMIT)} printable characters`, 'GOUZI_STATE_CONFLICT')
+  }
+  return trimmed
+}
+
 function memberView(row: MemberRow): GouziMemberView {
   return {
     gouziId: GouziId(row.gouzi_id),
@@ -104,6 +115,7 @@ function memberView(row: MemberRow): GouziMemberView {
     role: row.role as GouziRole,
     roleVersion: row.role_version,
     policyVersion: row.policy_version,
+    ...row.model === null ? {} : { model: row.model },
     membership: row.membership as GouziMembership,
     connection: row.connection as GouziConnection,
     activity: row.activity as GouziActivity,
@@ -180,12 +192,14 @@ export class GouziRegistry {
     name: string
     avatarId: GouziAvatarId
     role: GouziRole
+    model?: string
     grantDeadlineMs: number
   }): GouziMemberView {
     const name = checkName(input.name)
     const grantDeadlineMs = checkGrantDeadline(input.grantDeadlineMs)
     const avatarId = checkAvatar(input.avatarId)
     const role = checkRole(input.role)
+    const model = input.model === undefined ? null : checkModel(input.model)
     return this.transaction(() => {
       if (this.getHost(input.hostId) === undefined) {
         throw new OrchestrationError(`gouzi host ${String(input.hostId)} is not paired`, 'GOUZI_STATE_CONFLICT')
@@ -203,11 +217,11 @@ export class GouziRegistry {
       const now = new Date().toISOString()
       this.db.prepare(`
         INSERT INTO gouzi_members
-          (gouzi_id, owner_id, host_id, generation, name, avatar_id, role, role_version, policy_version,
+          (gouzi_id, owner_id, host_id, generation, name, avatar_id, role, role_version, policy_version, model,
            membership, connection, activity, grant_deadline_ms, created_at, updated_at)
-        VALUES (?, ?, ?, 1, ?, ?, ?, 1, 1, 'provisioning', 'unreachable', 'resting', ?, ?, ?)
+        VALUES (?, ?, ?, 1, ?, ?, ?, 1, 1, ?, 'provisioning', 'unreachable', 'resting', ?, ?, ?)
       `).run(
-        String(input.gouziId), String(input.ownerId), String(input.hostId), name, avatarId, role, grantDeadlineMs, now, now,
+        String(input.gouziId), String(input.ownerId), String(input.hostId), name, avatarId, role, model, grantDeadlineMs, now, now,
       )
       return this.require(input.gouziId)
     })
@@ -232,7 +246,8 @@ export class GouziRegistry {
   }
 
   /**
-   * Change name, avatar, or role. The identity and generation never change; a role change bumps `roleVersion`.
+   * Change name, avatar, role, or pinned model. The identity and generation never change; a role change bumps
+   * `roleVersion`, and a `null` model returns the member to Smart Auto.
    * @param gouziId - member identity.
    * @param edit - fields to change.
    * @returns the updated member.
@@ -247,9 +262,10 @@ export class GouziRegistry {
       const name = edit.name === undefined ? current.name : checkName(edit.name)
       const avatarId = edit.avatarId === undefined ? current.avatarId : checkAvatar(edit.avatarId)
       const role = edit.role === undefined ? current.role : checkRole(edit.role)
+      const model = edit.model === undefined ? current.model ?? null : edit.model === null ? null : checkModel(edit.model)
       this.db.prepare(`
-        UPDATE gouzi_members SET name = ?, avatar_id = ?, role = ?, role_version = ?, updated_at = ? WHERE gouzi_id = ?
-      `).run(name, avatarId, role, role === current.role ? current.roleVersion : current.roleVersion + 1, new Date().toISOString(), String(gouziId))
+        UPDATE gouzi_members SET name = ?, avatar_id = ?, role = ?, role_version = ?, model = ?, updated_at = ? WHERE gouzi_id = ?
+      `).run(name, avatarId, role, role === current.role ? current.roleVersion : current.roleVersion + 1, model, new Date().toISOString(), String(gouziId))
       return this.require(gouziId)
     })
   }

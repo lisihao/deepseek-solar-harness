@@ -15,11 +15,12 @@ import {
   type GouziDashboardV1,
   type GouziHostProjection,
   type GouziMemberProjection,
+  type GouziModelOptions,
   type GouziRoleId,
   type GouziProjectsCheck,
 } from '../contracts.ts'
 import { GouziAvatarImage } from './avatars.tsx'
-import { checkGouziProjects, controlGouzi, loadGouzi, type BrowserRequest } from './api.ts'
+import { callGouzi, checkGouziProjects, controlGouzi, loadGouzi, type BrowserRequest } from './api.ts'
 import { HostStep, messageOf } from './HostStep.tsx'
 import { RemoteFolderPicker } from './RemoteFolderPicker.tsx'
 import css from './GouziPanel.module.css'
@@ -340,10 +341,23 @@ function EditForm({ member, request, onDone, onCancel }: {
   const [name, setName] = useState(member.name)
   const [avatarId, setAvatarId] = useState<GouziAvatar>(member.avatarId)
   const [role, setRole] = useState<GouziRoleId>(member.role)
+  const [model, setModel] = useState(member.model ?? '')
+  const [offered, setOffered] = useState<readonly string[]>()
   const [error, setError] = useState<string>()
+  useEffect(() => {
+    let current = true
+    callGouzi<GouziModelOptions>(request, { action: 'models', gouziId: member.gouziId })
+      .then((reply) => { if (current) setOffered(reply.models) })
+      .catch(() => { if (current) setOffered([]) })
+    return () => { current = false }
+  }, [request, member.gouziId])
+  // A pinned model the runtimes no longer offer stays selectable so the user sees it and can change it.
+  const options = offered === undefined ? [] : [...new Set([...offered, ...member.model === undefined ? [] : [member.model]])]
   const save = async (): Promise<void> => {
     try {
-      await controlGouzi(request, { action: 'edit', gouziId: member.gouziId, name: name.trim(), avatarId, role })
+      await controlGouzi(request, {
+        action: 'edit', gouziId: member.gouziId, name: name.trim(), avatarId, role, model: model === '' ? null : model,
+      })
       onDone()
     } catch (cause) {
       setError(messageOf(cause))
@@ -357,6 +371,18 @@ function EditForm({ member, request, onDone, onCancel }: {
         <input value={name} maxLength={40} onChange={(event) => { setName(event.target.value) }} />
       </label>
       <RolePicker value={role} onChange={setRole} />
+      <label className={css.field}>
+        <span>模型</span>
+        <select value={model} disabled={offered === undefined} onChange={(event) => { setModel(event.target.value) }}>
+          <option value="">自动选择</option>
+          {options.map(id => (
+            <option key={id} value={id}>{offered?.includes(id) === false ? `${id}（当前不可用）` : id}</option>
+          ))}
+        </select>
+        <p className={css.hint}>
+          固定后，这只狗子的任务只会派给提供该模型的运行环境。狗子不在线时没有可选项，保持“自动选择”即可。
+        </p>
+      </label>
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
       <footer className={css.wizardActions}>
         <button type="button" className={css.secondary} onClick={onCancel}>取消</button>
@@ -381,7 +407,7 @@ function MemberCard({ member, canManage, busy, onAction, onEdit }: {
       <GouziAvatarImage avatarId={member.avatarId} size={56} />
       <div className={css.identity}>
         <strong>{member.name}</strong>
-        <span>{GOUZI_ROLE_COPY[member.role].label} · 住在 {member.hostLabel}</span>
+        <span>{GOUZI_ROLE_COPY[member.role].label} · 住在 {member.hostLabel}{member.model === undefined ? '' : ` · 模型 ${member.model}`}</span>
       </div>
       <span className={css.status} data-state={member.state}>{GOUZI_STATE_COPY[member.state]}</span>
       {canManage && (

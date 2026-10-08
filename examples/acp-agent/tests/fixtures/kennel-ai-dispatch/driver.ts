@@ -29,7 +29,7 @@ registry.gouzi.pairHost({ hostId: GouziHostId('local'), label: 'Keyless host', a
 registry.gouzi.create({ gouziId: GouziId('stable-dog'), ownerId: GouziOwnerId('main'), hostId: GouziHostId('local'), name: 'Original', avatarId: 'shiba', role: 'research', grantDeadlineMs: 60_000 })
 registry.gouzi.setMembership(GouziId('stable-dog'), 'enabled')
 registry.gouzi.setEndpoint(GouziId('stable-dog'), 'http://127.0.0.1:13301')
-registry.gouzi.edit(GouziId('stable-dog'), { name: 'Renamed' })
+registry.gouzi.edit(GouziId('stable-dog'), { name: 'Renamed', model: 'gpt-5.6-sol' })
 registry.close()
 const originalFetch = globalThis.fetch
 const methods: string[] = []
@@ -42,7 +42,10 @@ const provider = {
   operatorId: 'codex', product: 'codex', displayName: 'Fixture Codex', description: 'External worker fixture',
   tags: ['analysis'], maxConcurrency: 1, injectionBoundaries: [], available: true,
   supportsGenerationLimits: true, supportsGovernedWorkspacePolicy: true,
-  authentication: 'native-subscription', productVersion: 'fixture', protocolHash: 'fixture', models: [{ model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Worker', supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true }],
+  authentication: 'native-subscription', productVersion: 'fixture', protocolHash: 'fixture', models: [
+    { model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Worker', supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true },
+    { model: 'gpt-5.6-sol', displayName: 'Sol', description: 'Pinned worker', supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: false, supportsAdaptiveThinking: true },
+  ],
   gouziWorkspace: { gouziId: 'stable-dog', generation: 1, projectId: 'a'.repeat(64), projectScopes: [workspace] },
 }
 globalThis.fetch = async (input, init) => {
@@ -196,7 +199,9 @@ try {
         acceptance: writeCompiled.graph.nodes.find(node => node.id === 'verify')?.acceptance },
       nodes: writeRun.nodes.map(node => ({ id: node.id, role: node.role, state: node.state, dependsOn: node.dependsOn })),
       hasWorkerResult: writeRun.nodes.some(node => node.evidenceRefs.length > 0) },
-    executionCount: executed.length, hasSealedGrant: executed.every((request) => {
+    executionCount: executed.length,
+    executedModels: executed.map(request => (request.profile as { model?: string } | undefined)?.model ?? null),
+    hasSealedGrant: executed.every((request) => {
       const { gouziGrant, protocol: _protocol, ...sealed } = request
       const grant = gouziGrant as GouziExecutionGrant
       return grant.planHash === gouziRequestHash(sealed as unknown as RemoteResidentExecuteRequest)

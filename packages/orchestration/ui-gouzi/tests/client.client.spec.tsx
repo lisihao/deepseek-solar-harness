@@ -380,8 +380,56 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.click(screen.getByRole('radio', { name: /比熊/ }))
     fireEvent.click(screen.getByRole('radio', { name: /研究/ }))
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => { expect(harness.posts).toHaveLength(1) })
-    expect(harness.posts[0]!.body).toEqual({ action: 'edit', gouziId: 'g1', name: 'Pixel', avatarId: 'bichon', role: 'research' })
+    await waitFor(() => { expect(harness.posts).toHaveLength(2) })
+    expect(harness.posts[0]!.body).toEqual({ action: 'models', gouziId: 'g1' })
+    expect(harness.posts[1]!.body).toEqual({ action: 'edit', gouziId: 'g1', name: 'Pixel', avatarId: 'bichon', role: 'research', model: null })
+  })
+
+  it('pins a model chosen from the ones the member\'s runtimes offer, and returns to Smart Auto on request', async () => {
+    const harness = fakeRequest({
+      roster: dashboard([member({ model: 'gpt-5.5' })]),
+      reply: body => body.action === 'models' ? Response.json({ models: ['gpt-5.5', 'claude-opus-5-5'] }) : Response.json(member()),
+    })
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
+    expect(await screen.findByText(/模型 gpt-5\.5/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '修改' }))
+    const select = await screen.findByDisplayValue('gpt-5.5')
+    await waitFor(() => { expect(screen.getByRole('option', { name: 'claude-opus-5-5' })).toBeTruthy() })
+    fireEvent.change(select, { target: { value: 'claude-opus-5-5' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(harness.posts).toHaveLength(2) })
+    expect(harness.posts[1]!.body).toMatchObject({ action: 'edit', model: 'claude-opus-5-5' })
+
+    fireEvent.click(await screen.findByRole('button', { name: '修改' }))
+    fireEvent.change(await screen.findByDisplayValue('gpt-5.5'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(harness.posts).toHaveLength(4) })
+    expect(harness.posts[3]!.body).toMatchObject({ action: 'edit', model: null })
+  })
+
+  it('keeps a pinned model that no runtime offers selectable, and still saves when the models request fails', async () => {
+    const stale = fakeRequest({
+      roster: dashboard([member({ model: 'retired-model' })]),
+      reply: body => body.action === 'models' ? Response.json({ models: ['gpt-5.5'] }) : Response.json(member()),
+    })
+    const { unmount } = render(<GouziManager request={stale.request} folders={fakeFolders().folders} />)
+    fireEvent.click(await screen.findByRole('button', { name: '修改' }))
+    expect(await screen.findByRole('option', { name: 'retired-model（当前不可用）' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(stale.posts).toHaveLength(2) })
+    expect(stale.posts[1]!.body).toMatchObject({ action: 'edit', model: 'retired-model' })
+    unmount()
+
+    const failing = fakeRequest({
+      roster: dashboard([member()]),
+      reply: body => body.action === 'models' ? new Response('{}', { status: 500 }) : Response.json(member()),
+    })
+    render(<GouziManager request={failing.request} folders={fakeFolders().folders} />)
+    fireEvent.click(await screen.findByRole('button', { name: '修改' }))
+    await waitFor(() => { expect(failing.posts).toHaveLength(1) })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(failing.posts).toHaveLength(2) })
+    expect(failing.posts[1]!.body).toMatchObject({ action: 'edit', model: null })
   })
 
   it('hides every control from a read-only device and says so', async () => {

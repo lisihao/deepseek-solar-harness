@@ -94,6 +94,12 @@ export interface GouziRecord {
   readonly role: GouziRole
   readonly roleVersion: number
   readonly policyVersion: number
+  /**
+   * Native product model id this member's tasks must run on, such as a Codex or Claude Code catalog model. Absent
+   * means Smart Auto chooses from the live catalog. The id selects the runtime too: only the operator whose catalog
+   * offers it qualifies.
+   */
+  readonly model?: string
   readonly membership: GouziMembership
   readonly createdAt: string
   readonly updatedAt: string
@@ -259,6 +265,8 @@ export interface GouziMemberEdit {
   readonly name?: string
   readonly avatarId?: GouziAvatarId
   readonly role?: GouziRole
+  /** A native model id to pin, or `null` to return to Smart Auto. */
+  readonly model?: string | null
 }
 
 /** Facts required before a retiring member leaves the member count. */
@@ -276,6 +284,7 @@ export interface GouziCreateInput {
   readonly name: string
   readonly avatarId: GouziAvatarId
   readonly role: GouziRole
+  readonly model?: string
   readonly grantDeadlineMs: number
 }
 
@@ -312,7 +321,7 @@ export interface GouziControl {
    */
   create(input: GouziCreateInput): Promise<GouziMemberView>
   /**
-   * Change a member's name, avatar, or role.
+   * Change a member's name, avatar, role, or pinned model.
    * @param gouziId - member identity.
    * @param edit - fields to change.
    * @returns the updated member.

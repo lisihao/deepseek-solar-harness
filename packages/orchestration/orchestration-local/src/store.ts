@@ -35,7 +35,7 @@ import type {
 } from './cluster.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 5
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 6
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
@@ -142,6 +142,12 @@ const GOUZI_TABLES = `
   );
 `
 
+/**
+ * Schema 6: the model a member is pinned to. NULL keeps Smart Auto. Older rows stay valid, and an older program
+ * refuses the newer schema instead of dropping the column.
+ */
+const GOUZI_MODEL_COLUMN = 'ALTER TABLE gouzi_members ADD COLUMN model TEXT;'
+
 function makePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
   chmodSync(path, 0o700)
@@ -204,14 +210,20 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       this.migrateSchema2To3()
       this.migrateSchema3To4()
       this.migrateSchema4To5()
+      this.migrateSchema5To6()
     } else if (version === 2) {
       this.migrateSchema2To3()
       this.migrateSchema3To4()
       this.migrateSchema4To5()
+      this.migrateSchema5To6()
     } else if (version === 3) {
       this.migrateSchema3To4()
       this.migrateSchema4To5()
-    } else if (version === 4) this.migrateSchema4To5()
+      this.migrateSchema5To6()
+    } else if (version === 4) {
+      this.migrateSchema4To5()
+      this.migrateSchema5To6()
+    } else if (version === 5) this.migrateSchema5To6()
     this.gouzi = new GouziRegistry(this.db)
     this.clusterTracking = true
   }
@@ -869,6 +881,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         (singleton, current_term, role, lease_until, commit_index)
       VALUES (1, 0, 'follower', 0, 0);
       ${GOUZI_TABLES}
+      ${GOUZI_MODEL_COLUMN}
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
   }
@@ -934,6 +947,15 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       this.db.exec(`
         ${GOUZI_TABLES}
         PRAGMA user_version = 5;
+      `)
+    })
+  }
+
+  private migrateSchema5To6(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        ${GOUZI_MODEL_COLUMN}
+        PRAGMA user_version = 6;
       `)
     })
   }
