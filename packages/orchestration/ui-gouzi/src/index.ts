@@ -61,7 +61,7 @@ export const Config: z<Config> = z.object({
     enabled: z.boolean().default(true),
     jev: z.union([z.object({ provider: z.string().required(), model: z.string().required() })]),
     jevProvider: z.string().default('Jev'),
-    deepseek: z.object({ provider: z.string().default('DeepSeek'), model: z.string().default('deepseek-v4-flash') }),
+    deepseek: z.object({ provider: z.string().default('deepseek-official'), model: z.string().default('deepseek-flash') }),
     codex: z.object({ operatorId: z.string().default('codex'), model: z.string() }),
     maxTokens: z.number().step(1).min(1).default(512),
     timeoutMs: z.number().step(1).min(1_000).max(300_000).default(60_000),

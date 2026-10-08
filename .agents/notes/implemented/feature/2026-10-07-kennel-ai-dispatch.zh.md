@@ -10,6 +10,8 @@ Status: implemented
 
 ## 决策
 
+DeepSeek 默认路由使用实际注册 id `deepseek-official` 和 Flash 模型 id `deepseek-flash`，而不是显示名称 `DeepSeek`。真实适配器测试通过 LLM 服务加载该默认值，并验证正常响应、明确余额回退和非余额失败。
+
 [狗窝调度器](../../../../packages/orchestration/ui-gouzi/README.md)只消费 `kennel` 会话中的真实人工消息，并在独立且不带工具的调度请求前记录消息。Host 核验的候选固定成员身份、generation、已核验默认项目目录、算子 id，以及 `chat`、`read` 或 `write` 模式。既有 Run 控制候选绑定确切源会话与 revision，并按当前状态提供查看、暂停、继续和取消操作。所有模型请求、启动和控制 effect 都要求会话 flush 在执行前返回 true。模型返回已提供的候选 id 或要求澄清，不能创建身份、权限范围、计划或任务结果。明确点名限制候选集合。Host 在编译和启动前重新核验所选成员，然后通过不带 fallback 算子、RLM 或 Autonomous Mode 的标准 TaskGraph 准入。
 
 调度配置属于 DSH，独立于普通会话模型和私有 Codex 设置。显式 `dispatcher.jev` 优先；否则，已注册的 `dispatcher.jevProvider` 路由使用其首个配置模型，已注册却没有模型则拒绝。该路由不存在时，由配置的 DeepSeek 作判断。 LLM（大语言模型）服务拥有提供方无关的 `INSUFFICIENT_BALANCE_CODE`；DeepSeek 适配器将明确提供方余额失败映射到该错误码。只有明确的 DeepSeek 余额失败才允许 Codex 通过订阅 Responses API 作不带工具的判断。模型从实际注册目录解析；只读取既有已授权账号认证，过期时失败，不创建原生 Session。其他失败仍然失败；Jev 失败或普通传输失败都不会改变模型路由。
