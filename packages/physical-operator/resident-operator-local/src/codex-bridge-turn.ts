@@ -3,7 +3,7 @@ import { createConnection } from 'node:net'
 import type { Context as PiContext } from '@earendil-works/pi-ai'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentOperatorError, type ResidentDriverExecuteRequest, type ResidentTurnResult } from '@deepseek-ai/dsh-resident-operator'
-import { generateCodexModelCall, withCodexModelTranscript } from './codex-judgment.ts'
+import { codexTurnResult, generateCodexModelCall, withCodexModelTranscript } from './codex-judgment.ts'
 import { callModelToolBridge, modelToolCommandId, validateResidentModelToolBridge } from './model-tool-bridge.ts'
 import { canonicalNativeToolCatalogHash } from './store.ts'
 
@@ -96,13 +96,7 @@ export async function generateCodexBridgeTurn(request: ResidentDriverExecuteRequ
       if (toolCalls.length === 0) {
         if (result.stopReason !== 'stop') throw new ResidentOperatorError(`Legacy REPL model stopped with ${result.stopReason}`, 'INVALID_RESULT')
         request.onProgress('finalizing')
-        return {
-          output: result.content.flatMap<ResidentTurnResult['output'][number]>(block => block.type === 'text'
-            ? [{ type: 'text' as const, text: block.text }] : block.type === 'thinking' ? [{ type: 'reasoning' as const, text: block.thinking }] : []),
-          stopReason: 'completed', usage,
-          providerResponse: { provider: 'openai-codex', model: result.responseModel ?? result.model,
-            ...result.responseId === undefined ? {} : { responseId: result.responseId } },
-        }
+        return codexTurnResult(result, usage)
       }
       if (result.stopReason !== 'toolUse') throw new ResidentOperatorError('Legacy REPL tool calls require a tool-use stop reason', 'INVALID_RESULT')
       if (limits?.maxToolCalls !== undefined && calls + toolCalls.length > limits.maxToolCalls) {

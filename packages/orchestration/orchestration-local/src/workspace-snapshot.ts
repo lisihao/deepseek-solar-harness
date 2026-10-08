@@ -133,6 +133,9 @@ export class WorkspaceSnapshotManager {
     await verifySnapshot('')
     if (seen.size !== Object.keys(files).length) throw new Error('snapshot source entries changed while reading')
     await this.git(workspace, ['init', '--initial-branch=main'])
+    await this.git(workspace, ['config', 'core.autocrlf', 'false'])
+    await mkdir(join(workspace, '.git', 'info'), { recursive: true })
+    await writeFile(join(workspace, '.git', 'info', 'attributes'), '* -text -eol -filter -ident -working-tree-encoding\n', { mode: 0o600 })
     await this.git(workspace, ['add', '--force', '--all', '--', '.'])
     await this.git(workspace, ['-c', 'user.name=DSH Snapshot', '-c', 'user.email=dsh-snapshot@local',
       'commit', '--allow-empty', '-m', 'DSH task source snapshot'])

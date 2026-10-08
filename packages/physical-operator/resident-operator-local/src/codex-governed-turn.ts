@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { mkdir, open, type FileHandle } from 'node:fs/promises'
 import type { Context as PiContext } from '@earendil-works/pi-ai'
 import { ResidentOperatorError, type ResidentDriverExecuteRequest, type ResidentTurnResult } from '@deepseek-ai/dsh-resident-operator'
-import { generateCodexModelCall } from './codex-judgment.ts'
+import { codexTurnResult, generateCodexModelCall } from './codex-judgment.ts'
 import { callModelToolBridge } from './model-tool-bridge.ts'
 import { WorkspaceModelToolBridge } from './workspace-model-tool-bridge.ts'
 
@@ -78,11 +78,7 @@ export async function generateCodexGovernedTurn(request: ResidentDriverExecuteRe
       if (toolCalls.length === 0) {
         if (result.stopReason !== 'stop') throw new ResidentOperatorError(`Governed Codex stopped with ${result.stopReason}`, 'INVALID_RESULT')
         request.onProgress('finalizing')
-        return {
-          output: result.content.flatMap<ResidentTurnResult['output'][number]>(block => block.type === 'text' ? [{ type: 'text' as const, text: block.text }] : block.type === 'thinking' ? [{ type: 'reasoning' as const, text: block.thinking }] : []),
-          stopReason: 'completed', usage,
-          providerResponse: { provider: 'openai-codex', model: result.responseModel ?? result.model, ...result.responseId === undefined ? {} : { responseId: result.responseId } },
-        }
+        return codexTurnResult(result, usage)
       }
       if (calls + toolCalls.length > maxCalls) throw new ResidentOperatorError('Governed Codex exceeded maxToolCalls before executing tools', 'OUTPUT_LIMIT')
       if (result.stopReason !== 'toolUse') throw new ResidentOperatorError('Governed Codex tool calls require a tool-use stop reason', 'INVALID_RESULT')

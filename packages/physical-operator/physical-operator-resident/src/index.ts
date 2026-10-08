@@ -213,10 +213,13 @@ class DualModePhysicalOperator implements PhysicalOperator {
         ? {}
         : { nativeContext: { version: 1, digest: request.contextEnvelope.digest } },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+      // Independently loadable adapters forward the same optional resident request fields.
+      /* jscpd:ignore-start */
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
       ...request.generationLimits === undefined ? {} : { generationLimits: request.generationLimits },
       ...request.governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy: request.governedWorkspacePolicy },
+      /* jscpd:ignore-end */
       signal: request.signal,
     })
     return {

@@ -590,6 +590,30 @@ describe('connection node half', () => {
       { version: 1, kind: 'gouzi-project', projectId: 'not-a-project' },
       ...['../secret', '/secret', 'a\\b', 'a/./b', 'a//b'].map(subdir => ({ version: 1, kind: 'gouzi-project', projectId, subdir })),
     ]) expect((await call(route, 'operator.execute', directory('invalid-dir', identity))).status).toBe(400)
+    const validPolicy = { version: 1, sourceWorkspace: '/source', readScopes: [], writeScopes: [], forbiddenScopes: [],
+      limits: { maxToolCalls: 2, maxFileBytes: 4096, maxOutputBytes: 8192, maxSearchFiles: 8 } }
+    const beforeInvalidMaterialize = materializeWorkspace.mock.calls.length
+    const beforeInvalidExecute = execute.mock.calls.length
+    for (const patch of [
+      { nativeToolPolicy: 'unknown-mode' },
+      { nativeToolPolicy: 'dsh-tools-authoritative' },
+      { governedWorkspacePolicy: { ...validPolicy, version: 2 } },
+      { governedWorkspacePolicy: { ...validPolicy, readScopes: undefined } },
+      { governedWorkspacePolicy: { ...validPolicy, writeScopes: [null] } },
+      { governedWorkspacePolicy: { ...validPolicy, forbiddenScopes: [''] } },
+      { governedWorkspacePolicy: { ...validPolicy, limits: { ...validPolicy.limits, maxToolCalls: 0 } } },
+      { generationLimits: { maxTokens: 0, maxOutputBytes: 1024 } },
+      { generationLimits: { maxTokens: 32, maxOutputBytes: '1024' } },
+      { generationLimits: { maxTokens: 32, maxOutputBytes: 1024, maxToolCalls: 0 } },
+      { workspaceSnapshotInput: { version: 2, baseSha: 'a'.repeat(40), baseBundle: 'YWJj' } },
+      { workspaceSnapshotInput: { version: 1, baseSha: 'not-a-sha', baseBundle: 'YWJj' } },
+      { workspaceSnapshotInput: { version: 1, baseSha: 'a'.repeat(40), baseBundle: 'invalid!' } },
+    ]) {
+      const response = await call(route, 'operator.execute', { ...directory('invalid-policy'), ...patch })
+      expect(response.status).toBe(400)
+    }
+    expect(materializeWorkspace.mock.calls.length).toBe(beforeInvalidMaterialize)
+    expect(execute.mock.calls.length).toBe(beforeInvalidExecute)
     const goodDirectory = directory('exec-directory')
     expect((await call(route, 'operator.execute', { ...goodDirectory, protocol: { major: 1, minor: 4 } })).status).toBe(409)
     expect((await call(route, 'operator.execute', {

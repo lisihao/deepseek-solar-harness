@@ -10,7 +10,10 @@ import { generateCodexGovernedTurn } from '../src/codex-governed-turn.ts'
 import { CodexResidentDriver } from '../src/drivers.ts'
 import * as modelToolBridge from '../src/model-tool-bridge.ts'
 const { generate } = vi.hoisted(() => ({ generate: vi.fn<typeof GenerateCodexModelCall>() }))
-vi.mock('../src/codex-judgment.ts', () => ({ generateCodexModelCall: generate, generateCodexJudgment: vi.fn() }))
+vi.mock('../src/codex-judgment.ts', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/codex-judgment.ts')>(),
+  generateCodexModelCall: generate, generateCodexJudgment: vi.fn(),
+}))
 const roots: string[] = []
 afterEach(async () => {
   vi.restoreAllMocks(); generate.mockReset()

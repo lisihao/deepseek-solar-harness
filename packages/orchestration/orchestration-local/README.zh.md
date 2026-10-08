@@ -48,6 +48,8 @@ Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStor
 
 `workspaceIsolation: directory-snapshot` 将普通、尚无提交或含未提交修改的目录捕获到任务自有 Git 检查点，排除 `.git` 并保留原 index 和 HEAD。狗子修改任务的准入要求注册为 `hostId: local` 且端点为回环地址；此路由不授权远端完整快照传输。接收执行器必须重新证明支持生成限制、受治理文件策略和工作区修改返回。审批后，工作在隔离 checkout 中执行；独立验证接收当前修改的 bundle，而不是只有原始基线。
 
+新建私有检查点仓库与接收 bundle 的仓库在初始化后持久化 `core.autocrlf=false`，并向 `.git/info/attributes` 写入 `* -text -eol -filter -ident -working-tree-encoding`，使捕获、checkout 及关联执行者 worktree 保留文件字节，不应用换行、filter、ident 或编码转换。快照修改 diff 使用 `--no-textconv`。这些设置属于任务自有 Git 元数据，不修改源目录的 `.git`、index、HEAD 或用户 `.gitattributes`。已有回执保留原快照，未解决的快照或接收工作区身份不会自动重建。
+
 验证节点的 `model-verdict` 要求严格 JSON，包含 `accepted`、非空 `reason` 以及非空字符串 `evidence` 条目。否定或缺失的结论、字段格式错误及无证据都会阻止原目录应用。通用文件测试检查权限与修改机制，不能证明验证者的语义判断质量。最终应用在修改文件前对照检查点核验受影响的源路径及其父目录。交付在原目录修改前持久化 `applying`，并在这一关键阶段拒绝暂停／取消；此前已接受的取消会阻止应用。未知交付转为 indeterminate，要求核对原 effect。
 
 ## Model Experience

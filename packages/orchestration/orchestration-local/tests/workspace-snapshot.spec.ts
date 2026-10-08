@@ -1,11 +1,12 @@
 /** Real source snapshots, remote bundle inputs, and conditional verified file delivery. */
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { GouziMemberService } from '@deepseek-ai/dsh-client-connection'
+import { GitWorktreeManager } from '../src/git-worktrees.ts'
 import { WorkspaceSnapshotManager } from '../src/workspace-snapshot.ts'
 import { LocalRemoteOperatorHostService } from '../src/remote-execution-host.ts'
 
@@ -120,6 +121,90 @@ describe('WorkspaceSnapshotManager', () => {
     expect(await readFile(join(source, '.git', 'index'))).toEqual(index)
     expect(git(source, ['rev-parse', 'HEAD'])).toBe(head)
   })
+
+  it('preserves exact bytes through private Git snapshots, worktrees, bundles and delivery despite source attributes', async () => {
+    const { root, source, manager } = await fixture()
+    const configuration = join(root, 'fixture-global.gitconfig')
+    await writeFile(configuration, '[core]\n\tautocrlf = true\n[diff "byte-fixture"]\n\ttextconv = dsh-fixture-unavailable-textconv\n')
+    vi.stubEnv('GIT_CONFIG_GLOBAL', configuration)
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+    const ctx = new Context()
+    try {
+      const original: Record<string, Buffer> = {
+        'lf.txt': Buffer.from('first\n$Id$\nlast\n'),
+        'crlf.txt': Buffer.from('first\r\n$Id$\r\nlast\r\n'),
+        'nested/mixed.txt': Buffer.from('first\nsecond\r\n$Id$\nlast\r\n'),
+        '.gitattributes': Buffer.from('* text eol=crlf ident diff=byte-fixture\n'),
+        'nested/.gitattributes': Buffer.from('* text eol=lf ident diff=byte-fixture\n'),
+      }
+      await mkdir(join(source, 'nested'))
+      for (const [path, bytes] of Object.entries(original)) await writeFile(join(source, path), bytes)
+      git(source, ['init', '--initial-branch=main'])
+      git(source, ['add', '.'])
+      git(source, ['commit', '-m', 'source with conversion attributes'])
+      const sourceIndex = await readFile(join(source, '.git', 'index'))
+      const sourceHead = git(source, ['rev-parse', 'HEAD'])
+      const snapshot = await manager.prepare(source, 'exact-byte-transfers')
+      const assertBytes = async (workspace: string, expected: Readonly<Record<string, Buffer>>) => {
+        for (const [path, bytes] of Object.entries(expected)) {
+          expect(await readFile(join(workspace, path)), `${workspace}: ${path}`).toEqual(bytes)
+          expect(execFileSync('git', ['show', `HEAD:${path}`], { cwd: workspace }), `blob: ${path}`).toEqual(bytes)
+        }
+      }
+      await assertBytes(snapshot.workspace, original)
+      const worktrees = new GitWorktreeManager(join(root, 'linked-worktrees'))
+      const linked = await worktrees.prepare(snapshot.workspace, 'run-bytes', 'edit', 1)
+      await assertBytes(linked.path, original)
+      const remoteHome = join(root, 'byte-receiver')
+      await mkdir(join(remoteHome, 'orchestrations'), { recursive: true })
+      const projectId = 'b'.repeat(64)
+      await writeFile(join(remoteHome, 'orchestrations', 'cluster.json'), JSON.stringify({ version: 1, nodeId: 'remote',
+        members: [{ id: 'remote', label: 'Remote', endpoint: 'http://127.0.0.1:1', remoteExecution: {
+          enabled: true, repositories: [], defaultProjectId: projectId, projects: [{ projectId, source }],
+        } }] }))
+      new Member(ctx)
+      const remote = new LocalRemoteOperatorHostService(ctx, { dshHome: remoteHome, directoryLockRoot: join(root, 'byte-locks'),
+        timeoutMs: 10_000, artifactReadTimeoutMs: 1_000, artifactMaxBytes: 1024 * 1024, workspaceLeaseMs: 60_000 })
+      const identity = { version: 1 as const, kind: 'gouzi-project' as const, projectId }
+      const execution = await remote.materializeWorkspace(identity, 'exact-byte-edit',
+        { baseSha: snapshot.baseSha, baseBundle: snapshot.baseBundle })
+      await assertBytes(execution.path, original)
+      const changed: Record<string, Buffer> = {
+        ...original,
+        'lf.txt': Buffer.from('updated LF\n$Id$\n'),
+        'crlf.txt': Buffer.from('updated CRLF\r\n$Id$\r\n'),
+        'nested/mixed.txt': Buffer.from('updated mixed\r\nsecond\n$Id$\r\n'),
+        'nested/new.txt': Buffer.from('new mixed\nline\r\n'),
+      }
+      for (const [path, bytes] of Object.entries(changed)) await writeFile(join(execution.path, path), bytes)
+      const mutation = await remote.captureWorkspaceMutation('exact-byte-edit')
+      await remote.releaseWorkspace('exact-byte-edit')
+      if (mutation === undefined) throw new Error('expected captured byte mutation')
+      const patch = join(root, 'bytes.patch')
+      await writeFile(patch, mutation.patch)
+      git(linked.path, ['apply', '--check', '--', patch])
+      git(linked.path, ['apply', '--', patch])
+      await worktrees.integrate(snapshot.workspace, linked, 'exact-byte-integration')
+      await assertBytes(snapshot.workspace, changed)
+      const input = await manager.captureInput(snapshot.snapshotId)
+      expect(input.baseSha).not.toBe(snapshot.baseSha)
+      const verification = await remote.materializeWorkspace(identity, 'exact-byte-verification', undefined, input)
+      await assertBytes(verification.path, changed)
+      await remote.releaseWorkspace('exact-byte-verification')
+      for (const [path, bytes] of Object.entries(original)) expect(await readFile(join(source, path))).toEqual(bytes)
+      expect(await manager.conditionalApply(snapshot.snapshotId, snapshot.workspace))
+        .toEqual(['crlf.txt', 'lf.txt', 'nested/mixed.txt', 'nested/new.txt'])
+      for (const [path, bytes] of Object.entries(changed)) expect(await readFile(join(source, path))).toEqual(bytes)
+      expect(await readFile(join(source, '.git', 'index'))).toEqual(sourceIndex)
+      expect(git(source, ['rev-parse', 'HEAD'])).toBe(sourceHead)
+      expect(await readFile(join(source, '.gitattributes'))).toEqual(original['.gitattributes'])
+      expect(await readFile(join(source, 'nested', '.gitattributes'))).toEqual(original['nested/.gitattributes'])
+    } finally {
+      await ctx.fiber.dispose()
+      vi.unstubAllEnvs()
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
 
   it('rejects snapshots above the configured entry and byte budgets', async () => {
     const { root, source } = await fixture()

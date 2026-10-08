@@ -43,7 +43,7 @@ describe('governed workspace file tool execution', () => {
     try {
       await expect(f.call({ operation: 'read', path: 'allowed/readme.txt' })).resolves.toMatchObject({ content: 'isolated evidence\nsecond line' })
       await expect(f.call({ operation: 'list', path: 'allowed' })).resolves.toMatchObject({ entries: [{ name: 'readme.txt', kind: 'file' }] })
-      await expect(f.call({ operation: 'search', path: 'allowed', query: 'evidence' })).resolves.toMatchObject({ matches: [{ path: 'allowed/readme.txt', line: 1, text: 'isolated evidence' }] })
+      await expect(f.call({ operation: 'search', path: 'allowed', query: 'evidence' })).resolves.toMatchObject({ matches: [{ path: join('allowed', 'readme.txt'), line: 1, text: 'isolated evidence' }] })
       await f.call({ operation: 'write', path: 'allowed/new/sub.txt', content: 'new file' })
       expect(await readFile(join(f.workspace, 'allowed', 'new', 'sub.txt'), 'utf8')).toBe('new file')
       await f.call({ operation: 'write', path: 'allowed/new/sub.txt', content: 'replacement' })

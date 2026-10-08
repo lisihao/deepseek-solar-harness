@@ -120,10 +120,10 @@ it('strictly decodes sealed workspace policy without modifying its scope paths',
 })
 
 it('preserves emitted reasoning and the actual API response id without creating a native Session', async () => {
-  mockResult(assistant({ content: [{ type: 'thinking', thinking: 'Provider summary.' }, { type: 'text', text: 'chat' }] }))
+  mockResult(assistant({ responseModel: 'actual-provider-model', content: [{ type: 'thinking', thinking: 'Provider summary.' }, { type: 'text', text: 'chat' }] }))
   const result = await generateCodexJudgment(request())
   expect(result.output).toEqual([{ type: 'reasoning', text: 'Provider summary.' }, { type: 'text', text: 'chat' }])
-  expect(result.providerResponse).toEqual({ provider: 'openai-codex', model: 'resolved-native-model', responseId: 'provider-response' })
+  expect(result.providerResponse).toEqual({ provider: 'openai-codex', model: 'actual-provider-model', responseId: 'provider-response' })
   expect('nativeSessionId' in result).toBe(false)
 })
 

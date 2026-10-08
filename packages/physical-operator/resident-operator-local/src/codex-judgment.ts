@@ -9,6 +9,7 @@ import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-code
 import { stream } from '@earendil-works/pi-ai/api/openai-codex-responses'
 import type {
   PhysicalOperatorGenerationLimits, PhysicalOperatorModelToolBridgeV1, PhysicalOperatorModelToolV1, PhysicalOperatorReasoningEffort,
+  PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentOperatorError, type ResidentDriverExecuteRequest, type ResidentTurnResult } from '@deepseek-ai/dsh-resident-operator'
 import { validateResidentModelToolBridge } from './model-tool-bridge.ts'
@@ -225,14 +226,27 @@ export async function generateCodexJudgment(request: ResidentDriverExecuteReques
   }))
   if (result.stopReason !== 'stop') throw new ResidentOperatorError(`Codex model stopped with ${result.stopReason}`, 'INVALID_RESULT')
   request.onProgress('finalizing')
+  return codexTurnResult(result, {
+    inputTokens: result.usage.input, outputTokens: result.usage.output,
+    cacheReadInputTokens: result.usage.cacheRead, cacheWriteInputTokens: result.usage.cacheWrite,
+  })
+}
+
+/**
+ * Convert a completed direct-model response to canonical Resident output.
+ * The caller validates the stop reason and supplies the complete execution's measured usage.
+ * @param result - final assistant response, including actual returned model and response identity.
+ * @param usage - measured token usage accumulated across the execution.
+ * @returns canonical text/reasoning, completed stop reason, supplied usage and API response metadata without a native session identity.
+ */
+export function codexTurnResult(result: AssistantMessage, usage: PhysicalOperatorUsage): ResidentTurnResult {
   return {
     output: result.content.flatMap<ContentBlock>(block => block.type === 'text'
       ? [{ type: 'text' as const, text: block.text }]
       : block.type === 'thinking' ? [{ type: 'reasoning' as const, text: block.thinking }] : []),
+    stopReason: 'completed', usage,
     providerResponse: { provider: 'openai-codex', model: result.responseModel ?? result.model,
       ...result.responseId === undefined ? {} : { responseId: result.responseId } },
-    stopReason: 'completed', usage: { inputTokens: result.usage.input, outputTokens: result.usage.output,
-      cacheReadInputTokens: result.usage.cacheRead, cacheWriteInputTokens: result.usage.cacheWrite },
   }
 }
 

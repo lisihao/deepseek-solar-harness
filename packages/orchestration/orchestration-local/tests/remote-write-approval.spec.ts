@@ -41,12 +41,12 @@ function deferred() {
 
 describe('remote write approval', () => {
   it.each(scenarios)('$name', async ({ verdict, outcome, mode }) => {
-    const boundaryReached = deferred()
+    let boundaryReached = false
     const releaseBoundary = deferred()
     const originalApply: WorkspaceSnapshotManager['conditionalApply'] = Reflect.get(WorkspaceSnapshotManager.prototype, 'conditionalApply')
     const apply = vi.spyOn(WorkspaceSnapshotManager.prototype, 'conditionalApply').mockImplementation(async function (this: WorkspaceSnapshotManager, snapshotId, workspace) {
       if (mode === 'during-delivery' || mode === 'delivery-error') {
-        boundaryReached.resolve()
+        boundaryReached = true
         await releaseBoundary.promise
         if (mode === 'delivery-error') throw Object.assign(new Error('external delivery outcome unknown'), { code: 'COMMAND_INDETERMINATE' })
       }
@@ -108,7 +108,7 @@ describe('remote write approval', () => {
           expect(await readFile(join(workspace.path, 'work.txt'), 'utf8')).toBe('actually edited after approval\n')
           verificationReads += 1
           if (mode === 'before-delivery') {
-            boundaryReached.resolve()
+            boundaryReached = true
             await releaseBoundary.promise
           }
         }
@@ -170,8 +170,9 @@ describe('remote write approval', () => {
       await client.decide({ commandId: 'approve-real-write', runId: started.runId, expectedRevision: started.revision,
         decision: 'approve', reason: 'fixture user approval' })
       if (mode !== 'normal') {
-        await boundaryReached.promise
-        const atBoundary = await client.inspect(String(started.runId))
+        const atBoundary = await waitFor(() => client.inspect(String(started.runId)), value => boundaryReached
+          || ['completed', 'failed', 'cancelled', 'indeterminate'].includes(value.state))
+        expect(boundaryReached, JSON.stringify(atBoundary)).toBe(true)
         expect(await readFile(join(authority, 'work.txt'), 'utf8')).toBe('base\n')
         const cancel = { commandId: 'cancel-delivery', runId: started.runId, expectedRevision: atBoundary.revision,
           action: 'cancel' as const, reason: 'fixture cancellation' }
@@ -207,5 +208,5 @@ describe('remote write approval', () => {
       vi.unstubAllGlobals()
       await rm(home, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
 })

@@ -12,7 +12,7 @@ Status: implemented
 
 [狗窝调度器](../../../../packages/orchestration/ui-gouzi/README.md)只消费 `kennel` 会话中的真实人工消息，并在独立且不带工具的调度请求前记录消息。Host 核验的候选固定成员身份、generation、已核验默认项目目录、算子 id，以及 `chat`、`read` 或 `write` 模式。既有 Run 控制候选绑定确切源会话与 revision，并按当前状态提供查看、暂停、继续和取消操作。所有模型请求、启动和控制 effect 都要求会话 flush 在执行前返回 true。模型返回已提供的候选 id 或要求澄清，不能创建身份、权限范围、计划或任务结果。明确点名限制候选集合。Host 在编译和启动前重新核验所选成员，然后通过不带 fallback 算子、RLM 或 Autonomous Mode 的标准 TaskGraph 准入。
 
-调度配置属于 DSH，独立于普通会话模型和私有 Codex 设置。显式 `dispatcher.jev` 优先；否则，已注册的 `dispatcher.jevProvider` 路由使用其首个配置模型，已注册却没有模型则拒绝。该路由不存在时，由配置的 DeepSeek 作判断。只有明确的 DeepSeek 余额失败才允许 Codex 通过订阅 Responses API 作不带工具的判断。模型从实际注册目录解析；只读取既有已授权账号认证，过期时失败，不创建原生 Session。其他失败仍然失败；Jev 失败或普通传输失败都不会改变模型路由。
+调度配置属于 DSH，独立于普通会话模型和私有 Codex 设置。显式 `dispatcher.jev` 优先；否则，已注册的 `dispatcher.jevProvider` 路由使用其首个配置模型，已注册却没有模型则拒绝。该路由不存在时，由配置的 DeepSeek 作判断。 LLM（大语言模型）服务拥有提供方无关的 `INSUFFICIENT_BALANCE_CODE`；DeepSeek 适配器将明确提供方余额失败映射到该错误码。只有明确的 DeepSeek 余额失败才允许 Codex 通过订阅 Responses API 作不带工具的判断。模型从实际注册目录解析；只读取既有已授权账号认证，过期时失败，不创建原生 Session。其他失败仍然失败；Jev 失败或普通传输失败都不会改变模型路由。
 
 [物理算子目录](../../../../packages/physical-operator/physical-operator/README.md)带有可选 `gouziWorkspace` 绑定。远端执行 Host 通过 `registeredDirectory` 解析持久化默认项目，核验其真实路径，并提供项目身份与范围。[执行目录](../../../../packages/orchestration/orchestration-local/README.md)将此 catalog 与实际成员注册及 generation 匹配。非本地只读共享项目编译保留此接收宿主路径，不在调度 Mac 上解析它。缺少该字段的旧端点提供空范围列表。普通、陈旧、不匹配和不可达的入口不能证明目录访问权限。
 
@@ -25,6 +25,8 @@ Status: implemented
 兼容语义保留旧禁用工具且工具为空、没有生成限制请求的 provider-default 生成，并通过直接 Codex API 循环支持既有封存的单个 `typescript_repl` call-only 桥。旧桥不调用 `tool.describe`，也不编造生成预算。新狗窝请求仍使用显式预算与受治理文件工具。
 
 目录快照通过任务自有检查点支持普通、尚无提交和含未提交修改的源目录，排除 `.git`，保留源 index 与 HEAD。审批后的工作修改隔离 checkout；独立验证读取其当前已修改 bundle。严格 `model-verdict` 验收要求肯定结论、理由和实际证据。否定、缺失、格式错误或无证据的结论会阻止原目录应用。受影响的源路径或其父目录在检查点后发生变化会阻止无条件覆盖。交付在原目录修改前持久化 `applying`，在此关键阶段拒绝暂停／取消，并尊重此前已接受的取消。未知交付要求核对，不能再次应用。
+
+新建检查点和接收 bundle 的私有仓库在添加或 checkout 源文件前持久化 `core.autocrlf=false`，并设置 `.git/info/attributes` 覆盖项 `* -text -eol -filter -ident -working-tree-encoding`。关联执行者 worktree 共享这一私有仓库策略。快照修改 diff 用 `--no-textconv` 禁用文本转换，使检查点和返回修改依据原始文件字节，而不是 Git 转换设置。源目录的 `.git`、index、HEAD 和用户 `.gitattributes` 不修改。已有或 indeterminate 快照保留原身份，不自动重建。
 
 ## 考虑过的替代方案
 

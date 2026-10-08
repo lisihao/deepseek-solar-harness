@@ -226,7 +226,8 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
     const checkout = join(directory, 'checkout')
     await this.verifyCommit(checkout, lease.mutationReturn.baseSha, JSON.stringify(binding))
     await this.git(['add', '--all', '--', '.'], checkout)
-    const patch = await this.git(['diff', '--cached', '--binary', '--no-ext-diff', lease.mutationReturn.baseSha, '--'], checkout)
+    const snapshotDiff = lease.snapshotInput !== undefined || lease.mutationReturn.bundleDigest !== undefined ? ['--no-textconv'] : []
+    const patch = await this.git(['diff', '--cached', '--binary', '--no-ext-diff', ...snapshotDiff, lease.mutationReturn.baseSha, '--'], checkout)
     const mutation = { ...binding, baseSha: lease.mutationReturn.baseSha, patch }
     const temporary = `${receipt}.${randomUUID()}.tmp`
     await writeFile(temporary, JSON.stringify(mutation), { flag: 'wx', mode: 0o600 })
@@ -344,6 +345,9 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
       else {
         await mkdir(checkout)
         await this.git(['init', '--initial-branch=main'], checkout)
+        await this.git(['config', 'core.autocrlf', 'false'], checkout)
+        await mkdir(join(checkout, '.git', 'info'), { recursive: true })
+        await writeFile(join(checkout, '.git', 'info', 'attributes'), '* -text -eol -filter -ident -working-tree-encoding\n', { mode: 0o600 })
         const bundlePath = join(directory, 'base.bundle')
         await writeFile(bundlePath, bundle, { flag: 'wx', mode: 0o600 })
         await this.git(['bundle', 'verify', bundlePath], checkout)

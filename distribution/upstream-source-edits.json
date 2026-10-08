@@ -410,6 +410,10 @@
       "kind": "migration-debt",
       "note": "feat(deepseek): add native V4 Flash Vision route"
     },
+    "packages/llm/llm/src/error.ts": {
+      "kind": "seam",
+      "note": "Expose an explicit insufficient-balance failure code so the kennel dispatcher can distinguish balance exhaustion from quota, authentication and transport failures before selecting Codex."
+    },
     "packages/llm/llm/src/index.ts": {
       "kind": "migration-debt",
       "note": "feat: add Web coordination and live catalog refresh"
