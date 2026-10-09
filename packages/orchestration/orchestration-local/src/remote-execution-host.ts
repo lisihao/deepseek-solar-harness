@@ -280,6 +280,8 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
     const temporaryCheckout = join(temporaryRoot, 'checkout')
     try {
       await this.git(['clone', '--shared', '--no-checkout', '--', cache, temporaryCheckout])
+      // The host's Git configuration (a Windows host often has core.autocrlf=true) must not change the committed bytes.
+      await this.git(['config', 'core.autocrlf', 'false'], temporaryCheckout)
       await this.git(['checkout', '--detach', normalized.commit], temporaryCheckout)
       const status = await this.git(['status', '--porcelain=v1', '-uall', '--no-renames'], temporaryCheckout)
       if (status.length > 0) throw new Error('fresh remote execution workspace is not clean')
@@ -341,8 +343,11 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
       await mkdir(directory, { mode: 0o700 })
       // Failure retains the command directory; an unknown execution cannot acquire a fresh checkout.
       const checkout = join(directory, 'checkout')
-      if (bundle === undefined) await this.git(['clone', '--no-checkout', '--local', '--', root, checkout])
-      else {
+      if (bundle === undefined) {
+        await this.git(['clone', '--no-checkout', '--local', '--', root, checkout])
+        // Same as the bundle import below: the host's line-ending conversion must not change the committed bytes.
+        await this.git(['config', 'core.autocrlf', 'false'], checkout)
+      } else {
         await mkdir(checkout)
         await this.git(['init', '--initial-branch=main'], checkout)
         await this.git(['config', 'core.autocrlf', 'false'], checkout)

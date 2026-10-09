@@ -129,9 +129,17 @@ const processBoundTests = [
   'packages/workflow/workflow-worker-thread/tests/session.spec.ts',
 ]
 
+// Real filesystem, Git, SQLite, and subprocess fixtures take longer and vary more on a hosted Windows runner under
+// coverage instrumentation (a measured 22 of 50 recent native Windows runs failed, mostly on tests that crossed
+// Vitest's 5 s default). Windows therefore gets a longer default; a test that needs more still sets its own, and
+// Linux and macOS keep the stricter default. Rationale and evidence:
+// .agents/notes/implemented/process/2026-10-09-windows-test-timeouts-and-checkout-bytes.md.
+const platformTimeouts = process.platform === 'win32' ? { testTimeout: 20_000, hookTimeout: 30_000 } : {}
+
 export default defineConfig({
   plugins: [pathsPlugin(), standardDecoratorPlugin()],
   test: {
+    ...platformTimeouts,
     setupFiles: ['./scripts/test-invariants.ts'],
     // .tsx: client component specs (jsdom via per-file @vitest-environment pragma).
     include: testIncludes,
@@ -143,6 +151,7 @@ export default defineConfig({
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'thread-safe',
+          ...platformTimeouts,
           // The process-bound project runs beside this one. Two plus its one
           // worker leaves one standard-runner CPU for fixture subprocesses.
           maxWorkers: 2,
@@ -164,6 +173,7 @@ export default defineConfig({
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'process-bound',
+          ...platformTimeouts,
           maxWorkers: 1,
           execArgv: vitestExecArgv,
           pool: 'forks',

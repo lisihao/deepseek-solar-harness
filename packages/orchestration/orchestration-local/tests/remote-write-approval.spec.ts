@@ -206,7 +206,8 @@ describe('remote write approval', () => {
       await daemon.close()
       apply.mockRestore()
       vi.unstubAllGlobals()
-      await rm(home, { recursive: true, force: true })
+      // Windows can hold a just-closed SQLite or log file for a moment; retry instead of failing the teardown.
+      await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   }, 30_000)
 })
