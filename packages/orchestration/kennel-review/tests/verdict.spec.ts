@@ -32,7 +32,7 @@ const candidate: KennelCollaborationCandidate = {
   members: ['x', 'y'].map(id => ({ gouziId: id, generation: 1, name: id.toUpperCase(), role: 'research', operatorId: `gouzi.${id}.codex`, model: 'm' })),
   details: { target: { runId: 'task-1', title: 'Write the parser', authors: ['AUTHOR'] } },
 }
-const record = { collaboration: 'review', runId: 'review-run', messageId: 'm', candidate }
+const record = { collaboration: 'review', runId: 'review-run', messageId: 'm', candidate, assignments: [] }
 const reply = (index: number, text: string, accepted = true): KennelCollaborationResult => ({ nodeId: reviewNodeId(index), accepted, text })
 
 describe('isReview', () => {
@@ -58,6 +58,22 @@ describe('reviewOutcome', () => {
 
   it('names reviewer nodes by position', () => {
     expect([0, 1, 9].map(reviewNodeId)).toEqual(['review-1', 'review-2', 'review-10'])
+  })
+
+  it('gives the room each reviewer\'s conclusion and comments, whatever the overall outcome', () => {
+    const parts = (state: string, results: KennelCollaborationResult[]) => reviewOutcome(record, run(state), results).parts
+    const expected = [
+      { gouziId: 'x', label: '通过', text: '好' },
+      { gouziId: 'y', label: '需要修改', text: '缺测试' },
+    ]
+    const results = [reply(0, `${APPROVE_LINE}\n好`), reply(1, `${CHANGES_LINE}\n缺测试`)]
+    expect(parts('completed', results)).toEqual(expected)
+    // The same parts show while the run is unfinished, and an unanswered reviewer has no conclusion yet.
+    expect(parts('running', results)).toEqual(expected)
+    expect(parts('completed', [reply(0, '看起来不错')])).toEqual([
+      { gouziId: 'x', label: '结论不明', text: '看起来不错' },
+      { gouziId: 'y', label: '结论不明', text: '' },
+    ])
   })
 
   it('is pending until the run settles, whatever has been said so far', () => {

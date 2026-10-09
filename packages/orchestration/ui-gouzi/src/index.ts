@@ -579,13 +579,12 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
       // Outcomes come from the live Session's log; a Session that is not loaded shows its tasks without them.
       const session = ctx.sessions.get(SessionId(sessionId))
-      const collaborations = session === undefined
-        ? []
-        : await sessionCollaborations(ctx.orchestrations, ctx.get('kennelCollaborations')?.kinds() ?? [], session.events, sessionId)
+      const kinds = ctx.get('kennelCollaborations')?.kinds() ?? []
+      const collaborations = session === undefined ? [] : await sessionCollaborations(ctx.orchestrations, kinds, session.events, sessionId)
       return {
         status: 200,
         body: await gouziRoom(
-          ctx.orchestrations, control, sessionId, await dashboard(ctx, control, authority), roomPollIntervalMs, collaborations,
+          ctx.orchestrations, control, sessionId, await dashboard(ctx, control, authority), roomPollIntervalMs, collaborations, kinds,
         ),
       }
     }

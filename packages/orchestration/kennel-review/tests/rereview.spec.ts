@@ -23,7 +23,7 @@ const verdicts = [
 /** The first review (reviewers x then y) and the rework it led to. */
 function history(patch: Partial<Record<'review' | 'rework', Partial<KennelCollaborationRecord>>> = {}): KennelCollaborationRecord[] {
   const review: KennelCollaborationRecord = {
-    collaboration: 'review', runId: 'review-1', messageId: 'm1',
+    collaboration: 'review', runId: 'review-1', messageId: 'm1', assignments: [],
     candidate: {
       kind: 'collaboration', collaboration: 'review', id: 'r', workspace: '/project', members: [member('x'), member('y')],
       details: { target: { runId: 'task-1', title: 'Write the parser', authors: ['AUTHOR'] } },
@@ -31,7 +31,7 @@ function history(patch: Partial<Record<'review' | 'rework', Partial<KennelCollab
     outcome: { subjectRunId: 'task-1', state: 'negative', label: 'l', details: { verdicts } }, ...patch.review,
   }
   const rework: KennelCollaborationRecord = {
-    collaboration: 'rework', runId: 'task-2', messageId: 'm2',
+    collaboration: 'rework', runId: 'task-2', messageId: 'm2', assignments: [],
     candidate: {
       kind: 'collaboration', collaboration: 'rework', id: 'w', workspace: '/project', members: [],
       details: { review: 'review-1', target: { runId: 'task-1', title: 't' }, offer: {}, comments: [] },
@@ -92,7 +92,7 @@ describe('rereview offers', () => {
 
   it('offers each reworked task once, and not when the user already had it reviewed another way', () => {
     const reviewed: KennelCollaborationRecord = {
-      collaboration: 'review', runId: 'review-2', messageId: 'm3',
+      collaboration: 'review', runId: 'review-2', messageId: 'm3', assignments: [],
       candidate: { kind: 'collaboration', collaboration: 'review', id: 'again', workspace: '/project', members: [member('z')], details: { target: { runId: 'task-2', title: 't', authors: [] } } },
     }
     expect(offer(facts({ earlier: [...history(), reviewed] }))).toEqual([])
@@ -161,6 +161,7 @@ describe('rereview start', () => {
     const kind = kennelRereviewKind(new Context())
     expect(kind.kind).toBe('rereview')
     expect(kind.guidance).toContain('复审')
+    expect([kind.label, kind.roleLabels]).toEqual(['复审', { reviewer: '评审人' }])
     expect(typeof kind.outcome).toBe('function')
   })
 })

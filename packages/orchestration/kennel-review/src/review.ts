@@ -151,6 +151,8 @@ export async function startReview(ctx: Context, request: KennelCollaborationRequ
 export function kennelReviewKind(ctx: Context, config: Required<Config>): KennelCollaborationKind {
   return {
     kind: KENNEL_REVIEW_KIND,
+    label: '评审',
+    roleLabels: { reviewer: '评审人' },
     guidance: '用户明确要求某只或几只狗子评审、检查、点评另一只狗子已完成的任务时选它；用户点了名的狗子就是评审人，候选里就是这些狗子；它只读不改文件，评审人不会是任务的做事人；用户没说评审哪个任务时选最近完成的那个',
     offer: facts => offer(facts, config),
     start: request => startReview(ctx, request),

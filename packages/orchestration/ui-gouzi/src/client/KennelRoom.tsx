@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { InjectFace, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ConversationNode, ObservableSnapshot, ToolCallBlock } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ChatNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { Button, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, MarkdownText, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import { decodeKennelMessage, type KennelRecipient } from '../recipient-message.ts'
 import { GOUZI_ROLE_COPY, GOUZI_STATE_COPY, type GouziRoomSnapshotV1, type GouziRoomTaskV1, type GouziRoomNodeV1, type GouziRoomResultV1 } from '../contracts.ts'
 import { GouziAvatarImage } from './avatars.tsx'
@@ -146,6 +146,25 @@ export function KennelRoomAside({ useRoom, useStore, actions }: KennelRoomAsideP
         </article>
       })}
       {room?.dashboard.members.length === 0 && <p className={css.empty}>暂无成员。可在设置的“狗子”页面查看或领养。</p>}
+    </details>
+    <details open className={css.section}><summary>本房间协作</summary>
+      {room && room.collaborations === undefined && <p className={css.empty}>本房间还没有协作。让几只狗子辩论、评审或按评审意见返工，进展会显示在这里。</p>}
+      {room?.collaborations?.map(collaboration => <article className={css.card} key={collaboration.runId} aria-label={`${collaboration.label}协作`}>
+        <div className={css.cardHead}><strong>{collaboration.label}</strong>{collaboration.state !== 'unknown' && <Pill>{taskState(collaboration.state)}</Pill>}</div>
+        {collaboration.subject && <p className={css.muted}>针对任务：{collaboration.subject.title}</p>}
+        {collaboration.outcome && <p className={css.outcome} data-outcome={collaboration.outcome.state}>{collaboration.outcome.label}</p>}
+        <ul className={css.parts}>
+          {collaboration.members.map(member => <li key={member.gouziId}>
+            <span className={css.partWho}>
+              <strong>{memberName(room, member.gouziId)}</strong><span className={css.muted}>{member.roleLabel}</span>
+            </span>
+            {member.conclusion !== undefined && <span className={css.partConclusion}>{member.conclusion}</span>}
+            {member.text !== undefined && <details className={css.comment}>
+              <summary>查看意见</summary><MarkdownText text={member.text} />
+            </details>}
+          </li>)}
+        </ul>
+      </article>)}
     </details>
     <details open className={css.section}><summary>本房间任务</summary>
       {room?.tasks.length === 0 && <p className={css.empty}>本房间尚无已接纳的任务。</p>}

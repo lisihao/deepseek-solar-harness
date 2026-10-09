@@ -247,6 +247,57 @@
     "operator.inspect",
     "operator.providers"
   ],
+  "roomCollaborations": [
+    {
+      "label": "评审",
+      "state": "completed",
+      "subject": "Summarize the parser for me.",
+      "outcome": "评审：待修改（beta）",
+      "members": [
+        [
+          "gamma",
+          "评审人",
+          "通过"
+        ],
+        [
+          "beta",
+          "评审人",
+          "需要修改"
+        ]
+      ]
+    },
+    {
+      "label": "返工",
+      "state": "completed",
+      "subject": "Summarize the parser for me.",
+      "outcome": "已按评审意见返工（alpha），待再次评审",
+      "members": [
+        [
+          "alpha",
+          "作者",
+          null
+        ]
+      ]
+    },
+    {
+      "label": "复审",
+      "state": "completed",
+      "subject": "返工：Summarize the parser for me.",
+      "outcome": "复审：已通过（gamma、beta）",
+      "members": [
+        [
+          "gamma",
+          "评审人",
+          "通过"
+        ],
+        [
+          "beta",
+          "评审人",
+          "通过"
+        ]
+      ]
+    }
+  ],
   "room": {
     "status": 200,
     "tasks": [

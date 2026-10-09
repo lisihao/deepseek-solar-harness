@@ -56,6 +56,8 @@ function offer(facts: KennelCollaborationFacts): KennelCollaborationCandidate[] 
 export function kennelRereviewKind(ctx: Context): KennelCollaborationKind {
   return {
     kind: KENNEL_REREVIEW_KIND,
+    label: '复审',
+    roleLabels: { reviewer: '评审人' },
     guidance: '用户要求让原来的评审人复审返工后的结果、再看一遍修改有没有解决意见时选它；评审人就是上一轮评审的那些狗子，候选里就是他们；它只读不改文件，只在返工完成之后出现；用户点了别的评审人时选评审而不是复审',
     offer,
     start: request => startReview(ctx, request),

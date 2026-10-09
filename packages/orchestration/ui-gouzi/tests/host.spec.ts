@@ -248,13 +248,17 @@ describe('Gouzi Host route', () => {
     const candidate = { kind: 'collaboration', collaboration: 'pair', id: 'p', workspace: '/w', members: [], details: {} }
     sessions.set('room', { events: [
       { type: 'kennel/dispatch-collaboration', data: { messageId: 'm', candidate, commandId: 'c' } },
-      { type: 'kennel/dispatch-collaboration-admitted', data: { messageId: 'm', collaboration: 'pair', runId: 'review-run', assignments: [] } },
+      { type: 'kennel/dispatch-collaboration-admitted', data: { messageId: 'm', collaboration: 'pair', runId: 'review-run', assignments: [{ gouziId: 'dog', role: 'peer' }] } },
     ] })
     ctx.kennelCollaborations.register({
-      kind: 'pair', guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')),
-      outcome: () => ({ subjectRunId: 'task', state: 'negative', label: '待修改', details: {} }),
+      kind: 'pair', label: '搭档', roleLabels: { peer: '搭档者' }, guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')),
+      outcome: () => ({ subjectRunId: 'task', state: 'negative', label: '待修改', parts: [{ gouziId: 'dog', label: '同意', text: 'ok' }], details: {} }),
     })
     const loaded = await send('GET', undefined, reader, true, '?session_id=room')
+    expect(loaded.body).toMatchObject({ collaborations: [{
+      collaboration: 'pair', label: '搭档', runId: 'review-run', state: 'completed', subject: { runId: 'task', title: 'task' },
+      outcome: { state: 'negative', label: '待修改' }, members: [{ gouziId: 'dog', role: 'peer', roleLabel: '搭档者', conclusion: '同意', text: 'ok' }],
+    }] })
     expect(loaded.body).toMatchObject({ tasks: [{ runId: 'task', outcomes: [{ collaboration: 'pair', runId: 'review-run', state: 'negative', label: '待修改' }] }, { runId: 'review-run' }] })
     sessions.delete('room')
     const unloaded = await send('GET', undefined, reader, true, '?session_id=room')

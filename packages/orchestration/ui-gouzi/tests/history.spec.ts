@@ -45,10 +45,10 @@ describe('collaborationRecords', () => {
   it('joins what was chosen with the run that started, oldest first', () => {
     const events = [
       event('kennel/dispatch-collaboration', { messageId: 'm1', candidate: peer, commandId: 'c' }),
-      event('kennel/dispatch-collaboration-admitted', { messageId: 'm1', collaboration: 'pair', runId: 'run-9', assignments: [] }),
+      event('kennel/dispatch-collaboration-admitted', { messageId: 'm1', collaboration: 'pair', runId: 'run-9', assignments: [{ gouziId: 'dog', role: 'peer' }] }),
       event('kennel/dispatch-collaboration', { messageId: 'm2', candidate: { ...peer, id: 'pair-2' }, commandId: 'c2' }),
     ]
-    expect(collaborationRecords(events)).toEqual([{ collaboration: 'pair', runId: 'run-9', messageId: 'm1', candidate: peer }])
+    expect(collaborationRecords(events)).toEqual([{ collaboration: 'pair', runId: 'run-9', messageId: 'm1', candidate: peer, assignments: [{ gouziId: 'dog', role: 'peer' }] }])
     expect(collaborationRecords([event('kennel/dispatch-collaboration-admitted', { messageId: 'x', collaboration: 'pair', runId: 'r', assignments: [] })])).toEqual([])
   })
 })
@@ -90,9 +90,9 @@ describe('runResults', () => {
   })
 })
 
-const record = { collaboration: 'pair', runId: 'run-9', messageId: 'm1', candidate: peer }
+const record = { collaboration: 'pair', runId: 'run-9', messageId: 'm1', candidate: peer, assignments: [{ gouziId: 'dog', role: 'peer' }] }
 const kind = (outcome?: KennelCollaborationKind['outcome']): KennelCollaborationKind => ({
-  kind: 'pair', guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')), ...outcome === undefined ? {} : { outcome },
+  kind: 'pair', label: '搭档', guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')), ...outcome === undefined ? {} : { outcome },
 })
 
 describe('withOutcomes', () => {
@@ -115,7 +115,7 @@ describe('withOutcomes', () => {
 describe('sessionCollaborations', () => {
   const events = [
     event('kennel/dispatch-collaboration', { messageId: 'm1', candidate: peer, commandId: 'c' }),
-    event('kennel/dispatch-collaboration-admitted', { messageId: 'm1', collaboration: 'pair', runId: 'run-9', assignments: [] }),
+    event('kennel/dispatch-collaboration-admitted', { messageId: 'm1', collaboration: 'pair', runId: 'run-9', assignments: [{ gouziId: 'dog', role: 'peer' }] }),
   ]
 
   it('reads the Session\'s collaborations with outcomes, from this Session\'s runs only', async () => {

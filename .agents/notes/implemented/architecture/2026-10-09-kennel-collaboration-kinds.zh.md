@@ -12,7 +12,7 @@ Status: implemented
 
 调度器自己提供工作和控制候选，把其他所有协作方式都当作注册到 `ctx.kennelCollaborations` 的**协作类型**。服务定义和类型的契约在 `@deepseek-ai/dsh-orchestration` 中；[`ui-gouzi`](../../../../packages/orchestration/ui-gouzi/README.md) 提供注册表并使用它；每个类型是一个在 `ctx.effect` 中注册自己的插件。
 
-类型有名称、`guidance` 句子、`offer(facts)`、`start(request)`，以及可选的 `outcome(record, run, results)`。`facts` 包含成员、他们的执行入口、本会话按新到旧排列的 Run、用户点名的成员、消息里提到的成员（[点名成员](2026-10-09-kennel-named-members.md)）、调度器交给模型的工作提供项、本会话已接纳的工作任务，以及已启动的协作和其结论（见[评审结论](2026-10-09-kennel-review-conclusions.md)）。调度器把每个提供了候选的类型的 `guidance` 加进选择指令，并记录两个通用事件：启动前的 `kennel/dispatch-collaboration`，和启动后带有各成员分工的 `kennel/dispatch-collaboration-admitted`。两者都是 `ignorable`。
+类型有名称、给人看的 `label` 和 `roleLabels`、`guidance` 句子、`offer(facts)`、`start(request)`，以及可选的 `outcome(record, run, results)`，其结论可以带有 `parts`，即每个成员一条结论和意见。房间用这些名称列出每个协作，所以新类型不需要房间代码。`facts` 包含成员、他们的执行入口、本会话按新到旧排列的 Run、用户点名的成员、消息里提到的成员（[点名成员](2026-10-09-kennel-named-members.md)）、调度器交给模型的工作提供项、本会话已接纳的工作任务，以及已启动的协作和其结论（见[评审结论](2026-10-09-kennel-review-conclusions.md)）。调度器把每个提供了候选的类型的 `guidance` 加进选择指令，并记录两个通用事件：启动前的 `kennel/dispatch-collaboration`，和启动后带有各成员分工的 `kennel/dispatch-collaboration-admitted`。两者都是 `ignorable`。
 
 候选 id 必须写明提供候选所依赖的一切。Host 不给类型单独的确认步骤：它在记录之前和启动之前，用新的 facts 再次调用 `offer`，并拒绝 id 已不再提供的选择。所以类型不会漏掉对成员、入口、模型或对象的复查。Host 还拥有资源限制并随请求传入，类型不需要自己的限制。`bindKennelMember` 和 `qualifiedKennelMembers` 让类型使用与调度器处理工作时相同的入口和模型规则。
 

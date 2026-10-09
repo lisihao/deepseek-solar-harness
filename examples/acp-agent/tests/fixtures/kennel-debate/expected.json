@@ -151,6 +151,29 @@
     "operator.providers"
   ],
   "hasSealedGrant": true,
+  "roomCollaborations": [
+    {
+      "label": "辩论",
+      "state": "completed",
+      "members": [
+        [
+          "gamma",
+          "建议者",
+          null
+        ],
+        [
+          "alpha",
+          "证伪者",
+          null
+        ],
+        [
+          "beta",
+          "裁判",
+          null
+        ]
+      ]
+    }
+  ],
   "room": {
     "status": 200,
     "tasks": [

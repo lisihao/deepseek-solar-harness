@@ -54,6 +54,8 @@ export function targetOf(candidate: KennelCollaborationCandidate): ReviewTarget 
   return { runId: target.runId, title: target.title, authors: target.authors as string[] }
 }
 
+const VERDICT_LABEL: Record<ReviewVerdict['verdict'], string> = { approved: '通过', changes: '需要修改', unclear: '结论不明' }
+
 /** Comments from an earlier review that a repeated review checks again. */
 export interface PreviousComment {
   readonly name: string
@@ -103,13 +105,15 @@ export function reviewOutcome(
     return { gouziId: member.gouziId, name: member.name, ...read }
   })
   const details = { verdicts, review: record.runId }
+  // The room shows each reviewer's conclusion beside the member, and the comments under it.
+  const parts = verdicts.map(value => ({ gouziId: value.gouziId, label: VERDICT_LABEL[value.verdict], text: value.comment }))
   const word = record.collaboration === KENNEL_REREVIEW_KIND ? '复审' : '评审'
   if (run.state !== 'completed' && run.state !== 'failed' && run.state !== 'cancelled' && run.state !== 'indeterminate') {
-    return { subjectRunId: target.runId, state: 'pending', label: `${word}中（${names(verdicts)}）`, details }
+    return { subjectRunId: target.runId, state: 'pending', label: `${word}中（${names(verdicts)}）`, parts, details }
   }
   const changes = verdicts.filter(value => value.verdict === 'changes')
-  if (changes.length > 0) return { subjectRunId: target.runId, state: 'negative', label: `${word}：待修改（${names(changes)}）`, details }
+  if (changes.length > 0) return { subjectRunId: target.runId, state: 'negative', label: `${word}：待修改（${names(changes)}）`, parts, details }
   const unclear = verdicts.filter(value => value.verdict !== 'approved')
-  if (unclear.length > 0) return { subjectRunId: target.runId, state: 'unclear', label: `${word}：结论不明（${names(unclear)}）`, details }
-  return { subjectRunId: target.runId, state: 'positive', label: `${word}：已通过（${names(verdicts)}）`, details }
+  if (unclear.length > 0) return { subjectRunId: target.runId, state: 'unclear', label: `${word}：结论不明（${names(unclear)}）`, parts, details }
+  return { subjectRunId: target.runId, state: 'positive', label: `${word}：已通过（${names(verdicts)}）`, parts, details }
 }

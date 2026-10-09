@@ -224,6 +224,11 @@ try {
     authorReceivedTheComment: reworkTask !== undefined && JSON.stringify(reworkTask.request).includes(BETA_COMMENT)
       && !JSON.stringify(reworkTask.request).includes('gamma 核对了'),
     externalMethods: [...new Set(methods)].sort(),
+    // What the room lists for each collaboration: names for people, the task it is about, and who did what.
+    roomCollaborations: (room.collaborations ?? []).map(collaboration => ({
+      label: collaboration.label, state: collaboration.state, subject: collaboration.subject?.title, outcome: collaboration.outcome?.label,
+      members: collaboration.members.map(member => [member.gouziId, member.roleLabel, member.conclusion]),
+    })),
     room: { status, tasks: room.tasks.map(task => ({ state: task.state,
       nodes: task.nodes.map(node => ({
         gouziId: node.gouziId, state: node.state, accepted: node.result?.accepted, preview: node.result?.outputPreview,

@@ -260,7 +260,7 @@ function pairKind(extra: Partial<KennelCollaborationKind> = {}) {
     starts.push(request)
     return { runId: 'pair-1', assignments: request.candidate.members.map(value => ({ gouziId: value.gouziId, role: 'peer' })) }
   })
-  const kind: KennelCollaborationKind = { kind: 'pair', guidance: 'PAIR-GUIDANCE', offer, start: startMock, ...extra }
+  const kind: KennelCollaborationKind = { kind: 'pair', label: '搭档', guidance: 'PAIR-GUIDANCE', offer, start: startMock, ...extra }
   return { kind, offer, starts, startMock }
 }
 async function collaborationFixture(extra: Partial<KennelCollaborationKind> = {}) {
@@ -357,7 +357,7 @@ it('gives kinds the work offers, the work and collaborations already admitted wi
   const facts = f.offer.mock.calls[0]![0]
   expect(facts.work).toEqual([{ runId: 'old-work', offer: offerOnly }])
   expect(facts.earlier).toEqual([{
-    collaboration: 'pair', runId: 'old-pair-run', messageId: pairMessage, candidate: peerCandidate,
+    collaboration: 'pair', runId: 'old-pair-run', messageId: pairMessage, candidate: peerCandidate, assignments: [],
     outcome: { subjectRunId: 'old-work', state: 'negative', label: 'LABEL', details: { n: 1 } },
   }])
   // Each fresh offer (the first, then the two confirmations) reads the outcomes again.
