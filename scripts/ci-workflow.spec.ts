@@ -87,7 +87,8 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('windows-2025')
     expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe(pullRequestImpactIf)
+    expect(windowsNative.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+    expect(windowsNative.needs).toBeUndefined()
     const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (
       isRecord(step) && typeof step.run === 'string'
     ))
@@ -156,7 +157,7 @@ describe('CI workflow', () => {
     }
 
     // What bounds the cost of exempting push: a master push may only carry the
-    // cache seeder and the two drills. Any job reachable on push would start
+    // cache seeder, the observational native Windows run, and the two drills. Any job reachable on push would start
     // accumulating uncancelled runs, so the set is pinned here.
     //
     // Classification is an exact allowlist of the conditions in use, not a
@@ -181,7 +182,7 @@ describe('CI workflow', () => {
       })
       .map(([name]) => name)
       .sort()
-    expect(pushReachable).toEqual(['serial-linux-selfhosted', 'serial-windows', 'wine-apt-cache'])
+    expect(pushReachable).toEqual(['serial-linux-selfhosted', 'serial-windows', 'windows-native', 'wine-apt-cache'])
 
     // Why workflow_dispatch must keep cancelling: each benchmark fans out to a
     // dozen larger runners at once, in this same group on master. If it stopped
@@ -268,7 +269,7 @@ describe('CI workflow', () => {
     expect(JSON.stringify(docsOnly.steps)).toContain('pnpm run doc-sync')
     expect(aggregate.needs).toContain('docs-only')
 
-    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-scheduling', 'python-runtime', 'windows', 'windows-native']) {
+    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-scheduling', 'python-runtime', 'windows']) {
       const job = workflowJob(workflow, jobName)
       expect(job.needs, `${jobName} must depend on impact classification`).toEqual(['pr-impact'])
       expect(job.if, `${jobName} must fail open only after a classified full PR`).toBe(pullRequestImpactIf)
