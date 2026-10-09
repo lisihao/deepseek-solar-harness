@@ -19,7 +19,7 @@ import { OrchestrationStore } from '../src/store.ts'
 const roots: string[] = []
 const run = promisify(execFile)
 afterEach(async () => {
-  for (const root of roots.splice(0)) await import('node:fs/promises').then(fs => fs.rm(root, { recursive: true, force: true }))
+  for (const root of roots.splice(0)) await import('node:fs/promises').then(fs => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
 })
 
 async function temporary(): Promise<string> {
