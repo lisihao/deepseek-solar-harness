@@ -11,6 +11,14 @@
   "offered": [
     [
       {
+        "gouziId": "gamma",
+        "generation": 1,
+        "name": "gamma",
+        "role": "research",
+        "operatorId": "gouzi.gamma.codex",
+        "model": "gpt-5.6-luna"
+      },
+      {
         "gouziId": "alpha",
         "generation": 1,
         "name": "alpha",
@@ -25,19 +33,16 @@
         "role": "research",
         "operatorId": "gouzi.beta.codex",
         "model": "gpt-5.6-sol"
-      },
-      {
-        "gouziId": "gamma",
-        "generation": 1,
-        "name": "gamma",
-        "role": "research",
-        "operatorId": "gouzi.gamma.codex",
-        "model": "gpt-5.6-luna"
       }
     ]
   ],
   "started": {
     "members": [
+      {
+        "gouziId": "gamma",
+        "operatorId": "gouzi.gamma.codex",
+        "model": "gpt-5.6-luna"
+      },
       {
         "gouziId": "alpha",
         "operatorId": "gouzi.alpha.codex",
@@ -47,24 +52,19 @@
         "gouziId": "beta",
         "operatorId": "gouzi.beta.codex",
         "model": "gpt-5.6-sol"
-      },
-      {
-        "gouziId": "gamma",
-        "operatorId": "gouzi.gamma.codex",
-        "model": "gpt-5.6-luna"
       }
     ],
     "assignments": [
       {
-        "gouziId": "alpha",
+        "gouziId": "gamma",
         "role": "constructive-proposer"
       },
       {
-        "gouziId": "beta",
+        "gouziId": "alpha",
         "role": "skeptical-falsifier"
       },
       {
-        "gouziId": "gamma",
+        "gouziId": "beta",
         "role": "decision-judge"
       }
     ]
@@ -77,20 +77,20 @@
       [
         "constructive-proposer",
         "participant",
-        "gouzi.alpha.codex",
-        "gpt-5.6-sol"
+        "gouzi.gamma.codex",
+        "gpt-5.6-luna"
       ],
       [
         "skeptical-falsifier",
         "participant",
-        "gouzi.beta.codex",
+        "gouzi.alpha.codex",
         "gpt-5.6-sol"
       ],
       [
         "decision-judge",
         "judge",
-        "gouzi.gamma.codex",
-        "gpt-5.6-luna"
+        "gouzi.beta.codex",
+        "gpt-5.6-sol"
       ]
     ],
     "settledTurns": 3,
@@ -100,6 +100,13 @@
     {
       "state": "completed",
       "recipients": [
+        {
+          "gouziId": "gamma",
+          "generation": 1,
+          "operatorIds": [
+            "gouzi.gamma.codex"
+          ]
+        },
         {
           "gouziId": "alpha",
           "generation": 1,
@@ -113,13 +120,6 @@
           "operatorIds": [
             "gouzi.beta.codex"
           ]
-        },
-        {
-          "gouziId": "gamma",
-          "generation": 1,
-          "operatorIds": [
-            "gouzi.gamma.codex"
-          ]
         }
       ],
       "singular": null,
@@ -129,17 +129,17 @@
   ],
   "executed": [
     {
-      "member": "alpha",
-      "slotId": "constructive-proposer",
-      "model": "gpt-5.6-sol"
-    },
-    {
       "member": "gamma",
-      "slotId": "decision-judge",
+      "slotId": "constructive-proposer",
       "model": "gpt-5.6-luna"
     },
     {
       "member": "beta",
+      "slotId": "decision-judge",
+      "model": "gpt-5.6-sol"
+    },
+    {
+      "member": "alpha",
       "slotId": "skeptical-falsifier",
       "model": "gpt-5.6-sol"
     }
@@ -151,6 +151,29 @@
     "operator.providers"
   ],
   "hasSealedGrant": true,
+  "roomCollaborations": [
+    {
+      "label": "辩论",
+      "state": "completed",
+      "members": [
+        [
+          "gamma",
+          "建议者",
+          null
+        ],
+        [
+          "alpha",
+          "证伪者",
+          null
+        ],
+        [
+          "beta",
+          "裁判",
+          null
+        ]
+      ]
+    }
+  ],
   "room": {
     "status": 200,
     "tasks": [
@@ -158,17 +181,17 @@
         "state": "completed",
         "nodes": [
           {
+            "gouziId": "gamma",
+            "state": "passed",
+            "accepted": true
+          },
+          {
             "gouziId": "alpha",
             "state": "passed",
             "accepted": true
           },
           {
             "gouziId": "beta",
-            "state": "passed",
-            "accepted": true
-          },
-          {
-            "gouziId": "gamma",
             "state": "passed",
             "accepted": true
           }

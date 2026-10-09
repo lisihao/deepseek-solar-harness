@@ -29,6 +29,7 @@ function request(members: KennelCollaborationMember[], patch: Partial<KennelColl
       contextTokens: 1, taskTimeoutMs: 1, titleMaxChars: 1,
       generationLimits: { maxTokens: 1, maxOutputBytes: 1 }, workspaceToolLimits: {} as never,
     },
+    workGraph: () => { throw new Error('a Debate gives no member work') },
     ...patch,
   }
 }
@@ -54,7 +55,7 @@ async function setup(options: { state?: string; approve?: () => Promise<unknown>
 /** Facts for members that each hold the given projects, on one codex entry with two models. */
 function facts(ids: string[], patch: Partial<KennelCollaborationFacts> = {}, scopes: string[] = ['/project']): KennelCollaborationFacts {
   return {
-    sessionId: 's', runs: [],
+    sessionId: 's', runs: [], workOffers: [], work: [], earlier: [], mentioned: [],
     members: ids.map(id => ({ gouziId: id, generation: 1, membership: 'enabled', name: id, role: 'research' })) as never,
     entries: ids.map(id => ({
       gouziId: id, generation: 1, projectScopes: scopes,
@@ -78,6 +79,20 @@ describe('Debate kennel kind', () => {
     expect(await kind.offer(facts(['a', 'b', 'c'], { recipient: { gouziId: 'a', generation: 1 } }))).toEqual([])
     // Each project is offered on its own members.
     expect((await kind.offer(facts(['a', 'b', 'c'], {}, ['/one', '/two']))).map(value => value.workspace)).toEqual(['/one', '/two'])
+  })
+
+  it('runs the Debate on the members the message names, in the order it names them, and fills a short list', async () => {
+    const { kind } = await setup()
+    const named = (...ids: string[]) => ids.map(id => ({ gouziId: id, generation: 1, name: id }))
+    const ids = async (mentioned: ReturnType<typeof named>) =>
+      (await kind.offer(facts(['a', 'b', 'c', 'd', 'e'], { mentioned })))[0]?.members.map(value => value.gouziId)
+    expect(await ids(named('e', 'c', 'a'))).toEqual(['e', 'c', 'a'])
+    expect(await ids(named('d', 'b', 'e', 'a'))).toEqual(['d', 'b', 'e', 'a'])
+    // Two names get a third member from the registry to judge.
+    expect(await ids(named('e', 'b'))).toEqual(['e', 'b', 'a'])
+    // A named member that cannot take part, or too many names, leaves no Debate rather than a different roster.
+    expect(await ids(named('ghost', 'b'))).toBeUndefined()
+    expect(await ids(named('a', 'b', 'c', 'd', 'e'))).toBeUndefined()
   })
 
   it('gives three members the proposer, falsifier, and judge roles and starts a valid Debate for them', async () => {
@@ -151,6 +166,26 @@ describe('Debate kennel kind', () => {
     await vi.waitFor(() => { expect(warn).toHaveBeenCalledWith(expect.stringContaining('approval refused')) })
   })
 
+  it('reports a Debate\'s state in the words of an orchestration run, and nothing when it cannot be read', async () => {
+    const record = { collaboration: 'debate', runId: 'debate-1', messageId: 'm', candidate: candidate([]), assignments: [] }
+    const stateOf = async (lifecycle: string | Error) => {
+      const ctx = new Context()
+      contexts.push(ctx)
+      ctx.provide('debates', { inspect: async () => { if (lifecycle instanceof Error) throw lifecycle; return { state: lifecycle } } } as never)
+      return kennelDebateKind(ctx).runState!(record)
+    }
+    const expected: Record<string, string> = {
+      planned: 'awaiting_approval', awaiting_approval: 'awaiting_approval', admitting: 'running', round_running: 'running', reviewing: 'running',
+      converged: 'running', next_round: 'running', synthesizing: 'running', completed: 'completed', max_rounds: 'completed',
+      budget_limited: 'completed', stopped: 'cancelled', failed: 'failed', indeterminate: 'indeterminate', somethingNew: 'running',
+    }
+    for (const [lifecycle, state] of Object.entries(expected)) expect(await stateOf(lifecycle), lifecycle).toBe(state)
+    expect(await stateOf(new Error('unknown run'))).toBeUndefined()
+    const bare = new Context()
+    contexts.push(bare)
+    expect(await kennelDebateKind(bare).runState!(record)).toBeUndefined()
+  })
+
   it('registers with the kennel registry for the lifetime of its plugin and tells the model when to choose it', async () => {
     const ctx = new Context()
     contexts.push(ctx)
@@ -164,6 +199,10 @@ describe('Debate kennel kind', () => {
     await fiber.await()
     expect(registered.map(value => value.kind)).toEqual(['debate'])
     expect(registered[0]?.guidance).toContain('辩论')
+    expect(registered[0]?.label).toBe('辩论')
+    expect(registered[0]?.roleLabels).toEqual({
+      'constructive-proposer': '建议者', 'skeptical-falsifier': '证伪者', 'evidence-auditor': '证据审计者', 'decision-judge': '裁判',
+    })
     await fiber.dispose()
     await vi.waitFor(() => { expect(dispose).toHaveBeenCalledOnce() })
   })

@@ -40,7 +40,7 @@ function facts(
   ids: string[], patch: Partial<KennelCollaborationFacts> = {}, entry: Record<string, unknown> = {},
 ): KennelCollaborationFacts {
   return {
-    sessionId: 's', runs: [run()],
+    sessionId: 's', runs: [run()], workOffers: [], work: [], earlier: [], mentioned: [],
     members: ids.map(id => ({ gouziId: id, generation: 1, membership: 'enabled', name: id.toUpperCase(), role: 'research' })) as never,
     entries: ids.map(id => ({
       gouziId: id, generation: 1, projectScopes: ['/project'],
@@ -96,6 +96,31 @@ describe('review kind offers', () => {
     expect(await offer({ ...disabled, members: disabled.members.map(value => ({ ...value, membership: 'disabled' })) as never })).toEqual([])
   })
 
+  it('reviews with the members the message names, in that order, and never with the people who did the task', async () => {
+    const people = ['author', 'x', 'y', 'z']
+    const named = (...ids: string[]) => ids.map(id => ({ gouziId: id, generation: 1, name: id.toUpperCase() }))
+    const reviewers = async (mentioned: ReturnType<typeof named>, runs?: unknown[]) =>
+      (await offer(facts(people, { mentioned, ...runs === undefined ? {} : { runs: runs as never } })))[0]?.members
+        .map(value => value.gouziId)
+    expect(await reviewers(named('z', 'x'))).toEqual(['z', 'x'])
+    // Naming the author as well as a reviewer asks about the author's work; only the reviewer reviews.
+    expect(await reviewers(named('author', 'y'))).toEqual(['y'])
+    // Naming only the author is not choosing reviewers: the registry order applies.
+    expect(await reviewers(named('author'))).toEqual(['x', 'y'])
+    // A named member who cannot review leaves no review rather than a different one, and more names than reviewers is refused.
+    expect(await reviewers(named('x', 'ghost'))).toBeUndefined()
+    expect(await reviewers(named('x', 'y', 'z'))).toBeUndefined()
+    // Authors of a multi-member task are all excluded from the names.
+    expect(await reviewers(named('author', 'x', 'y'), [run({ authors: ['author', 'x'] })])).toEqual(['y'])
+  })
+
+  it('lets the addressed member override the names', async () => {
+    const offered = await offer(facts(['author', 'x', 'y'], {
+      recipient: { gouziId: 'y', generation: 1 }, mentioned: [{ gouziId: 'x', generation: 1, name: 'X' }],
+    }))
+    expect(offered[0]?.members.map(value => value.gouziId)).toEqual(['y'])
+  })
+
   it('offers only the addressed member, and only when that member did not do the task', async () => {
     const people = ['author', 'x', 'y']
     const by = (gouziId: string, generation = 1) => offer(facts(people, { recipient: { gouziId, generation } }))
@@ -135,6 +160,7 @@ function chosen(reviewers: string[]): KennelCollaborationRequest {
       generationLimits: { maxTokens: 4096, maxOutputBytes: 262_144 }, workspaceToolLimits: { maxReadBytes: 1 } as never,
     },
     runtimeContext: { version: 1, sourceSessionId: 's', contextSnapshotMessageId: 'ctx', sections: [] },
+    workGraph: () => { throw new Error('a review gives no member work') },
   }
 }
 
@@ -217,10 +243,12 @@ describe('review kind start', () => {
 
 describe('review plugin', () => {
   it('registers the kind for the plugin lifetime with guidance for the selection model, and bounds its configuration', async () => {
-    expect(defaults).toEqual({ maxReviewers: 2, maxTargets: 5 })
+    expect(defaults).toEqual({ maxReviewers: 2, maxTargets: 5, maxReworks: 2 })
     expect(() => Config({ maxReviewers: 0 })).toThrow()
     expect(() => Config({ maxReviewers: 5 })).toThrow()
     expect(() => Config({ maxTargets: 0 })).toThrow()
+    expect(() => Config({ maxReworks: 0 })).toThrow()
+    expect(() => Config({ maxReworks: 6 })).toThrow()
     expect(plugin.inject).toEqual(['kennelCollaborations', 'orchestrations'])
     const ctx = new Context()
     contexts.push(ctx)
@@ -233,9 +261,12 @@ describe('review plugin', () => {
     ctx.provide('orchestrations', {} as never)
     const fiber = ctx.plugin(plugin, defaults)
     await fiber.await()
-    expect(registered.map(value => value.kind)).toEqual(['review'])
+    expect(registered.map(value => value.kind)).toEqual(['review', 'rework', 'rereview'])
     expect(registered[0]?.guidance).toContain('评审')
+    expect(registered.map(value => value.label)).toEqual(['评审', '返工', '复审'])
+    expect(registered[0]?.roleLabels).toEqual({ reviewer: '评审人' })
+    expect(registered.map(value => typeof value.outcome)).toEqual(['function', 'function', 'function'])
     await fiber.dispose()
-    await vi.waitFor(() => { expect(dispose).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(dispose).toHaveBeenCalledTimes(3) })
   })
 })

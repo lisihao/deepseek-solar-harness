@@ -1268,10 +1268,12 @@ export interface Config {
   readonly maxReviewers?: number
   /** Most recent finished tasks offered for review. */
   readonly maxTargets?: number
+  /** Most times one task is handed back to its author, counting the rework of a rework. */
+  readonly maxReworks?: number
 }
 ```
 
-Source: [`packages/orchestration/kennel-review/src/index.ts:33`](../packages/orchestration/kennel-review/src/index.ts)
+Source: [`packages/orchestration/kennel-review/src/config.ts:5`](../packages/orchestration/kennel-review/src/config.ts)
 
 <a id="deepseek-aidsh-llm-deepseek"></a>
 
@@ -3680,7 +3682,7 @@ export interface DispatchModelConfig {
 
 Depends on: [`LogicalTaskGraphV1`](../packages/orchestration/orchestration/src/index.ts) · [`OrchestrationNodeSpecV1`](../packages/orchestration/orchestration/src/index.ts)
 
-Source: [`packages/orchestration/ui-gouzi/src/index.ts:52`](../packages/orchestration/ui-gouzi/src/index.ts)
+Source: [`packages/orchestration/ui-gouzi/src/index.ts:54`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

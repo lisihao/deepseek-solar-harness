@@ -12,11 +12,13 @@ import {
   type DebateRoleSpecV1,
 } from '@deepseek-ai/dsh-debate'
 import {
+  kennelRoster,
   qualifiedKennelMembers,
   type KennelCollaborationCandidate,
   type KennelCollaborationFacts,
   type KennelCollaborationKind,
   type KennelCollaborationMember,
+  type KennelCollaborationRecord,
   type KennelCollaborationRequest,
   type KennelCollaborationStarted,
 } from '@deepseek-ai/dsh-orchestration'
@@ -71,8 +73,10 @@ function validate(members: readonly KennelCollaborationMember[]): void {
 
 /**
  * Offer one Debate per project that enough members can argue.
- * Members are taken in registry order and the first `MAX_MEMBERS` of them argue; roles follow that order, so the
- * judge is never a member who also argued. A message addressed to one member is not a Debate.
+ * Members the message names argue in the order it names them; otherwise members are taken in registry order. A named
+ * member that cannot take part leaves no Debate in that project, and fewer than three names are completed from the
+ * other members. Roles follow the order, so the judge is never a member who also argued. A message addressed to one
+ * member is not a Debate.
  * @param facts - members and execution entries.
  * @returns one candidate per project with at least `MIN_MEMBERS` qualified members.
  */
@@ -80,9 +84,8 @@ function offer(facts: KennelCollaborationFacts): KennelCollaborationCandidate[] 
   if (facts.recipient !== undefined) return []
   const workspaces = new Set(facts.entries.flatMap(entry => entry.projectScopes))
   return [...workspaces].flatMap((workspace) => {
-    const qualified = qualifiedKennelMembers(facts, workspace)
-    if (qualified.length < MIN_MEMBERS) return []
-    const members = qualified.slice(0, MAX_MEMBERS)
+    const members = kennelRoster(qualifiedKennelMembers(facts, workspace), facts.mentioned, { min: MIN_MEMBERS, max: MAX_MEMBERS })
+    if (members === undefined) return []
     return [{
       kind: 'collaboration' as const,
       collaboration: KENNEL_DEBATE_KIND,
@@ -148,6 +151,28 @@ async function start(ctx: Context, request: KennelCollaborationRequest): Promise
   }
 }
 
+/** Debate lifecycle states in the words of an orchestration run, which is what the room can word. */
+const RUN_STATE: Readonly<Record<string, string>> = {
+  planned: 'awaiting_approval', awaiting_approval: 'awaiting_approval',
+  admitting: 'running', round_running: 'running', reviewing: 'running', converged: 'running', next_round: 'running', synthesizing: 'running',
+  completed: 'completed', max_rounds: 'completed', budget_limited: 'completed',
+  stopped: 'cancelled', failed: 'failed', indeterminate: 'indeterminate',
+}
+
+/**
+ * Read the state of a Debate, which the Debate service keeps instead of the orchestration service.
+ * @param ctx - context holding the Debate service.
+ * @param record - the Debate the kennel started.
+ * @returns the state as an orchestration run state, or undefined when the Debate cannot be read.
+ */
+async function runState(ctx: Context, record: Omit<KennelCollaborationRecord, 'outcome'>): Promise<string | undefined> {
+  const debates = ctx.get('debates')
+  if (debates === undefined) return undefined
+  // A Debate this service does not know, or a service that is down, leaves the room without a state; it must not fail the room read.
+  const snapshot = await debates.inspect(record.runId).catch(() => undefined)
+  return snapshot === undefined ? undefined : RUN_STATE[snapshot.state] ?? 'running'
+}
+
 /**
  * Describe the Debate kind for the kennel registry.
  * @param ctx - context holding the Debate service.
@@ -156,9 +181,14 @@ async function start(ctx: Context, request: KennelCollaborationRequest): Promise
 export function kennelDebateKind(ctx: Context): KennelCollaborationKind {
   return {
     kind: KENNEL_DEBATE_KIND,
-    guidance: '用户明确要求多只狗子一起辩论、讨论同一个问题时选它；它不修改文件，也不评审已完成的任务',
+    label: '辩论',
+    roleLabels: {
+      'constructive-proposer': '建议者', 'skeptical-falsifier': '证伪者', 'evidence-auditor': '证据审计者', 'decision-judge': '裁判',
+    },
+    guidance: '用户明确要求多只狗子一起辩论、讨论同一个问题时选它；用户点了名的狗子按点名顺序参加，候选里就是这些狗子；它不修改文件，也不评审已完成的任务',
     offer,
     start: request => start(ctx, request),
+    runState: record => runState(ctx, record),
   }
 }
 

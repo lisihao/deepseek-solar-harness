@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { authorizeRemoteRequest, type RemoteRequestAuthority } from '@deepseek-ai/dsh-host-remote-auth'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import {
   countsTowardGouziLimit,
   GOUZI_MEMBER_LIMIT,
@@ -35,6 +36,7 @@ import {
   type GouziModelOptions,
   type GouziProjectsCheck,
 } from './contracts.ts'
+import { sessionCollaborations } from './history.ts'
 import { gouziRoom, gouziRoomEvidence } from './room.ts'
 import './host-service.ts'
 import type { GouziProjectSource } from './host-service.ts'
@@ -575,9 +577,15 @@ export function apply(ctx: Context, config: Config = {}): void {
         const artifact = await gouziRoomEvidence(ctx.orchestrations, sessionId, runId, evidenceRef)
         return artifact === undefined ? refusal(404, 'GOUZI_EVIDENCE_NOT_FOUND', '这个会话没有保留该证据') : { status: 200, body: artifact }
       }
+      // Outcomes come from the live Session's log; a Session that is not loaded shows its tasks without them.
+      const session = ctx.sessions.get(SessionId(sessionId))
+      const kinds = ctx.get('kennelCollaborations')?.kinds() ?? []
+      const collaborations = session === undefined ? [] : await sessionCollaborations(ctx.orchestrations, kinds, session.events, sessionId)
       return {
         status: 200,
-        body: await gouziRoom(ctx.orchestrations, control, sessionId, await dashboard(ctx, control, authority), roomPollIntervalMs),
+        body: await gouziRoom(
+          ctx.orchestrations, control, sessionId, await dashboard(ctx, control, authority), roomPollIntervalMs, collaborations, kinds,
+        ),
       }
     }
     if (request.method !== 'POST') return 'method-not-allowed'

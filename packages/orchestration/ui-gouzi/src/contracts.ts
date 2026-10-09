@@ -238,6 +238,47 @@ export interface GouziRoomNodeV1 {
   readonly result?: GouziRoomResultV1
 }
 
+/** How a collaboration about a task ended up, as the kind that started it reports it. */
+export interface GouziRoomOutcomeV1 {
+  /** Registered kind, such as `review`. */
+  readonly collaboration: string
+  /** Run the collaboration started. */
+  readonly runId: string
+  readonly state: 'pending' | 'positive' | 'negative' | 'unclear'
+  /** One short line for people. */
+  readonly label: string
+}
+
+/** One member's part in a collaboration. */
+export interface GouziRoomCollaborationMemberV1 {
+  readonly gouziId: string
+  /** The role the kind gave the member. */
+  readonly role: string
+  /** The role in words for people; the role itself when the kind has none. */
+  readonly roleLabel: string
+  /** The member's conclusion, when the kind reports one per member. */
+  readonly conclusion?: string
+  /** The member's own comments, Markdown. */
+  readonly text?: string
+}
+
+/** A collaboration this session started, as the room shows it. */
+export interface GouziRoomCollaborationV1 {
+  /** Registered kind, such as `review`. */
+  readonly collaboration: string
+  /** The kind in words for people. */
+  readonly label: string
+  /** Run the collaboration started. */
+  readonly runId: string
+  /** State of that run. */
+  readonly state: string
+  /** The task the collaboration is about, when its kind says so. */
+  readonly subject?: { readonly runId: string; readonly title: string }
+  /** How it ended up, when its kind reports an outcome. */
+  readonly outcome?: { readonly state: 'pending' | 'positive' | 'negative' | 'unclear'; readonly label: string }
+  readonly members: readonly GouziRoomCollaborationMemberV1[]
+}
+
 /** Task admitted by this exact source session. */
 export interface GouziRoomTaskV1 {
   readonly runId: string
@@ -247,6 +288,8 @@ export interface GouziRoomTaskV1 {
   readonly createdAt: string
   readonly updatedAt: string
   readonly nodes: readonly GouziRoomNodeV1[]
+  /** Collaborations about this task that report an outcome, oldest first; absent when there are none. */
+  readonly outcomes?: readonly GouziRoomOutcomeV1[]
 }
 
 /** Read-only session room: roster, actual execution registrations, and admitted tasks. */
@@ -272,4 +315,6 @@ export interface GouziRoomSnapshotV1 {
     }[]
   }[]
   readonly tasks: readonly GouziRoomTaskV1[]
+  /** Collaborations this session started, oldest first; absent when there are none. */
+  readonly collaborations?: readonly GouziRoomCollaborationV1[]
 }

@@ -45,6 +45,62 @@ describe('Gouzi room', () => {
     expect(room.tasks[0]!.nodes[0]).toMatchObject({ gouziId: 'member', result: { time: event.time, sequence: 5, accepted: true, operatorId: 'actual.provider' } })
     expect(await gouziRoom(f.service, f.control, 'empty', dashboard, 250)).toMatchObject({ tasks: [] })
   })
+  it('attaches the outcome of a collaboration to the task it is about and leaves other tasks without the field', async () => {
+    const other = { ...run, runId: OrchestrationRunId('run-2') }
+    const f = fixture([run, other])
+    const outcome = (subjectRunId: string, state: 'negative' | 'positive', label: string, runId = 'review-1') => ({
+      collaboration: 'review', runId, messageId: 'm', candidate: {} as never, assignments: [], outcome: { subjectRunId, state, label, details: {} },
+    })
+    const room = await gouziRoom(f.service, f.control, 'session-a', dashboard, 250, [
+      outcome('run-1', 'negative', '评审：待修改（乙）'), outcome('run-1', 'positive', '评审：已通过（丙）', 'review-2'),
+      { collaboration: 'debate', runId: 'debate-1', messageId: 'm', candidate: {} as never, assignments: [] },
+    ])
+    expect(room.tasks[0]!.outcomes).toEqual([
+      { collaboration: 'review', runId: 'review-1', state: 'negative', label: '评审：待修改（乙）' },
+      { collaboration: 'review', runId: 'review-2', state: 'positive', label: '评审：已通过（丙）' },
+    ])
+    expect(room.tasks[1]).not.toHaveProperty('outcomes')
+  })
+  it('shows each collaboration with the names the kind gives it, its members\' roles and conclusions, and the task it is about', async () => {
+    const reviewRun = { ...run, runId: OrchestrationRunId('review-1'), title: 'Review', state: 'completed' as const }
+    const f = fixture([run, reviewRun])
+    const kinds = [
+      { kind: 'review', label: '评审', roleLabels: { reviewer: '评审人' }, guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')) },
+      // A kind whose runs another service keeps reports their state itself.
+      { kind: 'external', label: '外部', guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')), runState: async () => 'running' },
+      { kind: 'silent', label: '静默', guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')), runState: async () => undefined },
+    ]
+    const records = [
+      {
+        collaboration: 'review', runId: 'review-1', messageId: 'm', candidate: {} as never,
+        assignments: [{ gouziId: 'x', role: 'reviewer' }, { gouziId: 'y', role: 'reviewer' }, { gouziId: 'z', role: 'mystery' }],
+        outcome: {
+          subjectRunId: 'run-1', state: 'negative' as const, label: '评审：待修改（乙）', details: {},
+          parts: [{ gouziId: 'x', label: '需要修改', text: '缺测试' }, { gouziId: 'y', label: '通过', text: '' }],
+        },
+      },
+      // A collaboration whose kind is gone, whose run is gone, and that reports no outcome still shows what is known.
+      { collaboration: 'ghost', runId: 'gone', messageId: 'm2', candidate: {} as never, assignments: [{ gouziId: 'x', role: 'seat' }] },
+      { collaboration: 'external', runId: 'elsewhere', messageId: 'm3', candidate: {} as never, assignments: [] },
+      { collaboration: 'silent', runId: 'nowhere', messageId: 'm4', candidate: {} as never, assignments: [] },
+    ]
+    const room = await gouziRoom(f.service, f.control, 'session-a', dashboard, 250, records, kinds)
+    expect(room.collaborations).toEqual([
+      {
+        collaboration: 'review', label: '评审', runId: 'review-1', state: 'completed', subject: { runId: 'run-1', title: 'Task' },
+        outcome: { state: 'negative', label: '评审：待修改（乙）' },
+        members: [
+          { gouziId: 'x', role: 'reviewer', roleLabel: '评审人', conclusion: '需要修改', text: '缺测试' },
+          { gouziId: 'y', role: 'reviewer', roleLabel: '评审人', conclusion: '通过' },
+          { gouziId: 'z', role: 'mystery', roleLabel: 'mystery' },
+        ],
+      },
+      { collaboration: 'ghost', label: 'ghost', runId: 'gone', state: 'unknown', members: [{ gouziId: 'x', role: 'seat', roleLabel: 'seat' }] },
+      { collaboration: 'external', label: '外部', runId: 'elsewhere', state: 'running', members: [] },
+      { collaboration: 'silent', label: '静默', runId: 'nowhere', state: 'unknown', members: [] },
+    ])
+    expect((await gouziRoom(f.service, f.control, 'session-a', dashboard, 250)).collaborations).toBeUndefined()
+  })
   it.each([{ attempt: 1 }, { generation: 2 }, { data: { ...event.data, operatorId: 'wrong' } }, { data: { code: 'FAILED' } }])('omits stale or unattributable results: %j', async (patch) => {
     const f = fixture([run], [{ ...event, ...patch }])
     expect((await gouziRoom(f.service, f.control, 'session-a', dashboard, 250)).tasks[0]!.nodes[0]!.result).toBeUndefined()
