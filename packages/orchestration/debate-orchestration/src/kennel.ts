@@ -12,6 +12,7 @@ import {
   type DebateRoleSpecV1,
 } from '@deepseek-ai/dsh-debate'
 import {
+  kennelRoster,
   qualifiedKennelMembers,
   type KennelCollaborationCandidate,
   type KennelCollaborationFacts,
@@ -71,8 +72,10 @@ function validate(members: readonly KennelCollaborationMember[]): void {
 
 /**
  * Offer one Debate per project that enough members can argue.
- * Members are taken in registry order and the first `MAX_MEMBERS` of them argue; roles follow that order, so the
- * judge is never a member who also argued. A message addressed to one member is not a Debate.
+ * Members the message names argue in the order it names them; otherwise members are taken in registry order. A named
+ * member that cannot take part leaves no Debate in that project, and fewer than three names are completed from the
+ * other members. Roles follow the order, so the judge is never a member who also argued. A message addressed to one
+ * member is not a Debate.
  * @param facts - members and execution entries.
  * @returns one candidate per project with at least `MIN_MEMBERS` qualified members.
  */
@@ -80,9 +83,8 @@ function offer(facts: KennelCollaborationFacts): KennelCollaborationCandidate[] 
   if (facts.recipient !== undefined) return []
   const workspaces = new Set(facts.entries.flatMap(entry => entry.projectScopes))
   return [...workspaces].flatMap((workspace) => {
-    const qualified = qualifiedKennelMembers(facts, workspace)
-    if (qualified.length < MIN_MEMBERS) return []
-    const members = qualified.slice(0, MAX_MEMBERS)
+    const members = kennelRoster(qualifiedKennelMembers(facts, workspace), facts.mentioned, { min: MIN_MEMBERS, max: MAX_MEMBERS })
+    if (members === undefined) return []
     return [{
       kind: 'collaboration' as const,
       collaboration: KENNEL_DEBATE_KIND,
@@ -156,7 +158,7 @@ async function start(ctx: Context, request: KennelCollaborationRequest): Promise
 export function kennelDebateKind(ctx: Context): KennelCollaborationKind {
   return {
     kind: KENNEL_DEBATE_KIND,
-    guidance: '用户明确要求多只狗子一起辩论、讨论同一个问题时选它；它不修改文件，也不评审已完成的任务',
+    guidance: '用户明确要求多只狗子一起辩论、讨论同一个问题时选它；用户点了名的狗子按点名顺序参加，候选里就是这些狗子；它不修改文件，也不评审已完成的任务',
     offer,
     start: request => start(ctx, request),
   }

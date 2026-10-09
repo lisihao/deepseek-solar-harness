@@ -40,7 +40,7 @@ function facts(
   ids: string[], patch: Partial<KennelCollaborationFacts> = {}, entry: Record<string, unknown> = {},
 ): KennelCollaborationFacts {
   return {
-    sessionId: 's', runs: [run()], workOffers: [], work: [], earlier: [],
+    sessionId: 's', runs: [run()], workOffers: [], work: [], earlier: [], mentioned: [],
     members: ids.map(id => ({ gouziId: id, generation: 1, membership: 'enabled', name: id.toUpperCase(), role: 'research' })) as never,
     entries: ids.map(id => ({
       gouziId: id, generation: 1, projectScopes: ['/project'],
@@ -94,6 +94,31 @@ describe('review kind offers', () => {
     expect(await offer(facts(['author', 'x'], { runs: [run({ workspace: '/elsewhere' })] }))).toEqual([])
     const disabled = facts(['author', 'x'])
     expect(await offer({ ...disabled, members: disabled.members.map(value => ({ ...value, membership: 'disabled' })) as never })).toEqual([])
+  })
+
+  it('reviews with the members the message names, in that order, and never with the people who did the task', async () => {
+    const people = ['author', 'x', 'y', 'z']
+    const named = (...ids: string[]) => ids.map(id => ({ gouziId: id, generation: 1, name: id.toUpperCase() }))
+    const reviewers = async (mentioned: ReturnType<typeof named>, runs?: unknown[]) =>
+      (await offer(facts(people, { mentioned, ...runs === undefined ? {} : { runs: runs as never } })))[0]?.members
+        .map(value => value.gouziId)
+    expect(await reviewers(named('z', 'x'))).toEqual(['z', 'x'])
+    // Naming the author as well as a reviewer asks about the author's work; only the reviewer reviews.
+    expect(await reviewers(named('author', 'y'))).toEqual(['y'])
+    // Naming only the author is not choosing reviewers: the registry order applies.
+    expect(await reviewers(named('author'))).toEqual(['x', 'y'])
+    // A named member who cannot review leaves no review rather than a different one, and more names than reviewers is refused.
+    expect(await reviewers(named('x', 'ghost'))).toBeUndefined()
+    expect(await reviewers(named('x', 'y', 'z'))).toBeUndefined()
+    // Authors of a multi-member task are all excluded from the names.
+    expect(await reviewers(named('author', 'x', 'y'), [run({ authors: ['author', 'x'] })])).toEqual(['y'])
+  })
+
+  it('lets the addressed member override the names', async () => {
+    const offered = await offer(facts(['author', 'x', 'y'], {
+      recipient: { gouziId: 'y', generation: 1 }, mentioned: [{ gouziId: 'x', generation: 1, name: 'X' }],
+    }))
+    expect(offered[0]?.members.map(value => value.gouziId)).toEqual(['y'])
   })
 
   it('offers only the addressed member, and only when that member did not do the task', async () => {

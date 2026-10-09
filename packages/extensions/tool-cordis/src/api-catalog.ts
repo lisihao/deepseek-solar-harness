@@ -5013,7 +5013,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'KennelCollaborationFacts',
-    declaration: 'export interface KennelCollaborationFacts {\n    readonly sessionId: string;\n    readonly members: readonly GouziMemberView[];\n    readonly entries: readonly KennelExecutionEntry[];\n    readonly runs: readonly OrchestrationRunSnapshot[];\n    readonly workOffers: readonly KennelWorkOffer[];\n    readonly work: readonly KennelWorkRecord[];\n    readonly earlier: readonly KennelCollaborationRecord[];\n    readonly recipient?: {\n        readonly gouziId: string;\n        readonly generation: number;\n    };\n}',
+    declaration: 'export interface KennelCollaborationFacts {\n    readonly sessionId: string;\n    readonly members: readonly GouziMemberView[];\n    readonly entries: readonly KennelExecutionEntry[];\n    readonly runs: readonly OrchestrationRunSnapshot[];\n    readonly workOffers: readonly KennelWorkOffer[];\n    readonly work: readonly KennelWorkRecord[];\n    readonly earlier: readonly KennelCollaborationRecord[];\n    readonly recipient?: {\n        readonly gouziId: string;\n        readonly generation: number;\n    };\n    readonly mentioned: readonly KennelMentionedMember[];\n}',
   },
   {
     name: 'KennelCollaborationKind',
@@ -5050,6 +5050,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KennelExecutionEntry',
     declaration: 'export type KennelExecutionEntry = Awaited<ReturnType<GouziControl[\'executionOperators\']>>[number];',
+  },
+  {
+    name: 'KennelMentionedMember',
+    declaration: 'export interface KennelMentionedMember {\n    readonly gouziId: string;\n    readonly generation: number;\n    readonly name: string;\n}',
   },
   {
     name: 'KennelWorkGraphInput',

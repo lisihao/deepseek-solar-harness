@@ -27,8 +27,8 @@
       {
         "target": "Summarize the parser for me.",
         "members": [
-          "beta",
-          "gamma"
+          "gamma",
+          "beta"
         ]
       }
     ],
@@ -52,11 +52,11 @@
       "collaboration": "review",
       "assignments": [
         {
-          "gouziId": "beta",
+          "gouziId": "gamma",
           "role": "reviewer"
         },
         {
-          "gouziId": "gamma",
+          "gouziId": "beta",
           "role": "reviewer"
         }
       ]
@@ -110,8 +110,8 @@
         "review-2:passed"
       ],
       "recipients": [
-        "beta",
-        "gamma"
+        "gamma",
+        "beta"
       ]
     },
     {
@@ -126,14 +126,14 @@
   ],
   "executed": [
     {
-      "member": "beta",
+      "member": "gamma",
       "nodeId": "review-1",
-      "model": "gpt-5.6-sol"
+      "model": "gpt-5.6-luna"
     },
     {
-      "member": "gamma",
+      "member": "beta",
       "nodeId": "review-2",
-      "model": "gpt-5.6-luna"
+      "model": "gpt-5.6-sol"
     },
     {
       "member": "alpha",
@@ -188,16 +188,16 @@
         "state": "completed",
         "nodes": [
           {
-            "gouziId": "beta",
-            "state": "passed",
-            "accepted": true,
-            "preview": "结论：需要修改\n- src/parse.ts 没处理超长输入"
-          },
-          {
             "gouziId": "gamma",
             "state": "passed",
             "accepted": true,
             "preview": "结论：通过\n- gamma 核对了 src/parse.ts，空输入有处理。"
+          },
+          {
+            "gouziId": "beta",
+            "state": "passed",
+            "accepted": true,
+            "preview": "结论：需要修改\n- src/parse.ts 没处理超长输入"
           }
         ]
       },

@@ -11,6 +11,7 @@ import {
   type LogicalTaskGraphV1, type OrchestrationNodeSpecV1, type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 import { collaborationRecords, withOutcomes, workRecords } from './history.ts'
+import { mentionedMembers } from './mentions.ts'
 import { decodeKennelMessage } from './recipient-message.ts'
 import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { generateDispatchModel, type DispatchModelConfig, type DispatchModelRecord } from './dispatch-model.ts'
@@ -199,7 +200,7 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
       const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('')
       const decoded = decodeKennelMessage(text)
       if (message.content.some(block => block.type !== 'text')) throw new HarnessError('请先明确附件对应的项目与处理方式。', 'KENNEL_CLARIFICATION_REQUIRED')
-      const facts = await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient)
+      const facts = await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient, decoded.text)
       const workCandidates: KennelWorkCandidate[] = facts.workOffers.map(offer => ({ kind: 'work', ...offer }))
       const offered = await Promise.all((ctx.get('kennelCollaborations')?.kinds() ?? []).map(async kind => ({
         kind, candidates: [...await kind.offer(facts)],
@@ -320,9 +321,9 @@ function workOffers(
   })
 }
 
-/** Read what a collaboration kind decides from: members, entries, work offers, this Session's runs, and its history. */
+/** Read what a collaboration kind decides from: members, entries, work offers, this Session's history, and the message's names. */
 async function collaborationFacts(
-  ctx: Context, session: Session, sessionId: string, recipient: KennelCollaborationFacts['recipient'],
+  ctx: Context, session: Session, sessionId: string, recipient: KennelCollaborationFacts['recipient'], text: string,
 ): Promise<KennelCollaborationFacts> {
   const control = ctx.orchestrations.gouzi
   if (control === undefined) throw new HarnessError('当前编排服务不管理狗子。', 'GOUZI_UNAVAILABLE')
@@ -331,6 +332,7 @@ async function collaborationFacts(
   const earlier = await withOutcomes(collaborationRecords(session.events), ctx.get('kennelCollaborations')?.kinds() ?? [], ctx.orchestrations, runs)
   return {
     sessionId, members: listing.members, entries, runs, earlier, work: workRecords(session.events),
+    mentioned: mentionedMembers(text, listing.members),
     workOffers: workOffers(listing.members, entries, recipient),
     ...recipient === undefined ? {} : { recipient: { gouziId: recipient.gouziId, generation: recipient.generation } },
   }
@@ -353,7 +355,7 @@ async function startCollaboration(
   const kind = ctx.get('kennelCollaborations')?.kinds().find(value => value.kind === selected.collaboration)
   if (kind === undefined) throw new HarnessError(`协作「${selected.collaboration}」已不可用。`, 'KENNEL_COLLABORATION_UNAVAILABLE')
   const confirm = async (): Promise<void> => {
-    const current = await kind.offer(await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient))
+    const current = await kind.offer(await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient, decoded.text))
     if (!current.some(value => value.id === selected.id)) {
       throw new HarnessError('参加协作的狗子、执行实例、项目或对象已变化；未改派给其他成员。', 'GOUZI_STATE_CONFLICT')
     }

@@ -6,6 +6,7 @@ import {
   GouziId,
   KENNEL_WORK_NODE_ID,
   OrchestrationRunId,
+  kennelRoster,
   qualifiedKennelMembers,
   type KennelCollaborationCandidate,
   type KennelCollaborationFacts,
@@ -38,11 +39,11 @@ function offer(facts: KennelCollaborationFacts, config: Required<Config>): Kenne
     // Reviewers read the delivered files, so each needs file tools; the authors never review their own work.
     const qualified = qualifiedKennelMembers(facts, run.workspace, { workspacePolicy: true })
       .filter(member => !authorIds.has(member.gouziId))
-    const pool = facts.recipient === undefined
-      ? qualified
+    // The addressed member reviews alone; otherwise the members the message names, else the first members in registry order.
+    const members = facts.recipient === undefined
+      ? kennelRoster(qualified, facts.mentioned, { min: 1, max: config.maxReviewers }, authorIds)
       : qualified.filter(member => member.gouziId === facts.recipient?.gouziId && member.generation === facts.recipient.generation)
-    const members = pool.slice(0, config.maxReviewers)
-    if (members.length === 0) return []
+    if (members === undefined || members.length === 0) return []
     const names = facts.members.filter(member => authorIds.has(String(member.gouziId))).map(member => member.name)
     return [{
       kind: 'collaboration' as const,
@@ -137,7 +138,7 @@ async function start(ctx: Context, request: KennelCollaborationRequest): Promise
 export function kennelReviewKind(ctx: Context, config: Required<Config>): KennelCollaborationKind {
   return {
     kind: KENNEL_REVIEW_KIND,
-    guidance: '用户明确要求某只或几只狗子评审、检查、点评另一只狗子已完成的任务时选它；它只读不改文件，评审人不会是任务的做事人；用户没说评审哪个任务时选最近完成的那个',
+    guidance: '用户明确要求某只或几只狗子评审、检查、点评另一只狗子已完成的任务时选它；用户点了名的狗子就是评审人，候选里就是这些狗子；它只读不改文件，评审人不会是任务的做事人；用户没说评审哪个任务时选最近完成的那个',
     offer: facts => offer(facts, config),
     start: request => start(ctx, request),
     outcome: reviewOutcome,

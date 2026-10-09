@@ -16,6 +16,7 @@
     "src/dispatch-model.ts",
     "src/collaboration.ts",
     "src/history.ts",
+    "src/mentions.ts",
     "src/dispatcher.ts"
   ],
   "references": [
