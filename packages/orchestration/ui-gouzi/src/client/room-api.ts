@@ -19,6 +19,13 @@ function isoTime(value: unknown): value is string {
   const date = value.slice(0, 10)
   return new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) === date
 }
+/** Collaboration outcomes on a task are optional; each one must carry its kind, run, state, and label. */
+function validOutcomes(value: unknown): boolean {
+  return value === undefined || Array.isArray(value) && value.every((outcome: unknown) =>
+    record(outcome) && id(outcome.collaboration) && id(outcome.runId) && typeof outcome.label === 'string'
+    && ['pending', 'positive', 'negative', 'unclear'].includes(String(outcome.state)))
+}
+
 function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapshotV1 {
   if (!record(value) || !integer(value.roomPollIntervalMs) || value.roomPollIntervalMs <= 0 || value.version !== 1 || value.sessionId !== sessionId || typeof value.generatedAt !== 'string'
     || !record(value.dashboard) || !Array.isArray(value.dashboard.members)
@@ -39,7 +46,8 @@ function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapsho
       && strings(operator.models)))
   const tasks = value.tasks.every((task: unknown) => record(task) && id(task.runId) && typeof task.title === 'string'
     && typeof task.state === 'string' && integer(task.revision) && typeof task.createdAt === 'string'
-    && typeof task.updatedAt === 'string' && Array.isArray(task.nodes) && task.nodes.every((node: unknown) => {
+    && typeof task.updatedAt === 'string' && validOutcomes(task.outcomes)
+    && Array.isArray(task.nodes) && task.nodes.every((node: unknown) => {
     if (!record(node) || !id(node.nodeId) || typeof node.title !== 'string' || typeof node.state !== 'string'
         || !integer(node.attempt) || !integer(node.capabilityGeneration) || !strings(node.evidenceRefs)
         || node.gouziId !== undefined && !id(node.gouziId) || node.operatorId !== undefined && !id(node.operatorId)) return false

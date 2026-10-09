@@ -238,6 +238,17 @@ export interface GouziRoomNodeV1 {
   readonly result?: GouziRoomResultV1
 }
 
+/** How a collaboration about a task ended up, as the kind that started it reports it. */
+export interface GouziRoomOutcomeV1 {
+  /** Registered kind, such as `review`. */
+  readonly collaboration: string
+  /** Run the collaboration started. */
+  readonly runId: string
+  readonly state: 'pending' | 'positive' | 'negative' | 'unclear'
+  /** One short line for people. */
+  readonly label: string
+}
+
 /** Task admitted by this exact source session. */
 export interface GouziRoomTaskV1 {
   readonly runId: string
@@ -247,6 +258,8 @@ export interface GouziRoomTaskV1 {
   readonly createdAt: string
   readonly updatedAt: string
   readonly nodes: readonly GouziRoomNodeV1[]
+  /** Collaborations about this task that report an outcome, oldest first; absent when there are none. */
+  readonly outcomes?: readonly GouziRoomOutcomeV1[]
 }
 
 /** Read-only session room: roster, actual execution registrations, and admitted tasks. */

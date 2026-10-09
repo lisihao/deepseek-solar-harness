@@ -1,6 +1,8 @@
 /** Extension point for work that kennel members do together: Debate, review, and later kinds. */
 import type { GouziControl, GouziMemberView } from './gouzi.ts'
-import type { OrchestrationNodeSpecV1, OrchestrationRunSnapshot, OrchestrationRuntimeContextV1 } from './index.ts'
+import type {
+  LogicalTaskGraphV1, OrchestrationNodeSpecV1, OrchestrationRunSnapshot, OrchestrationRuntimeContextV1,
+} from './index.ts'
 
 /** Id of the node a kennel work task runs; a collaboration reviewing finished work looks for it. */
 export const KENNEL_WORK_NODE_ID = 'work'
@@ -37,6 +39,62 @@ export interface KennelCollaborationCandidate {
   readonly details: Readonly<Record<string, unknown>>
 }
 
+/** One Host-qualified way for a single member to take a task: a member, a project, a mode, and the entries that can run it. */
+export interface KennelWorkOffer {
+  readonly id: string
+  readonly gouziId: string
+  readonly generation: number
+  readonly name: string
+  readonly role: string
+  readonly activity: string
+  readonly workspace: string
+  readonly mode: 'chat' | 'read' | 'write'
+  readonly operatorIds: readonly string[]
+  /** Native model the member is pinned to; every listed operator offers it. Absent when Smart Auto chooses. */
+  readonly model?: string
+}
+
+/** A work task this Session's dispatcher admitted, with the member offer that took it. */
+export interface KennelWorkRecord {
+  readonly runId: string
+  readonly offer: KennelWorkOffer
+}
+
+/** The final text of one node of a collaboration's run. */
+export interface KennelCollaborationResult {
+  readonly nodeId: string
+  /** Whether the Scheduler accepted the node's result. */
+  readonly accepted: boolean
+  readonly text: string
+}
+
+/**
+ * How a collaboration ended up for the task it is about. The room shows `label` on that task, and a later kind reads
+ * `state` and `details` to decide what to offer.
+ */
+export interface KennelCollaborationOutcome {
+  /** Run of the task the collaboration is about. */
+  readonly subjectRunId: string
+  /** `pending` while it runs, `positive` or `negative` when it reached a verdict, `unclear` when it did not. */
+  readonly state: 'pending' | 'positive' | 'negative' | 'unclear'
+  /** One short line for people. */
+  readonly label: string
+  /** Kind-owned facts, JSON values only. */
+  readonly details: Readonly<Record<string, unknown>>
+}
+
+/** A collaboration this Session already started. */
+export interface KennelCollaborationRecord {
+  readonly collaboration: string
+  /** Run the collaboration started. */
+  readonly runId: string
+  /** The user message that chose it. */
+  readonly messageId: string
+  readonly candidate: KennelCollaborationCandidate
+  /** The outcome its kind reported from the run's current results, when the kind reports outcomes. */
+  readonly outcome?: KennelCollaborationOutcome
+}
+
 /** What the Host knows when it asks a kind for candidates. */
 export interface KennelCollaborationFacts {
   readonly sessionId: string
@@ -46,6 +104,12 @@ export interface KennelCollaborationFacts {
   readonly entries: readonly KennelExecutionEntry[]
   /** This Session's runs, newest first. */
   readonly runs: readonly OrchestrationRunSnapshot[]
+  /** The ways a single member could take a task now, as the dispatcher offers them. */
+  readonly workOffers: readonly KennelWorkOffer[]
+  /** Work tasks this Session admitted, oldest first. */
+  readonly work: readonly KennelWorkRecord[]
+  /** Collaborations this Session started, oldest first. */
+  readonly earlier: readonly KennelCollaborationRecord[]
   /** The member the user addressed directly, when the message was sent to one member. */
   readonly recipient?: { readonly gouziId: string; readonly generation: number }
 }
@@ -59,6 +123,13 @@ export interface KennelCollaborationLimits {
   readonly workspaceToolLimits: NonNullable<OrchestrationNodeSpecV1['workspaceToolLimits']>
 }
 
+/** A task for one member that the Host will bound and certify exactly as it does for a user's own message. */
+export interface KennelWorkGraphInput {
+  readonly offer: KennelWorkOffer
+  /** The task text the member receives. */
+  readonly text: string
+}
+
 /** A request to start the collaboration the user chose. */
 export interface KennelCollaborationRequest {
   /** Idempotent command identity; repeating it returns the run it started. */
@@ -70,6 +141,13 @@ export interface KennelCollaborationRequest {
   readonly prompt: string
   readonly candidate: KennelCollaborationCandidate
   readonly limits: KennelCollaborationLimits
+  /**
+   * Build the certified graph for one member's task, with the Host's file scopes, isolation, and verification rules.
+   * A kind that gives a member work calls this instead of composing permissions itself.
+   * @param input - the member offer and the task text.
+   * @returns the graph to compile for that member.
+   */
+  workGraph(input: KennelWorkGraphInput): LogicalTaskGraphV1
   /** Request-time dynamic contexts captured from the Session. */
   readonly runtimeContext?: OrchestrationRuntimeContextV1
 }
@@ -99,6 +177,18 @@ export interface KennelCollaborationKind {
    * @returns the durable run and each member's assignment.
    */
   start(request: KennelCollaborationRequest): Promise<KennelCollaborationStarted>
+  /**
+   * Read what a collaboration it started has concluded. Optional: a kind that reaches no verdict omits it.
+   * @param record - the collaboration, with the candidate that started it.
+   * @param run - the collaboration's current run.
+   * @param results - final text of each node of the run that has one.
+   * @returns the outcome for the task the collaboration is about, or undefined when it is about none.
+   */
+  outcome?(
+    record: Omit<KennelCollaborationRecord, 'outcome'>,
+    run: OrchestrationRunSnapshot,
+    results: readonly KennelCollaborationResult[],
+  ): KennelCollaborationOutcome | undefined
 }
 
 /** Registry of the collaboration kinds the kennel dispatcher can offer. */

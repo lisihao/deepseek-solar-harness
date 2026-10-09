@@ -45,6 +45,22 @@ describe('Gouzi room', () => {
     expect(room.tasks[0]!.nodes[0]).toMatchObject({ gouziId: 'member', result: { time: event.time, sequence: 5, accepted: true, operatorId: 'actual.provider' } })
     expect(await gouziRoom(f.service, f.control, 'empty', dashboard, 250)).toMatchObject({ tasks: [] })
   })
+  it('attaches the outcome of a collaboration to the task it is about and leaves other tasks without the field', async () => {
+    const other = { ...run, runId: OrchestrationRunId('run-2') }
+    const f = fixture([run, other])
+    const outcome = (subjectRunId: string, state: 'negative' | 'positive', label: string, runId = 'review-1') => ({
+      collaboration: 'review', runId, messageId: 'm', candidate: {} as never, outcome: { subjectRunId, state, label, details: {} },
+    })
+    const room = await gouziRoom(f.service, f.control, 'session-a', dashboard, 250, [
+      outcome('run-1', 'negative', '评审：待修改（乙）'), outcome('run-1', 'positive', '评审：已通过（丙）', 'review-2'),
+      { collaboration: 'debate', runId: 'debate-1', messageId: 'm', candidate: {} as never },
+    ])
+    expect(room.tasks[0]!.outcomes).toEqual([
+      { collaboration: 'review', runId: 'review-1', state: 'negative', label: '评审：待修改（乙）' },
+      { collaboration: 'review', runId: 'review-2', state: 'positive', label: '评审：已通过（丙）' },
+    ])
+    expect(room.tasks[1]).not.toHaveProperty('outcomes')
+  })
   it.each([{ attempt: 1 }, { generation: 2 }, { data: { ...event.data, operatorId: 'wrong' } }, { data: { code: 'FAILED' } }])('omits stale or unattributable results: %j', async (patch) => {
     const f = fixture([run], [{ ...event, ...patch }])
     expect((await gouziRoom(f.service, f.control, 'session-a', dashboard, 250)).tasks[0]!.nodes[0]!.result).toBeUndefined()

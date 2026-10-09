@@ -452,6 +452,23 @@ describe('room source and transport', () => {
     const invalid = { ...room(), tasks: [{ runId: 'r', title: 'task', state: 'done', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [{ nodeId: 'n', title: 'node', state: 'done', attempt: 1, capabilityGeneration: 1, evidenceRefs: [], operatorId: 'actual', result: { sequence: 1, time: '2026-10-06T00:00:00.000Z', evidenceRef: 'ref', outputPreview: 'wrong', accepted: true, operatorId: 'other' } }] }] }
     await expect(loadKennelRoom(vi.fn(async () => Response.json(invalid)) as never, 's')).rejects.toThrow('Invalid kennel room reply')
   })
+  it('shows the outcomes of collaborations about a task on that task, and accepts them from the Host only when well-formed', async () => {
+    const task = (outcomes: unknown) => ({
+      runId: 'r', title: '被评审任务', state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [], ...outcomes === undefined ? {} : { outcomes },
+    })
+    const good = [{ collaboration: 'review', runId: 'rv', state: 'negative', label: '评审：待修改（乙）' }, { collaboration: 'review', runId: 'rv2', state: 'positive', label: '评审：已通过（丙）' }]
+    const load = (value: unknown) => loadKennelRoom(vi.fn(async () => Response.json({ ...room(), tasks: [task(value)] })), 's')
+    expect((await load(good)).tasks[0]!.outcomes).toEqual(good)
+    expect((await load(undefined)).tasks[0]!.outcomes).toBeUndefined()
+    for (const bad of ['x', [null], [{ ...good[0], state: 'done' }], [{ ...good[0], label: 1 }], [{ ...good[0], runId: '' }], [{ ...good[0], collaboration: '' }]]) {
+      await expect(load(bad)).rejects.toThrow('Invalid kennel room reply')
+    }
+    const h = harness()
+    patchRoom(h, current => ({ ...current, tasks: [task(good) as never] }))
+    all(h)
+    expect(screen.getByText('评审：待修改（乙）').getAttribute('data-outcome')).toBe('negative')
+    expect(screen.getByText('评审：已通过（丙）').getAttribute('data-outcome')).toBe('positive')
+  })
   it.each(['not-a-time', '2026-10-06', '2026-02-30T00:00:00.000Z'])('rejects invalid actual result time %s', async (time) => {
     const snapshot = { ...room(), tasks: [{
       runId: 'r', title: 'task', state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now',

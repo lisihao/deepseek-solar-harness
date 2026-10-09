@@ -6,9 +6,11 @@ import { PhysicalOperatorExecutionId, PhysicalOperatorId } from '@deepseek-ai/ds
 import type { Session } from '@deepseek-ai/dsh-session'
 import {
   admissionGouziRecipients, GouziId, KENNEL_WORK_NODE_ID, OrchestrationRunId,
-  type KennelCollaborationCandidate, type KennelCollaborationFacts, type KennelCollaborationKind,
+  type KennelCollaborationCandidate, type KennelCollaborationFacts, type KennelCollaborationKind, type KennelWorkOffer,
+  type GouziControl, type GouziMemberView,
   type LogicalTaskGraphV1, type OrchestrationNodeSpecV1, type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
+import { collaborationRecords, withOutcomes, workRecords } from './history.ts'
 import { decodeKennelMessage } from './recipient-message.ts'
 import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { generateDispatchModel, type DispatchModelConfig, type DispatchModelRecord } from './dispatch-model.ts'
@@ -37,19 +39,8 @@ export interface KennelDispatchConfig extends DispatchModelConfig {
   readonly workspaceSnapshotLimits: NonNullable<LogicalTaskGraphV1['workspaceSnapshotLimits']>
 }
 /** One Host-qualified routing option; the model returns its identity only. */
-export interface KennelWorkCandidate {
+export interface KennelWorkCandidate extends KennelWorkOffer {
   readonly kind: 'work'
-  readonly id: string
-  readonly gouziId: string
-  readonly generation: number
-  readonly name: string
-  readonly role: string
-  readonly activity: string
-  readonly workspace: string
-  readonly mode: 'chat' | 'read' | 'write'
-  readonly operatorIds: readonly string[]
-  /** Native model the member is pinned to; every listed operator offers it. Absent when Smart Auto chooses. */
-  readonly model?: string
 }
 
 /** A revision-bound action on an existing task in this room. */
@@ -208,27 +199,8 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
       const text = message.content.filter(block => block.type === 'text').map(block => block.text).join('')
       const decoded = decodeKennelMessage(text)
       if (message.content.some(block => block.type !== 'text')) throw new HarnessError('请先明确附件对应的项目与处理方式。', 'KENNEL_CLARIFICATION_REQUIRED')
-      const facts = await collaborationFacts(ctx, String(agent.id), decoded.recipient)
-      const { members, entries } = facts
-      const workCandidates: KennelWorkCandidate[] = members.filter(member => member.membership === 'enabled'
-        && (!decoded.recipient || String(member.gouziId) === decoded.recipient.gouziId)).flatMap((member) => {
-        const entry = entries.find(value => value.gouziId === member.gouziId && value.generation === member.generation)
-        if (!entry || decoded.recipient && decoded.recipient.generation !== entry.generation) return []
-        return entry.projectScopes.flatMap(workspace => (['chat', 'read', 'write'] as const)
-          .filter(mode => mode !== 'write' || String(member.hostId) === 'local')
-          .flatMap((mode) => {
-            // A pinned model qualifies only the runtimes whose catalog offers it; none left means the member is not a candidate.
-            const operatorIds = entry.operators.filter(operator => operator.available && operator.supportsGenerationLimits === true
-              && (mode === 'chat' || operator.supportsGovernedWorkspacePolicy === true)
-              && (member.model === undefined || operator.models.includes(member.model))).map(operator => operator.operatorId)
-            return operatorIds.length === 0 ? [] : [{
-              kind: 'work' as const, id: JSON.stringify([String(member.gouziId), member.generation, workspace, mode]),
-              gouziId: String(member.gouziId), generation: member.generation, name: member.name, role: member.role,
-              activity: member.activity, workspace, mode, operatorIds,
-              ...member.model === undefined ? {} : { model: member.model },
-            }]
-          }))
-      })
+      const facts = await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient)
+      const workCandidates: KennelWorkCandidate[] = facts.workOffers.map(offer => ({ kind: 'work', ...offer }))
       const offered = await Promise.all((ctx.get('kennelCollaborations')?.kinds() ?? []).map(async kind => ({
         kind, candidates: [...await kind.offer(facts)],
       })))
@@ -315,16 +287,51 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
   })
 }
 
-/** Read the members, execution entries, and this Session's runs a collaboration kind decides from. */
+/**
+ * List the ways a single member can take a task now, for the model and for collaboration kinds.
+ * A pinned model qualifies only the runtimes whose catalog offers it; none left means the member is not offered.
+ * @param members - every registered member.
+ * @param entries - current registered execution entries.
+ * @param recipient - the member the user addressed, when the message was sent to one.
+ * @returns one offer per member, project, and mode that an available entry can run.
+ */
+function workOffers(
+  members: readonly GouziMemberView[],
+  entries: Awaited<ReturnType<GouziControl['executionOperators']>>,
+  recipient: KennelCollaborationFacts['recipient'],
+): KennelWorkOffer[] {
+  return members.filter(member => member.membership === 'enabled'
+    && (!recipient || String(member.gouziId) === recipient.gouziId)).flatMap((member) => {
+    const entry = entries.find(value => value.gouziId === member.gouziId && value.generation === member.generation)
+    if (!entry || recipient && recipient.generation !== entry.generation) return []
+    return entry.projectScopes.flatMap(workspace => (['chat', 'read', 'write'] as const)
+      .filter(mode => mode !== 'write' || String(member.hostId) === 'local')
+      .flatMap((mode): KennelWorkOffer[] => {
+        const operatorIds = entry.operators.filter(operator => operator.available && operator.supportsGenerationLimits === true
+          && (mode === 'chat' || operator.supportsGovernedWorkspacePolicy === true)
+          && (member.model === undefined || operator.models.includes(member.model))).map(operator => operator.operatorId)
+        return operatorIds.length === 0 ? [] : [{
+          id: JSON.stringify([String(member.gouziId), member.generation, workspace, mode]),
+          gouziId: String(member.gouziId), generation: member.generation, name: member.name, role: member.role,
+          activity: member.activity, workspace, mode, operatorIds,
+          ...member.model === undefined ? {} : { model: member.model },
+        }]
+      }))
+  })
+}
+
+/** Read what a collaboration kind decides from: members, entries, work offers, this Session's runs, and its history. */
 async function collaborationFacts(
-  ctx: Context, sessionId: string, recipient: KennelCollaborationFacts['recipient'],
+  ctx: Context, session: Session, sessionId: string, recipient: KennelCollaborationFacts['recipient'],
 ): Promise<KennelCollaborationFacts> {
   const control = ctx.orchestrations.gouzi
   if (control === undefined) throw new HarnessError('当前编排服务不管理狗子。', 'GOUZI_UNAVAILABLE')
-  const [listing, entries, runs] = await Promise.all([control.list(), control.executionOperators(), ctx.orchestrations.list()])
+  const [listing, entries, all] = await Promise.all([control.list(), control.executionOperators(), ctx.orchestrations.list()])
+  const runs = all.filter(run => run.admission?.sourceSessionId === sessionId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const earlier = await withOutcomes(collaborationRecords(session.events), ctx.get('kennelCollaborations')?.kinds() ?? [], ctx.orchestrations, runs)
   return {
-    sessionId, members: listing.members, entries,
-    runs: runs.filter(run => run.admission?.sourceSessionId === sessionId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    sessionId, members: listing.members, entries, runs, earlier, work: workRecords(session.events),
+    workOffers: workOffers(listing.members, entries, recipient),
     ...recipient === undefined ? {} : { recipient: { gouziId: recipient.gouziId, generation: recipient.generation } },
   }
 }
@@ -346,7 +353,7 @@ async function startCollaboration(
   const kind = ctx.get('kennelCollaborations')?.kinds().find(value => value.kind === selected.collaboration)
   if (kind === undefined) throw new HarnessError(`协作「${selected.collaboration}」已不可用。`, 'KENNEL_COLLABORATION_UNAVAILABLE')
   const confirm = async (): Promise<void> => {
-    const current = await kind.offer(await collaborationFacts(ctx, String(agent.id), decoded.recipient))
+    const current = await kind.offer(await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient))
     if (!current.some(value => value.id === selected.id)) {
       throw new HarnessError('参加协作的狗子、执行实例、项目或对象已变化；未改派给其他成员。', 'GOUZI_STATE_CONFLICT')
     }
@@ -365,6 +372,7 @@ async function startCollaboration(
       contextTokens: config.contextTokens, taskTimeoutMs: config.taskTimeoutMs, titleMaxChars: config.titleMaxChars,
       generationLimits: config.taskGenerationLimits, workspaceToolLimits: config.workspaceToolLimits,
     },
+    workGraph: input => kennelDispatchGraph({ kind: 'work', ...input.offer }, input.text, config),
     ...runtimeContext === undefined ? {} : { runtimeContext },
   })
   agent.session.append('kennel/dispatch-collaboration-admitted', {

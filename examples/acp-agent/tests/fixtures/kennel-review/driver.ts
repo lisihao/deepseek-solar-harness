@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { LlmAdapter, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { APPROVE_LINE, CHANGES_LINE } from '@deepseek-ai/dsh-kennel-review'
 import {
   admissionGouziRecipients, GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId,
   type GouziExecutionGrant, type OrchestrationAdmissionTraceV1,
@@ -36,6 +37,9 @@ registry.gouzi.edit(GouziId('gamma'), { model: 'gpt-5.6-luna' })
 registry.close()
 
 const WORK_RESULT = 'The parser lives in src/parse.ts and handles empty input.'
+const REWORK_RESULT = 'The parser now also bounds oversized input.'
+const BETA_COMMENT = '- src/parse.ts 没处理超长输入'
+let workRuns = 0
 const originalFetch = globalThis.fetch
 const methods: string[] = []
 const executed: { member: string; nodeId: string; request: Record<string, unknown> }[] = []
@@ -68,7 +72,10 @@ globalThis.fetch = async (input, init) => {
       if (nodeId === undefined) throw new Error(`cannot identify the node in ${commandId}`)
       executed.push({ member, nodeId, request: call.payload })
       const turnId = `turn:${commandId}`
-      const text = nodeId === 'work' ? WORK_RESULT : `结论：通过\n- ${member} 核对了 src/parse.ts，空输入有处理。`
+      if (nodeId === 'work') workRuns++
+      const text = nodeId === 'work'
+        ? workRuns === 1 ? WORK_RESULT : REWORK_RESULT
+        : member === 'beta' ? `${CHANGES_LINE}\n${BETA_COMMENT}` : `${APPROVE_LINE}\n- gamma 核对了 src/parse.ts，空输入有处理。`
       results.set(turnId, {
         commandId, sessionId: `session:${member}`, turnId, state: 'settled', stateRevision: 2, updatedAt: '2026-10-09T00:00:00.000Z',
         result: { output: [{ type: 'text', text }], stopReason: 'completed', usage: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 2, costUsd: 0.01 } },
@@ -102,9 +109,11 @@ interface Choice {
   gouziId?: string
   mode?: string
   members?: { gouziId: string; operatorId: string; model: string }[]
-  details?: { target?: { title: string; authors: string[] } }
+  details?: { target?: { title: string; authors: string[] }; comments?: { name: string; comment: string }[] }
 }
-const offeredReviews: { target: unknown; reviewers: string[] }[] = []
+const offered = { reviewBeforeWork: false, reworkBeforeReview: false, review: [] as unknown[], rework: [] as unknown[] }
+// 1: hand the work to alpha, 2: have the others review it, 3: have alpha rework it from the comments.
+let step = 1
 let modelCalls = 0
 class Judgment extends LlmAdapter {
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -112,16 +121,18 @@ class Judgment extends LlmAdapter {
     const block = options.messages[0]?.content[0]
     if (block?.type !== 'text') throw new Error('missing judgment request')
     const input = JSON.parse(block.text) as { candidates: Choice[] }
-    const review = input.candidates.find(candidate => candidate.collaboration === 'review')
-    // The first message has no finished task to review, so the AI hands the work to alpha.
-    const chosen = review ?? input.candidates.find(candidate => candidate.kind === 'work' && candidate.gouziId === 'alpha' && candidate.mode === 'read')
-    if (review !== undefined) {
-      offeredReviews.push(...input.candidates.filter(candidate => candidate.collaboration === 'review').map(candidate => ({
-        target: { title: candidate.details?.target?.title, authors: candidate.details?.target?.authors },
-        reviewers: (candidate.members ?? []).map(value => value.gouziId),
-      })))
-    }
-    if (!chosen) throw new Error('no candidate to choose')
+    const kind = (name: string) => input.candidates.filter(candidate => candidate.collaboration === name)
+    const summary = (candidate: Choice) => ({
+      target: candidate.details?.target?.title, members: (candidate.members ?? []).map(value => value.gouziId),
+      comments: candidate.details?.comments,
+    })
+    if (step === 1) offered.reviewBeforeWork = kind('review').length > 0
+    if (step === 2) { offered.reworkBeforeReview = kind('rework').length > 0; offered.review.push(...kind('review').map(summary)) }
+    if (step === 3) offered.rework.push(...kind('rework').map(summary))
+    const chosen = step === 1
+      ? input.candidates.find(candidate => candidate.kind === 'work' && candidate.gouziId === 'alpha' && candidate.mode === 'read')
+      : kind(step === 2 ? 'review' : 'rework')[0]
+    if (!chosen) throw new Error(`no candidate to choose at step ${String(step)}`)
     yield { type: 'text-delta', index: 0, text: JSON.stringify({ candidateId: chosen.id }) }
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
@@ -142,28 +153,39 @@ try {
   const say = (text: string): void => {
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }))
   }
-  const finished = async () => (await ctx.orchestrations.list()).every(run => run.state === 'completed') && agent.status === 'idle'
+  const settled = async (runs: number) => {
+    const all = await ctx.orchestrations.list()
+    return all.length === runs && all.every(run => run.state === 'completed') && agent.status === 'idle'
+  }
+  const readRoom = async () => {
+    const response = await originalFetch(`http://127.0.0.1:${ctx.webServer.port}${GOUZI_DASHBOARD_PATH}?session_id=${String(agent.id)}`)
+    return { status: response.status, room: await response.json() as GouziRoomSnapshotV1 }
+  }
+  const outcomes = (room: GouziRoomSnapshotV1) => room.tasks.flatMap(task => (task.outcomes ?? []).map(outcome => ({
+    task: task.title, collaboration: outcome.collaboration, state: outcome.state, label: outcome.label,
+  })))
   say('Summarize the parser for me.')
-  await waitFor(async () => agent.session.events.some(event => event.type === 'kennel/dispatch-admitted'))
-  await waitFor(async () => (await ctx.orchestrations.list()).some(run => run.state === 'completed') && finished())
+  await waitFor(async () => settled(1))
+  step = 2
   say('Ask the other dogs to review that result.')
-  await waitFor(async () => agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration-admitted'))
-  await waitFor(async () => (await ctx.orchestrations.list()).length === 2 && finished())
+  await waitFor(async () => settled(2))
+  const afterReview = outcomes((await readRoom()).room)
+  step = 3
+  say('Rework it using the review comments.')
+  await waitFor(async () => settled(3))
   const runs = (await ctx.orchestrations.list()).sort((left, right) => left.createdAt.localeCompare(right.createdAt))
-  const requested = agent.session.events.find(event => event.type === 'kennel/dispatch-collaboration')
-  const admitted = agent.session.events.find(event => event.type === 'kennel/dispatch-collaboration-admitted')
-  if (requested?.type !== 'kennel/dispatch-collaboration' || admitted?.type !== 'kennel/dispatch-collaboration-admitted') throw new Error('missing collaboration dispatch events')
-  const response = await originalFetch(`http://127.0.0.1:${ctx.webServer.port}${GOUZI_DASHBOARD_PATH}?session_id=${String(agent.id)}`)
-  const room = await response.json() as GouziRoomSnapshotV1
+  const started = agent.session.events.flatMap(event => event.type === 'kennel/dispatch-collaboration-admitted'
+    ? [{ collaboration: event.data.collaboration, assignments: event.data.assignments }] : [])
+  const { status, room } = await readRoom()
   const reviewTasks = executed.filter(value => value.nodeId.startsWith('review-'))
+  const reworkTask = executed.filter(value => value.nodeId === 'work').at(-1)
   process.stdout.write(`${JSON.stringify({
     modelCalls,
     dispatchEvents: agent.session.events.filter(event => event.type.startsWith('kennel/dispatch-')).map(event => event.type),
-    offeredReviews,
-    started: {
-      collaboration: admitted.data.collaboration,
-      reviewers: requested.data.candidate.members.map(({ gouziId, operatorId, model }) => ({ gouziId, operatorId, model })),
-      assignments: admitted.data.assignments },
+    offered,
+    started,
+    outcomeAfterReview: afterReview,
+    outcomeAfterRework: outcomes(room),
     orchestrationRuns: runs.map(run => ({
       state: run.state, nodes: run.nodes.map(node => `${node.id}:${node.state}`),
       recipients: admissionRecipients(run.admission),
@@ -181,8 +203,10 @@ try {
       return { read: scopes.read, write: scopes.write, effects: scopes.effects }
     }),
     reviewersReadTheResult: reviewTasks.length === 2 && reviewTasks.every(value => JSON.stringify(value.request).includes(WORK_RESULT)),
+    authorReceivedTheComment: reworkTask !== undefined && JSON.stringify(reworkTask.request).includes(BETA_COMMENT)
+      && !JSON.stringify(reworkTask.request).includes('gamma 核对了'),
     externalMethods: [...new Set(methods)].sort(),
-    room: { status: response.status, tasks: room.tasks.map(task => ({ state: task.state,
+    room: { status, tasks: room.tasks.map(task => ({ state: task.state,
       nodes: task.nodes.map(node => ({
         gouziId: node.gouziId, state: node.state, accepted: node.result?.accepted, preview: node.result?.outputPreview,
       })) })) },

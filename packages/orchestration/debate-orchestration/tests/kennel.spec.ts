@@ -29,6 +29,7 @@ function request(members: KennelCollaborationMember[], patch: Partial<KennelColl
       contextTokens: 1, taskTimeoutMs: 1, titleMaxChars: 1,
       generationLimits: { maxTokens: 1, maxOutputBytes: 1 }, workspaceToolLimits: {} as never,
     },
+    workGraph: () => { throw new Error('a Debate gives no member work') },
     ...patch,
   }
 }
@@ -54,7 +55,7 @@ async function setup(options: { state?: string; approve?: () => Promise<unknown>
 /** Facts for members that each hold the given projects, on one codex entry with two models. */
 function facts(ids: string[], patch: Partial<KennelCollaborationFacts> = {}, scopes: string[] = ['/project']): KennelCollaborationFacts {
   return {
-    sessionId: 's', runs: [],
+    sessionId: 's', runs: [], workOffers: [], work: [], earlier: [],
     members: ids.map(id => ({ gouziId: id, generation: 1, membership: 'enabled', name: id, role: 'research' })) as never,
     entries: ids.map(id => ({
       gouziId: id, generation: 1, projectScopes: scopes,

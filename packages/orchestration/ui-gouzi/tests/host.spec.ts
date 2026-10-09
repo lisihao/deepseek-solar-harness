@@ -174,7 +174,12 @@ async function mount(options: { host?: boolean } = {}) {
   const routes: WebRoute[] = []
   const control = new FakeControl()
   ctx.provide('webServer', { register: (route: WebRoute) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1) } } } as never)
-  ctx.provide('orchestrations', { gouzi: control, list: () => Promise.resolve([]) } as never)
+  const runs: unknown[] = []
+  const sessions = new Map<string, { events: unknown[] }>()
+  ctx.provide('sessions', { get: (id: string) => sessions.get(id) } as never)
+  ctx.provide('orchestrations', {
+    gouzi: control, list: () => Promise.resolve(runs), readEvents: () => Promise.resolve({ events: [], nextSequence: 0 }),
+  } as never)
   ctx.provide('remoteAuth', {
     authenticate: (token: string) => ({
       'admin-token': { deviceId: 'd1', deviceName: 'MacBook', scope: 'admin' },
@@ -183,7 +188,7 @@ async function mount(options: { host?: boolean } = {}) {
     } as const)[token as 'admin-token'],
   } as never)
   const host = options.host === false ? undefined : new FakeHost(ctx)
-  const fiber = ctx.plugin({ name: 'gouzi-test', inject: ['orchestrations', 'webServer'], apply }, Config({ grantDeadlineMs: 600_000 }))
+  const fiber = ctx.plugin({ name: 'gouzi-test', inject: ['orchestrations', 'webServer', 'sessions'], apply }, Config({ grantDeadlineMs: 600_000 }))
   await fiber.await()
   fibers.push(fiber)
   const route = routes[0]!
@@ -218,7 +223,7 @@ async function mount(options: { host?: boolean } = {}) {
     const text = Buffer.concat(chunks).toString()
     return { status: status === 0 ? 200 : status, body: (text.length === 0 ? undefined : JSON.parse(text)) as Body }
   }
-  return { control, host, send, route, routes, fiber }
+  return { ctx, control, host, send, route, routes, fiber, runs, sessions }
 }
 
 const CONTROL = { [GOUZI_CONTROL_HEADER]: '1' }
@@ -233,6 +238,28 @@ describe('Gouzi Host route', () => {
     expect(await send('GET', undefined, reader, true, '?run_id=run&evidence_ref=ref')).toMatchObject({ status: 400 })
     expect(await send('GET', undefined, reader, true, '?session_id=room&run_id=run&evidence_ref=ref')).toMatchObject({ status: 404 })
     expect(control.calls).toEqual([])
+  })
+
+  it('shows the outcome a live Session\'s collaboration kind reports on the task it is about, and nothing for a Session that is not loaded', async () => {
+    const { ctx, send, runs, sessions } = await mount()
+    const reader = { authorization: 'Bearer pocket-token' }
+    const run = (runId: string) => ({ runId, title: runId, state: 'completed', revision: 1, nodes: [], createdAt: 'a', updatedAt: 'b', admission: { sourceSessionId: 'room' } })
+    runs.push(run('task'), run('review-run'))
+    const candidate = { kind: 'collaboration', collaboration: 'pair', id: 'p', workspace: '/w', members: [], details: {} }
+    sessions.set('room', { events: [
+      { type: 'kennel/dispatch-collaboration', data: { messageId: 'm', candidate, commandId: 'c' } },
+      { type: 'kennel/dispatch-collaboration-admitted', data: { messageId: 'm', collaboration: 'pair', runId: 'review-run', assignments: [] } },
+    ] })
+    ctx.kennelCollaborations.register({
+      kind: 'pair', guidance: 'g', offer: () => [], start: () => Promise.reject(new Error('unused')),
+      outcome: () => ({ subjectRunId: 'task', state: 'negative', label: '待修改', details: {} }),
+    })
+    const loaded = await send('GET', undefined, reader, true, '?session_id=room')
+    expect(loaded.body).toMatchObject({ tasks: [{ runId: 'task', outcomes: [{ collaboration: 'pair', runId: 'review-run', state: 'negative', label: '待修改' }] }, { runId: 'review-run' }] })
+    sessions.delete('room')
+    const unloaded = await send('GET', undefined, reader, true, '?session_id=room')
+    expect(unloaded.body).toMatchObject({ tasks: [{ runId: 'task' }, { runId: 'review-run' }] })
+    expect(JSON.stringify(unloaded.body)).not.toContain('outcomes')
   })
 
   it('removes the room and dashboard route when disposed', async () => {

@@ -151,6 +151,7 @@ export function KennelRoomAside({ useRoom, useStore, actions }: KennelRoomAsideP
       {room?.tasks.length === 0 && <p className={css.empty}>本房间尚无已接纳的任务。</p>}
       {room?.tasks.map(task => <article className={css.card} key={task.runId}>
         <strong>{task.title}</strong><p>状态：{taskState(task.state)}</p>
+        {task.outcomes?.map(outcome => <p key={outcome.runId} data-outcome={outcome.state}>{outcome.label}</p>)}
         {task.nodes.map((node) => {
           const key = `task:${task.runId}:${node.nodeId}:${node.attempt}:${node.capabilityGeneration}`
           return <div key={key} className={css.task}>

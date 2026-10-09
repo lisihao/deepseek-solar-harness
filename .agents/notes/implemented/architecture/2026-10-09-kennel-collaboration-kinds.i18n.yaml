@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-09-kennel-collaboration-kinds.md
-2026-10-09-kennel-collaboration-kinds.md: 222e6f7ebdec7dcf33e01a0e9ab28eca8d3f5ba2
-2026-10-09-kennel-collaboration-kinds.zh.md: dac93062f4dd0aa818b475bbae8e33541c120251
+2026-10-09-kennel-collaboration-kinds.md: 90ad4096eb3b53e5fd1af866990089e26002fdab
+2026-10-09-kennel-collaboration-kinds.zh.md: 6f509319eee24dc8485012f7226d031a0f89c553

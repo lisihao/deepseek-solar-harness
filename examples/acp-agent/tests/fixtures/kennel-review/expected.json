@@ -1,5 +1,5 @@
 {
-  "modelCalls": 2,
+  "modelCalls": 3,
   "dispatchEvents": [
     "kennel/dispatch-request",
     "kennel/dispatch-model",
@@ -12,47 +12,87 @@
     "kennel/dispatch-model",
     "kennel/dispatch-decision",
     "kennel/dispatch-collaboration",
+    "kennel/dispatch-collaboration-admitted",
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-collaboration",
     "kennel/dispatch-collaboration-admitted"
   ],
-  "offeredReviews": [
-    {
-      "target": {
-        "title": "Summarize the parser for me.",
-        "authors": [
-          "alpha"
+  "offered": {
+    "reviewBeforeWork": false,
+    "reworkBeforeReview": false,
+    "review": [
+      {
+        "target": "Summarize the parser for me.",
+        "members": [
+          "beta",
+          "gamma"
         ]
-      },
-      "reviewers": [
-        "beta",
-        "gamma"
-      ]
-    }
-  ],
-  "started": {
-    "collaboration": "review",
-    "reviewers": [
-      {
-        "gouziId": "beta",
-        "operatorId": "gouzi.beta.codex",
-        "model": "gpt-5.6-sol"
-      },
-      {
-        "gouziId": "gamma",
-        "operatorId": "gouzi.gamma.codex",
-        "model": "gpt-5.6-luna"
       }
     ],
-    "assignments": [
+    "rework": [
       {
-        "gouziId": "beta",
-        "role": "reviewer"
-      },
-      {
-        "gouziId": "gamma",
-        "role": "reviewer"
+        "target": "Summarize the parser for me.",
+        "members": [
+          "alpha"
+        ],
+        "comments": [
+          {
+            "name": "beta",
+            "comment": "- src/parse.ts 没处理超长输入"
+          }
+        ]
       }
     ]
   },
+  "started": [
+    {
+      "collaboration": "review",
+      "assignments": [
+        {
+          "gouziId": "beta",
+          "role": "reviewer"
+        },
+        {
+          "gouziId": "gamma",
+          "role": "reviewer"
+        }
+      ]
+    },
+    {
+      "collaboration": "rework",
+      "assignments": [
+        {
+          "gouziId": "alpha",
+          "role": "author"
+        }
+      ]
+    }
+  ],
+  "outcomeAfterReview": [
+    {
+      "task": "Summarize the parser for me.",
+      "collaboration": "review",
+      "state": "negative",
+      "label": "评审：待修改（beta）"
+    }
+  ],
+  "outcomeAfterRework": [
+    {
+      "task": "Summarize the parser for me.",
+      "collaboration": "review",
+      "state": "negative",
+      "label": "评审：待修改（beta）"
+    },
+    {
+      "task": "Summarize the parser for me.",
+      "collaboration": "rework",
+      "state": "unclear",
+      "label": "已按评审意见返工（alpha），待再次评审"
+    }
+  ],
   "orchestrationRuns": [
     {
       "state": "completed",
@@ -73,6 +113,15 @@
         "beta",
         "gamma"
       ]
+    },
+    {
+      "state": "completed",
+      "nodes": [
+        "work:passed"
+      ],
+      "recipients": [
+        "alpha"
+      ]
     }
   ],
   "executed": [
@@ -84,6 +133,11 @@
     {
       "member": "gamma",
       "nodeId": "review-2",
+      "model": "gpt-5.6-luna"
+    },
+    {
+      "member": "alpha",
+      "nodeId": "work",
       "model": "gpt-5.6-luna"
     },
     {
@@ -109,6 +163,7 @@
     }
   ],
   "reviewersReadTheResult": true,
+  "authorReceivedTheComment": true,
   "externalMethods": [
     "operator.events",
     "operator.execute",
@@ -122,10 +177,21 @@
         "state": "completed",
         "nodes": [
           {
+            "gouziId": "alpha",
+            "state": "passed",
+            "accepted": true,
+            "preview": "The parser now also bounds oversized input."
+          }
+        ]
+      },
+      {
+        "state": "completed",
+        "nodes": [
+          {
             "gouziId": "beta",
             "state": "passed",
             "accepted": true,
-            "preview": "结论：通过\n- beta 核对了 src/parse.ts，空输入有处理。"
+            "preview": "结论：需要修改\n- src/parse.ts 没处理超长输入"
           },
           {
             "gouziId": "gamma",

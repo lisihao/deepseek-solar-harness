@@ -36,7 +36,8 @@ async function fixture(persisted = true) {
   const persist = vi.fn(async (_session: typeof session) => {})
   const members: (typeof member)[] = [member]; const entries: (typeof entry)[] = [entry]
   if (persisted) ctx.on('session/flush', persist)
-  ctx.provide('orchestrations', { gouzi: { list: async () => ({ members, hosts: [] }), executionOperators: async () => entries }, compile, start, list, inspect, control } as never)
+  ctx.provide('orchestrations', { gouzi: { list: async () => ({ members, hosts: [] }), executionOperators: async () => entries }, compile, start, list, inspect, control,
+    readEvents: async () => ({ events: [], nextSequence: 0 }) } as never)
   const generate = vi.fn((_options: GenerateOptions) => JSON.stringify({ candidateId: candidate.id }))
   ctx.llm.registerAdapter(['deepseek-official'], new Adapter(generate))
   await ctx.plugin(Object.assign((child: Context) => { installKennelDispatch(child, config) }, { inject: ['sessions'] }))
@@ -313,6 +314,47 @@ it('tells a kind the Session, its runs newest first, and the member the user add
   direct.generate.mockReturnValue('{"candidateId":"clarify"}')
   await expect(direct.run([addressed])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
   expect(direct.offer.mock.calls[0]![0].recipient).toEqual({ gouziId: 'dog', generation: 2 })
+})
+it('gives kinds the work offers, the work and collaborations already admitted with their outcomes, and the Host\'s work graph', async () => {
+  const outcome = vi.fn((_record: unknown, _run: unknown, _results: unknown) => ({ subjectRunId: 'old-work', state: 'negative' as const, label: 'LABEL', details: { n: 1 } }))
+  const f = await collaborationFixture({ outcome })
+  const workOffer = { ...candidate }
+  const { kind: _kind, ...offerOnly } = workOffer
+  const peerCandidate = { kind: 'collaboration' as const, collaboration: 'pair', id: 'old-pair', workspace: '/project', members: [], details: {} }
+  const { session } = f.agent
+  // Earlier dispatches, appended in the order the dispatcher records them so the Session invariants hold.
+  const earlier = (messageId: string, chosen: typeof workOffer | typeof peerCandidate) => {
+    const user = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: messageId }] })
+    const id = String(user.id)
+    session.append('user/message', user, { surfaceOp: 'append' })
+    session.append('kennel/dispatch-request', { messageId: id, message: user, candidates: [chosen] }, { ignorable: true })
+    session.append('kennel/dispatch-decision', { messageId: id, source: 'deepseek', provider: 'p', candidateId: chosen.id }, { ignorable: true })
+    return id
+  }
+  const workMessage = earlier('work', workOffer)
+  session.append('kennel/dispatch-submission', { messageId: workMessage, compilationId: 'c', commandId: 'c' }, { ignorable: true })
+  session.append('kennel/dispatch-admitted', { messageId: workMessage, runId: 'old-work' }, { ignorable: true })
+  const pairMessage = earlier('pair', peerCandidate)
+  session.append('kennel/dispatch-collaboration', { messageId: pairMessage, candidate: peerCandidate, commandId: 'c' }, { ignorable: true })
+  session.append('kennel/dispatch-collaboration-admitted', { messageId: pairMessage, collaboration: 'pair', runId: 'old-pair-run', assignments: [] }, { ignorable: true })
+  f.list.mockResolvedValue([{ ...existingRun('completed'), runId: OrchestrationRunId('old-pair-run') }])
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
+  await f.run()
+
+  const facts = f.offer.mock.calls[0]![0]
+  expect(facts.work).toEqual([{ runId: 'old-work', offer: offerOnly }])
+  expect(facts.earlier).toEqual([{
+    collaboration: 'pair', runId: 'old-pair-run', messageId: pairMessage, candidate: peerCandidate,
+    outcome: { subjectRunId: 'old-work', state: 'negative', label: 'LABEL', details: { n: 1 } },
+  }])
+  // Each fresh offer (the first, then the two confirmations) reads the outcomes again.
+  expect(outcome).toHaveBeenCalledTimes(3)
+  // The kinds see exactly the work the model is offered: one chat, read, and write offer per member and project.
+  expect(facts.workOffers.map(value => [value.gouziId, value.mode])).toEqual([['dog', 'chat'], ['dog', 'read'], ['dog', 'write'], ['cat', 'chat'], ['cat', 'read'], ['cat', 'write']])
+  const [request] = f.starts
+  const given = facts.workOffers[2]!
+  expect(request!.workGraph({ offer: given, text: 'redo it' })).toEqual(kennelDispatchGraph({ kind: 'work', ...given }, 'redo it', config))
+  expect(request!.workGraph({ offer: given, text: 'redo it' })).toMatchObject({ risk: 'high', workspaceIsolation: 'directory-snapshot' })
 })
 it('starts the selected collaboration through its kind after durably recording the candidate, without compiling a task', async () => {
   const f = await collaborationFixture()

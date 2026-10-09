@@ -40,7 +40,7 @@ function facts(
   ids: string[], patch: Partial<KennelCollaborationFacts> = {}, entry: Record<string, unknown> = {},
 ): KennelCollaborationFacts {
   return {
-    sessionId: 's', runs: [run()],
+    sessionId: 's', runs: [run()], workOffers: [], work: [], earlier: [],
     members: ids.map(id => ({ gouziId: id, generation: 1, membership: 'enabled', name: id.toUpperCase(), role: 'research' })) as never,
     entries: ids.map(id => ({
       gouziId: id, generation: 1, projectScopes: ['/project'],
@@ -135,6 +135,7 @@ function chosen(reviewers: string[]): KennelCollaborationRequest {
       generationLimits: { maxTokens: 4096, maxOutputBytes: 262_144 }, workspaceToolLimits: { maxReadBytes: 1 } as never,
     },
     runtimeContext: { version: 1, sourceSessionId: 's', contextSnapshotMessageId: 'ctx', sections: [] },
+    workGraph: () => { throw new Error('a review gives no member work') },
   }
 }
 
@@ -233,9 +234,10 @@ describe('review plugin', () => {
     ctx.provide('orchestrations', {} as never)
     const fiber = ctx.plugin(plugin, defaults)
     await fiber.await()
-    expect(registered.map(value => value.kind)).toEqual(['review'])
+    expect(registered.map(value => value.kind)).toEqual(['review', 'rework'])
     expect(registered[0]?.guidance).toContain('评审')
+    expect(registered.map(value => typeof value.outcome)).toEqual(['function', 'function'])
     await fiber.dispose()
-    await vi.waitFor(() => { expect(dispose).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(dispose).toHaveBeenCalledTimes(2) })
   })
 })
