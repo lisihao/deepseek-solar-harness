@@ -6,6 +6,7 @@ import type {
   KennelCollaborationResult,
   OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
+import { KENNEL_REREVIEW_KIND } from './kinds.ts'
 
 const APPROVE_WORD = '通过'
 const CHANGES_WORD = '需要修改'
@@ -53,6 +54,22 @@ export function targetOf(candidate: KennelCollaborationCandidate): ReviewTarget 
   return { runId: target.runId, title: target.title, authors: target.authors as string[] }
 }
 
+/** Comments from an earlier review that a repeated review checks again. */
+export interface PreviousComment {
+  readonly name: string
+  readonly comment: string
+}
+
+/**
+ * Read the earlier comments a candidate asks its reviewers to check again.
+ * @param candidate - a review or repeated-review candidate.
+ * @returns the comments, empty for a first review.
+ */
+export function previousOf(candidate: KennelCollaborationCandidate): readonly PreviousComment[] {
+  const previous = candidate.details.previous as readonly PreviousComment[] | undefined
+  return previous ?? []
+}
+
 /**
  * Read a reviewer's conclusion from the first line of its reply.
  * @param text - the reply.
@@ -86,12 +103,13 @@ export function reviewOutcome(
     return { gouziId: member.gouziId, name: member.name, ...read }
   })
   const details = { verdicts, review: record.runId }
+  const word = record.collaboration === KENNEL_REREVIEW_KIND ? '复审' : '评审'
   if (run.state !== 'completed' && run.state !== 'failed' && run.state !== 'cancelled' && run.state !== 'indeterminate') {
-    return { subjectRunId: target.runId, state: 'pending', label: `评审中（${names(verdicts)}）`, details }
+    return { subjectRunId: target.runId, state: 'pending', label: `${word}中（${names(verdicts)}）`, details }
   }
   const changes = verdicts.filter(value => value.verdict === 'changes')
-  if (changes.length > 0) return { subjectRunId: target.runId, state: 'negative', label: `评审：待修改（${names(changes)}）`, details }
+  if (changes.length > 0) return { subjectRunId: target.runId, state: 'negative', label: `${word}：待修改（${names(changes)}）`, details }
   const unclear = verdicts.filter(value => value.verdict !== 'approved')
-  if (unclear.length > 0) return { subjectRunId: target.runId, state: 'unclear', label: `评审：结论不明（${names(unclear)}）`, details }
-  return { subjectRunId: target.runId, state: 'positive', label: `评审：已通过（${names(verdicts)}）`, details }
+  if (unclear.length > 0) return { subjectRunId: target.runId, state: 'unclear', label: `${word}：结论不明（${names(unclear)}）`, details }
+  return { subjectRunId: target.runId, state: 'positive', label: `${word}：已通过（${names(verdicts)}）`, details }
 }

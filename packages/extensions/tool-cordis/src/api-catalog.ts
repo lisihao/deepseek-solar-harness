@@ -5057,7 +5057,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'KennelWorkGraphInput',
-    declaration: 'export interface KennelWorkGraphInput {\n    readonly offer: KennelWorkOffer;\n    readonly text: string;\n}',
+    declaration: 'export interface KennelWorkGraphInput {\n    readonly offer: KennelWorkOffer;\n    readonly text: string;\n    readonly title?: string;\n}',
   },
   {
     name: 'KennelWorkOffer',

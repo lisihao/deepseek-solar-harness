@@ -20,15 +20,18 @@ import {
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 import type { Config } from './config.ts'
-import { APPROVE_LINE, CHANGES_LINE, reviewNodeId, reviewOutcome, targetOf, type ReviewTarget } from './verdict.ts'
+import { KENNEL_REREVIEW_KIND, KENNEL_REVIEW_KIND } from './kinds.ts'
+import { APPROVE_LINE, CHANGES_LINE, previousOf, reviewNodeId, reviewOutcome, targetOf, type ReviewTarget } from './verdict.ts'
 
-/** Name this kind registers under. */
-export const KENNEL_REVIEW_KIND = 'review'
 /** Assignment every reviewer reports. */
 const REVIEWER_ROLE = 'reviewer'
 
-/** A finished kennel work task that members did, whose result a review can read. */
-function reviewable(run: OrchestrationRunSnapshot): boolean {
+/**
+ * Whether a run is a finished kennel work task that members did, whose result a review can read.
+ * @param run - a run of this Session.
+ * @returns true when the run completed, is bound to members, and passed its `work` node.
+ */
+export function reviewable(run: OrchestrationRunSnapshot): boolean {
   return run.state === 'completed' && admissionGouziRecipients(run.admission).length > 0
     && run.nodes.some(node => node.id === KENNEL_WORK_NODE_ID && node.state === 'passed')
 }
@@ -79,15 +82,18 @@ function reviewNode(
   member: KennelCollaborationMember, index: number, target: ReviewTarget, result: string, request: KennelCollaborationRequest,
 ): OrchestrationNodeSpecV1 {
   const { limits } = request
-  const title = `评审：${target.title}`.slice(0, limits.titleMaxChars)
+  const again = request.candidate.collaboration === KENNEL_REREVIEW_KIND
+  const previous = previousOf(request.candidate)
+  const title = `${again ? '复审' : '评审'}：${target.title}`.slice(0, limits.titleMaxChars)
   return {
     id: reviewNodeId(index), dependsOn: [], requiredForCompletion: true, title,
     task: [
-      `你是狗窝成员「${member.name}」，现在评审「${target.authors.join('、')}」已完成的任务。只读检查，不修改文件，不执行命令。`,
+      `你是狗窝成员「${member.name}」，现在${again ? '复审' : '评审'}「${target.authors.join('、')}」已完成的任务。只读检查，不修改文件，不执行命令。`,
       `任务：${target.title}`,
+      ...previous.length === 0 ? [] : [`上一轮评审要求修改的意见，作者已按它们返工：\n${previous.map(value => `- ${value.name}：\n${value.comment}`).join('\n')}`],
       `对方的结果（可能被截断）：\n${result}`,
       `用户的要求：${request.prompt}`,
-      `对照任务目标检查这个结果，必要时读取工作区里相关文件核对。第一行只写「${APPROVE_LINE}」或「${CHANGES_LINE}」；之后逐条写意见，每条指出位置或依据。没有问题时说明你核对了什么。`,
+      `${previous.length === 0 ? '' : '先逐条核对上一轮的意见是否已经解决，再检查有没有新的问题。'}对照任务目标检查这个结果，必要时读取工作区里相关文件核对。第一行只写「${APPROVE_LINE}」或「${CHANGES_LINE}」；之后逐条写意见，每条指出位置或依据。没有问题时说明你核对了什么。`,
     ].join('\n\n'),
     role: 'analysis', phase: 'execution', capabilityRequirements: [], capabilityBudget: [],
     contextPolicy: { maxTokens: limits.contextTokens, allowedSourceKinds: ['intent', 'artifact', 'capsule'], unavailableSource: 'block' },
@@ -100,12 +106,19 @@ function reviewNode(
   }
 }
 
-async function start(ctx: Context, request: KennelCollaborationRequest): Promise<KennelCollaborationStarted> {
+/**
+ * Start a review of the task a candidate names, first or repeated.
+ * @param ctx - context holding the orchestration service.
+ * @param request - the chosen candidate and the user's message.
+ * @returns the run and each reviewer's assignment.
+ */
+export async function startReview(ctx: Context, request: KennelCollaborationRequest): Promise<KennelCollaborationStarted> {
   const { candidate } = request
   const target = targetOf(candidate)
   const result = await resultOf(ctx, target.runId)
   const graph: LogicalTaskGraphV1 = {
-    version: 1, title: `评审：${target.title}`.slice(0, request.limits.titleMaxChars), workspace: candidate.workspace,
+    version: 1, title: `${candidate.collaboration === KENNEL_REREVIEW_KIND ? '复审' : '评审'}：${target.title}`.slice(0, request.limits.titleMaxChars),
+    workspace: candidate.workspace,
     maxParallel: candidate.members.length, risk: 'low',
     nodes: candidate.members.map((member, index) => reviewNode(member, index, target, result, request)),
   }
@@ -140,7 +153,7 @@ export function kennelReviewKind(ctx: Context, config: Required<Config>): Kennel
     kind: KENNEL_REVIEW_KIND,
     guidance: '用户明确要求某只或几只狗子评审、检查、点评另一只狗子已完成的任务时选它；用户点了名的狗子就是评审人，候选里就是这些狗子；它只读不改文件，评审人不会是任务的做事人；用户没说评审哪个任务时选最近完成的那个',
     offer: facts => offer(facts, config),
-    start: request => start(ctx, request),
+    start: request => startReview(ctx, request),
     outcome: reviewOutcome,
   }
 }

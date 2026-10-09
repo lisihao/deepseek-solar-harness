@@ -2,7 +2,8 @@
 
 import type { KennelCollaborationCandidate, KennelCollaborationResult, OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
 import { describe, expect, it } from 'vitest'
-import { APPROVE_LINE, CHANGES_LINE, parseConclusion, reviewNodeId, reviewOutcome } from '../src/verdict.ts'
+import { isReview } from '../src/kinds.ts'
+import { APPROVE_LINE, CHANGES_LINE, parseConclusion, previousOf, reviewNodeId, reviewOutcome } from '../src/verdict.ts'
 
 describe('parseConclusion', () => {
   it('reads the conclusion from the first line and keeps the comments', () => {
@@ -34,7 +35,27 @@ const candidate: KennelCollaborationCandidate = {
 const record = { collaboration: 'review', runId: 'review-run', messageId: 'm', candidate }
 const reply = (index: number, text: string, accepted = true): KennelCollaborationResult => ({ nodeId: reviewNodeId(index), accepted, text })
 
+describe('isReview', () => {
+  it('counts first and repeated reviews and nothing else', () => {
+    expect(['review', 'rereview'].map(isReview)).toEqual([true, true])
+    expect(['rework', 'debate', ''].map(isReview)).toEqual([false, false, false])
+  })
+})
+
 describe('reviewOutcome', () => {
+  it('words a repeated review as a rereview', () => {
+    const again = { ...record, collaboration: 'rereview' }
+    expect(reviewOutcome(again, run('running'), []).label).toBe('复审中（X、Y）')
+    expect(reviewOutcome(again, run('completed'), [reply(0, CHANGES_LINE), reply(1, APPROVE_LINE)]).label).toBe('复审：待修改（X）')
+    expect(reviewOutcome(again, run('completed'), [reply(0, APPROVE_LINE)]).label).toBe('复审：结论不明（Y）')
+    expect(reviewOutcome(again, run('completed'), [reply(0, APPROVE_LINE), reply(1, APPROVE_LINE)]).label).toBe('复审：已通过（X、Y）')
+  })
+
+  it('reads the earlier comments a repeated review checks, none for a first review', () => {
+    expect(previousOf(candidate)).toEqual([])
+    expect(previousOf({ ...candidate, details: { ...candidate.details, previous: [{ name: 'X', comment: 'c' }] } })).toEqual([{ name: 'X', comment: 'c' }])
+  })
+
   it('names reviewer nodes by position', () => {
     expect([0, 1, 9].map(reviewNodeId)).toEqual(['review-1', 'review-2', 'review-10'])
   })

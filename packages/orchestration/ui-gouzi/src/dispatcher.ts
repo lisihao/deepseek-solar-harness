@@ -109,14 +109,17 @@ export function parseDispatchSelection(text: string, candidates: readonly Kennel
  * @param selected - fresh, fixed member and project choice.
  * @param text - unmodified user objective.
  * @param config - task and context limits.
+ * @param title - title of the task in the room; the objective when absent.
  * @returns one certified task, with a completion-critical verifier for writes.
  */
-export function kennelDispatchGraph(selected: KennelWorkCandidate, text: string, config: KennelDispatchConfig): LogicalTaskGraphV1 {
+export function kennelDispatchGraph(
+  selected: KennelWorkCandidate, text: string, config: KennelDispatchConfig, title = text,
+): LogicalTaskGraphV1 {
   const read = selected.mode === 'chat' ? [] : ['**']
   const write = selected.mode === 'write' ? ['**'] : []
   const node: OrchestrationNodeSpecV1 = {
     id: KENNEL_WORK_NODE_ID, dependsOn: [], requiredForCompletion: true,
-    title: text.trim().slice(0, config.titleMaxChars),
+    title: title.trim().slice(0, config.titleMaxChars),
     task: selected.mode === 'chat'
       ? `你是狗窝成员「${selected.name}」。直接回复这条聊天消息，不读取、修改文件或执行命令：\n${text}`
       : text,
@@ -374,7 +377,7 @@ async function startCollaboration(
       contextTokens: config.contextTokens, taskTimeoutMs: config.taskTimeoutMs, titleMaxChars: config.titleMaxChars,
       generationLimits: config.taskGenerationLimits, workspaceToolLimits: config.workspaceToolLimits,
     },
-    workGraph: input => kennelDispatchGraph({ kind: 'work', ...input.offer }, input.text, config),
+    workGraph: input => kennelDispatchGraph({ kind: 'work', ...input.offer }, input.text, config, input.title),
     ...runtimeContext === undefined ? {} : { runtimeContext },
   })
   agent.session.append('kennel/dispatch-collaboration-admitted', {

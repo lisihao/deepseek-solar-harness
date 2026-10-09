@@ -1270,6 +1270,8 @@ export interface Config {
   readonly maxReviewers?: number
   /** Most recent finished tasks offered for review. */
   readonly maxTargets?: number
+  /** Most times one task is handed back to its author, counting the rework of a rework. */
+  readonly maxReworks?: number
 }
 ```
 

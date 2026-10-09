@@ -5,7 +5,9 @@ import type {
   KennelCollaborationCandidate, KennelCollaborationFacts, KennelCollaborationRecord, KennelCollaborationRequest, KennelWorkOffer,
 } from '@deepseek-ai/dsh-orchestration'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { kennelReworkKind, KENNEL_REWORK_KIND } from '../src/rework.ts'
+import { resolveConfig } from '../src/config.ts'
+import { KENNEL_REWORK_KIND } from '../src/kinds.ts'
+import { kennelReworkKind } from '../src/rework.ts'
 import { CHANGES_LINE } from '../src/verdict.ts'
 
 const contexts: Context[] = []
@@ -33,10 +35,10 @@ function review(patch: Partial<KennelCollaborationRecord> & { subject?: string; 
   }
 }
 
-function rework(reviewRun: string, runId: string, offer = author): KennelCollaborationRecord {
+function rework(reviewRun: string, runId: string, offer = author, target = 'task-1'): KennelCollaborationRecord {
   return {
     collaboration: KENNEL_REWORK_KIND, runId, messageId: 'm2',
-    candidate: { ...reviewCandidate, collaboration: KENNEL_REWORK_KIND, details: { review: reviewRun, offer, target: { runId: 'task-1', title: 't' }, comments: [] } },
+    candidate: { ...reviewCandidate, collaboration: KENNEL_REWORK_KIND, details: { review: reviewRun, offer, target: { runId: target, title: 't' }, comments: [] } },
   }
 }
 
@@ -47,7 +49,8 @@ function facts(patch: Partial<KennelCollaborationFacts> = {}): KennelCollaborati
   }
 }
 
-const offer = (value: KennelCollaborationFacts) => kennelReworkKind(new Context()).offer(value) as KennelCollaborationCandidate[]
+const offer = (value: KennelCollaborationFacts) =>
+  kennelReworkKind(new Context(), resolveConfig({})).offer(value) as KennelCollaborationCandidate[]
 
 describe('rework offers', () => {
   it('hands a reviewed task back to the member that did it, with the comments that asked for changes', () => {
@@ -99,11 +102,33 @@ describe('rework offers', () => {
     expect(offer(facts({ runs: [] }))).toEqual([])
   })
 
+  it('offers rework for a repeated review that asked for changes, and stops after the configured number of reworks', () => {
+    const again = { ...review({ subject: 'task-2', runId: 'rereview-1' }), collaboration: 'rereview' }
+    const chain = (maxReworks: number) => kennelReworkKind(new Context(), resolveConfig({ maxReworks })).offer(facts({
+      work: [{ runId: 'task-0', offer: author }],
+      runs: [{ runId: 'task-2', title: 'Write the parser' } as never],
+      earlier: [rework('review-0', 'task-1', author, 'task-0'), rework('rereview-0', 'task-2', author, 'task-1'), again],
+    })) as KennelCollaborationCandidate[]
+    // task-2 is the rework of task-1, which is the rework of the first task: two reworks so far.
+    expect(chain(3).map(value => value.details.review)).toEqual(['rereview-1'])
+    expect(chain(2)).toEqual([])
+    expect(chain(1)).toEqual([])
+  })
+
+  it('counts one rework for a task that was reworked once', () => {
+    const rounds = (maxReworks: number) =>
+      (kennelReworkKind(new Context(), resolveConfig({ maxReworks })).offer(facts()) as unknown[]).length
+    expect(rounds(1)).toBe(1)
+    // A log that names a run as its own rework is damaged; it must not hang or overflow the stack.
+    const looped = rework('review-0', 'task-1', author, 'task-1')
+    expect(() => kennelReworkKind(new Context(), resolveConfig({})).offer(facts({ earlier: [looped, review()] }))).not.toThrow()
+  })
+
   it('follows a task that was itself a rework back to the offer that took it', () => {
     const later = { ...author, id: '["author",1,"/project","write"]b' }
     const chain = facts({
       work: [], workOffers: [author],
-      earlier: [rework('review-0', 'task-1', author), review({ runId: 'review-3' })],
+      earlier: [rework('review-0', 'task-1', author, 'task-0'), review({ runId: 'review-3' })],
     })
     const [candidate] = offer(chain)
     expect(candidate?.details.review).toBe('review-3')
@@ -117,7 +142,7 @@ function service() {
   const ctx = new Context()
   contexts.push(ctx)
   ctx.provide('orchestrations', { compile, start } as never)
-  const workGraph = vi.fn((input: { offer: KennelWorkOffer; text: string }) => ({ version: 1, title: 'graph', workspace: input.offer.workspace }) as never)
+  const workGraph = vi.fn((input: { offer: KennelWorkOffer; text: string; title?: string }) => ({ version: 1, title: 'graph', workspace: input.offer.workspace }) as never)
   return { ctx, compile, start, workGraph }
 }
 
@@ -137,11 +162,16 @@ describe('rework start', () => {
   it('has the author take the task again through the Host\'s own graph, admitted to that one member', async () => {
     const { ctx, compile, start, workGraph } = service()
     const runtimeContext = { version: 1 as const, sourceSessionId: 's', contextSnapshotMessageId: 'ctx', sections: [] }
-    const started = await kennelReworkKind(ctx).start(chosen(workGraph, { runtimeContext }))
+    const started = await kennelReworkKind(ctx, resolveConfig({})).start(chosen(workGraph, { runtimeContext }))
 
     expect(started).toEqual({ runId: 'rework-run', assignments: [{ gouziId: 'author', role: 'author' }] })
-    const [{ offer: given, text }] = workGraph.mock.calls[0]!
+    const [{ offer: given, text, title }] = workGraph.mock.calls[0]!
     expect(given).toEqual(author)
+    expect(title).toBe('返工：Write the parser')
+    // A task that is itself a rework keeps one prefix when it is reworked again.
+    const again = chosen(workGraph)
+    await kennelReworkKind(ctx, resolveConfig({})).start({ ...again, candidate: { ...again.candidate, details: { ...again.candidate.details, target: { runId: 't', title: '返工：返工：Write the parser' } } } })
+    expect(workGraph.mock.calls[1]![0].title).toBe('返工：Write the parser')
     expect(text).toContain('「Author」')
     expect(text).toContain('任务：Write the parser'.replace('任务：', ''))
     expect(text).toContain('- X：\n没处理空输入')
@@ -161,16 +191,16 @@ describe('rework start', () => {
 
   it('omits an absent runtime context and refuses a candidate that names no review', async () => {
     const { ctx, compile, workGraph } = service()
-    await kennelReworkKind(ctx).start(chosen(workGraph))
+    await kennelReworkKind(ctx, resolveConfig({})).start(chosen(workGraph))
     expect((compile.mock.calls[0]![0] as { admission: Record<string, unknown> }).admission.runtimeContext).toBeUndefined()
     const request = chosen(workGraph)
     for (const details of [{}, { review: 'r' }, { review: 'r', offer: author, target: { runId: 't', title: 't' }, comments: 'x' }]) {
-      await expect(kennelReworkKind(ctx).start({ ...request, candidate: { ...request.candidate, details } })).rejects.toThrow('does not name a review')
+      await expect(kennelReworkKind(ctx, resolveConfig({})).start({ ...request, candidate: { ...request.candidate, details } })).rejects.toThrow('does not name a review')
     }
   })
 
   it('reports where the rework stands on the task it reworks, without approving it', () => {
-    const kind = kennelReworkKind(new Context())
+    const kind = kennelReworkKind(new Context(), resolveConfig({}))
     const [candidate] = offer(facts())
     const record = { collaboration: 'rework', runId: 'rework-run', messageId: 'm', candidate: candidate! }
     const outcome = (state: string) => kind.outcome!(record, { runId: 'rework-run', state } as never, [])
@@ -182,7 +212,7 @@ describe('rework start', () => {
   })
 
   it('tells the model when to choose it', () => {
-    const kind = kennelReworkKind(new Context())
+    const kind = kennelReworkKind(new Context(), resolveConfig({}))
     expect(kind.kind).toBe('rework')
     expect(kind.guidance).toContain('评审意见')
     expect(CHANGES_LINE).toContain('需要修改')

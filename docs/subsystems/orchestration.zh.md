@@ -463,7 +463,7 @@ register(kind: KennelCollaborationKind): () => void
 kinds(): readonly KennelCollaborationKind[]
 ```
 
-Source: [`packages/orchestration/orchestration/src/kennel-collaboration.ts:207`](../../packages/orchestration/orchestration/src/kennel-collaboration.ts)
+Source: [`packages/orchestration/orchestration/src/kennel-collaboration.ts:209`](../../packages/orchestration/orchestration/src/kennel-collaboration.ts)
 
 <a id="ctxmodelallocation--modelallocationservice-abstract-seam"></a>
 

@@ -368,6 +368,11 @@ it('gives kinds the work offers, the work and collaborations already admitted wi
   const given = facts.workOffers[2]!
   expect(request!.workGraph({ offer: given, text: 'redo it' })).toEqual(kennelDispatchGraph({ kind: 'work', ...given }, 'redo it', config))
   expect(request!.workGraph({ offer: given, text: 'redo it' })).toMatchObject({ risk: 'high', workspaceIsolation: 'directory-snapshot' })
+  // A title the kind gives is the task's title; the text stays what the member receives.
+  const titled = request!.workGraph({ offer: given, text: 'redo it', title: '返工：old task' })
+  expect(titled).toEqual(kennelDispatchGraph({ kind: 'work', ...given }, 'redo it', config, '返工：old task'))
+  expect(titled.title).toBe('返工：old task')
+  expect(titled.nodes[0]).toMatchObject({ title: '返工：old task', task: 'redo it' })
 })
 it('starts the selected collaboration through its kind after durably recording the candidate, without compiling a task', async () => {
   const f = await collaborationFixture()

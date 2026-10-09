@@ -13,15 +13,13 @@ import {
   type KennelWorkOffer,
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
-import { KENNEL_REVIEW_KIND } from './review.ts'
+import type { Config } from './config.ts'
+import { isReview, KENNEL_REWORK_KIND } from './kinds.ts'
 import type { ReviewVerdict } from './verdict.ts'
-
-/** Name this kind registers under. */
-export const KENNEL_REWORK_KIND = 'rework'
 const AUTHOR_ROLE = 'author'
 
 /** What a rework candidate keeps in its details. */
-interface ReworkDetails {
+export interface ReworkDetails {
   /** Run of the review whose comments the author receives. */
   readonly review: string
   readonly target: { readonly runId: string; readonly title: string }
@@ -29,7 +27,12 @@ interface ReworkDetails {
   readonly comments: readonly { readonly name: string; readonly comment: string }[]
 }
 
-function detailsOf(candidate: KennelCollaborationCandidate): ReworkDetails {
+/**
+ * Read what a rework candidate keeps.
+ * @param candidate - a candidate this kind offered.
+ * @returns the review it answers, the task, the author's offer, and the comments.
+ */
+export function reworkDetails(candidate: KennelCollaborationCandidate): ReworkDetails {
   const details = candidate.details as Partial<ReworkDetails>
   if (typeof details.review !== 'string' || details.offer === undefined || details.target === undefined || !Array.isArray(details.comments)) {
     throw new Error(`rework candidate ${candidate.id} does not name a review`)
@@ -42,14 +45,29 @@ function authorOffer(facts: KennelCollaborationFacts, runId: string): KennelWork
   const dispatched = facts.work.find(value => value.runId === runId)
   if (dispatched !== undefined) return dispatched.offer
   const rework = facts.earlier.find(value => value.collaboration === KENNEL_REWORK_KIND && value.runId === runId)
-  return rework === undefined ? undefined : detailsOf(rework.candidate).offer
+  return rework === undefined ? undefined : reworkDetails(rework.candidate).offer
 }
 
-function offer(facts: KennelCollaborationFacts): KennelCollaborationCandidate[] {
+/** How many reworks led to a task: zero for a task nobody reworked. A run met twice in the log ends the count. */
+function depth(facts: KennelCollaborationFacts, runId: string): number {
+  const seen = new Set<string>()
+  let count = 0
+  for (let current = runId; !seen.has(current); count += 1) {
+    seen.add(current)
+    const rework = facts.earlier.find(value => value.collaboration === KENNEL_REWORK_KIND && value.runId === current)
+    if (rework === undefined) break
+    current = reworkDetails(rework.candidate).target.runId
+  }
+  return count
+}
+
+function offer(facts: KennelCollaborationFacts, config: Required<Config>): KennelCollaborationCandidate[] {
   const reworked = new Set(facts.earlier.filter(value => value.collaboration === KENNEL_REWORK_KIND)
-    .map(value => detailsOf(value.candidate).review))
+    .map(value => reworkDetails(value.candidate).review))
   return facts.earlier.flatMap((record: KennelCollaborationRecord) => {
-    if (record.collaboration !== KENNEL_REVIEW_KIND || record.outcome?.state !== 'negative' || reworked.has(record.runId)) return []
+    if (!isReview(record.collaboration) || record.outcome?.state !== 'negative' || reworked.has(record.runId)) return []
+    // A task that has been handed back as many times as allowed stays with its comments instead of looping.
+    if (depth(facts, record.outcome.subjectRunId) >= config.maxReworks) return []
     const taken = authorOffer(facts, record.outcome.subjectRunId)
     // Only the member that did the task reworks it, on the same project and in the same mode, if the Host still offers that.
     const current = taken === undefined ? undefined : facts.workOffers.find(value => value.gouziId === taken.gouziId
@@ -86,11 +104,11 @@ function task(details: ReworkDetails, prompt: string): string {
 }
 
 async function start(ctx: Context, request: KennelCollaborationRequest): Promise<KennelCollaborationStarted> {
-  const details = detailsOf(request.candidate)
+  const details = reworkDetails(request.candidate)
   const { offer: taken } = details
   const compilation = await ctx.orchestrations.compile({
     intent: { request: request.prompt },
-    graph: request.workGraph({ offer: taken, text: task(details, request.prompt) }),
+    graph: request.workGraph({ offer: taken, text: task(details, request.prompt), title: `返工：${details.target.title.replace(/^(返工：)+/u, '')}` }),
     admission: {
       policy: 'auto', route: 'taskgraph', sourceSessionId: request.sessionId, sourceMessageId: request.messageId,
       ...request.runtimeContext === undefined ? {} : { runtimeContext: request.runtimeContext },
@@ -112,7 +130,7 @@ async function start(ctx: Context, request: KennelCollaborationRequest): Promise
  * @returns the outcome for the original task.
  */
 function outcome(record: Omit<KennelCollaborationRecord, 'outcome'>, run: OrchestrationRunSnapshot): KennelCollaborationOutcome {
-  const { target, offer: taken } = detailsOf(record.candidate)
+  const { target, offer: taken } = reworkDetails(record.candidate)
   const base = { subjectRunId: target.runId, details: { rework: record.runId } }
   if (run.state === 'completed') return { ...base, state: 'unclear', label: `已按评审意见返工（${taken.name}），待再次评审` }
   if (run.state === 'failed' || run.state === 'cancelled' || run.state === 'indeterminate') {
@@ -124,13 +142,14 @@ function outcome(record: Omit<KennelCollaborationRecord, 'outcome'>, run: Orches
 /**
  * Describe the rework kind for the kennel registry.
  * @param ctx - context holding the orchestration service.
+ * @param config - rework bounds.
  * @returns the kind to register.
  */
-export function kennelReworkKind(ctx: Context): KennelCollaborationKind {
+export function kennelReworkKind(ctx: Context, config: Required<Config>): KennelCollaborationKind {
   return {
     kind: KENNEL_REWORK_KIND,
     guidance: '用户要求按评审意见修改、返工，或让做这个任务的狗子处理评审提出的问题时选它；它让原作者带着评审意见再做一轮，只在评审结论是“需要修改”之后出现',
-    offer,
+    offer: facts => offer(facts, config),
     start: request => start(ctx, request),
     outcome,
   }

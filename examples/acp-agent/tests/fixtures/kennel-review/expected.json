@@ -1,5 +1,5 @@
 {
-  "modelCalls": 3,
+  "modelCalls": 4,
   "dispatchEvents": [
     "kennel/dispatch-request",
     "kennel/dispatch-model",
@@ -18,11 +18,18 @@
     "kennel/dispatch-model",
     "kennel/dispatch-decision",
     "kennel/dispatch-collaboration",
+    "kennel/dispatch-collaboration-admitted",
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-collaboration",
     "kennel/dispatch-collaboration-admitted"
   ],
   "offered": {
     "reviewBeforeWork": false,
     "reworkBeforeReview": false,
+    "rereviewBeforeRework": false,
     "review": [
       {
         "target": "Summarize the parser for me.",
@@ -39,6 +46,21 @@
           "alpha"
         ],
         "comments": [
+          {
+            "name": "beta",
+            "comment": "- src/parse.ts 没处理超长输入"
+          }
+        ]
+      }
+    ],
+    "rereview": [
+      {
+        "target": "返工：Summarize the parser for me.",
+        "members": [
+          "gamma",
+          "beta"
+        ],
+        "previous": [
           {
             "name": "beta",
             "comment": "- src/parse.ts 没处理超长输入"
@@ -69,6 +91,19 @@
           "role": "author"
         }
       ]
+    },
+    {
+      "collaboration": "rereview",
+      "assignments": [
+        {
+          "gouziId": "gamma",
+          "role": "reviewer"
+        },
+        {
+          "gouziId": "beta",
+          "role": "reviewer"
+        }
+      ]
     }
   ],
   "outcomeAfterReview": [
@@ -80,6 +115,12 @@
     }
   ],
   "outcomeAfterRework": [
+    {
+      "task": "返工：Summarize the parser for me.",
+      "collaboration": "rereview",
+      "state": "positive",
+      "label": "复审：已通过（gamma、beta）"
+    },
     {
       "task": "Summarize the parser for me.",
       "collaboration": "review",
@@ -122,6 +163,17 @@
       "recipients": [
         "alpha"
       ]
+    },
+    {
+      "state": "completed",
+      "nodes": [
+        "review-1:passed",
+        "review-2:passed"
+      ],
+      "recipients": [
+        "gamma",
+        "beta"
+      ]
     }
   ],
   "executed": [
@@ -129,6 +181,16 @@
       "member": "gamma",
       "nodeId": "review-1",
       "model": "gpt-5.6-luna"
+    },
+    {
+      "member": "gamma",
+      "nodeId": "review-1",
+      "model": "gpt-5.6-luna"
+    },
+    {
+      "member": "beta",
+      "nodeId": "review-2",
+      "model": "gpt-5.6-sol"
     },
     {
       "member": "beta",
@@ -160,9 +222,24 @@
       ],
       "write": [],
       "effects": []
+    },
+    {
+      "read": [
+        "**"
+      ],
+      "write": [],
+      "effects": []
+    },
+    {
+      "read": [
+        "**"
+      ],
+      "write": [],
+      "effects": []
     }
   ],
-  "reviewersReadTheResult": true,
+  "reviewersReadTheResult": false,
+  "reviewersReceivedTheirComment": true,
   "authorReceivedTheComment": true,
   "externalMethods": [
     "operator.events",
@@ -173,6 +250,23 @@
   "room": {
     "status": 200,
     "tasks": [
+      {
+        "state": "completed",
+        "nodes": [
+          {
+            "gouziId": "gamma",
+            "state": "passed",
+            "accepted": true,
+            "preview": "结论：通过\n- gamma 核对了 src/parse.ts，空输入有处理。"
+          },
+          {
+            "gouziId": "beta",
+            "state": "passed",
+            "accepted": true,
+            "preview": "结论：通过\n- beta 核对了 src/parse.ts，空输入有处理。"
+          }
+        ]
+      },
       {
         "state": "completed",
         "nodes": [
