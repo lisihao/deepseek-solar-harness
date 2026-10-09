@@ -2048,14 +2048,18 @@ export class OrchestrationDaemon {
           && catalog.gouziWorkspace?.gouziId === String(member.gouziId)
           && catalog.gouziWorkspace.generation === member.generation)
           .flatMap(catalog => catalog.gouziWorkspace?.projectScopes ?? []))],
-        operators: catalogs.filter(catalog => operatorIds.has(String(catalog.operatorId))).map(catalog => ({
-          operatorId: String(catalog.operatorId),
-          available: catalog.available,
-          supportsGenerationLimits: catalog.supportsGenerationLimits === true,
-          supportsGovernedWorkspacePolicy: catalog.supportsGovernedWorkspacePolicy === true,
-          ...catalog.unavailableReason === undefined ? {} : { unavailableReason: catalog.unavailableReason },
-          models: catalog.models.map(model => model.model),
-        })),
+        operators: catalogs.filter(catalog => operatorIds.has(String(catalog.operatorId))).map((catalog) => {
+          const defaultModel = catalog.models.find(model => model.isDefault)?.model
+          return {
+            operatorId: String(catalog.operatorId),
+            available: catalog.available,
+            supportsGenerationLimits: catalog.supportsGenerationLimits === true,
+            supportsGovernedWorkspacePolicy: catalog.supportsGovernedWorkspacePolicy === true,
+            ...catalog.unavailableReason === undefined ? {} : { unavailableReason: catalog.unavailableReason },
+            models: catalog.models.map(model => model.model),
+            ...defaultModel === undefined ? {} : { defaultModel },
+          }
+        }),
       }
     })
   }

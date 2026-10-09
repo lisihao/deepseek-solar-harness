@@ -338,6 +338,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Resolves the current human request to an enabled member generation and available execution entries before sealing TaskGraph admission.',
   },
   {
+    key: 'kennelCollaborations',
+    pkg: 'orchestration',
+    title: 'Kennel collaboration kinds',
+    mode: 'seam',
+    implementations: ['ui-gouzi'],
+    consumers: ['ui-gouzi', 'debate-orchestration', 'kennel-review'],
+    note: 'Registry of the kinds of work members do together, such as Debate and review. A kind offers candidates and starts the one the user chose; the dispatcher never learns what a kind does.',
+  },
+  {
     key: 'gouziHost',
     pkg: 'ui-gouzi',
     title: 'Gouzi member process host',

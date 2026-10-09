@@ -101,6 +101,9 @@ flowchart LR
   pkg_ui_orchestration["ui-orchestration"]
   svc_orchestrationRecipients["ctx.orchestrationRecipients<br/>User-selected orchestration recipient resolver"]
   pkg_ui_gouzi["ui-gouzi"]
+  svc_kennelCollaborations["ctx.kennelCollaborations<br/>Kennel collaboration kinds"]
+  pkg_debate_orchestration["debate-orchestration"]
+  pkg_kennel_review["kennel-review"]
   svc_gouziHost["ctx.gouziHost<br/>Gouzi member process host"]
   pkg_remote_auth["remote-auth"]
   svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
@@ -307,6 +310,7 @@ flowchart LR
   pkg_model_worker --> svc_modelWorkers
   pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_kennelCollaborations
   pkg_orchestration --> svc_orchestrationRecipients
   pkg_orchestration --> svc_orchestrations
   pkg_orchestration_local --> svc_capabilityCapsules
@@ -375,6 +379,7 @@ flowchart LR
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
   pkg_ui_gouzi --> svc_gouziHost
+  pkg_ui_gouzi --> svc_kennelCollaborations
   pkg_ui_gouzi --> svc_orchestrationRecipients
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
@@ -422,6 +427,9 @@ flowchart LR
   svc_jobs --> pkg_tool_jobs
   svc_jobs --> pkg_tool_subagent
   svc_jobs --> pkg_tool_terminal
+  svc_kennelCollaborations --> pkg_debate_orchestration
+  svc_kennelCollaborations --> pkg_kennel_review
+  svc_kennelCollaborations --> pkg_ui_gouzi
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
@@ -557,6 +565,7 @@ flowchart LR
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
 | `ctx.orchestrationRecipients` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | [`tool-orchestration`](../packages/orchestration/tool-orchestration) | - | Resolves the current human request to an enabled member generation and available execution entries before sealing TaskGraph admission. |
+| `ctx.kennelCollaborations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | [`ui-gouzi`](../packages/orchestration/ui-gouzi), [`debate-orchestration`](../packages/orchestration/debate-orchestration), [`kennel-review`](../packages/orchestration/kennel-review) | - | Registry of the kinds of work members do together, such as Debate and review. A kind offers candidates and starts the one the user chose; the dispatcher never learns what a kind does. |
 | `ctx.gouziHost` | `seam` | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | Starts, adopts, and stops execution-member processes on the machine that runs the Server; the Desktop product provides it and the roster only consumes it. |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |

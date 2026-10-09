@@ -56,6 +56,7 @@ import type {
   DebateUsageV1,
 } from './types.ts'
 
+export * from './defaults.ts'
 export * from './error.ts'
 export type * from './types.ts'
 

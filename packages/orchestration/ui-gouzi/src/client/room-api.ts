@@ -19,6 +19,26 @@ function isoTime(value: unknown): value is string {
   const date = value.slice(0, 10)
   return new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) === date
 }
+/** A collaboration is shown by kind, run, state, and the members with their roles. */
+function validCollaborations(value: unknown): boolean {
+  return value === undefined || Array.isArray(value) && value.every((entry: unknown) =>
+    record(entry) && id(entry.collaboration) && typeof entry.label === 'string' && id(entry.runId) && typeof entry.state === 'string'
+    && (entry.subject === undefined || record(entry.subject) && id(entry.subject.runId) && typeof entry.subject.title === 'string')
+    && (entry.outcome === undefined || record(entry.outcome) && typeof entry.outcome.label === 'string'
+      && ['pending', 'positive', 'negative', 'unclear'].includes(String(entry.outcome.state)))
+    && Array.isArray(entry.members) && entry.members.every((member: unknown) => record(member) && id(member.gouziId)
+      && typeof member.role === 'string' && typeof member.roleLabel === 'string'
+      && (member.conclusion === undefined || typeof member.conclusion === 'string')
+      && (member.text === undefined || typeof member.text === 'string')))
+}
+
+/** Collaboration outcomes on a task are optional; each one must carry its kind, run, state, and label. */
+function validOutcomes(value: unknown): boolean {
+  return value === undefined || Array.isArray(value) && value.every((outcome: unknown) =>
+    record(outcome) && id(outcome.collaboration) && id(outcome.runId) && typeof outcome.label === 'string'
+    && ['pending', 'positive', 'negative', 'unclear'].includes(String(outcome.state)))
+}
+
 function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapshotV1 {
   if (!record(value) || !integer(value.roomPollIntervalMs) || value.roomPollIntervalMs <= 0 || value.version !== 1 || value.sessionId !== sessionId || typeof value.generatedAt !== 'string'
     || !record(value.dashboard) || !Array.isArray(value.dashboard.members)
@@ -39,7 +59,8 @@ function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapsho
       && strings(operator.models)))
   const tasks = value.tasks.every((task: unknown) => record(task) && id(task.runId) && typeof task.title === 'string'
     && typeof task.state === 'string' && integer(task.revision) && typeof task.createdAt === 'string'
-    && typeof task.updatedAt === 'string' && Array.isArray(task.nodes) && task.nodes.every((node: unknown) => {
+    && typeof task.updatedAt === 'string' && validOutcomes(task.outcomes)
+    && Array.isArray(task.nodes) && task.nodes.every((node: unknown) => {
     if (!record(node) || !id(node.nodeId) || typeof node.title !== 'string' || typeof node.state !== 'string'
         || !integer(node.attempt) || !integer(node.capabilityGeneration) || !strings(node.evidenceRefs)
         || node.gouziId !== undefined && !id(node.gouziId) || node.operatorId !== undefined && !id(node.operatorId)) return false
@@ -49,7 +70,7 @@ function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapsho
         && typeof node.result.outputPreview === 'string' && typeof node.result.accepted === 'boolean'
         && id(node.result.operatorId) && node.result.operatorId === node.operatorId
   }))
-  return members && execution && tasks
+  return members && execution && tasks && validCollaborations(value.collaborations)
 }
 /**
  * Read the exact session room, rejecting invalid wire fields before they can authorize a send.

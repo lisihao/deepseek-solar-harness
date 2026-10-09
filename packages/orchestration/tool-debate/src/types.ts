@@ -1,17 +1,7 @@
-/** Client-safe per-session Debate execution preferences. */
+/** Client-safe Debate vocabulary. */
 
-/** User-visible Debate strategy selection. */
+/** Admission mode recorded on a `debate/admission` event; Sessions written earlier may carry any of the three values. */
 export type DebateExecutionMode = 'auto' | 'enabled' | 'disabled'
-
-/** Whole-value preference persisted in the Session log. */
-export interface DebateExecutionPreferences {
-  readonly mode: DebateExecutionMode
-}
-
-/** Preference plus the complete selector vocabulary. */
-export interface DebateExecutionPreferencesSelect extends DebateExecutionPreferences {
-  readonly options: readonly DebateExecutionMode[]
-}
 
 /** Explainable deterministic depth selected for an automatic Debate start. */
 export type DebateInitialPlanReason =
@@ -28,10 +18,4 @@ export interface DebateInitialPlan {
   readonly reason: DebateInitialPlanReason
   /** Concise Chinese explanation shown in the host transcript and tool result. */
   readonly explanation: string
-}
-
-declare module '@deepseek-ai/dsh-session-projection/types' {
-  interface SessionProjectionMap {
-    debateExecutionPreferences: DebateExecutionPreferencesSelect
-  }
 }

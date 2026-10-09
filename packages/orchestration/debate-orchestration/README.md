@@ -16,6 +16,12 @@ The Debate command receipt is durable before this adapter is called, and the Tas
 
 The optional `dshHome` configuration follows the harness-wide home resolution rules. Debate run state is stored under `$DSH_HOME/debates`; Bundle users do not configure an independent state path.
 
+## Member slots
+
+A roster slot whose `operatorId` is a registered Gouzi entry (`gouzi.<gouziId>.<operator>`) runs on that member. When every slot names a member, the round's admission carries `gouziRecipient` for one member or `gouziRecipients` for several, built from the members' current generations, so the daemon checks availability, workspace, and grants for each member. A round that mixes members with other operators, names a fallback for a member slot, or names an unregistered member is refused with `DEBATE_UNSUPPORTED` or `DEBATE_ROSTER_INVALID`.
+
+The plugin also registers the `debate` kennel collaboration kind with `ctx.kennelCollaborations` while a kennel registry is present. It offers one candidate per project that at least three enabled members hold on a usable entry, never for a message addressed to one member. It uses the members the message names, in the order it names them, otherwise the first members in registry order; one or two names are completed with other members so the last member can judge, and a named member that cannot take part, or more than four names, offers no Debate rather than a different one. It gives three or four members the proposer, falsifier, optional evidence-auditor, and judge roles in that order, derives the ordinary three-round policy, starts the Debate, and approves it in the background because approval returns when the rounds settle. The candidate id names every member's generation, entry, and model, so a changed member makes the choice stale.
+
 ## Model Experience
 
 ### Sealed `NodeExecutionPlan` round

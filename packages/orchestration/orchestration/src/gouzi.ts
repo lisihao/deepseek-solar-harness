@@ -113,6 +113,8 @@ export interface GouziOperatorCapability {
   /** Why the operator cannot run, such as a missing login. */
   readonly unavailableReason?: string
   readonly models: readonly string[]
+  /** The catalog's default model, when the catalog marks one; absent otherwise. */
+  readonly defaultModel?: string
   /** Actual execution endpoint supports bounded model-only requests. */
   readonly supportsGenerationLimits?: boolean
   /** Actual execution endpoint supports scoped file-tool requests. */

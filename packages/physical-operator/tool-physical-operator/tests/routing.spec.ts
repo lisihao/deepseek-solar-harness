@@ -51,12 +51,6 @@ import SubscriptionFirstModelAllocation, { canonicalCohortKey } from '@deepseek-
 import * as tool from '../src/index.ts'
 import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
-declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionDataMap {
-    'debate/preferences': { readonly mode: 'auto' | 'enabled' | 'disabled' }
-  }
-}
-
 class CountingDeepSeek extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
 
@@ -1382,21 +1376,29 @@ describe('host physical-operator routing', () => {
     expect(agent.session.events.filter(event => event.type === 'physical-operator/dispatch')).toHaveLength(1)
   })
 
-  it('yields Smart Auto host routing when the Session explicitly enables Debate', async () => {
-    const { agent, deepseek, codex, claude } = await setup()
-    agent.session.append('debate/preferences', { mode: 'enabled' }, { ignorable: true })
+  it('routes a Session that still carries a legacy enabled Debate preference like any other Session', async () => {
+    const prompt = '请深度分析 DSH 是否代表 Agent 架构趋势。'
+    const routed = async (legacyPreference: boolean) => {
+      const { agent, deepseek, codex, claude } = await setup()
+      // An older build wrote this event; its type is no longer declared, so write it untyped.
+      if (legacyPreference) {
+        (agent.session as unknown as { append(type: string, data: unknown, options: object): void })
+          .append('debate/preferences', { mode: 'enabled' }, { ignorable: true })
+      }
+      send(agent, prompt)
+      await agent.whenIdle()
+      const decision = agent.session.events.find(event => event.type === 'physical-operator/routing-decision')
+      if (decision?.type !== 'physical-operator/routing-decision') throw new Error('missing routing decision')
+      const { policy, route, reason, operatorId } = decision.data
+      return {
+        decision: { policy, route, reason, operatorId },
+        requests: [deepseek.requests.length, codex.requests.length, claude.requests.length],
+      }
+    }
 
-    send(agent, '请深度分析 DSH 是否代表 Agent 架构趋势。')
-    await agent.whenIdle()
-
-    expect(deepseek.requests).toHaveLength(1)
-    expect(codex.requests).toHaveLength(0)
-    expect(claude.requests).toHaveLength(0)
-    const decision = agent.session.events.find(event => event.type === 'physical-operator/routing-decision')
-    if (decision?.type !== 'physical-operator/routing-decision') throw new Error('missing routing decision')
-    expect(decision.data.policy).toBe('auto')
-    expect(decision.data.route).toBe('taskgraph-candidate')
-    expect(decision.data.reason).toContain('Debate')
+    const legacy = await routed(true)
+    expect(legacy).toEqual(await routed(false))
+    expect(legacy.decision.reason).not.toContain('Debate')
   })
 
   describe('Smart Auto allocation', () => {

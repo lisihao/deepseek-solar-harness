@@ -11,15 +11,6 @@
     "webAdvisorSelected": "true",
     "primaryProfileCount": 0
   },
-  "debate": {
-    "chip": "协作 · Debate（多 Agent 辩论）",
-    "claudeAdvisorDisabled": true,
-    "nativeProfileCount": 0
-  },
-  "restored": {
-    "chip": "协作 · Codex",
-    "claudeAdvisorDisabled": false
-  },
   "webDirect": {
     "chip": "协作 · ChatGPT 网页版",
     "mainModel": "Select model, current ChatGPT Web · Fixture Web Route",

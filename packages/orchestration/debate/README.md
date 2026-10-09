@@ -14,6 +14,8 @@ English | [中文](README.zh.md)
 - A continuation is eligible only after a fully settled `completed`, `max_rounds`, or `budget_limited` run with known token accounting and, when a monetary cap exists, known cost accounting. `DebateRunResultV1` distinguishes completed, round-limit, budget-limit, failed, indeterminate, rejected, stopped, and running outcomes; an exhausted or forecast-blocked metered cap reports the actual cap and requires the existing explicit approval path.
 - Providers may append `debate.agent.progress` while an admitted slot is running. Its v1 payload is deliberately limited to source sequence/time, phase, bounded public output preview, tool start/completion name, approval requirement, usage, and requested/actual routing. Prompt text, hidden reasoning, credentials, and native session or command identifiers are outside this event contract.
 
+The package also exports the defaults Consumers share when they compose a policy: `DEFAULT_DEBATE_PERSONAS` for the four roles, `DEFAULT_DEBATE_ROUNDS`, `DEFAULT_DEBATE_CONVERGENCE`, and `defaultDebateBudget(maxRounds, participantCount)`. They name no provider, operator, or model.
+
 ## Provider boundary
 
 Providers must validate untrusted JSON with the exported policy, start, control, event-read, event, snapshot, continuation-state, and command-receipt validators. Released snapshots may omit `topic`, `continuation`, and `result`; fields that are present use exact version-1 records. Unknown fields, wrong versions, unsupported role identifiers, parent-identity mismatches, unsafe budgets, and unbounded event pages fail closed. Every start request names the canonical TaskGraph workspace.
