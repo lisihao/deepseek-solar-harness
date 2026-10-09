@@ -121,7 +121,8 @@ describe('kennel room interaction', () => {
     expect(screen.getByText('总管回复')).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toBe('执行入口拒绝当前仓库（REPOSITORY_DENIED）')
     expect(screen.getByText('狗子封存输出')).toBeTruthy()
-    expect(screen.getAllByText('执行结束 · 结果已接纳')).toHaveLength(2)
+    expect(screen.getAllByText('执行结束 · 结果已接纳')).toHaveLength(1)
+    expect(screen.getAllByText('结果已接纳')).toHaveLength(1)
     expect(screen.queryByText(/验收通过/)).toBe(null)
     expect(container.textContent).not.toContain('内部模型上下文')
     expect(container.textContent).not.toContain('内部诊断')
@@ -248,7 +249,8 @@ describe('kennel room interaction', () => {
     fireEvent.click(screen.getByRole('button', { name: '全部' }))
     expect(screen.getByRole('button', { name: '收起证据' })).toBeTruthy()
     expect(h.readEvidence).toHaveBeenCalledExactlyOnceWith('run', 'ref')
-    expect(screen.getAllByText('执行结束 · 结果未接纳')).toHaveLength(2)
+    expect(screen.getAllByText('执行结束 · 结果未接纳')).toHaveLength(1)
+    expect(screen.getAllByText('结果未接纳')).toHaveLength(1)
   })
   it('shows addressed user messages under the matching recipient filter', () => {
     const h = harness()
@@ -336,6 +338,42 @@ describe('kennel room interaction', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '展开执行记录' })[0]!)
     expect(screen.getByText('尝试 1 · generation 1')).toBeTruthy()
     expect(h.send).not.toHaveBeenCalled()
+  })
+  it('shows each member as working in the transcript until its result is sealed, and says when it did not finish', () => {
+    const h = harness()
+    const task = (state: string, result?: object) => ({
+      runId: 'r', title: '大家有什么建议', state: 'running', revision: 1, createdAt: '2026-10-06T00:00:00.000Z', updatedAt: 'now',
+      nodes: [{ nodeId: 'work', title: '大家有什么建议', state, attempt: 1, capabilityGeneration: 1, gouziId: 'g1', evidenceRefs: [], ...result === undefined ? {} : { result } }],
+    })
+    patchRoom(h, current => ({ ...current, tasks: [task('running')] as never }))
+    const { container } = all(h)
+    const progress = container.querySelector('[data-node-state="running"]')
+    expect(progress?.getAttribute('role')).toBe('status')
+    expect(progress?.textContent).toBe('同名 · 机器0 · 开发 · 执行中')
+
+    act(() => { patchRoom(h, current => ({ ...current, tasks: [task('failed')] as never })) })
+    expect(container.querySelector('[data-node-state="running"]')).toBe(null)
+    expect(container.querySelector('[data-node-state="failed"]')?.textContent).toBe('同名 · 机器0 · 开发 · 执行失败')
+
+    act(() => { patchRoom(h, current => ({ ...current, tasks: [task('passed', {
+      sequence: 3, time: '2026-10-06T00:00:05.000Z', evidenceRef: 'ref', outputPreview: '先明确目标，再列方案。', accepted: true, operatorId: 'g1.codex',
+    })] as never })) })
+    expect(container.querySelector('[data-node-state]')).toBe(null)
+    expect(screen.getByText('先明确目标，再列方案。')).toBeTruthy()
+  })
+  it('does not repeat a task title that is the same as its node title in the result card', () => {
+    const h = harness()
+    const node = (title: string) => ({ nodeId: 'work', title, state: 'passed', attempt: 1, capabilityGeneration: 1, gouziId: 'g1', evidenceRefs: [], result: {
+      sequence: 1, time: '2026-10-06T00:00:00.000Z', evidenceRef: 'ref', outputPreview: '答复', accepted: true, operatorId: 'g1.codex',
+    } })
+    patchRoom(h, current => ({ ...current, tasks: [{ runId: 'same', title: '大家有什么建议', state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [node('大家有什么建议')] },
+      { runId: 'differs', title: '整理文档', state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [node('检查')] }] as never }))
+    const { container } = all(h)
+    const cards = [...container.querySelectorAll('article')].filter(card => card.textContent?.includes('答复'))
+    expect(cards).toHaveLength(2)
+    const [same, differs] = [cards.find(card => !card.textContent?.includes('整理文档')), cards.find(card => card.textContent?.includes('整理文档'))]
+    expect(same?.textContent).not.toContain('大家有什么建议')
+    expect(differs?.textContent).toContain('整理文档 / 检查')
   })
   it('interleaves an older sealed task result before a newer user message using actual timestamps', () => {
     const h = harness()

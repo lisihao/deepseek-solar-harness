@@ -32,7 +32,7 @@ TaskGraph 节点提示词将上下文路径标为 `Sender workspace`，并指示
 
 只有节点策略列出了返回的错误码且仍有 Attempt 预算时，自动重试才会创建新 Attempt。Resident 响应流断开会成为可重试的 `RUNTIME_UNAVAILABLE`；原生产品明确报告额度用尽时归类为 `QUOTA_EXHAUSTED`。允许额度重试时，下一个 Attempt 在重新密封前会排除已耗尽的 quota pool（没有 pool 身份时排除精确 offer）。格式错误的结果与不确定 command 绝不会自动重放。正常关闭 daemon 会先禁止新 Scheduler tick，并等待当前 tick 完成后再释放状态；脱离调用方的 tick 若失败，会记录日志并持久化为有界 `scheduler-fatal.json` 诊断。随后 daemon 会在报告关闭完成前结束已接受的控制连接，因此被替换的 build 不会存活在拒绝连接的 socket 后面。
 
-Attempt 运行时，daemon 会将有界 Resident 进度阶段复制到编排事件流。结算会把完整算子结果保留在 Evidence 产物中，并向终态事件添加有界的面向用户输出预览。协议版本 7 包含经 digest 校验的 `artifact.read`、持久 Autonomous 状态和 term-fenced 集群控制方法，因此经过认证的投影可以按需读取已保留的 Evidence 结果，而不把提示词、私有推理、终端屏幕或产品本地 transcript 复制进事件流。
+Attempt 运行时，daemon 会将有界 Resident 进度阶段复制到编排事件流。结算会把完整算子结果保留在 Evidence 产物中，并向终态事件添加有界的面向用户输出预览；预览不含算子的推理块，推理块只保留在 Evidence 产物中。协议版本 7 包含经 digest 校验的 `artifact.read`、持久 Autonomous 状态和 term-fenced 集群控制方法，因此经过认证的投影可以按需读取已保留的 Evidence 结果，而不把提示词、私有推理、终端屏幕或产品本地 transcript 复制进事件流。
 
 Schema 5 新增 `gouzi_hosts` 与 `gouzi_members`，只通过 `OrchestrationStore.gouzi`（`GouziRegistry`）写入。host 记录保存它接受的权威纪元和凭据条目名称；凭据本身从不存入 SQLite。成员记录保存其进程监听的端点，因为同一宿主上的多个成员监听不同端口；进程每次启动都会用 `setEndpoint` 替换它，没有端点的成员不会被注册为算子。成员从 `provisioning` 开始，经过 `enabled` 与 `retiring`，只有 `archive` 才会离开十只的计数，而 `archive` 需要凭据已撤销、在途工作已结算和进程树已停止。`connection` 与 `activity` 和 `membership` 并列保存，各自独立变化。创建是一个立即事务，会统计所有未归档成员，所以第十一次创建以 `GOUZI_LIMIT_REACHED` 失败。这两张表不属于集群副本；被提升的 follower 需要重新配对宿主。成员记录还保存可选的 `model`，即原生产品模型 id，由 `gouzi.edit` 设置，传 `null` 则清除。Schema 5 与 6 都是单向迁移：旧程序会拒绝打开该数据库。
 

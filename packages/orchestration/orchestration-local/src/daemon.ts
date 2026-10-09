@@ -138,6 +138,7 @@ import {
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
 import {
   OrchestrationClusterElection,
@@ -695,7 +696,6 @@ function browserBindingArtifact(value: unknown): BrowserBindingArtifactV1 {
   }
 }
 
-const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
 const MAX_UPSTREAM_CONTEXT_PREVIEW = 4_000
 const MAX_OPERATOR_OBSERVATION_PREVIEW = 1_600
 const MAX_OPERATOR_OBSERVATION_NAME = 160
@@ -757,18 +757,6 @@ function nodeOperatorObservation(value: Readonly<Record<string, unknown>>): Node
       return Object.keys(usage).length === 0 ? undefined : { kind, usage }
     }
     default: return undefined
-  }
-}
-
-/** Project the operator's user-facing result without copying unbounded output into the event index. */
-function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
-  const text = output.map((block) => {
-    if (block.type === 'text') return block.text
-    return JSON.stringify(block)
-  }).join('\n')
-  return {
-    outputPreview: text.slice(0, MAX_OPERATOR_OUTPUT_PREVIEW),
-    outputTruncated: text.length > MAX_OPERATOR_OUTPUT_PREVIEW,
   }
 }
 
