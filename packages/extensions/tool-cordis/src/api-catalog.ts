@@ -1087,6 +1087,25 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'kennelCollaborations',
+    summary: 'Registry of the collaboration kinds the kennel dispatcher can offer.',
+    description: 'Registry of the collaboration kinds the kennel dispatcher can offer.',
+    methods: [
+      {
+        signature: 'register(kind: KennelCollaborationKind): () => void',
+        description: 'Register a kind.',
+        parameters: [{ name: 'kind', description: 'the kind to offer; a repeated or reserved name fails.' }],
+        returns: 'the disposer that removes it.',
+      },
+      {
+        signature: 'kinds(): readonly KennelCollaborationKind[]',
+        description: 'List the registered kinds.',
+        parameters: [],
+        returns: 'the kinds in registration order.',
+      },
+    ],
+  },
+  {
     key: 'llm',
     summary: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
     description: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
@@ -4834,7 +4853,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziOperatorCapability',
-    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n}',
+    declaration: 'export interface GouziOperatorCapability {\n    readonly operatorId: string;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly models: readonly string[];\n    readonly defaultModel?: string;\n    readonly supportsGenerationLimits?: boolean;\n    readonly supportsGovernedWorkspacePolicy?: boolean;\n}',
   },
   {
     name: 'GouziOwnerId',
@@ -4987,6 +5006,70 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'JsonValue',
     declaration: 'export type JsonValue = null | boolean | number | string | JsonValue[] | {\n    [key: string]: JsonValue;\n};',
+  },
+  {
+    name: 'KennelCollaborationCandidate',
+    declaration: 'export interface KennelCollaborationCandidate {\n    readonly kind: \'collaboration\';\n    readonly collaboration: string;\n    readonly id: string;\n    readonly workspace: string;\n    readonly members: readonly KennelCollaborationMember[];\n    readonly details: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'KennelCollaborationFacts',
+    declaration: 'export interface KennelCollaborationFacts {\n    readonly sessionId: string;\n    readonly members: readonly GouziMemberView[];\n    readonly entries: readonly KennelExecutionEntry[];\n    readonly runs: readonly OrchestrationRunSnapshot[];\n    readonly workOffers: readonly KennelWorkOffer[];\n    readonly work: readonly KennelWorkRecord[];\n    readonly earlier: readonly KennelCollaborationRecord[];\n    readonly recipient?: {\n        readonly gouziId: string;\n        readonly generation: number;\n    };\n    readonly mentioned: readonly KennelMentionedMember[];\n}',
+  },
+  {
+    name: 'KennelCollaborationKind',
+    declaration: 'export interface KennelCollaborationKind {\n    readonly kind: string;\n    readonly label: string;\n    readonly roleLabels?: Readonly<Record<string, string>>;\n    readonly guidance: string;\n    offer(facts: KennelCollaborationFacts): readonly KennelCollaborationCandidate[] | Promise<readonly KennelCollaborationCandidate[]>;\n    start(request: KennelCollaborationRequest): Promise<KennelCollaborationStarted>;\n    runState?(record: Omit<KennelCollaborationRecord, \'outcome\'>): Promise<string | undefined>;\n    outcome?(record: Omit<KennelCollaborationRecord, \'outcome\'>, run: OrchestrationRunSnapshot, results: readonly KennelCollaborationResult[]): KennelCollaborationOutcome | undefined;\n}',
+  },
+  {
+    name: 'KennelCollaborationLimits',
+    declaration: 'export interface KennelCollaborationLimits {\n    readonly contextTokens: number;\n    readonly taskTimeoutMs: number;\n    readonly titleMaxChars: number;\n    readonly generationLimits: NonNullable<OrchestrationNodeSpecV1[\'generationLimits\']>;\n    readonly workspaceToolLimits: NonNullable<OrchestrationNodeSpecV1[\'workspaceToolLimits\']>;\n}',
+  },
+  {
+    name: 'KennelCollaborationMember',
+    declaration: 'export interface KennelCollaborationMember {\n    readonly gouziId: string;\n    readonly generation: number;\n    readonly name: string;\n    readonly role: string;\n    readonly operatorId: string;\n    readonly model: string;\n}',
+  },
+  {
+    name: 'KennelCollaborationOutcome',
+    declaration: 'export interface KennelCollaborationOutcome {\n    readonly subjectRunId: string;\n    readonly state: \'pending\' | \'positive\' | \'negative\' | \'unclear\';\n    readonly label: string;\n    readonly parts?: readonly KennelCollaborationPart[];\n    readonly details: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'KennelCollaborationPart',
+    declaration: 'export interface KennelCollaborationPart {\n    readonly gouziId: string;\n    readonly label: string;\n    readonly text?: string;\n}',
+  },
+  {
+    name: 'KennelCollaborationRecord',
+    declaration: 'export interface KennelCollaborationRecord {\n    readonly collaboration: string;\n    readonly runId: string;\n    readonly messageId: string;\n    readonly candidate: KennelCollaborationCandidate;\n    readonly assignments: KennelCollaborationStarted[\'assignments\'];\n    readonly outcome?: KennelCollaborationOutcome;\n}',
+  },
+  {
+    name: 'KennelCollaborationRequest',
+    declaration: 'export interface KennelCollaborationRequest {\n    readonly commandId: string;\n    readonly sessionId: string;\n    readonly messageId: string;\n    readonly prompt: string;\n    readonly candidate: KennelCollaborationCandidate;\n    readonly limits: KennelCollaborationLimits;\n    workGraph(input: KennelWorkGraphInput): LogicalTaskGraphV1;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n}',
+  },
+  {
+    name: 'KennelCollaborationResult',
+    declaration: 'export interface KennelCollaborationResult {\n    readonly nodeId: string;\n    readonly accepted: boolean;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'KennelCollaborationStarted',
+    declaration: 'export interface KennelCollaborationStarted {\n    readonly runId: string;\n    readonly assignments: readonly {\n        readonly gouziId: string;\n        readonly role: string;\n    }[];\n}',
+  },
+  {
+    name: 'KennelExecutionEntry',
+    declaration: 'export type KennelExecutionEntry = Awaited<ReturnType<GouziControl[\'executionOperators\']>>[number];',
+  },
+  {
+    name: 'KennelMentionedMember',
+    declaration: 'export interface KennelMentionedMember {\n    readonly gouziId: string;\n    readonly generation: number;\n    readonly name: string;\n}',
+  },
+  {
+    name: 'KennelWorkGraphInput',
+    declaration: 'export interface KennelWorkGraphInput {\n    readonly offer: KennelWorkOffer;\n    readonly text: string;\n    readonly title?: string;\n}',
+  },
+  {
+    name: 'KennelWorkOffer',
+    declaration: 'export interface KennelWorkOffer {\n    readonly id: string;\n    readonly gouziId: string;\n    readonly generation: number;\n    readonly name: string;\n    readonly role: string;\n    readonly activity: string;\n    readonly workspace: string;\n    readonly mode: \'chat\' | \'read\' | \'write\';\n    readonly operatorIds: readonly string[];\n    readonly model?: string;\n}',
+  },
+  {
+    name: 'KennelWorkRecord',
+    declaration: 'export interface KennelWorkRecord {\n    readonly runId: string;\n    readonly offer: KennelWorkOffer;\n}',
   },
   {
     name: 'KnobState',

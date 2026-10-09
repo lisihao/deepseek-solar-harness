@@ -1,6 +1,6 @@
 /** Read-only projection of source-session tasks and their current sealed execution results. */
-import { admissionGouziRecipients, OrchestrationArtifactRef, type GouziControl, type OrchestrationService, type OrchestrationEvent, type OrchestrationNodeSnapshot, type OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
-import type { GouziDashboardV1, GouziRoomNodeV1, GouziRoomSnapshotV1 } from './contracts.ts'
+import { admissionGouziRecipients, OrchestrationArtifactRef, type GouziControl, type KennelCollaborationKind, type KennelCollaborationRecord, type OrchestrationService, type OrchestrationEvent, type OrchestrationNodeSnapshot, type OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
+import type { GouziDashboardV1, GouziRoomCollaborationV1, GouziRoomNodeV1, GouziRoomSnapshotV1 } from './contracts.ts'
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -57,22 +57,50 @@ async function projectNode(service: OrchestrationService, run: OrchestrationRunS
  * @param sessionId - explicit source session identity.
  * @param dashboard - authorized roster projection.
  * @param roomPollIntervalMs - validated Host read interval.
+ * @param collaborations - collaborations this session started, with the outcomes their kinds report.
+ * @param kinds - registered kinds, for the names they give their collaborations and roles.
  * @returns current room data without starting or changing any work.
  */
 export async function gouziRoom(
   service: OrchestrationService, control: GouziControl, sessionId: string, dashboard: GouziDashboardV1, roomPollIntervalMs: number,
+  collaborations: readonly KennelCollaborationRecord[] = [], kinds: readonly KennelCollaborationKind[] = [],
 ): Promise<GouziRoomSnapshotV1> {
   const execution = (await control.executionOperators()).map(member => ({ ...member, gouziId: String(member.gouziId) }))
   const runs = (await service.list()).filter(run => run.admission?.sourceSessionId === sessionId)
   const tasks = await Promise.all(runs.map(async (run) => {
     const log = await events(service, run)
+    const outcomes = collaborations.flatMap(record => record.outcome?.subjectRunId === String(run.runId)
+      ? [{ collaboration: record.collaboration, runId: record.runId, state: record.outcome.state, label: record.outcome.label }]
+      : [])
     return {
       runId: String(run.runId), title: run.title, state: run.state, revision: run.revision,
       createdAt: run.createdAt, updatedAt: run.updatedAt,
       nodes: await Promise.all(run.nodes.map(node => projectNode(service, run, node, log, execution))),
+      ...outcomes.length === 0 ? {} : { outcomes },
     }
   }))
-  return { version: 1, sessionId, roomPollIntervalMs, generatedAt: dashboard.generatedAt, dashboard, execution, tasks }
+  const shown = await Promise.all(collaborations.map(async (record): Promise<GouziRoomCollaborationV1> => {
+    const kind = kinds.find(value => value.kind === record.collaboration)
+    const run = runs.find(value => String(value.runId) === record.runId)
+    const subject = runs.find(value => String(value.runId) === record.outcome?.subjectRunId)
+    return {
+      collaboration: record.collaboration, label: kind?.label ?? record.collaboration, runId: record.runId,
+      state: run?.state ?? await kind?.runState?.(record) ?? 'unknown',
+      ...subject === undefined ? {} : { subject: { runId: String(subject.runId), title: subject.title } },
+      ...record.outcome === undefined ? {} : { outcome: { state: record.outcome.state, label: record.outcome.label } },
+      members: record.assignments.map((assignment) => {
+        const part = record.outcome?.parts?.find(value => value.gouziId === assignment.gouziId)
+        return {
+          gouziId: assignment.gouziId, role: assignment.role, roleLabel: kind?.roleLabels?.[assignment.role] ?? assignment.role,
+          ...part === undefined ? {} : { conclusion: part.label, ...part.text === undefined || part.text === '' ? {} : { text: part.text } },
+        }
+      }),
+    }
+  }))
+  return {
+    version: 1, sessionId, roomPollIntervalMs, generatedAt: dashboard.generatedAt, dashboard, execution, tasks,
+    ...shown.length === 0 ? {} : { collaborations: shown },
+  }
 }
 
 /**

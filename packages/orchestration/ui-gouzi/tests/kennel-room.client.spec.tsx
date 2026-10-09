@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSnapshotStore, EMPTY_CHAT_SNAPSHOT, type ConversationSnapshot, type ToolResultNode } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ChatNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -451,6 +451,74 @@ describe('room source and transport', () => {
     await expect(loadKennelRoom(vi.fn(async () => Response.json(data)) as never, 's')).rejects.toThrow('Invalid kennel room reply')
     const invalid = { ...room(), tasks: [{ runId: 'r', title: 'task', state: 'done', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [{ nodeId: 'n', title: 'node', state: 'done', attempt: 1, capabilityGeneration: 1, evidenceRefs: [], operatorId: 'actual', result: { sequence: 1, time: '2026-10-06T00:00:00.000Z', evidenceRef: 'ref', outputPreview: 'wrong', accepted: true, operatorId: 'other' } }] }] }
     await expect(loadKennelRoom(vi.fn(async () => Response.json(invalid)) as never, 's')).rejects.toThrow('Invalid kennel room reply')
+  })
+  it('shows the outcomes of collaborations about a task on that task, and accepts them from the Host only when well-formed', async () => {
+    const task = (outcomes: unknown) => ({
+      runId: 'r', title: '被评审任务', state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [], ...outcomes === undefined ? {} : { outcomes },
+    })
+    const good = [{ collaboration: 'review', runId: 'rv', state: 'negative', label: '评审：待修改（乙）' }, { collaboration: 'review', runId: 'rv2', state: 'positive', label: '评审：已通过（丙）' }]
+    const load = (value: unknown) => loadKennelRoom(vi.fn(async () => Response.json({ ...room(), tasks: [task(value)] })), 's')
+    expect((await load(good)).tasks[0]!.outcomes).toEqual(good)
+    expect((await load(undefined)).tasks[0]!.outcomes).toBeUndefined()
+    for (const bad of ['x', [null], [{ ...good[0], state: 'done' }], [{ ...good[0], label: 1 }], [{ ...good[0], runId: '' }], [{ ...good[0], collaboration: '' }]]) {
+      await expect(load(bad)).rejects.toThrow('Invalid kennel room reply')
+    }
+    const h = harness()
+    patchRoom(h, current => ({ ...current, tasks: [task(good) as never] }))
+    all(h)
+    expect(screen.getByText('评审：待修改（乙）').getAttribute('data-outcome')).toBe('negative')
+    expect(screen.getByText('评审：已通过（丙）').getAttribute('data-outcome')).toBe('positive')
+  })
+  it('shows each collaboration as a card with its kind, state, task, outcome, and members, and a sentence when there are none', async () => {
+    const collaboration = (patch: Record<string, unknown> = {}) => ({
+      collaboration: 'review', label: '评审', runId: 'rv', state: 'completed', subject: { runId: 'r', title: '被评审任务' },
+      outcome: { state: 'negative', label: '评审：待修改（同名）' },
+      members: [
+        { gouziId: 'g1', role: 'reviewer', roleLabel: '评审人', conclusion: '需要修改', text: '缺**测试**' },
+        { gouziId: 'g2', role: 'reviewer', roleLabel: '评审人', conclusion: '通过' },
+        { gouziId: 'ghost', role: 'seat', roleLabel: '席位' },
+      ], ...patch,
+    })
+    const load = (value: unknown) => loadKennelRoom(vi.fn(async () => Response.json({ ...room(), collaborations: value })), 's')
+    const good = [collaboration(), { collaboration: 'debate', label: '辩论', runId: 'dr', state: 'running', members: [] }]
+    const unread = { collaboration: 'debate', label: '辩论', runId: 'du', state: 'unknown', members: [] }
+    expect((await load(good)).collaborations).toEqual(good)
+    expect((await load(undefined)).collaborations).toBeUndefined()
+    const bad: unknown[] = [
+      'x', [null], [collaboration({ collaboration: '' })], [collaboration({ label: 1 })], [collaboration({ runId: '' })], [collaboration({ state: 1 })],
+      [collaboration({ subject: { runId: '', title: 't' } })], [collaboration({ subject: { runId: 'r', title: 1 } })],
+      [collaboration({ outcome: { state: 'done', label: 'l' } })], [collaboration({ outcome: { state: 'negative', label: 1 } })],
+      [collaboration({ members: 'x' })], [collaboration({ members: [null] })], [collaboration({ members: [{ gouziId: '', role: 'r', roleLabel: 'r' }] })],
+      [collaboration({ members: [{ gouziId: 'g1', role: 1, roleLabel: 'r' }] })], [collaboration({ members: [{ gouziId: 'g1', role: 'r', roleLabel: 1 }] })],
+      [collaboration({ members: [{ gouziId: 'g1', role: 'r', roleLabel: 'r', conclusion: 1 }] })],
+      [collaboration({ members: [{ gouziId: 'g1', role: 'r', roleLabel: 'r', text: 1 }] })],
+    ]
+    for (const value of bad) await expect(load(value)).rejects.toThrow('Invalid kennel room reply')
+
+    const h = harness()
+    patchRoom(h, current => ({ ...current, collaborations: good as never }))
+    all(h)
+    const card = screen.getByRole('article', { name: '评审协作' })
+    expect(card.textContent).toContain('针对任务：被评审任务')
+    expect(within(card).getByText('评审：待修改（同名）').getAttribute('data-outcome')).toBe('negative')
+    expect(card.textContent).toContain('评审人')
+    expect(card.textContent).toContain('需要修改')
+    expect(card.textContent).toContain('席位')
+    // Names, not the roster label, and the comments are behind a disclosure rather than always open.
+    expect(card.textContent).not.toContain('机器0')
+    fireEvent.click(within(card).getByText('查看意见'))
+    expect(within(card).getByText('测试').tagName).toBe('STRONG')
+    expect(screen.getByRole('article', { name: '辩论协作' }).textContent).toContain('执行中')
+    // A state nobody could read is left out instead of shown as an unknown state.
+    cleanup()
+    const unreadRoom = harness()
+    patchRoom(unreadRoom, current => ({ ...current, collaborations: [unread] as never }))
+    all(unreadRoom)
+    expect(screen.getByRole('article', { name: '辩论协作' }).textContent).toBe('辩论')
+
+    const none = harness()
+    all(none)
+    expect(screen.getAllByText(/本房间还没有协作/)).toHaveLength(1)
   })
   it.each(['not-a-time', '2026-10-06', '2026-02-30T00:00:00.000Z'])('rejects invalid actual result time %s', async (time) => {
     const snapshot = { ...room(), tasks: [{

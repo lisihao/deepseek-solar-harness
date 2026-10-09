@@ -103,6 +103,9 @@ flowchart LR
   pkg_ui_orchestration["ui-orchestration"]
   svc_orchestrationRecipients["ctx.orchestrationRecipients<br/>User-selected orchestration recipient resolver"]
   pkg_ui_gouzi["ui-gouzi"]
+  svc_kennelCollaborations["ctx.kennelCollaborations<br/>Kennel collaboration kinds"]
+  pkg_debate_orchestration["debate-orchestration"]
+  pkg_kennel_review["kennel-review"]
   svc_gouziHost["ctx.gouziHost<br/>Gouzi member process host"]
   pkg_remote_auth["remote-auth"]
   svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
@@ -309,6 +312,7 @@ flowchart LR
   pkg_model_worker --> svc_modelWorkers
   pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_kennelCollaborations
   pkg_orchestration --> svc_orchestrationRecipients
   pkg_orchestration --> svc_orchestrations
   pkg_orchestration_local --> svc_capabilityCapsules
@@ -377,6 +381,7 @@ flowchart LR
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
   pkg_ui_gouzi --> svc_gouziHost
+  pkg_ui_gouzi --> svc_kennelCollaborations
   pkg_ui_gouzi --> svc_orchestrationRecipients
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
@@ -424,6 +429,9 @@ flowchart LR
   svc_jobs --> pkg_tool_jobs
   svc_jobs --> pkg_tool_subagent
   svc_jobs --> pkg_tool_terminal
+  svc_kennelCollaborations --> pkg_debate_orchestration
+  svc_kennelCollaborations --> pkg_kennel_review
+  svc_kennelCollaborations --> pkg_ui_gouzi
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
@@ -559,6 +567,7 @@ flowchart LR
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 持有节点内 TypeScript Kernel、异步子项注册表、家族消息、Receipt、Goal 与恢复机制，不成为第二个全局 TaskGraph 调度器。 |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
 | `ctx.orchestrationRecipients` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | [`tool-orchestration`](../packages/orchestration/tool-orchestration) | - | 在封存 TaskGraph 准入前，将当前人工请求解析为已启用的成员 generation 和可用执行入口。 |
+| `ctx.kennelCollaborations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | [`ui-gouzi`](../packages/orchestration/ui-gouzi), [`debate-orchestration`](../packages/orchestration/debate-orchestration), [`kennel-review`](../packages/orchestration/kennel-review) | - | 为成员协作的各种类型提供注册表，例如 Debate 与评审。类型负责提供候选并启动用户选定的那个；调度器不需要知道类型做什么。 |
 | `ctx.gouziHost` | `seam` | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | [`ui-gouzi`](../packages/orchestration/ui-gouzi) | - | 在运行 Server 的机器上启动、接管和停止执行成员进程；Desktop 产品提供它，名册只消费它。 |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Server 是配对、凭据交换、固定设备范围、撤销和无正文命令回执的唯一写者；传输和编排投影消费已认证 principal，但不持有凭据状态。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |

@@ -959,7 +959,7 @@ describe('orchestration daemon', () => {
     const entries = await client.gouziExecutionOperators()
     expect(entries).toEqual([
       { gouziId: 'gouzi-1', generation: 1, projectScopes: ['/srv/registered-project'], operators: [{
-        operatorId: 'gouzi.gouzi-1.claude', available: true, models: ['gpt-5.6-luna'],
+        operatorId: 'gouzi.gouzi-1.claude', available: true, models: ['gpt-5.6-luna'], defaultModel: 'gpt-5.6-luna',
         supportsGenerationLimits: false, supportsGovernedWorkspacePolicy: false,
       }] },
       { gouziId: 'gouzi-2', generation: 1, projectScopes: [], operators: [] },
@@ -977,9 +977,12 @@ describe('orchestration daemon', () => {
     provider.models[0]!.model = 'fresh-model'
     expect((await client.gouziExecutionOperators())[0]?.operators).toEqual([{
       operatorId: 'gouzi.gouzi-1.claude', available: false,
-      unavailableReason: 'native login missing', models: ['fresh-model'],
+      unavailableReason: 'native login missing', models: ['fresh-model'], defaultModel: 'fresh-model',
       supportsGenerationLimits: false, supportsGovernedWorkspacePolicy: false,
     }])
+    // A catalog that marks no default reports none, and the caller falls back to the first listed model.
+    provider.models[0]!.isDefault = false
+    expect((await client.gouziExecutionOperators())[0]?.operators[0]).not.toHaveProperty('defaultModel')
     unreachable = true
     const unreachableEntry = (await client.gouziExecutionOperators())[0]
     expect(unreachableEntry?.projectScopes).toEqual([])

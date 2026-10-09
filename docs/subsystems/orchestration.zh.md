@@ -333,7 +333,7 @@ abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV
 abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
 ```
 
-Source: [`packages/orchestration/debate/src/index.ts:1389`](../../packages/orchestration/debate/src/index.ts)
+Source: [`packages/orchestration/debate/src/index.ts:1390`](../../packages/orchestration/debate/src/index.ts)
 
 <a id="ctxgouzihost--gouzihostservice-abstract-seam"></a>
 
@@ -441,6 +441,29 @@ abstract compile(request: IntentCompileRequest): Promise<IntentIRV1>
 ```
 
 Source: [`packages/orchestration/intent-compiler/src/index.ts:43`](../../packages/orchestration/intent-compiler/src/index.ts)
+
+<a id="ctxkennelcollaborations--kennelcollaborations"></a>
+
+### `ctx.kennelCollaborations` — `KennelCollaborations`
+
+Registry of the collaboration kinds the kennel dispatcher can offer.
+
+```ts cordis-catalog
+/**
+ * Register a kind.
+ * @param kind - the kind to offer; a repeated or reserved name fails.
+ * @returns the disposer that removes it.
+ */
+register(kind: KennelCollaborationKind): () => void
+
+/**
+ * List the registered kinds.
+ * @returns the kinds in registration order.
+ */
+kinds(): readonly KennelCollaborationKind[]
+```
+
+Source: [`packages/orchestration/orchestration/src/kennel-collaboration.ts:233`](../../packages/orchestration/orchestration/src/kennel-collaboration.ts)
 
 <a id="ctxmodelallocation--modelallocationservice-abstract-seam"></a>
 

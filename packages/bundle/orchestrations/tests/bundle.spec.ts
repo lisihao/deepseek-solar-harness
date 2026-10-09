@@ -20,6 +20,7 @@ describe('orchestrations bundle', () => {
     expect(rows.map(value => value.id)).toEqual([
       'orchestration-local',
       'debate-orchestration',
+      'kennel-review',
       'tool-orchestration',
       'tool-debate',
       'ui-debate',

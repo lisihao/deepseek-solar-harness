@@ -64,6 +64,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-tool-stat',
   '@deepseek-ai/dsh-tool-time',
   '@deepseek-ai/dsh-intent-compiler',
+  '@deepseek-ai/dsh-kennel-review',
   '@deepseek-ai/dsh-context-compiler',
   '@deepseek-ai/dsh-capability-capsule',
   '@deepseek-ai/dsh-chatgpt-web-operator',

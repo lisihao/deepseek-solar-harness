@@ -22,6 +22,7 @@
     "@deepseek-ai/dsh-debate": "workspace:^",
     "@deepseek-ai/dsh-debate-local": "workspace:^",
     "@deepseek-ai/dsh-debate-orchestration": "workspace:^",
+    "@deepseek-ai/dsh-kennel-review": "workspace:^",
     "@deepseek-ai/dsh-model-allocation": "workspace:^",
     "@deepseek-ai/dsh-model-allocation-local": "workspace:^",
     "@deepseek-ai/dsh-model-worker": "workspace:^",

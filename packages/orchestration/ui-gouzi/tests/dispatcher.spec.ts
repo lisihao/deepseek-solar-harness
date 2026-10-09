@@ -3,8 +3,12 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { LlmAdapter, createUserMessage, type GenerateOptions, type StreamChunk, type UserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import { GouziId, OrchestrationRunId, type OrchestrationRunSnapshot } from '@deepseek-ai/dsh-orchestration'
+import {
+  GouziId, OrchestrationRunId, type KennelCollaborationCandidate, type KennelCollaborationFacts, type KennelCollaborationKind,
+  type KennelCollaborationRequest, type KennelCollaborationStarted, type OrchestrationRunSnapshot,
+} from '@deepseek-ai/dsh-orchestration'
 import { expect, it, vi } from 'vitest'
+import { KennelCollaborationRegistry } from '../src/collaboration.ts'
 import { Config } from '../src/index.ts'
 import { installKennelDispatch, kennelDispatchGraph, parseDispatchSelection, type KennelWorkCandidate, type KennelDispatchConfig } from '../src/dispatcher.ts'
 import { encodeKennelMessage } from '../src/recipient-message.ts'
@@ -19,6 +23,7 @@ class Adapter extends LlmAdapter {
 }
 async function fixture(persisted = true) {
   const ctx = new Context(); await ctx.plugin(LlmRuntime); await ctx.plugin(SessionStore)
+  const registry = new KennelCollaborationRegistry(ctx)
   const session = ctx.sessions.create(SessionId('dispatch-fixture')); session.append('agent-preset/selected', { agentPreset: 'kennel' })
   const agent = { id: 'agent', session } as unknown as Agent
   const member = { hostId: 'local', gouziId: 'dog', generation: 2, membership: 'enabled', name: 'Dog', role: 'research', activity: 'idle' }
@@ -29,14 +34,19 @@ async function fixture(persisted = true) {
   const inspect = vi.fn(async (_id: unknown): Promise<OrchestrationRunSnapshot> => existingRun())
   const control = vi.fn(async (_request: unknown): Promise<OrchestrationRunSnapshot> => existingRun())
   const persist = vi.fn(async (_session: typeof session) => {})
+  const members: (typeof member)[] = [member]; const entries: (typeof entry)[] = [entry]
   if (persisted) ctx.on('session/flush', persist)
-  ctx.provide('orchestrations', { gouzi: { list: async () => ({ members: [member], hosts: [] }), executionOperators: async () => [entry] }, compile, start, list, inspect, control } as never)
+  ctx.provide('orchestrations', { gouzi: { list: async () => ({ members, hosts: [] }), executionOperators: async () => entries }, compile, start, list, inspect, control,
+    readEvents: async () => ({ events: [], nextSequence: 0 }) } as never)
   const generate = vi.fn((_options: GenerateOptions) => JSON.stringify({ candidateId: candidate.id }))
   ctx.llm.registerAdapter(['deepseek-official'], new Adapter(generate))
   await ctx.plugin(Object.assign((child: Context) => { installKennelDispatch(child, config) }, { inject: ['sessions'] }))
   const controller = new AbortController(); const message = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] })
   const run = (messages: UserMessage[] = [message]) => ctx.waterfall('agent/pre-step', { agent, signal: controller.signal, turn: 1, step: 1 } as never, async () => ({ kind: 'enter' as const, messages }))
-  return { ctx, agent, member, entry, compile, start, generate, controller, message, run, list, inspect, control, persist }
+  return {
+    ctx, registry, agent, member, entry, members, entries, compile, start, generate, controller, message, run, list, inspect, control,
+    persist,
+  }
 }
 it('fills nested dispatcher defaults for Config({})', () => {
   expect(Config({}).dispatcher).toMatchObject({ enabled: true, jevProvider: 'Jev', deepseek: { provider: 'deepseek-official', model: 'deepseek-flash' }, codex: { operatorId: 'codex' } })
@@ -161,8 +171,10 @@ it('stops on explicit clarification without creating a graph', async () => {
 })
 
 /** Minimal authoritative run snapshot supplied by the unit service fixture. */
-function existingRun(state: OrchestrationRunSnapshot['state'] = 'running', room = 'agent', revision = 3): OrchestrationRunSnapshot {
-  return { runId: OrchestrationRunId('existing'), state, revision, title: 'Existing task', updatedAt: '2026-10-07T00:00:00.000Z',
+function existingRun(
+  state: OrchestrationRunSnapshot['state'] = 'running', room = 'agent', revision = 3, updatedAt = '2026-10-07T00:00:00.000Z',
+): OrchestrationRunSnapshot {
+  return { runId: OrchestrationRunId('existing'), state, revision, title: 'Existing task', updatedAt,
     admission: { sourceSessionId: room, gouziRecipient: { gouziId: 'dog', generation: 2, operatorIds: ['gouzi.dog.codex'] } },
   } as unknown as OrchestrationRunSnapshot
 }
@@ -226,6 +238,238 @@ it('offers an addressed room the runs of a recipient set that names the addresse
     text: encodeKennelMessage('status', { gouziId: 'dog', generation: 2, mode: 'standard' }) }] })
   await expect(f.run([addressed])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
   expect(f.generate).toHaveBeenCalledOnce()
+})
+const choicesIn = (options: GenerateOptions) => {
+  const block = options.messages[0]!.content[0]!
+  if (block.type !== 'text') throw new Error('fixture expects text')
+  type Candidate = { kind: string; id: string; collaboration?: string; members?: { gouziId: string; model: string; operatorId: string }[] }
+  return (JSON.parse(block.text) as { candidates: Candidate[] }).candidates
+}
+/** A kind that offers its candidate while at least two members hold /project; the candidate id names the members. */
+function pairKind(extra: Partial<KennelCollaborationKind> = {}) {
+  const offer = vi.fn((facts: KennelCollaborationFacts): KennelCollaborationCandidate[] => {
+    const members = facts.members.filter(value => value.membership === 'enabled').slice(0, 2).map(value => ({
+      gouziId: String(value.gouziId), generation: value.generation, name: value.name, role: value.role,
+      operatorId: `gouzi.${String(value.gouziId)}.codex`, model: 'm',
+    }))
+    return members.length < 2 ? [] : [{ kind: 'collaboration', collaboration: 'pair', workspace: '/project', details: { note: 'x' },
+      id: JSON.stringify(['pair', ...members.map(value => [value.gouziId, value.generation])]), members }]
+  })
+  const starts: KennelCollaborationRequest[] = []
+  const startMock = vi.fn(async (request: KennelCollaborationRequest): Promise<KennelCollaborationStarted> => {
+    starts.push(request)
+    return { runId: 'pair-1', assignments: request.candidate.members.map(value => ({ gouziId: value.gouziId, role: 'peer' })) }
+  })
+  const kind: KennelCollaborationKind = { kind: 'pair', label: '搭档', guidance: 'PAIR-GUIDANCE', offer, start: startMock, ...extra }
+  return { kind, offer, starts, startMock }
+}
+async function collaborationFixture(extra: Partial<KennelCollaborationKind> = {}) {
+  const f = await fixture()
+  f.members.push({ ...f.member, gouziId: 'cat', name: 'cat', generation: 1 })
+  f.entries.push({ ...f.entry, gouziId: 'cat', generation: 1, operators: [{ ...f.entry.operators[0]!, operatorId: 'gouzi.cat.codex' }] })
+  const pair = pairKind(extra)
+  const dispose = f.registry.register(pair.kind)
+  const pairId = JSON.stringify(['pair', ['dog', 2], ['cat', 1]])
+  return { ...f, ...pair, dispose, pairId }
+}
+it('offers a kind\'s candidates and its guidance only while the kind offers some', async () => {
+  const bare = await fixture()
+  bare.generate.mockImplementation((options) => {
+    expect(choicesIn(options).some(choice => choice.kind === 'collaboration')).toBe(false)
+    expect(options.system).not.toContain('collaboration')
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(bare.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+
+  const f = await collaborationFixture()
+  f.generate.mockImplementation((options) => {
+    expect(choicesIn(options).filter(choice => choice.kind === 'collaboration')).toEqual([expect.objectContaining({
+      collaboration: 'pair', id: f.pairId, members: [expect.objectContaining({ gouziId: 'dog' }), expect.objectContaining({ gouziId: 'cat' })] })])
+    expect(options.system).toContain('pair：PAIR-GUIDANCE')
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+
+  const silent = await collaborationFixture()
+  silent.members.pop(); silent.entries.pop()
+  silent.generate.mockImplementation((options) => {
+    expect(choicesIn(options).some(choice => choice.kind === 'collaboration')).toBe(false)
+    expect(options.system).not.toContain('PAIR-GUIDANCE')
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(silent.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+})
+/** Candidates that each carry a long earlier review comment, oldest first, as unanswered reviews accumulate. */
+function commented(count: number, comment: string): Partial<KennelCollaborationKind> {
+  const members = [{ gouziId: 'dog', generation: 2, name: 'Dog', role: 'research', operatorId: 'gouzi.dog.codex', model: 'm' }]
+  return {
+    offer: () => Array.from({ length: count }, (_, index): KennelCollaborationCandidate => ({
+      kind: 'collaboration', collaboration: 'pair', workspace: '/project', members, id: `old-${String(index)}`,
+      details: { comments: [{ name: 'Cat', comment: `${comment}${String(index)}` }], revision: 3, settled: true, ended: null },
+    })),
+  }
+}
+it('shows the model a short form of each collaboration\'s details, so earlier review comments do not block a message', async () => {
+  const long = 'x'.repeat(5_000)
+  const f = await collaborationFixture(commented(30, long))
+  expect(30 * 5_000).toBeGreaterThan(config.maxInputBytes)
+  f.generate.mockImplementation((options) => {
+    const shown = choicesIn(options).filter(choice => choice.kind === 'collaboration') as unknown as { details: { comments: { comment: string }[] } }[]
+    expect(shown).toHaveLength(30)
+    expect(shown.every(choice => choice.details.comments[0]!.comment.length <= 200)).toBe(true)
+    expect(shown[0]).toMatchObject({ details: { revision: 3, settled: true, ended: null } })
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  const logged = f.agent.session.events.find(event => event.type === 'kennel/dispatch-request')
+  const kept = logged?.type === 'kennel/dispatch-request' ? logged.data.candidates.filter(choice => choice.kind === 'collaboration') : []
+  expect(kept).toHaveLength(30)
+  expect((kept[0] as KennelCollaborationCandidate).details).toMatchObject({ comments: [{ name: 'Cat', comment: `${long}0` }] })
+})
+it('leaves out the oldest collaborations when the shortened request still exceeds the input limit, and logs what the model saw', async () => {
+  const f = await collaborationFixture(commented(400, 'y'.repeat(150)))
+  const seen: string[][] = []
+  f.generate.mockImplementation((options) => {
+    seen.push(choicesIn(options).filter(choice => choice.kind === 'collaboration').map(choice => choice.id))
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  const [shown] = seen
+  expect(shown!.length).toBeGreaterThan(0)
+  expect(shown!.length).toBeLessThan(400)
+  expect(shown!.at(-1)).toBe('old-399')
+  const logged = f.agent.session.events.find(event => event.type === 'kennel/dispatch-request')
+  expect(logged?.type === 'kennel/dispatch-request' ? logged.data.candidates.filter(choice => choice.kind === 'collaboration').map(choice => choice.id) : []).toEqual(shown)
+})
+it('still refuses a message whose own text exceeds the input limit', async () => {
+  const f = await collaborationFixture()
+  const huge = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'z'.repeat(config.maxInputBytes) }] })
+  await expect(f.run([huge])).rejects.toMatchObject({ code: 'KENNEL_INPUT_LIMIT' })
+  expect(f.generate).not.toHaveBeenCalled()
+})
+it('tells a kind the Session, its runs newest first, and the member the user addressed', async () => {
+  const f = await collaborationFixture()
+  f.list.mockResolvedValue([existingRun('completed', 'agent', 1, '2026-01-01T00:00:00.000Z'), existingRun('running', 'agent', 2, '2026-02-01T00:00:00.000Z'), existingRun('running', 'other', 1)])
+  f.generate.mockReturnValue('{"candidateId":"clarify"}')
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  const open = f.offer.mock.calls[0]![0]
+  expect(open).toMatchObject({ sessionId: 'agent', members: f.members, entries: f.entries })
+  expect(open.runs.map(run => run.updatedAt)).toEqual(['2026-02-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'])
+  expect(open.recipient).toBeUndefined()
+
+  const addressed = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: encodeKennelMessage('hello', { gouziId: 'dog', generation: 2, mode: 'standard' }) }] })
+  const direct = await collaborationFixture()
+  direct.generate.mockReturnValue('{"candidateId":"clarify"}')
+  await expect(direct.run([addressed])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  expect(direct.offer.mock.calls[0]![0].recipient).toEqual({ gouziId: 'dog', generation: 2 })
+})
+it('tells a kind which members the message names, in the order it names them, from the message without its addressing prefix', async () => {
+  const f = await collaborationFixture()
+  f.generate.mockReturnValue('{"candidateId":"clarify"}')
+  const say = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })
+  await expect(f.run([say('ask cat and then Dog to look at it')])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  expect(f.offer.mock.calls[0]![0].mentioned).toEqual([
+    { gouziId: 'cat', generation: 1, name: 'cat' }, { gouziId: 'dog', generation: 2, name: 'Dog' },
+  ])
+  const quiet = await collaborationFixture()
+  quiet.generate.mockReturnValue('{"candidateId":"clarify"}')
+  await expect(quiet.run([say('hello there')])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  expect(quiet.offer.mock.calls[0]![0].mentioned).toEqual([])
+})
+it('gives kinds the work offers, the work and collaborations already admitted with their outcomes, and the Host\'s work graph', async () => {
+  const outcome = vi.fn((_record: unknown, _run: unknown, _results: unknown) => ({ subjectRunId: 'old-work', state: 'negative' as const, label: 'LABEL', details: { n: 1 } }))
+  const f = await collaborationFixture({ outcome })
+  const workOffer = { ...candidate }
+  const { kind: _kind, ...offerOnly } = workOffer
+  const peerCandidate = { kind: 'collaboration' as const, collaboration: 'pair', id: 'old-pair', workspace: '/project', members: [], details: {} }
+  const { session } = f.agent
+  // Earlier dispatches, appended in the order the dispatcher records them so the Session invariants hold.
+  const earlier = (messageId: string, chosen: typeof workOffer | typeof peerCandidate) => {
+    const user = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: messageId }] })
+    const id = String(user.id)
+    session.append('user/message', user, { surfaceOp: 'append' })
+    session.append('kennel/dispatch-request', { messageId: id, message: user, candidates: [chosen] }, { ignorable: true })
+    session.append('kennel/dispatch-decision', { messageId: id, source: 'deepseek', provider: 'p', candidateId: chosen.id }, { ignorable: true })
+    return id
+  }
+  const workMessage = earlier('work', workOffer)
+  session.append('kennel/dispatch-submission', { messageId: workMessage, compilationId: 'c', commandId: 'c' }, { ignorable: true })
+  session.append('kennel/dispatch-admitted', { messageId: workMessage, runId: 'old-work' }, { ignorable: true })
+  const pairMessage = earlier('pair', peerCandidate)
+  session.append('kennel/dispatch-collaboration', { messageId: pairMessage, candidate: peerCandidate, commandId: 'c' }, { ignorable: true })
+  session.append('kennel/dispatch-collaboration-admitted', { messageId: pairMessage, collaboration: 'pair', runId: 'old-pair-run', assignments: [] }, { ignorable: true })
+  f.list.mockResolvedValue([{ ...existingRun('completed'), runId: OrchestrationRunId('old-pair-run') }])
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
+  await f.run()
+
+  const facts = f.offer.mock.calls[0]![0]
+  expect(facts.work).toEqual([{ runId: 'old-work', offer: offerOnly }])
+  expect(facts.earlier).toEqual([{
+    collaboration: 'pair', runId: 'old-pair-run', messageId: pairMessage, candidate: peerCandidate, assignments: [],
+    outcome: { subjectRunId: 'old-work', state: 'negative', label: 'LABEL', details: { n: 1 } },
+  }])
+  // Each fresh offer (the first, then the two confirmations) reads the outcomes again.
+  expect(outcome).toHaveBeenCalledTimes(3)
+  // The kinds see exactly the work the model is offered: one chat, read, and write offer per member and project.
+  expect(facts.workOffers.map(value => [value.gouziId, value.mode])).toEqual([['dog', 'chat'], ['dog', 'read'], ['dog', 'write'], ['cat', 'chat'], ['cat', 'read'], ['cat', 'write']])
+  const [request] = f.starts
+  const given = facts.workOffers[2]!
+  expect(request!.workGraph({ offer: given, text: 'redo it' })).toEqual(kennelDispatchGraph({ kind: 'work', ...given }, 'redo it', config))
+  expect(request!.workGraph({ offer: given, text: 'redo it' })).toMatchObject({ risk: 'high', workspaceIsolation: 'directory-snapshot' })
+  // A title the kind gives is the task's title; the text stays what the member receives.
+  const titled = request!.workGraph({ offer: given, text: 'redo it', title: '返工：old task' })
+  expect(titled).toEqual(kennelDispatchGraph({ kind: 'work', ...given }, 'redo it', config, '返工：old task'))
+  expect(titled.title).toBe('返工：old task')
+  expect(titled.nodes[0]).toMatchObject({ title: '返工：old task', task: 'redo it' })
+})
+it('starts the selected collaboration through its kind after durably recording the candidate, without compiling a task', async () => {
+  const f = await collaborationFixture()
+  const seen: boolean[] = []
+  f.startMock.mockImplementation(async (request: KennelCollaborationRequest) => {
+    seen.push(f.agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration'))
+    f.starts.push(request)
+    return { runId: 'pair-1', assignments: request.candidate.members.map(value => ({ gouziId: value.gouziId, role: 'peer' })) }
+  })
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
+  expect(await f.run()).toEqual({ kind: 'reject' })
+  expect(f.starts).toEqual([expect.objectContaining({
+    commandId: `kennel:pair:agent:${String(f.message.id)}`, sessionId: 'agent', messageId: String(f.message.id), prompt: 'hello',
+    limits: { contextTokens: config.contextTokens, taskTimeoutMs: config.taskTimeoutMs, titleMaxChars: config.titleMaxChars,
+      generationLimits: config.taskGenerationLimits, workspaceToolLimits: config.workspaceToolLimits },
+  })])
+  expect(f.starts[0]?.candidate.id).toBe(f.pairId)
+  expect(seen).toEqual([true])
+  expect(f.compile).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled()
+  const types = f.agent.session.events.map(event => event.type)
+  expect(types.indexOf('kennel/dispatch-collaboration')).toBeLessThan(types.indexOf('kennel/dispatch-collaboration-admitted'))
+  expect(f.agent.session.events.at(-1)).toMatchObject({ type: 'kennel/dispatch-collaboration-admitted', data: {
+    collaboration: 'pair', runId: 'pair-1', assignments: [{ gouziId: 'dog', role: 'peer' }, { gouziId: 'cat', role: 'peer' }] } })
+  // The same source message is never started twice.
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_DISPATCH_UNCONFIRMED' })
+  expect(f.startMock).toHaveBeenCalledOnce()
+})
+it('does not start a collaboration whose candidate is no longer offered or whose kind was removed', async () => {
+  const f = await collaborationFixture()
+  f.generate.mockImplementation(() => { f.members[1]!.generation = 9; return JSON.stringify({ candidateId: f.pairId }) })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  expect(f.startMock).not.toHaveBeenCalled()
+
+  const removed = await collaborationFixture()
+  removed.generate.mockImplementation(() => { removed.dispose(); return JSON.stringify({ candidateId: removed.pairId }) })
+  await expect(removed.run()).rejects.toMatchObject({ code: 'KENNEL_COLLABORATION_UNAVAILABLE' })
+  expect(removed.startMock).not.toHaveBeenCalled()
+})
+it('registers kinds once, refuses names the dispatcher owns, and removes a kind with its disposer', async () => {
+  const f = await fixture()
+  const first = pairKind().kind
+  const dispose = f.registry.register(first)
+  expect(f.registry.kinds()).toEqual([first])
+  expect(() => f.registry.register(pairKind().kind)).toThrow(expect.objectContaining({ code: 'KENNEL_COLLABORATION_DUPLICATE' }))
+  for (const reserved of ['work', 'control', 'clarify']) {
+    expect(() => f.registry.register({ ...first, kind: reserved })).toThrow(expect.objectContaining({ code: 'KENNEL_COLLABORATION_RESERVED' }))
+  }
+  dispose(); dispose()
+  expect(f.registry.kinds()).toEqual([])
 })
 it('refuses a revision change between selection and inspection', async () => {
   const f = await fixture(); f.list.mockResolvedValue([existingRun()]); f.inspect.mockResolvedValue(existingRun('running', 'agent', 4))

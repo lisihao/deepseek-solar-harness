@@ -435,6 +435,7 @@ export const GOUZI_WORKER_DISABLED_ROW_IDS = [
   'ui-debate',
   'ui-orchestration',
   'ui-gouzi',
+  'kennel-review',
   SCHEDULING_EVIDENCE_ROW_ID,
   SCHEDULING_EVIDENCE_RPC_ROW_ID,
   SCHEDULING_EVIDENCE_SETTINGS_ROW_ID,

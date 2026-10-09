@@ -20,6 +20,19 @@
 .filters, .member { display: flex; align-items: center; gap: 8px; }
 .card { margin-top: 8px; padding: 12px; border-radius: 12px; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l2); }
 .member { width: 100%; justify-content: flex-start; }
+.cardHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cardHead strong { min-width: 0; overflow-wrap: anywhere; }
+.outcome { font-weight: 600; overflow-wrap: anywhere; }
+.outcome[data-outcome='positive'] { color: var(--dsw-alias-state-success-primary); }
+.outcome[data-outcome='negative'] { color: var(--dsw-alias-state-warn-label); }
+.outcome[data-outcome='pending'], .outcome[data-outcome='unclear'] { color: var(--dsw-alias-label-secondary); }
+.parts { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.parts li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; min-width: 0; }
+.partWho { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.partWho strong { font-weight: 500; }
+.partConclusion { flex: none; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
+.comment { flex-basis: 100%; }
+.comment summary { cursor: pointer; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .task { border-top: 1px solid var(--dsw-alias-border-l2); margin-top: 8px; padding-top: 6px; }
 .muted, .empty { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 .empty { padding: 16px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; }

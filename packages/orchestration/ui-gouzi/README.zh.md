@@ -24,6 +24,8 @@
 
 成员可以固定到一个原生模型。编辑表单提供 `models` 操作返回的模型：它不重复地列出该成员当前可用运行环境的模型目录，成员离线时返回空列表；已固定但没有任何运行环境提供的模型仍可选中，并标为不可用。`edit` 设置 `model`，传 `null` 则清除。调度器只通过目录中包含该模型的运行环境提供已固定的成员，把模型写入任务节点的 `operator.profile`，并在成员的模型于调度决定之后变化时拒绝启动。已固定的模型没有可用运行环境提供时，该成员不进入候选；未固定的成员由 Smart Auto 选择模型。
 
+本包提供 `ctx.kennelCollaborations`，这是协作类型的注册表：协作指几个成员一起做事，而不是一个成员接一个任务。每个类型根据成员、成员的执行入口、本会话的 Run 以及用户点名的成员给出由 Host 确认的候选，并启动用户选定的那个。调度器把所有候选与工作、控制候选一起交给 AI，把每个提供候选的类型的 `guidance` 句子加进指令，除此之外不了解类型的任何内容。AI 选中候选后，Host 会重新询问类型并拒绝 id 已不再提供的候选，在类型启动 Run 之前记录 `kennel/dispatch-collaboration`，启动之后记录带有各成员分工的 `kennel/dispatch-collaboration-admitted`。类型启动的 Run 是本会话的普通 TaskGraph Run，所以房间会显示每个成员的发言并归属到该成员。类型名必须唯一，且不能是 `work`、`control` 或 `clarify`。除了成员、成员的入口、本会话的 Run、被点名的成员，以及消息里提到的成员（名字出现在文本中的已启用成员，按首次出现的顺序；多个成员共用的名字有歧义，会被略去），类型还会得到调度器交给模型的工作提供项、本会话已接纳的工作任务（每个附带接下它的提供项），以及已启动的协作和其类型根据 Run 当前结果给出的 `outcome`。请求里还带有 `workGraph`，它按 Host 的文件范围、隔离和验证规则构建成员的任务图，所以给成员派工作的类型不需要自己拼装权限。会话已加载时，房间会把每个结论显示在它所针对的任务上（`GouziRoomTaskV1.outcomes`），并在“本房间协作”区块里列出本会话启动的每个协作（`GouziRoomSnapshotV1.collaborations`），每个一张卡：类型的 `label`、Run 的状态（取自编排 Run，或对由别的服务保存的 Run，比如辩论，取自类型的 `runState`；谁都读不到时省略）、它所针对的任务、结论行，以及按名字列出的每个成员，角色用类型的 `roleLabels`，类型的结论带有 `parts` 时，成员的结论和意见收在可展开的说明里。类型已经不再注册的协作仍按原名称列出。没有协作时，该区块会说明缺什么以及怎么发起。[`debate-orchestration`](../debate-orchestration/README.md) 注册 `debate`，[`kennel-review`](../kennel-review/README.md) 注册 `review`；任何注入 `kennelCollaborations` 并在 `ctx.effect` 中注册类型的插件，无需修改调度器就能增加新类型。
+
 `check-projects` 接收 `hostId` 和非空的绝对路径列表 `projects`，只读检查已有目录，不修改目录、配对宿主或创建成员，并返回 `GouziProjectsCheck`：每个请求的 `path` 对应 `usable: true`，或带 `message` 的 `usable: false`。Git 仓库、没有 origin 的仓库和普通目录均可选择。选择器先检查候选工作区和新选目录，再允许选择；所有选中项目通过检查才允许下一步。检查未完成或请求失败都不能授权选择。路径不存在、路径是文件和权限拒绝会给出可操作的目录错误；进程与超时错误仍作为请求失败报告。确认前关闭向导不会初始化 Git。
 
 确认领养后，系统再次只读检查全部选中目录并检查十只成员的容量，然后按顺序为每个不同的已解析 source 调用 `prepareRepository`。只有选中目录位于 Git 仓库之外时才初始化 Git；准备过程不暂存文件、不提交，也不修改 origin。`GouziProjectSource` 包含不透明的 SHA-256 `projectId`、用户确切选中目录的真实路径 `source`，以及可选的规范 origin 信息 `repository`。确认页明确显示第一个选中项目为默认项目，并将其持久化为 `defaultProjectId`。准备失败不会创建成员或配对宿主，也不占用名额；错误会列出已经完成准备的目录，并保留其中的元数据。准备完成后，系统只配对一次所选宿主，以 `provisioning` 创建成员，配置项目映射、启动进程、记录端点，再启用成员。启动失败仍以 `provisioning` 占着名额，并报告 `GOUZI_START_FAILED`；唤醒会重试启动。领养逐个进行。退役在归档前停止成员及其 Resident 进程树；正在工作的成员不能休息或退役。[目录领养决策](../../../.agents/notes/implemented/feature/2026-10-06-gouzi-directory-adoption.md)记录执行与恢复语义。
@@ -65,11 +67,11 @@ interface GouziProjectSource {
 
 #### What the model sees
 
-调度器发起独立且不带工具的模型请求，包含用户目标、Host 核验过的工作／控制候选，以及只返回候选身份或澄清的固定指令。配置、准备后的请求、已记录输出或失败、选择、提交及准入回执均保留在会话事件中。调度请求不包含任务执行工具。
+调度器发起独立且不带工具的模型请求，包含用户目标、Host 核验过的工作、控制和协作候选，以及只返回候选身份或澄清的固定指令。配置、准备后的请求、已记录输出或失败、选择、提交及准入回执均保留在会话事件中。调度请求不包含任务执行工具。
 
 #### Token effect
 
-对于具备候选的消息，分派在任务启动或控制执行前增加一次有界调度请求；明确的 DeepSeek 余额失败可以增加一次 Codex 判断请求。`maxInputBytes`、`maxTokens` 和 `maxOutputBytes` 分别限制输入字节、报告的输出 token 及已观察输出字节。这些限制不衡量 token 节省，也不提供 Codex 后端硬输出 token 上限。
+对于具备候选的消息，分派在任务启动或控制执行前增加一次有界调度请求；明确的 DeepSeek 余额失败可以增加一次 Codex 判断请求。`maxInputBytes`、`maxTokens` 和 `maxOutputBytes` 分别限制输入字节、报告的输出 token 及已观察输出字节。调度模型读到的每个协作候选的细节会缩短到 200 个字符；缩短后请求仍超过 `maxInputBytes` 时，最早的协作候选会从请求和记录的候选中去掉；只有消息本身和工作候选就超限时才以 `KENNEL_INPUT_LIMIT` 失败。这些限制不衡量 token 节省，也不提供 Codex 后端硬输出 token 上限。
 
 #### KV Cache effect
 
