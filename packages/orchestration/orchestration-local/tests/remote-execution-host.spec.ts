@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { createRemotePhysicalOperators } from '../src/remote-physical-operator.ts'
 import { OrchestrationStore } from '../src/store.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { GouziMemberService } from '@deepseek-ai/dsh-client-connection'
 import {
   identifyRemoteWorkspace,
@@ -28,11 +28,6 @@ async function sourceRepository(): Promise<{ readonly root: string; readonly com
   execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root })
   execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/lisihao/remote-fixture.git'], { cwd: root })
   return { root, commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() }
-}
-
-function configureFixtureCheckout(path: string): void {
-  execFileSync('git', ['config', 'core.autocrlf', 'false'], { cwd: path })
-  execFileSync('git', ['reset', '--hard', 'HEAD'], { cwd: path })
 }
 
 async function serviceFixture() {
@@ -110,7 +105,6 @@ describe('LocalRemoteOperatorHostService', () => {
         const workspace = await service.materializeWorkspace(
           call.payload.workspaceIdentity as never, commandId, call.payload.workspaceMutationReturn as never,
         )
-        configureFixtureCheckout(workspace.path)
         await writeFile(join(workspace.path, 'packages/core/fixture.txt'), 'actually developed remotely\n')
         await writeFile(join(workspace.path, 'new.txt'), 'actual new file\n')
         value = { sessionId: 'session', turnId: 'turn', stateRevision: 1 }
@@ -159,11 +153,29 @@ describe('LocalRemoteOperatorHostService', () => {
     store.close()
   })
 
+  it('materializes the committed bytes whatever line-ending conversion the host Git is configured for', async () => {
+    const { source, service } = await serviceFixture()
+    // A Windows host commonly has core.autocrlf=true; the checkout must not inherit it, whichever path creates it.
+    const hostConfig = join(await mkdtemp(join(tmpdir(), 'dsh-host-gitconfig-')), 'gitconfig')
+    await writeFile(hostConfig, '[core]\n\tautocrlf = true\n')
+    vi.stubEnv('GIT_CONFIG_GLOBAL', hostConfig)
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
+    try {
+      const identity = await identifyRemoteWorkspace(source.root, 10_000)
+      const fresh = await service.materializeWorkspace(identity, 'exact-fresh')
+      expect(await readFile(join(fresh.path, 'packages', 'core', 'fixture.txt'), 'utf8')).toBe('exact commit fixture\n')
+      const mutation = await service.materializeWorkspace(identity, 'exact-mutation', { baseSha: source.commit })
+      expect(await readFile(join(mutation.path, 'packages', 'core', 'fixture.txt'), 'utf8')).toBe('exact commit fixture\n')
+      expect(execFileSync('git', ['status', '--porcelain=v1', '-uall'], { cwd: mutation.path, encoding: 'utf8' })).toBe('')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('captures actual tracked and untracked edits as a durable exact-base patch before release', async () => {
     const { source, service } = await serviceFixture()
     const identity = await identifyRemoteWorkspace(source.root, 10_000)
     const workspace = await service.materializeWorkspace(identity, 'mutation', { baseSha: source.commit })
-    configureFixtureCheckout(workspace.path)
     await writeFile(join(workspace.path, 'packages/core/fixture.txt'), 'real edited bytes\n')
     execFileSync('git', ['add', '.'], { cwd: workspace.path })
     execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'native edit'],
@@ -196,7 +208,6 @@ describe('LocalRemoteOperatorHostService', () => {
 
     await expect(service.qualification()).resolves.toEqual({ available: true })
     const first = await service.materializeWorkspace(sender, 'execution-1')
-    configureFixtureCheckout(first.path)
     const second = await service.materializeWorkspace(sender, 'execution-1')
     expect(second.path).toBe(first.path)
     expect(first.path).not.toContain(source.root)
@@ -234,8 +245,6 @@ describe('LocalRemoteOperatorHostService', () => {
       service.materializeWorkspace(identity, 'execution-a'),
       service.materializeWorkspace(identity, 'execution-b'),
     ])
-    configureFixtureCheckout(first.path)
-    configureFixtureCheckout(second.path)
     expect(first.path).not.toBe(second.path)
     await writeFile(join(first.path, 'packages', 'core', 'fixture.txt'), 'changed by A\n')
     await writeFile(join(first.path, 'untracked.txt'), 'A only\n')
@@ -344,7 +353,6 @@ describe('registered directory execution', () => {
     await writeFile(join(root, 'tracked.txt'), 'user dirty bytes\n')
     await writeFile(join(root, 'private-untracked.txt'), 'user bytes\n')
     const isolated = await service.materializeWorkspace(directoryIdentity, 'isolated-project', { baseSha })
-    configureFixtureCheckout(isolated.path)
     expect(isolated.path).not.toBe(root)
     expect(await readFile(join(isolated.path, 'tracked.txt'), 'utf8')).toBe('base\n')
     await expect(readFile(join(isolated.path, 'private-untracked.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
