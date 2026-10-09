@@ -49,6 +49,8 @@ function recipientBlock(state: KennelRoomReadState | undefined, recipient: Kenne
   return null
 }
 
+/** Node states in which a member is working or about to, so the transcript shows it as in progress. */
+const WORKING_STATES: ReadonlySet<string> = new Set(['pending', 'ready', 'running', 'retry_wait', 'awaiting_recompile'])
 const TASK_STATE_COPY: Readonly<Record<string, string>> = {
   awaiting_clarification: '等待澄清', awaiting_approval: '等待批准', running: '执行中', paused: '已暂停',
   completed: '执行结束', failed: '执行失败', cancelled: '已取消', indeterminate: '执行结果待核对',
@@ -70,10 +72,14 @@ function displayMessage(text: string): ReturnType<typeof decodeKennelMessage> {
   catch { return { text: '指定对象记录格式无效，请核对原记录。' } }
 }
 
+/** One node of a room task in the transcript: its sealed result, or only its state while it has none. */
 interface RoomResultRow {
   task: GouziRoomTaskV1
   node: GouziRoomNodeV1
-  result: GouziRoomResultV1
+  /** Absent while the node has not sealed a result. */
+  result?: GouziRoomResultV1
+  /** When the entry belongs in the transcript: the result's time, or the task's creation. */
+  time: string
   key: string
 }
 type RoomTranscriptRow = { kind: 'message'; node: ConversationNode; key: string; time: number; seq: number }
@@ -81,7 +87,7 @@ type RoomTranscriptRow = { kind: 'message'; node: ConversationNode; key: string;
 type RoomRow = RoomTranscriptRow | { kind: 'result'; entry: RoomResultRow; key: string }
 function compareKeys(a: string, b: string): number { return a < b ? -1 : a > b ? 1 : 0 }
 function durableRows(nodes: readonly ConversationNode[], tools: readonly ChatNode<'tool-call'>[], results: readonly RoomResultRow[]): RoomRow[] {
-  const ordered = [...results].sort((a, b) => Date.parse(a.result.time) - Date.parse(b.result.time) || compareKeys(a.key, b.key))
+  const ordered = [...results].sort((a, b) => Date.parse(a.time) - Date.parse(b.time) || compareKeys(a.key, b.key))
   const transcript: RoomTranscriptRow[] = nodes.map(node => ({ kind: 'message', node, key: `message:${node.kind}:${node.seq}`, time: node.time, seq: node.seq }))
   transcript.push(...tools.map(node => ({ kind: 'tool' as const, node, key: `tool:${node.key}`, time: node.data.root.time, seq: node.anchorSeq })))
   transcript.sort((a, b) => a.time - b.time || a.seq - b.seq || compareKeys(a.key, b.key))
@@ -90,7 +96,7 @@ function durableRows(nodes: readonly ConversationNode[], tools: readonly ChatNod
   for (const row of transcript) {
     let entry = ordered[index]
     while (entry) {
-      const time = Date.parse(entry.result.time)
+      const time = Date.parse(entry.time)
       if (time > row.time || time === row.time && compareKeys(entry.key, row.key) >= 0) break
       rows.push({ kind: 'result', entry, key: entry.key }); index++
       entry = ordered[index]
@@ -207,7 +213,9 @@ export function KennelRoomContent({ useRoom, useSession, useStore, actions, read
   const [paging, setPaging] = useState(false)
   const pagingAnchor = useRef<{ key: string; top: number; nodes: typeof nodes } | null>(null)
   const room = state.room
-  const results = room?.tasks.flatMap(task => task.nodes.flatMap(node => node.result ? [{ task, node, result: node.result, key: `${task.runId}:${node.nodeId}:${node.attempt}:${node.capabilityGeneration}:${node.result.sequence}` }] : [])) ?? []
+  const results = room?.tasks.flatMap(task => task.nodes.map((node): RoomResultRow => node.result
+    ? { task, node, result: node.result, time: node.result.time, key: `${task.runId}:${node.nodeId}:${node.attempt}:${node.capabilityGeneration}:${node.result.sequence}` }
+    : { task, node, time: task.createdAt, key: `${task.runId}:${node.nodeId}:${node.attempt}:${node.capabilityGeneration}:${node.state}` })) ?? []
   const visibleResults = results.filter(r => filter === 'all' || (filter !== 'manager' && r.node.gouziId === filter))
   const visiblePartial = (filter === 'all' || filter === 'manager') ? partial : null
   const tools = filter === 'all' || filter === 'manager'
@@ -293,7 +301,9 @@ export function KennelRoomContent({ useRoom, useSession, useStore, actions, read
           return <article className={css.message} data-room-anchor={`${node.kind}:${node.seq}`} key={`${node.kind}:${node.seq}`}><strong>{user ? '我' : node.kind === 'assistant' ? '总管' : '执行记录'}</strong>{decoded.recipient && <p className={css.muted}>发给 {memberName(room, decoded.recipient.gouziId)}</p>}{text || invalid ? <MarkdownText text={decoded.text} /> : <p>{node.kind === 'assistant' ? '总管正在执行工具或生成非文本内容。' : `${node.kind} · 序号 ${node.seq}`}</p>}</article>
         }
         const { task, node, result, key } = row.entry
-        return <article className={css.result} key={key}><strong>{node.gouziId ? memberLabel(room, node.gouziId) : result.operatorId || '执行结果'} · 任务结果</strong><p>{task.title} / {node.title}</p><p>执行结束 · {result.accepted ? '结果已接纳' : '结果未接纳'}</p><MarkdownText text={result.outputPreview} /><Button size="sm" onClick={() => { void toggleEvidence(key, task.runId, result.evidenceRef) }}>{expanded[key] ? '收起证据' : '查看证据'}</Button>{expanded[key] && <div><p className={css.muted}>尝试 {node.attempt} · generation {node.capabilityGeneration}</p>{evidence[key]?.loading && <p>正在读取证据…</p>}{evidence[key]?.error && <p className={css.error} role="alert">{evidence[key].error}</p>}{evidence[key]?.text !== undefined && <pre className={css.evidence}>{evidence[key].text}</pre>}</div>}</article>
+        const who = node.gouziId ? memberLabel(room, node.gouziId) : result?.operatorId || '执行'
+        if (!result) return <article className={css.progress} data-node-state={node.state} role="status" key={key}><strong>{who} · {taskState(node.state)}</strong>{WORKING_STATES.has(node.state) && <span className={css.dots} aria-hidden="true" />}</article>
+        return <article className={css.result} key={key}><strong>{who} · 任务结果</strong>{task.title !== node.title && <p className={css.muted}>{task.title} / {node.title}</p>}<p className={css.muted}>{result.accepted ? '结果已接纳' : '结果未接纳'}</p><MarkdownText text={result.outputPreview} /><Button size="sm" onClick={() => { void toggleEvidence(key, task.runId, result.evidenceRef) }}>{expanded[key] ? '收起证据' : '查看证据'}</Button>{expanded[key] && <div><p className={css.muted}>尝试 {node.attempt} · generation {node.capabilityGeneration}</p>{evidence[key]?.loading && <p>正在读取证据…</p>}{evidence[key]?.error && <p className={css.error} role="alert">{evidence[key].error}</p>}{evidence[key]?.text !== undefined && <pre className={css.evidence}>{evidence[key].text}</pre>}</div>}</article>
       })}
 
       {queued.map(({ item, decoded }) => <article className={css.message} key={`queue:${item.messageId}`}>

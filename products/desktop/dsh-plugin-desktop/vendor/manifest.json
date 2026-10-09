@@ -280,6 +280,11 @@
       "name": "Kennel Debate, mutual review, rework and named members; Debate leaves the execution mechanism",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "9565962bcc21ded11441ec80bb3c1d19dba07bd5"
+    },
+    {
+      "name": "Kennel room shows members working and keeps reasoning out of results",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "73a107bb024d0a37e89a6660f15d18833a7acf12"
     }
   ],
   "sourcePackages": {
@@ -458,7 +463,7 @@
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "2abb1112a13d28db66203cbbaefc2d5c833937e392fa01b3088fe32f96d1b770",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "47cff98eb94dfcbc9273cee79a2d55b76ac782d6eef802e5cc03c145f30bd42b",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "f23461005a365ff5187301c71d2e5690957b91e64ac734444da3765e27adf9dd",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "91095115d2316ff01c3d1390e26be8b7202749b9f74e2bafb95b5e4ce7669d0e",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "8f6ec6d2b22f48d3a0626817710c70b71e67d0a5774434c75831a5d26776af77",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "2ef397368e994f1f5fb22958ff64f110e696e77bcdd2702c3d2f58e13821f36b",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "ff739e592e964c0af34c4b13b9598d61aeba26090e6b41ccabaaee4296a0da2b",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "70c32494b88d6ad6cbc68dfca97cb9644f92bd69c66b3a1ec28a4ee5b8fff11d",
@@ -493,7 +498,7 @@
     "dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz": "074f755f4aeee4dc135c68889414ae996bc0be6ed2a4d04d62049e39b37a4b7f",
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "531cde167a6d9fd6963491551779945a3fae7cf287858b169980ff7f525d2c20",
     "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "5c6d138cd8147da3ece6d7142c4171d777fd28e95660f4986e19e70f7719dbdd",
-    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "26a4d80dfc767b31c8583b35e3548d8b56f020e0cc896e5333865d42ce157761",
+    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "79a4bbc05eff042b5e7960e660e742a20ecb909aa8376875377106fab120743c",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "f9ecb9781bd709faa4b3c905b5695917af78436bd5007afc79ddfa5311b1cee6",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "6c105fb5fbee7043f0075bba956fca8e0e8d37b214e5b01355dc0de6a16573d1",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "97c9e6e8ac3698e464f98493d6c13b68be32a0202a6d5119c50d5440b22d6c12",
