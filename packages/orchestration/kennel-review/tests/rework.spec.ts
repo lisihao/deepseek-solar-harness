@@ -43,7 +43,7 @@ function rework(reviewRun: string, runId: string, offer = author): KennelCollabo
 function facts(patch: Partial<KennelCollaborationFacts> = {}): KennelCollaborationFacts {
   return {
     sessionId: 's', members: [], entries: [], runs: [{ runId: 'task-1', title: 'Write the parser' } as never],
-    workOffers: [author], work: [{ runId: 'task-1', offer: author }], earlier: [review()], ...patch,
+    workOffers: [author], work: [{ runId: 'task-1', offer: author }], earlier: [review()], mentioned: [], ...patch,
   }
 }
 

@@ -315,6 +315,19 @@ it('tells a kind the Session, its runs newest first, and the member the user add
   await expect(direct.run([addressed])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
   expect(direct.offer.mock.calls[0]![0].recipient).toEqual({ gouziId: 'dog', generation: 2 })
 })
+it('tells a kind which members the message names, in the order it names them, from the message without its addressing prefix', async () => {
+  const f = await collaborationFixture()
+  f.generate.mockReturnValue('{"candidateId":"clarify"}')
+  const say = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })
+  await expect(f.run([say('ask cat and then Dog to look at it')])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  expect(f.offer.mock.calls[0]![0].mentioned).toEqual([
+    { gouziId: 'cat', generation: 1, name: 'cat' }, { gouziId: 'dog', generation: 2, name: 'Dog' },
+  ])
+  const quiet = await collaborationFixture()
+  quiet.generate.mockReturnValue('{"candidateId":"clarify"}')
+  await expect(quiet.run([say('hello there')])).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  expect(quiet.offer.mock.calls[0]![0].mentioned).toEqual([])
+})
 it('gives kinds the work offers, the work and collaborations already admitted with their outcomes, and the Host\'s work graph', async () => {
   const outcome = vi.fn((_record: unknown, _run: unknown, _results: unknown) => ({ subjectRunId: 'old-work', state: 'negative' as const, label: 'LABEL', details: { n: 1 } }))
   const f = await collaborationFixture({ outcome })

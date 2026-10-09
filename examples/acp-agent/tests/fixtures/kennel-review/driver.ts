@@ -24,7 +24,7 @@ const projectPath = join(home, 'project')
 await mkdir(projectPath, { recursive: true })
 const workspace = await realpath(projectPath)
 const root = join(home, 'orchestrations')
-// Registry order is creation order: alpha does the work, then beta and gamma review it.
+// Registry order is creation order: alpha does the work; the message asks gamma and then beta to review it.
 const ports: Record<string, number> = { alpha: 13331, beta: 13332, gamma: 13333 }
 const registry = new OrchestrationStore(root)
 registry.gouzi.pairHost({ hostId: GouziHostId('local'), label: 'Keyless host', authorityEpoch: GouziAuthorityEpoch('keyless-epoch'), credentialRef: 'KENNEL_FIXTURE_TOKEN' })
@@ -167,7 +167,8 @@ try {
   say('Summarize the parser for me.')
   await waitFor(async () => settled(1))
   step = 2
-  say('Ask the other dogs to review that result.')
+  // The message names the reviewers, in the reverse of registry order.
+  say('Ask gamma and beta to review that result.')
   await waitFor(async () => settled(2))
   const afterReview = outcomes((await readRoom()).room)
   step = 3

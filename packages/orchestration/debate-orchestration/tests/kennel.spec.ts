@@ -55,7 +55,7 @@ async function setup(options: { state?: string; approve?: () => Promise<unknown>
 /** Facts for members that each hold the given projects, on one codex entry with two models. */
 function facts(ids: string[], patch: Partial<KennelCollaborationFacts> = {}, scopes: string[] = ['/project']): KennelCollaborationFacts {
   return {
-    sessionId: 's', runs: [], workOffers: [], work: [], earlier: [],
+    sessionId: 's', runs: [], workOffers: [], work: [], earlier: [], mentioned: [],
     members: ids.map(id => ({ gouziId: id, generation: 1, membership: 'enabled', name: id, role: 'research' })) as never,
     entries: ids.map(id => ({
       gouziId: id, generation: 1, projectScopes: scopes,
@@ -79,6 +79,20 @@ describe('Debate kennel kind', () => {
     expect(await kind.offer(facts(['a', 'b', 'c'], { recipient: { gouziId: 'a', generation: 1 } }))).toEqual([])
     // Each project is offered on its own members.
     expect((await kind.offer(facts(['a', 'b', 'c'], {}, ['/one', '/two']))).map(value => value.workspace)).toEqual(['/one', '/two'])
+  })
+
+  it('runs the Debate on the members the message names, in the order it names them, and fills a short list', async () => {
+    const { kind } = await setup()
+    const named = (...ids: string[]) => ids.map(id => ({ gouziId: id, generation: 1, name: id }))
+    const ids = async (mentioned: ReturnType<typeof named>) =>
+      (await kind.offer(facts(['a', 'b', 'c', 'd', 'e'], { mentioned })))[0]?.members.map(value => value.gouziId)
+    expect(await ids(named('e', 'c', 'a'))).toEqual(['e', 'c', 'a'])
+    expect(await ids(named('d', 'b', 'e', 'a'))).toEqual(['d', 'b', 'e', 'a'])
+    // Two names get a third member from the registry to judge.
+    expect(await ids(named('e', 'b'))).toEqual(['e', 'b', 'a'])
+    // A named member that cannot take part, or too many names, leaves no Debate rather than a different roster.
+    expect(await ids(named('ghost', 'b'))).toBeUndefined()
+    expect(await ids(named('a', 'b', 'c', 'd', 'e'))).toBeUndefined()
   })
 
   it('gives three members the proposer, falsifier, and judge roles and starts a valid Debate for them', async () => {

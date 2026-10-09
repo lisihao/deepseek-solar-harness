@@ -10,6 +10,7 @@ A candidate names one finished task of the Session: a completed run that has a p
 
 - A reviewer is an enabled member that holds the task's project on an entry that supports file tools and generation limits, and runs its pinned model. Members who did the task never review it. Reviewers follow registry order.
 - When the user addressed one member, that member is the only reviewer, and only when the member did not do the task.
+- When the message names members, those members review, in the order named, and nobody else: the authors are dropped from the names, a named member who cannot review leaves no review to offer instead of a different one, and naming more than `maxReviewers` is refused. A message that names only the authors, as the subject of the review, gets the default reviewers.
 - The candidate id names the run, its revision, and every reviewer's generation, entry, and model, so a task that changed or a reviewer who changed makes a choice stale; the dispatcher then refuses it.
 
 ## What starts

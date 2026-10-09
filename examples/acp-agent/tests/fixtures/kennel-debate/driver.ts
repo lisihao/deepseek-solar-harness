@@ -22,7 +22,7 @@ const projectPath = join(home, 'project')
 await mkdir(projectPath, { recursive: true })
 const workspace = await realpath(projectPath)
 const root = join(home, 'orchestrations')
-// Registry order is creation order, which fixes the Debate roles: proposer, falsifier, judge.
+// The message names the members in the reverse of registry order, which fixes the Debate roles: proposer, falsifier, judge.
 const ports: Record<string, number> = { alpha: 13321, beta: 13322, gamma: 13323 }
 const registry = new OrchestrationStore(root)
 registry.gouzi.pairHost({ hostId: GouziHostId('local'), label: 'Keyless host', authorityEpoch: GouziAuthorityEpoch('keyless-epoch'), credentialRef: 'KENNEL_FIXTURE_TOKEN' })
@@ -134,7 +134,7 @@ try {
   const handle = await ctx.agents.create({ sessionId: SessionId('kennel-debate-a'), meta: { cwd: workspace } })
   const agent = handle.agent
   agent.session.append('agent-preset/selected', { agentPreset: 'kennel' })
-  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Debate: should we keep the reversible option?' }] }))
+  agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Debate: gamma, alpha and beta, should we keep the reversible option?' }] }))
   await waitFor(async () => agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration-admitted'))
   const terminal = new Set(['completed', 'max_rounds', 'budget_limited', 'failed', 'stopped', 'indeterminate'])
   await waitFor(async () => {

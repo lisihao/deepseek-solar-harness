@@ -95,6 +95,13 @@ export interface KennelCollaborationRecord {
   readonly outcome?: KennelCollaborationOutcome
 }
 
+/** A member the user's message names. */
+export interface KennelMentionedMember {
+  readonly gouziId: string
+  readonly generation: number
+  readonly name: string
+}
+
 /** What the Host knows when it asks a kind for candidates. */
 export interface KennelCollaborationFacts {
   readonly sessionId: string
@@ -112,6 +119,11 @@ export interface KennelCollaborationFacts {
   readonly earlier: readonly KennelCollaborationRecord[]
   /** The member the user addressed directly, when the message was sent to one member. */
   readonly recipient?: { readonly gouziId: string; readonly generation: number }
+  /**
+   * Enabled members whose name the message contains, in order of first mention. A name that more than one member
+   * has is ambiguous and is left out. Empty when the message names none.
+   */
+  readonly mentioned: readonly KennelMentionedMember[]
 }
 
 /** Resource bounds the Host applies to every task a collaboration starts. */
@@ -259,6 +271,45 @@ export function qualifiedKennelMembers(
       gouziId: String(member.gouziId), generation: member.generation, name: member.name, role: member.role, ...chosen,
     }]
   })
+}
+
+/** How many members a collaboration takes. */
+export interface KennelRosterBounds {
+  readonly min: number
+  readonly max: number
+}
+
+/**
+ * Choose the members a collaboration runs on when the user's message may name some.
+ * The members the message names are used, in the order it names them, and none is replaced by another: a named member
+ * that cannot take part, or more named members than the collaboration takes, leaves nothing to offer, so the user
+ * is asked instead of getting someone else. Members the collaboration excludes are dropped from the names, and a
+ * message that then names nobody gets the default roster. Fewer named members than the minimum are completed from
+ * the other qualified members in registry order.
+ * @param qualified - members that can take part, in registry order.
+ * @param mentioned - members the message names.
+ * @param bounds - fewest and most members.
+ * @param excluded - ids of members that never take part, such as the authors of a task under review.
+ * @returns the members, or undefined when nothing can be offered.
+ */
+export function kennelRoster(
+  qualified: readonly KennelCollaborationMember[],
+  mentioned: readonly KennelMentionedMember[],
+  bounds: KennelRosterBounds,
+  excluded: ReadonlySet<string> = new Set(),
+): readonly KennelCollaborationMember[] | undefined {
+  const named = mentioned.filter(value => !excluded.has(value.gouziId))
+  if (named.length === 0) return qualified.length < bounds.min ? undefined : qualified.slice(0, bounds.max)
+  if (named.length > bounds.max) return undefined
+  const chosen: KennelCollaborationMember[] = []
+  for (const value of named) {
+    const member = qualified.find(candidate => candidate.gouziId === value.gouziId && candidate.generation === value.generation)
+    if (member === undefined) return undefined
+    chosen.push(member)
+  }
+  const fillers = qualified.filter(candidate => !chosen.some(member => member.gouziId === candidate.gouziId))
+  const members = [...chosen, ...fillers.slice(0, Math.max(0, bounds.min - chosen.length))]
+  return members.length < bounds.min ? undefined : members
 }
 
 declare module '@deepseek-ai/cordis' {
