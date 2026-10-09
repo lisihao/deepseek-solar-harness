@@ -465,7 +465,7 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
-  it('keeps the user model selected when a Debate turn logs its transient host route', async () => {
+  it('keeps the user model selected when a legacy Session logged the retired Debate host route', async () => {
     const { ctx, agent, sessionId } = await harness({
       provider: 'deepseek-official',
       model: 'deepseek-reasoner',
@@ -482,7 +482,7 @@ describe('Web session model selection', () => {
       reason: 'change',
     })
 
-    // The Debate adapter route is an actual logged request route, but it is
+    // The retired Debate route is an actual logged request route, but it is
     // not a user-selectable model and must not replace the selector's durable
     // preference after a restart/cold resume.
     expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
@@ -490,8 +490,7 @@ describe('Web session model selection', () => {
     expect(stored).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
 
     // This must also restore the live request path, not merely the model
-    // directory: otherwise a subsequent Standard or Auto turn enters the
-    // Debate adapter without a dispatch record.
+    // directory: otherwise a subsequent turn requests a route no adapter serves.
     expect((await ctx.systemPrompt.assemble()).variables)
       .toMatchObject({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
     await expect(agentEvents(ctx, agent).waterfall(

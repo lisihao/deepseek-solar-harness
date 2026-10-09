@@ -10,8 +10,6 @@ import {
   orchestrationExecutionModeLabel,
   physicalOperatorDashboardRefreshMs,
   physicalOperatorEffortLabel,
-  physicalOperatorEffectiveExecutionLabel,
-  physicalOperatorEffectiveExecutionMechanism,
   physicalOperatorRoutingDescription,
   physicalOperatorRoutingLabel,
   physicalOperatorRoutingSummary,
@@ -133,7 +131,7 @@ describe('physical operator client plugin', () => {
     expect(routing?.options.name).toBe('conversation.input.right')
     const injected = routing?.options.inject?.('session-1') as Pick<
       PhysicalOperatorRoutingInjected,
-      'directory' | 'refreshModels' | 'select' | 'selectProfile' | 'selectOrchestrationStrategy' | 'selectDebateMode'
+      'directory' | 'refreshModels' | 'select' | 'selectProfile' | 'selectOrchestrationStrategy'
     >
     expect(injected.directory).toBe(directory)
     expect(modelDirectories.directoryFor).toHaveBeenCalledWith('session-1')
@@ -145,7 +143,6 @@ describe('physical operator client plugin', () => {
     await expect(injected.selectOrchestrationStrategy(
       'enabled', 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
     )).resolves.toBeNull()
-    await expect(injected.selectDebateMode('enabled')).resolves.toBeNull()
     expect(execute).toHaveBeenNthCalledWith(1, 'session-1', '/operator codex')
     expect(execute).toHaveBeenNthCalledWith(2, 'session-1', '/operator chatgpt-web')
     expect(execute).toHaveBeenNthCalledWith(3, 'session-1', '/operator-profile codex gpt-5.6-sol high')
@@ -154,7 +151,6 @@ describe('physical operator client plugin', () => {
       'session-1',
       '/orchestration-strategy enabled enabled off balanced codex-sol luna-first',
     )
-    expect(execute).toHaveBeenNthCalledWith(5, 'session-1', '/debate-mode enabled')
 
     execute
       .mockResolvedValueOnce({
@@ -169,141 +165,63 @@ describe('physical operator client plugin', () => {
         ok: true,
         value: { commandId: 'command-error-3', result: { kind: 'error', text: 'strategy rejected' } },
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        value: { commandId: 'command-error-4', result: { kind: 'error', text: 'debate rejected' } },
-      })
     await expect(injected.select('codex')).resolves.toBe('operator rejected')
     await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBe('profile rejected')
     await expect(injected.selectOrchestrationStrategy(
       'enabled', 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
     )).resolves.toBe('strategy rejected')
-    await expect(injected.selectDebateMode('enabled')).resolves.toBe('debate rejected')
 
     execute.mockReset()
-    execute
-      .mockResolvedValueOnce({
-        ok: true,
-        value: { commandId: 'transition-error-1', result: { kind: 'error', text: 'RLM rejected' } },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        value: { commandId: 'transition-success-1', result: { kind: 'success' } },
-      })
+    execute.mockResolvedValueOnce({
+      ok: true,
+      value: { commandId: 'transition-error-1', result: { kind: 'error', text: 'RLM rejected' } },
+    })
     await expect(changeOrchestrationExecutionMechanism(
-      { rlm: 'enabled', debate: 'disabled' },
-      'debate',
-      mode => injected.selectOrchestrationStrategy(
-        mode, 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
-      ),
-      injected.selectDebateMode,
-    )).resolves.toBe('关闭 RLM失败：RLM rejected')
-    expect(execute).toHaveBeenCalledTimes(1)
-
-    execute.mockReset()
-    execute
-      .mockResolvedValueOnce({
-        ok: true,
-        value: { commandId: 'transition-error-2', result: { kind: 'error', text: 'Debate rejected' } },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        value: { commandId: 'transition-success-2', result: { kind: 'success' } },
-      })
-    await expect(changeOrchestrationExecutionMechanism(
-      { rlm: 'disabled', debate: 'enabled' },
+      { rlm: 'auto' },
       'rlm',
       mode => injected.selectOrchestrationStrategy(
         mode, 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
       ),
-      injected.selectDebateMode,
-    )).resolves.toBe('关闭 Debate失败：Debate rejected')
+    )).resolves.toBe('启用 RLM失败：RLM rejected')
     expect(execute).toHaveBeenCalledTimes(1)
   })
 
-  it('maps RLM and Debate preferences into one mutually exclusive execution selector', () => {
-    expect(orchestrationExecutionMechanism('auto', 'auto')).toBe('auto')
-    expect(orchestrationExecutionMechanism('auto', 'disabled')).toBe('auto')
-    expect(orchestrationExecutionMechanism('disabled', 'disabled')).toBe('standard')
-    expect(orchestrationExecutionMechanism('enabled', 'disabled')).toBe('rlm')
-    expect(orchestrationExecutionMechanism('disabled', 'enabled')).toBe('debate')
-    expect(orchestrationExecutionMechanismLabel('debate')).toBe('Debate（多 Agent 辩论）')
-    expect(physicalOperatorEffectiveExecutionMechanism('auto', 'enabled')).toBe('debate')
-    expect(physicalOperatorEffectiveExecutionMechanism('disabled', 'enabled')).toBe('debate')
-    expect(physicalOperatorEffectiveExecutionLabel('chatgpt-web', 'auto', 'enabled'))
-      .toBe('Debate（多 Agent 辩论）')
-    expect(physicalOperatorEffectiveExecutionLabel('chatgpt-web', 'auto', 'disabled'))
-      .toBe('ChatGPT 网页版')
+  it('maps the RLM preference into one execution selector', () => {
+    expect(orchestrationExecutionMechanism('auto')).toBe('auto')
+    expect(orchestrationExecutionMechanism('disabled')).toBe('standard')
+    expect(orchestrationExecutionMechanism('enabled')).toBe('rlm')
+    expect(orchestrationExecutionMechanismLabel('standard')).toBe('标准（关闭 RLM）')
   })
 
-  it('closes the non-target mechanism before enabling the selected mechanism', async () => {
-    const calls: string[] = []
-    const saveRlm = vi.fn(async (mode: 'auto' | 'enabled' | 'disabled') => {
-      calls.push(`rlm:${mode}`)
-      return null
-    })
-    const saveDebate = vi.fn(async (mode: 'auto' | 'enabled' | 'disabled') => {
-      calls.push(`debate:${mode}`)
-      return null
-    })
-    await expect(changeOrchestrationExecutionMechanism(
-      { rlm: 'auto', debate: 'auto' },
-      'debate',
-      saveRlm,
-      saveDebate,
-    )).resolves.toBeNull()
-    expect(calls).toEqual(['rlm:disabled', 'debate:enabled'])
+  it('saves the RLM mode that the selected mechanism needs and nothing else', async () => {
+    const saveRlm = vi.fn(async () => null)
+    await expect(changeOrchestrationExecutionMechanism({ rlm: 'disabled' }, 'auto', saveRlm)).resolves.toBeNull()
+    expect(saveRlm).toHaveBeenLastCalledWith('auto')
+    await expect(changeOrchestrationExecutionMechanism({ rlm: 'auto' }, 'standard', saveRlm)).resolves.toBeNull()
+    expect(saveRlm).toHaveBeenLastCalledWith('disabled')
+    await expect(changeOrchestrationExecutionMechanism({ rlm: 'disabled' }, 'rlm', saveRlm)).resolves.toBeNull()
+    expect(saveRlm).toHaveBeenLastCalledWith('enabled')
+    expect(saveRlm).toHaveBeenCalledTimes(3)
 
-    calls.length = 0
-    await expect(changeOrchestrationExecutionMechanism(
-      { rlm: 'disabled', debate: 'enabled' },
-      'rlm',
-      saveRlm,
-      saveDebate,
-    )).resolves.toBeNull()
-    expect(calls).toEqual(['debate:disabled', 'rlm:enabled'])
-
-    calls.length = 0
-    await expect(changeOrchestrationExecutionMechanism(
-      { rlm: 'disabled', debate: 'disabled' },
-      'auto',
-      saveRlm,
-      saveDebate,
-    )).resolves.toBeNull()
-    expect(calls).toEqual(['rlm:auto', 'debate:auto'])
-
-    calls.length = 0
-    await expect(changeOrchestrationExecutionMechanism(
-      { rlm: 'auto', debate: 'auto' },
-      'standard',
-      saveRlm,
-      saveDebate,
-    )).resolves.toBeNull()
-    expect(calls).toEqual(['debate:disabled', 'rlm:disabled'])
+    // Reselecting the saved mechanism saves nothing, except that standard also closes an enabled Autonomous Mode.
+    saveRlm.mockClear()
+    await expect(changeOrchestrationExecutionMechanism({ rlm: 'enabled' }, 'rlm', saveRlm)).resolves.toBeNull()
+    await expect(changeOrchestrationExecutionMechanism({ rlm: 'disabled', autonomous: 'disabled' }, 'standard', saveRlm)).resolves.toBeNull()
+    expect(saveRlm).not.toHaveBeenCalled()
+    await expect(changeOrchestrationExecutionMechanism({ rlm: 'disabled', autonomous: 'enabled' }, 'standard', saveRlm)).resolves.toBeNull()
+    expect(saveRlm).toHaveBeenCalledWith('disabled')
   })
 
-  it('returns a failed transition step and allows the same selection to be retried', async () => {
+  it('returns a failed save and allows the same selection to be retried', async () => {
     const saveRlm = vi.fn()
       .mockResolvedValueOnce('temporary host failure')
       .mockResolvedValue(null)
-    const saveDebate = vi.fn().mockResolvedValue(null)
-    const current = { rlm: 'enabled' as const, debate: 'disabled' as const }
+    const current = { rlm: 'auto' as const }
 
-    await expect(changeOrchestrationExecutionMechanism(
-      current,
-      'debate',
-      saveRlm,
-      saveDebate,
-    )).resolves.toBe('关闭 RLM失败：temporary host failure')
-    expect(saveDebate).not.toHaveBeenCalled()
-
-    await expect(changeOrchestrationExecutionMechanism(
-      current,
-      'debate',
-      saveRlm,
-      saveDebate,
-    )).resolves.toBeNull()
-    expect(saveDebate).toHaveBeenCalledWith('enabled')
+    await expect(changeOrchestrationExecutionMechanism(current, 'rlm', saveRlm)).resolves.toBe('启用 RLM失败：temporary host failure')
+    await expect(changeOrchestrationExecutionMechanism(current, 'rlm', saveRlm)).resolves.toBeNull()
+    expect(saveRlm).toHaveBeenCalledTimes(2)
+    expect(saveRlm).toHaveBeenLastCalledWith('enabled')
   })
 
   it('keeps user-facing collaboration labels stable outside the Desktop product', () => {

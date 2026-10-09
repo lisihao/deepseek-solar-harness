@@ -555,42 +555,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:128`](../packages/orchestration/tool-debate/src/index.ts)
-
-<a id="debatedispatch--log-only"></a>
-
-#### `debate/dispatch` — log-only
-
-```ts persistence-catalog
-/**
- * Durable host admission for one user message while Debate is explicitly enabled.
- * @param commandId Idempotent Debate command identity.
- * @param promptMessageId User message owned by this admission.
- * @param turn Agent turn receiving the message.
- * @param step Agent step replaced by the Debate host adapter.
- * @param planModeActive Effective Plan state captured for this host step.
- */
-'debate/dispatch': {
-  readonly commandId: string
-  readonly promptMessageId: string
-  readonly turn: number
-  readonly step: number
-  readonly planModeActive?: boolean
-}
-```
-
-Source: [`packages/orchestration/tool-debate/src/index.ts:142`](../packages/orchestration/tool-debate/src/index.ts)
-
-<a id="debatepreferences--log-only"></a>
-
-#### `debate/preferences` — log-only
-
-```ts persistence-catalog
-/** Whole-value strategy for future Debate admissions in this Session. */
-'debate/preferences': DebateExecutionPreferences
-```
-
-Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:73`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -605,7 +570,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orch
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:154`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:84`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 

@@ -1277,11 +1277,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const selections = new WeakMap<Agent, WebModelSelectionRef>()
 
   /**
-   * Debate owns the dsh-debate-host/debate route only for the turn it serves.
-   * It is an implementation route, not a model a user can select or a
-   * persistent session preference.  The actual request header still records
-   * it so the session transcript remains reconstructable; model-directory
-   * projection must therefore skip it when recovering the user's selection.
+   * Sessions recorded while Debate took over direct messages log the
+   * dsh-debate-host/debate route in their request headers. No adapter serves
+   * it any more and a user cannot select it, so recovering the user's
+   * selection skips it and keeps the transcript reconstructable.
    */
   function isTransientDebateRoute(selection: Pick<ModelSelection, 'provider' | 'model'>): boolean {
     return selection.provider === 'dsh-debate-host' && selection.model === 'debate'
@@ -1306,8 +1305,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   /**
    * Value exposed by sessions.models.  A live user selection wins; after a
    * restart, recover the last non-Debate route rather than making the
-   * implementation route appear as the selected model.  No event is written
-   * and the Debate route remains available to the runtime adapter itself.
+   * retired route appear as the selected model.  No event is written.
    */
   function userFacingSelection(agent: Agent, selection: WebModelSelectionRef): ModelSelection {
     const current = selection.current
@@ -1361,10 +1359,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // O(new events) rather than a rescan.
         const logged = agent.session.requestHeader()?.config
         if (logged === undefined) return defaults.defaultModelSelection()
-        // The Debate host route is only valid while tool-debate has a
-        // dispatch for the current turn. Its logged request header remains
-        // necessary for transcript reconstruction, but cannot seed a later
-        // ordinary turn after Debate was disabled or switched to Auto.
+        // A legacy Session may end on the retired Debate host route. Its
+        // logged request header stays for transcript reconstruction but must
+        // not seed a later turn.
         if (isTransientDebateRoute(logged)) {
           return lastUserSelection(agent) ?? defaults.defaultModelSelection()
         }
