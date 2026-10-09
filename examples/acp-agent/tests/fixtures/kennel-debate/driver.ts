@@ -185,6 +185,11 @@ try {
         && grant.gouziId === member && grant.generation === 1
         && [...grant.scopes.read, ...grant.scopes.write, ...grant.scopes.effects].length === 0
     }),
+    // What the room lists for each collaboration: names for people, the task it is about, and who did what.
+    roomCollaborations: (room.collaborations ?? []).map(collaboration => ({
+      label: collaboration.label, state: collaboration.state, subject: collaboration.subject?.title, outcome: collaboration.outcome?.label,
+      members: collaboration.members.map(member => [member.gouziId, member.roleLabel, member.conclusion]),
+    })),
     room: { status: response.status, tasks: room.tasks.map(task => ({ state: task.state,
       nodes: task.nodes.map(node => ({ gouziId: node.gouziId, state: node.state, accepted: node.result?.accepted })) })) },
     managerAssistantMessages: agent.session.events.filter(event => event.type === 'assistant/message').length,

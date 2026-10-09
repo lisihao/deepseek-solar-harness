@@ -68,6 +68,15 @@ export interface KennelCollaborationResult {
   readonly text: string
 }
 
+/** What one member contributed to a collaboration's outcome, for the room to show beside the member. */
+export interface KennelCollaborationPart {
+  readonly gouziId: string
+  /** One short word or phrase, such as the member's conclusion. */
+  readonly label: string
+  /** The member's own words, such as review comments; Markdown. */
+  readonly text?: string
+}
+
 /**
  * How a collaboration ended up for the task it is about. The room shows `label` on that task, and a later kind reads
  * `state` and `details` to decide what to offer.
@@ -79,6 +88,8 @@ export interface KennelCollaborationOutcome {
   readonly state: 'pending' | 'positive' | 'negative' | 'unclear'
   /** One short line for people. */
   readonly label: string
+  /** What each member contributed, when the kind has something to say per member. */
+  readonly parts?: readonly KennelCollaborationPart[]
   /** Kind-owned facts, JSON values only. */
   readonly details: Readonly<Record<string, unknown>>
 }
@@ -91,6 +102,8 @@ export interface KennelCollaborationRecord {
   /** The user message that chose it. */
   readonly messageId: string
   readonly candidate: KennelCollaborationCandidate
+  /** What each member does in it, as the kind reported when it started. */
+  readonly assignments: KennelCollaborationStarted['assignments']
   /** The outcome its kind reported from the run's current results, when the kind reports outcomes. */
   readonly outcome?: KennelCollaborationOutcome
 }
@@ -177,6 +190,10 @@ export interface KennelCollaborationStarted {
 export interface KennelCollaborationKind {
   /** Stable name, such as `debate`. Names the kind in candidates and in the Session log; `work` and `control` are reserved. */
   readonly kind: string
+  /** Short name for people, such as `辩论`, shown in the room. */
+  readonly label: string
+  /** Names for people of the assignment roles this kind reports; a role without one is shown as it is. */
+  readonly roleLabels?: Readonly<Record<string, string>>
   /** One model-facing sentence saying when the user's message asks for this kind. */
   readonly guidance: string
   /**
@@ -191,6 +208,13 @@ export interface KennelCollaborationKind {
    * @returns the durable run and each member's assignment.
    */
   start(request: KennelCollaborationRequest): Promise<KennelCollaborationStarted>
+  /**
+   * Read the state of a run this kind started that the orchestration service does not list, such as a Debate kept by
+   * another service. Optional: a kind whose runs are orchestration runs omits it.
+   * @param record - the collaboration, with the candidate that started it.
+   * @returns an orchestration run state word, or undefined when it cannot be read.
+   */
+  runState?(record: Omit<KennelCollaborationRecord, 'outcome'>): Promise<string | undefined>
   /**
    * Read what a collaboration it started has concluded. Optional: a kind that reaches no verdict omits it.
    * @param record - the collaboration, with the candidate that started it.

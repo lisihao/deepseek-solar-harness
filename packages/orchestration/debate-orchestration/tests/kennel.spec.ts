@@ -166,6 +166,26 @@ describe('Debate kennel kind', () => {
     await vi.waitFor(() => { expect(warn).toHaveBeenCalledWith(expect.stringContaining('approval refused')) })
   })
 
+  it('reports a Debate\'s state in the words of an orchestration run, and nothing when it cannot be read', async () => {
+    const record = { collaboration: 'debate', runId: 'debate-1', messageId: 'm', candidate: candidate([]), assignments: [] }
+    const stateOf = async (lifecycle: string | Error) => {
+      const ctx = new Context()
+      contexts.push(ctx)
+      ctx.provide('debates', { inspect: async () => { if (lifecycle instanceof Error) throw lifecycle; return { state: lifecycle } } } as never)
+      return kennelDebateKind(ctx).runState!(record)
+    }
+    const expected: Record<string, string> = {
+      planned: 'awaiting_approval', awaiting_approval: 'awaiting_approval', admitting: 'running', round_running: 'running', reviewing: 'running',
+      converged: 'running', next_round: 'running', synthesizing: 'running', completed: 'completed', max_rounds: 'completed',
+      budget_limited: 'completed', stopped: 'cancelled', failed: 'failed', indeterminate: 'indeterminate', somethingNew: 'running',
+    }
+    for (const [lifecycle, state] of Object.entries(expected)) expect(await stateOf(lifecycle), lifecycle).toBe(state)
+    expect(await stateOf(new Error('unknown run'))).toBeUndefined()
+    const bare = new Context()
+    contexts.push(bare)
+    expect(await kennelDebateKind(bare).runState!(record)).toBeUndefined()
+  })
+
   it('registers with the kennel registry for the lifetime of its plugin and tells the model when to choose it', async () => {
     const ctx = new Context()
     contexts.push(ctx)
@@ -179,6 +199,10 @@ describe('Debate kennel kind', () => {
     await fiber.await()
     expect(registered.map(value => value.kind)).toEqual(['debate'])
     expect(registered[0]?.guidance).toContain('辩论')
+    expect(registered[0]?.label).toBe('辩论')
+    expect(registered[0]?.roleLabels).toEqual({
+      'constructive-proposer': '建议者', 'skeptical-falsifier': '证伪者', 'evidence-auditor': '证据审计者', 'decision-judge': '裁判',
+    })
     await fiber.dispose()
     await vi.waitFor(() => { expect(dispose).toHaveBeenCalledOnce() })
   })

@@ -148,6 +148,8 @@ function outcome(record: Omit<KennelCollaborationRecord, 'outcome'>, run: Orches
 export function kennelReworkKind(ctx: Context, config: Required<Config>): KennelCollaborationKind {
   return {
     kind: KENNEL_REWORK_KIND,
+    label: '返工',
+    roleLabels: { author: '作者' },
     guidance: '用户要求按评审意见修改、返工，或让做这个任务的狗子处理评审提出的问题时选它；它让原作者带着评审意见再做一轮，只在评审结论是“需要修改”之后出现',
     offer: facts => offer(facts, config),
     start: request => start(ctx, request),

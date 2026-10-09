@@ -5017,7 +5017,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'KennelCollaborationKind',
-    declaration: 'export interface KennelCollaborationKind {\n    readonly kind: string;\n    readonly guidance: string;\n    offer(facts: KennelCollaborationFacts): readonly KennelCollaborationCandidate[] | Promise<readonly KennelCollaborationCandidate[]>;\n    start(request: KennelCollaborationRequest): Promise<KennelCollaborationStarted>;\n    outcome?(record: Omit<KennelCollaborationRecord, \'outcome\'>, run: OrchestrationRunSnapshot, results: readonly KennelCollaborationResult[]): KennelCollaborationOutcome | undefined;\n}',
+    declaration: 'export interface KennelCollaborationKind {\n    readonly kind: string;\n    readonly label: string;\n    readonly roleLabels?: Readonly<Record<string, string>>;\n    readonly guidance: string;\n    offer(facts: KennelCollaborationFacts): readonly KennelCollaborationCandidate[] | Promise<readonly KennelCollaborationCandidate[]>;\n    start(request: KennelCollaborationRequest): Promise<KennelCollaborationStarted>;\n    runState?(record: Omit<KennelCollaborationRecord, \'outcome\'>): Promise<string | undefined>;\n    outcome?(record: Omit<KennelCollaborationRecord, \'outcome\'>, run: OrchestrationRunSnapshot, results: readonly KennelCollaborationResult[]): KennelCollaborationOutcome | undefined;\n}',
   },
   {
     name: 'KennelCollaborationLimits',
@@ -5029,11 +5029,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'KennelCollaborationOutcome',
-    declaration: 'export interface KennelCollaborationOutcome {\n    readonly subjectRunId: string;\n    readonly state: \'pending\' | \'positive\' | \'negative\' | \'unclear\';\n    readonly label: string;\n    readonly details: Readonly<Record<string, unknown>>;\n}',
+    declaration: 'export interface KennelCollaborationOutcome {\n    readonly subjectRunId: string;\n    readonly state: \'pending\' | \'positive\' | \'negative\' | \'unclear\';\n    readonly label: string;\n    readonly parts?: readonly KennelCollaborationPart[];\n    readonly details: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'KennelCollaborationPart',
+    declaration: 'export interface KennelCollaborationPart {\n    readonly gouziId: string;\n    readonly label: string;\n    readonly text?: string;\n}',
   },
   {
     name: 'KennelCollaborationRecord',
-    declaration: 'export interface KennelCollaborationRecord {\n    readonly collaboration: string;\n    readonly runId: string;\n    readonly messageId: string;\n    readonly candidate: KennelCollaborationCandidate;\n    readonly outcome?: KennelCollaborationOutcome;\n}',
+    declaration: 'export interface KennelCollaborationRecord {\n    readonly collaboration: string;\n    readonly runId: string;\n    readonly messageId: string;\n    readonly candidate: KennelCollaborationCandidate;\n    readonly assignments: KennelCollaborationStarted[\'assignments\'];\n    readonly outcome?: KennelCollaborationOutcome;\n}',
   },
   {
     name: 'KennelCollaborationRequest',

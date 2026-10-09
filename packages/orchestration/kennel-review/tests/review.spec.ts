@@ -263,6 +263,8 @@ describe('review plugin', () => {
     await fiber.await()
     expect(registered.map(value => value.kind)).toEqual(['review', 'rework', 'rereview'])
     expect(registered[0]?.guidance).toContain('评审')
+    expect(registered.map(value => value.label)).toEqual(['评审', '返工', '复审'])
+    expect(registered[0]?.roleLabels).toEqual({ reviewer: '评审人' })
     expect(registered.map(value => typeof value.outcome)).toEqual(['function', 'function', 'function'])
     await fiber.dispose()
     await vi.waitFor(() => { expect(dispose).toHaveBeenCalledTimes(3) })

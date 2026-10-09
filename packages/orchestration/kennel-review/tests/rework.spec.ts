@@ -30,14 +30,14 @@ const reviewCandidate: KennelCollaborationCandidate = {
 function review(patch: Partial<KennelCollaborationRecord> & { subject?: string; state?: 'negative' | 'positive' } = {}): KennelCollaborationRecord {
   const { subject = 'task-1', state = 'negative', ...rest } = patch
   return {
-    collaboration: 'review', runId: 'review-1', messageId: 'm1', candidate: reviewCandidate,
+    collaboration: 'review', runId: 'review-1', messageId: 'm1', candidate: reviewCandidate, assignments: [],
     outcome: { subjectRunId: subject, state, label: 'l', details: { verdicts } }, ...rest,
   }
 }
 
 function rework(reviewRun: string, runId: string, offer = author, target = 'task-1'): KennelCollaborationRecord {
   return {
-    collaboration: KENNEL_REWORK_KIND, runId, messageId: 'm2',
+    collaboration: KENNEL_REWORK_KIND, runId, messageId: 'm2', assignments: [],
     candidate: { ...reviewCandidate, collaboration: KENNEL_REWORK_KIND, details: { review: reviewRun, offer, target: { runId: target, title: 't' }, comments: [] } },
   }
 }
@@ -202,7 +202,7 @@ describe('rework start', () => {
   it('reports where the rework stands on the task it reworks, without approving it', () => {
     const kind = kennelReworkKind(new Context(), resolveConfig({}))
     const [candidate] = offer(facts())
-    const record = { collaboration: 'rework', runId: 'rework-run', messageId: 'm', candidate: candidate! }
+    const record = { collaboration: 'rework', runId: 'rework-run', messageId: 'm', candidate: candidate!, assignments: [] }
     const outcome = (state: string) => kind.outcome!(record, { runId: 'rework-run', state } as never, [])
     for (const state of ['running', 'paused', 'awaiting_approval']) {
       expect(outcome(state)).toEqual({ subjectRunId: 'task-1', state: 'pending', label: '返工中（Author）', details: { rework: 'rework-run' } })
@@ -214,6 +214,7 @@ describe('rework start', () => {
   it('tells the model when to choose it', () => {
     const kind = kennelReworkKind(new Context(), resolveConfig({}))
     expect(kind.kind).toBe('rework')
+    expect([kind.label, kind.roleLabels]).toEqual(['返工', { author: '作者' }])
     expect(kind.guidance).toContain('评审意见')
     expect(CHANGES_LINE).toContain('需要修改')
   })

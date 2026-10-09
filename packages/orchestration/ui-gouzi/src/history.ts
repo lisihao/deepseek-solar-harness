@@ -36,9 +36,9 @@ export function workRecords(events: readonly SessionEvent[]): KennelWorkRecord[]
 export function collaborationRecords(events: readonly SessionEvent[]): Omit<KennelCollaborationRecord, 'outcome'>[] {
   return events.flatMap((event) => {
     if (event.type !== 'kennel/dispatch-collaboration-admitted') return []
-    const { messageId, collaboration, runId } = event.data
+    const { messageId, collaboration, runId, assignments } = event.data
     const started = events.find(value => value.type === 'kennel/dispatch-collaboration' && value.data.messageId === messageId)
-    return started?.type === 'kennel/dispatch-collaboration' ? [{ collaboration, runId, messageId, candidate: started.data.candidate }] : []
+    return started?.type === 'kennel/dispatch-collaboration' ? [{ collaboration, runId, messageId, candidate: started.data.candidate, assignments }] : []
   })
 }
 
