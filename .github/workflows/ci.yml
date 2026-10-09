@@ -558,24 +558,21 @@ jobs:
           cp /var/cache/apt/archives/*.deb "$HOME/wine-debs/"
           du -sh "$HOME/wine-debs"
 
-  # Every pull request also gets a real Windows-kernel signal. This job keeps
-  # its own unmasked conclusion but is deliberately absent from
-  # all-checks-passed.needs, so it never delays or changes that required
-  # verdict. Under normal operation it runs on standard hosted Windows; under
-  # Windows failover (DSH_CI_FAILOVER_WINDOWS=selfhosted) it retargets onto the
-  # in-house self-hosted Windows pool. Dependabot PRs are excluded from the
-  # self-hosted pool and stay queued for the hosted runner — see the failover
-  # runbook. This Windows switch is independent of the Linux
-  # DSH_CI_FAILOVER_LINUX variable that retargets the three required Linux jobs
-  # and the all-checks-passed verdict above.
+  # A real Windows-kernel signal on every push to master, not on pull requests:
+  # DSH ships macOS only, so a Windows result is observational and must not
+  # add a red check to each pull request. The required Wine `windows` job
+  # above still owns the pull-request Windows verdict. This job keeps its own
+  # unmasked conclusion and is absent from all-checks-passed.needs. Under
+  # normal operation it runs on standard hosted Windows; under Windows
+  # failover (DSH_CI_FAILOVER_WINDOWS=selfhosted) it retargets onto the
+  # in-house self-hosted Windows pool — see the failover runbook. This Windows
+  # switch is independent of the Linux DSH_CI_FAILOVER_LINUX variable that
+  # retargets the three required Linux jobs and the all-checks-passed verdict
+  # above.
   windows-native:
-    needs: [pr-impact]
-    if: >-
-      github.event_name == 'pull_request'
-      && needs['pr-impact'].outputs.run_ci != 'false'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
-          && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
           || 'windows-2025' }}
     name: windows node 24 / native complete
