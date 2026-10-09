@@ -299,6 +299,54 @@ it('offers a kind\'s candidates and its guidance only while the kind offers some
   })
   await expect(silent.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
 })
+/** Candidates that each carry a long earlier review comment, oldest first, as unanswered reviews accumulate. */
+function commented(count: number, comment: string): Partial<KennelCollaborationKind> {
+  const members = [{ gouziId: 'dog', generation: 2, name: 'Dog', role: 'research', operatorId: 'gouzi.dog.codex', model: 'm' }]
+  return {
+    offer: () => Array.from({ length: count }, (_, index): KennelCollaborationCandidate => ({
+      kind: 'collaboration', collaboration: 'pair', workspace: '/project', members, id: `old-${String(index)}`,
+      details: { comments: [{ name: 'Cat', comment: `${comment}${String(index)}` }], revision: 3, settled: true, ended: null },
+    })),
+  }
+}
+it('shows the model a short form of each collaboration\'s details, so earlier review comments do not block a message', async () => {
+  const long = 'x'.repeat(5_000)
+  const f = await collaborationFixture(commented(30, long))
+  expect(30 * 5_000).toBeGreaterThan(config.maxInputBytes)
+  f.generate.mockImplementation((options) => {
+    const shown = choicesIn(options).filter(choice => choice.kind === 'collaboration') as unknown as { details: { comments: { comment: string }[] } }[]
+    expect(shown).toHaveLength(30)
+    expect(shown.every(choice => choice.details.comments[0]!.comment.length <= 200)).toBe(true)
+    expect(shown[0]).toMatchObject({ details: { revision: 3, settled: true, ended: null } })
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  const logged = f.agent.session.events.find(event => event.type === 'kennel/dispatch-request')
+  const kept = logged?.type === 'kennel/dispatch-request' ? logged.data.candidates.filter(choice => choice.kind === 'collaboration') : []
+  expect(kept).toHaveLength(30)
+  expect((kept[0] as KennelCollaborationCandidate).details).toMatchObject({ comments: [{ name: 'Cat', comment: `${long}0` }] })
+})
+it('leaves out the oldest collaborations when the shortened request still exceeds the input limit, and logs what the model saw', async () => {
+  const f = await collaborationFixture(commented(400, 'y'.repeat(150)))
+  const seen: string[][] = []
+  f.generate.mockImplementation((options) => {
+    seen.push(choicesIn(options).filter(choice => choice.kind === 'collaboration').map(choice => choice.id))
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  const [shown] = seen
+  expect(shown!.length).toBeGreaterThan(0)
+  expect(shown!.length).toBeLessThan(400)
+  expect(shown!.at(-1)).toBe('old-399')
+  const logged = f.agent.session.events.find(event => event.type === 'kennel/dispatch-request')
+  expect(logged?.type === 'kennel/dispatch-request' ? logged.data.candidates.filter(choice => choice.kind === 'collaboration').map(choice => choice.id) : []).toEqual(shown)
+})
+it('still refuses a message whose own text exceeds the input limit', async () => {
+  const f = await collaborationFixture()
+  const huge = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'z'.repeat(config.maxInputBytes) }] })
+  await expect(f.run([huge])).rejects.toMatchObject({ code: 'KENNEL_INPUT_LIMIT' })
+  expect(f.generate).not.toHaveBeenCalled()
+})
 it('tells a kind the Session, its runs newest first, and the member the user addressed', async () => {
   const f = await collaborationFixture()
   f.list.mockResolvedValue([existingRun('completed', 'agent', 1, '2026-01-01T00:00:00.000Z'), existingRun('running', 'agent', 2, '2026-02-01T00:00:00.000Z'), existingRun('running', 'other', 1)])

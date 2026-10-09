@@ -71,7 +71,7 @@ The dispatcher issues an independent, tool-free model request containing the use
 
 #### Token effect
 
-For a qualified message, dispatch adds a bounded scheduling request before task start or control execution; explicit DeepSeek balance failure can add a Codex judgment request. `maxInputBytes`, `maxTokens`, and `maxOutputBytes` limit input bytes, reported output tokens, and observed output bytes. These limits do not measure token savings or provide a Codex backend hard output-token cap.
+For a qualified message, dispatch adds a bounded scheduling request before task start or control execution; explicit DeepSeek balance failure can add a Codex judgment request. `maxInputBytes`, `maxTokens`, and `maxOutputBytes` limit input bytes, reported output tokens, and observed output bytes. The scheduling model reads each collaboration candidate's details shortened to 200 characters, and when the request still exceeds `maxInputBytes` the oldest collaboration candidates are left out of both the request and the logged candidates; a message whose own text and work candidates exceed it fails with `KENNEL_INPUT_LIMIT`. These limits do not measure token savings or provide a Codex backend hard output-token cap.
 
 #### KV Cache effect
 

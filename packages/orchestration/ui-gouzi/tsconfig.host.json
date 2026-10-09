@@ -17,6 +17,7 @@
     "src/collaboration.ts",
     "src/history.ts",
     "src/mentions.ts",
+    "src/model-view.ts",
     "src/dispatcher.ts"
   ],
   "references": [

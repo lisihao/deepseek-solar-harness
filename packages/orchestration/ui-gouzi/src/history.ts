@@ -1,4 +1,5 @@
 /** What a kennel Session has already dispatched, and how its collaborations ended, read back from the Session log. */
+import { OrchestrationArtifactRef } from '@deepseek-ai/dsh-orchestration'
 import type {
   KennelCollaborationKind,
   KennelCollaborationRecord,
@@ -42,27 +43,51 @@ export function collaborationRecords(events: readonly SessionEvent[]): Omit<Kenn
   })
 }
 
+/** Appended to a result whose complete text could not be read, so a cut-off reply is never taken for a whole one. */
+export const TRUNCATED_RESULT_NOTE = '\n（以上内容被截断，未能读取完整文本）'
+
+/** Text of a node's retained output: text blocks as written, any other block as JSON, as the scheduler's preview does. */
+async function fullText(service: OrchestrationService, evidenceRef: string): Promise<string | undefined> {
+  let evidence: unknown
+  try { evidence = await service.readArtifact(OrchestrationArtifactRef(evidenceRef)) } catch {
+    // The caller keeps the preview and marks it cut off, so an unreadable artifact must not fail the whole room read.
+    return undefined
+  }
+  const output = (evidence as { output?: unknown } | null)?.output
+  if (!Array.isArray(output)) return undefined
+  return output.map((block: { type?: unknown; text?: unknown }) => (block.type === 'text' && typeof block.text === 'string' ? block.text : JSON.stringify(block))).join('\n')
+}
+
 /**
- * Read the final text of each node of a run.
+ * Read the final text of each node of a run. A reply the scheduler cut off in its event preview is read whole from the
+ * node's retained output; when that cannot be read, the preview is kept and says it is cut off.
  * @param service - authoritative scheduler reads.
  * @param run - run whose events are read.
  * @returns the newest accepted or failed result per node that has output text.
  */
 export async function runResults(service: OrchestrationService, run: OrchestrationRunSnapshot): Promise<KennelCollaborationResult[]> {
   const latest = new Map<string, KennelCollaborationResult>()
+  const cutOff = new Map<string, string>()
   let afterSequence = 0
   for (;;) {
     const page = await service.readEvents({ runId: run.runId, afterSequence, limit: 500 })
-    if (page.events.length === 0) return [...latest.values()]
+    if (page.events.length === 0) break
     if (page.nextSequence <= afterSequence) throw new Error('orchestration event cursor did not advance')
     for (const event of page.events) {
       if ((event.type === 'node.evidence.accepted' || event.type === 'node.failed') && event.nodeId !== undefined
         && typeof event.data.outputPreview === 'string') {
         latest.set(event.nodeId, { nodeId: event.nodeId, accepted: event.type === 'node.evidence.accepted', text: event.data.outputPreview })
+        if (event.data.outputTruncated === true) cutOff.set(event.nodeId, String(event.data.evidenceRef))
+        else cutOff.delete(event.nodeId)
       }
     }
     afterSequence = page.nextSequence
   }
+  return Promise.all([...latest.values()].map(async (result) => {
+    const evidenceRef = cutOff.get(result.nodeId)
+    if (evidenceRef === undefined) return result
+    return { ...result, text: await fullText(service, evidenceRef) ?? `${result.text}${TRUNCATED_RESULT_NOTE}` }
+  }))
 }
 
 /**

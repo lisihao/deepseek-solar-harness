@@ -71,7 +71,7 @@ interface GouziProjectSource {
 
 #### Token effect
 
-对于具备候选的消息，分派在任务启动或控制执行前增加一次有界调度请求；明确的 DeepSeek 余额失败可以增加一次 Codex 判断请求。`maxInputBytes`、`maxTokens` 和 `maxOutputBytes` 分别限制输入字节、报告的输出 token 及已观察输出字节。这些限制不衡量 token 节省，也不提供 Codex 后端硬输出 token 上限。
+对于具备候选的消息，分派在任务启动或控制执行前增加一次有界调度请求；明确的 DeepSeek 余额失败可以增加一次 Codex 判断请求。`maxInputBytes`、`maxTokens` 和 `maxOutputBytes` 分别限制输入字节、报告的输出 token 及已观察输出字节。调度模型读到的每个协作候选的细节会缩短到 200 个字符；缩短后请求仍超过 `maxInputBytes` 时，最早的协作候选会从请求和记录的候选中去掉；只有消息本身和工作候选就超限时才以 `KENNEL_INPUT_LIMIT` 失败。这些限制不衡量 token 节省，也不提供 Codex 后端硬输出 token 上限。
 
 #### KV Cache effect
 

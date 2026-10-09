@@ -5,7 +5,7 @@ import type {
 } from '@deepseek-ai/dsh-orchestration'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import { describe, expect, it, vi } from 'vitest'
-import { collaborationRecords, runResults, sessionCollaborations, withOutcomes, workRecords } from '../src/history.ts'
+import { collaborationRecords, runResults, sessionCollaborations, TRUNCATED_RESULT_NOTE, withOutcomes, workRecords } from '../src/history.ts'
 
 const offer = {
   id: 'dog-write', gouziId: 'dog', generation: 2, name: 'Dog', role: 'coder', activity: 'idle', workspace: '/project',
@@ -82,6 +82,36 @@ describe('runResults', () => {
       { nodeId: 'b', accepted: false, text: 'broken' },
     ])
     expect(await runResults(f, run('quiet'))).toEqual([])
+  })
+
+  it('reads a reply the scheduler cut off whole from its retained output, and says so when it cannot', async () => {
+    const whole = `结论：需要修改\n${'意见。'.repeat(4_000)}末尾意见`
+    const cut = (nodeId: string, evidenceRef: string) => ({
+      type: 'node.evidence.accepted', nodeId, data: { outputPreview: whole.slice(0, 8_000), outputTruncated: true, evidenceRef },
+    })
+    const f = service({ 'run-9': [{ events: [cut('a', 'ref-a'), cut('b', 'ref-b'), accepted('c', 'short'), cut('d', 'ref-d')], nextSequence: 4 }] })
+    const readArtifact = vi.fn(async (ref: string) => {
+      if (ref === 'ref-b') throw new Error('gone')
+      if (ref === 'ref-d') return { stopReason: 'completed' }
+      return { output: [{ type: 'text', text: '结论：需要修改' }, { type: 'text', text: whole.split('\n')[1] }, { type: 'image', url: 'u' }] }
+    })
+    const results = await runResults(Object.assign(f, { readArtifact }), run('run-9'))
+    expect(results.find(value => value.nodeId === 'a')!.text).toContain('末尾意见')
+    expect(results.find(value => value.nodeId === 'a')!.text).toContain('"type":"image"')
+    expect(results.find(value => value.nodeId === 'b')!.text).toBe(`${whole.slice(0, 8_000)}${TRUNCATED_RESULT_NOTE}`)
+    expect(results.find(value => value.nodeId === 'c')!.text).toBe('short')
+    expect(results.find(value => value.nodeId === 'd')!.text).toBe(`${whole.slice(0, 8_000)}${TRUNCATED_RESULT_NOTE}`)
+    expect(readArtifact).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not read the retained output of a node whose later result is whole', async () => {
+    const f = service({ 'run-9': [{ events: [
+      { type: 'node.failed', nodeId: 'a', data: { outputPreview: 'cut', outputTruncated: true, evidenceRef: 'ref-a' } },
+      { type: 'node.evidence.accepted', nodeId: 'a', data: { outputPreview: 'whole', outputTruncated: false, evidenceRef: 'ref-a2' } },
+    ], nextSequence: 2 }] })
+    const readArtifact = vi.fn()
+    expect(await runResults(Object.assign(f, { readArtifact }), run('run-9'))).toEqual([{ nodeId: 'a', accepted: true, text: 'whole' }])
+    expect(readArtifact).not.toHaveBeenCalled()
   })
 
   it('refuses a cursor that does not advance', async () => {

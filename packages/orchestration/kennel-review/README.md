@@ -69,7 +69,7 @@ No cross-node cache contract is assumed; the rework is a new task.
 
 ## Known Limitations and Deferred Work
 
-- A review reads the preview of the task's result, not the full evidence artifact, and the delivered files only through the reviewer's file tools. A result that the daemon truncated is reviewed as truncated.
+- A review reads the preview of the task's result, not the full evidence artifact, and the delivered files only through the reviewer's file tools. A result that the daemon truncated is reviewed as truncated. A reviewer's own comments are different: when the daemon cut them off in its event preview, the conclusion and the rework or repeated review read them whole from the retained output, and a reply whose retained output cannot be read carries a note that it is cut off.
 - The conclusion is read from the first line of the reply. A reviewer who words it differently is counted as unclear, not as approval.
 - Outcomes are read from the live Session's log, so the room shows them only while the Session is loaded.
 - Rework covers a task that one member did and that the same member is still offered for in the same mode. A task done by a set of members is reviewed but not reworked.

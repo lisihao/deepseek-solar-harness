@@ -1,7 +1,7 @@
 /** Host-owned AI selection and durable TaskGraph admission for kennel messages. */
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
-import { createUserMessage, HarnessError, type UserMessage } from '@deepseek-ai/dsh-llm'
+import { HarnessError, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { PhysicalOperatorExecutionId, PhysicalOperatorId } from '@deepseek-ai/dsh-physical-operator'
 import type { Session } from '@deepseek-ai/dsh-session'
 import {
@@ -11,6 +11,7 @@ import {
   type LogicalTaskGraphV1, type OrchestrationNodeSpecV1, type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 import { collaborationRecords, withOutcomes, workRecords } from './history.ts'
+import { fitCandidates } from './model-view.ts'
 import { mentionedMembers } from './mentions.ts'
 import { decodeKennelMessage } from './recipient-message.ts'
 import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
@@ -211,17 +212,16 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
       const runs = facts.runs.filter(run => !decoded.recipient || admissionGouziRecipients(run.admission).some(value =>
         String(value.gouziId) === decoded.recipient?.gouziId && value.generation === decoded.recipient.generation))
         .slice(0, config.maxRunCandidates)
-      const candidates: KennelDispatchCandidate[] = [
-        ...workCandidates, ...offered.flatMap(value => value.candidates), ...runs.flatMap(runChoices),
-      ]
+      const system = selectionPrompt(offered.filter(value => value.candidates.length > 0).map(value => value.kind))
+      const fitted = fitCandidates(
+        [...workCandidates, ...offered.flatMap(value => value.candidates), ...runs.flatMap(runChoices)],
+        decoded.text, system, config.maxInputBytes,
+      )
+      if (fitted === undefined) throw new HarnessError('这条消息和候选资料超过调度输入上限。', 'KENNEL_INPUT_LIMIT')
+      const { candidates, options } = fitted
       agent.session.append('kennel/dispatch-request', { messageId: message.id, message, candidates }, { ignorable: true })
       await flushDispatch(ctx, agent)
       if (candidates.length === 0) throw new HarnessError('当前没有已确认项目和可用执行入口的狗子；请检查狗子的连接与项目。', 'GOUZI_NO_EXECUTOR')
-      const options = {
-        system: selectionPrompt(offered.filter(value => value.candidates.length > 0).map(value => value.kind)),
-        messages: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: JSON.stringify({ request: decoded.text, candidates }) }] })],
-      }
-      if (Buffer.byteLength(JSON.stringify(options)) > config.maxInputBytes) throw new HarnessError('这条消息和候选资料超过调度输入上限。', 'KENNEL_INPUT_LIMIT')
       let modelConfig: DispatchModelConfig = config
       if (config.jev === undefined && config.jevProvider !== undefined) {
         const llm = ctx.get('llm')
