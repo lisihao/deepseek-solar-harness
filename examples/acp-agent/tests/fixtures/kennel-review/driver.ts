@@ -40,6 +40,7 @@ const WORK_RESULT = 'The parser lives in src/parse.ts and handles empty input.'
 const REWORK_RESULT = 'The parser now also bounds oversized input.'
 const BETA_COMMENT = '- src/parse.ts 没处理超长输入'
 let workRuns = 0
+let reviewRuns = 0
 const originalFetch = globalThis.fetch
 const methods: string[] = []
 const executed: { member: string; nodeId: string; request: Record<string, unknown> }[] = []
@@ -73,9 +74,11 @@ globalThis.fetch = async (input, init) => {
       executed.push({ member, nodeId, request: call.payload })
       const turnId = `turn:${commandId}`
       if (nodeId === 'work') workRuns++
+      else reviewRuns++
       const text = nodeId === 'work'
         ? workRuns === 1 ? WORK_RESULT : REWORK_RESULT
-        : member === 'beta' ? `${CHANGES_LINE}\n${BETA_COMMENT}` : `${APPROVE_LINE}\n- gamma 核对了 src/parse.ts，空输入有处理。`
+        // The first round's beta asks for changes; the rereview of the rework approves.
+        : member === 'beta' && reviewRuns <= 2 ? `${CHANGES_LINE}\n${BETA_COMMENT}` : `${APPROVE_LINE}\n- ${member} 核对了 src/parse.ts，空输入有处理。`
       results.set(turnId, {
         commandId, sessionId: `session:${member}`, turnId, state: 'settled', stateRevision: 2, updatedAt: '2026-10-09T00:00:00.000Z',
         result: { output: [{ type: 'text', text }], stopReason: 'completed', usage: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 2, costUsd: 0.01 } },
@@ -109,10 +112,18 @@ interface Choice {
   gouziId?: string
   mode?: string
   members?: { gouziId: string; operatorId: string; model: string }[]
-  details?: { target?: { title: string; authors: string[] }; comments?: { name: string; comment: string }[] }
+  details?: {
+    target?: { title: string; authors: string[] }
+    comments?: { name: string; comment: string }[]
+    previous?: { name: string; comment: string }[]
+  }
 }
-const offered = { reviewBeforeWork: false, reworkBeforeReview: false, review: [] as unknown[], rework: [] as unknown[] }
-// 1: hand the work to alpha, 2: have the others review it, 3: have alpha rework it from the comments.
+const offered = {
+  reviewBeforeWork: false, reworkBeforeReview: false, rereviewBeforeRework: false,
+  review: [] as unknown[], rework: [] as unknown[], rereview: [] as unknown[],
+}
+// 1: hand the work to alpha, 2: have the others review it, 3: have alpha rework it from the comments, 4: have the same reviewers check it.
+
 let step = 1
 let modelCalls = 0
 class Judgment extends LlmAdapter {
@@ -124,14 +135,15 @@ class Judgment extends LlmAdapter {
     const kind = (name: string) => input.candidates.filter(candidate => candidate.collaboration === name)
     const summary = (candidate: Choice) => ({
       target: candidate.details?.target?.title, members: (candidate.members ?? []).map(value => value.gouziId),
-      comments: candidate.details?.comments,
+      comments: candidate.details?.comments, previous: candidate.details?.previous,
     })
     if (step === 1) offered.reviewBeforeWork = kind('review').length > 0
     if (step === 2) { offered.reworkBeforeReview = kind('rework').length > 0; offered.review.push(...kind('review').map(summary)) }
-    if (step === 3) offered.rework.push(...kind('rework').map(summary))
+    if (step === 3) { offered.rereviewBeforeRework = kind('rereview').length > 0; offered.rework.push(...kind('rework').map(summary)) }
+    if (step === 4) offered.rereview.push(...kind('rereview').map(summary))
     const chosen = step === 1
       ? input.candidates.find(candidate => candidate.kind === 'work' && candidate.gouziId === 'alpha' && candidate.mode === 'read')
-      : kind(step === 2 ? 'review' : 'rework')[0]
+      : kind(['', '', 'review', 'rework', 'rereview'][step] ?? '')[0]
     if (!chosen) throw new Error(`no candidate to choose at step ${String(step)}`)
     yield { type: 'text-delta', index: 0, text: JSON.stringify({ candidateId: chosen.id }) }
     yield { type: 'finish', reason: { kind: 'stop' } }
@@ -174,6 +186,9 @@ try {
   step = 3
   say('Rework it using the review comments.')
   await waitFor(async () => settled(3))
+  step = 4
+  say('Ask the same reviewers to check the rework.')
+  await waitFor(async () => settled(4))
   const runs = (await ctx.orchestrations.list()).sort((left, right) => left.createdAt.localeCompare(right.createdAt))
   const started = agent.session.events.flatMap(event => event.type === 'kennel/dispatch-collaboration-admitted'
     ? [{ collaboration: event.data.collaboration, assignments: event.data.assignments }] : [])
@@ -204,6 +219,8 @@ try {
       return { read: scopes.read, write: scopes.write, effects: scopes.effects }
     }),
     reviewersReadTheResult: reviewTasks.length === 2 && reviewTasks.every(value => JSON.stringify(value.request).includes(WORK_RESULT)),
+    reviewersReceivedTheirComment: reviewTasks.slice(2).length === 2
+      && reviewTasks.slice(2).every(value => JSON.stringify(value.request).includes(BETA_COMMENT)),
     authorReceivedTheComment: reworkTask !== undefined && JSON.stringify(reworkTask.request).includes(BETA_COMMENT)
       && !JSON.stringify(reworkTask.request).includes('gamma 核对了'),
     externalMethods: [...new Set(methods)].sort(),

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This package registers the `review` and `rework` collaboration kinds with the [kennel registry](../ui-gouzi/README.md) (`ctx.kennelCollaborations`). A review has other members read a kennel task that finished, and reply with a conclusion and comments; rework hands the task back to its author with the comments of a review that asked for changes. They follow `debate` in [`debate-orchestration`](../debate-orchestration/README.md) and show what a kind consists of: an `offer` that returns candidates, a `start` that begins one, and optionally an `outcome` that says how the collaboration ended.
+This package registers the `review`, `rework`, and `rereview` collaboration kinds with the [kennel registry](../ui-gouzi/README.md) (`ctx.kennelCollaborations`). A review has other members read a kennel task that finished, and reply with a conclusion and comments; rework hands the task back to its author with the comments of a review that asked for changes; rereview has the same reviewers check the reworked task. They follow `debate` in [`debate-orchestration`](../debate-orchestration/README.md) and show what a kind consists of: an `offer` that returns candidates, a `start` that begins one, and optionally an `outcome` that says how the collaboration ended.
 
 ## What is offered
 
@@ -31,7 +31,11 @@ The outcome is computed from the run's results each time it is read, not stored,
 
 ## Rework
 
-When a review asked for changes, the `rework` kind offers the task back to the member that did it, once per review. The member must still be offered by the dispatcher on the same project in the same mode (a write task is reworked as a write task), and the candidate id names that offer, so a changed member makes the choice stale. The dispatcher offers it only to a message that is not addressed to another member, and the user has to ask for it; nothing is reworked automatically. The author gets the task title, the comments of the reviewers who asked for changes (not the approving ones), and the user's message, and the Host builds the task graph exactly as for the member's own messages, including file scopes, isolation, and verification for a write task. The reworked task is an ordinary finished task, so it can be reviewed again. The original task then also shows `已按评审意见返工`, which reports progress and not approval.
+When a review asked for changes, the `rework` kind offers the task back to the member that did it, once per review. The member must still be offered by the dispatcher on the same project in the same mode (a write task is reworked as a write task), and the candidate id names that offer, so a changed member makes the choice stale. The dispatcher offers it only to a message that is not addressed to another member, and the user has to ask for it; nothing is reworked automatically. The author gets the task title, the comments of the reviewers who asked for changes (not the approving ones), and the user's message, and the Host builds the task graph exactly as for the member's own messages, including file scopes, isolation, and verification for a write task. The reworked task is an ordinary finished task. The original task then also shows `已按评审意见返工`, which reports progress and not approval. A task is handed back at most `maxReworks` times (default 2), counting the rework of a rework, so a review-and-rework loop ends and the last comments stay on the task.
+
+## Rereview
+
+Once a reworked task has finished, the `rereview` kind offers to send it back to the reviewers of the review that asked for changes: the same members in the same order, only if every one of them can still review the task, and never in place of a different batch. It is offered once per reworked task, and not when the message names reviewers or addresses a member (that is an ordinary review) or the task was already reviewed some other way. Each reviewer gets the comments of the reviewers who asked for changes and is asked to check them one by one before looking for new problems. Its reply uses the same conclusion line, and the room shows the result on the reworked task as `复审：…` (`复审：已通过` when everyone approves). A rereview that asks for changes can be reworked again until `maxReworks` is reached. Nothing starts automatically.
 
 ## Model Experience
 
@@ -49,15 +53,15 @@ Each reviewer adds one bounded prompt: the task title, the result preview, and t
 
 No cross-node cache contract is assumed; each review node is an independent request.
 
-### Rework node
+### Rework and rereview nodes
 
 #### What the model sees
 
-The author sees its member name, the original task title, the comments of each reviewer who asked for changes under that reviewer's name, an instruction to change the work and say what was and was not changed and why, and the user's message. It works with the same tools and limits as the member's own tasks in that mode.
+The author of a rework sees its member name, the original task title, the comments of each reviewer who asked for changes under that reviewer's name, an instruction to change the work and say what was and was not changed and why, and the user's message. It works with the same tools and limits as the member's own tasks in that mode. A reviewer in a rereview sees what a first reviewer sees plus the earlier comments that asked for changes, and an instruction to check them one by one first.
 
 #### Token effect
 
-One bounded prompt for the author, plus the comments, which are limited by the reviewers' own output limits.
+One bounded prompt for the author, plus the comments, which are limited by the reviewers' own output limits. A rereview adds the same comments to each reviewer's prompt.
 
 #### KV Cache effect
 
@@ -69,5 +73,6 @@ No cross-node cache contract is assumed; the rework is a new task.
 - The conclusion is read from the first line of the reply. A reviewer who words it differently is counted as unclear, not as approval.
 - Outcomes are read from the live Session's log, so the room shows them only while the Session is loaded.
 - Rework covers a task that one member did and that the same member is still offered for in the same mode. A task done by a set of members is reviewed but not reworked.
+- A rereview needs the whole first batch. If one of them is gone, the user asks for an ordinary review and names the reviewers.
 - Only tasks started by kennel dispatch (a `work` node) can be reviewed. Debates and other reviews are not offered.
 - Reviewers are chosen in registry order; the user cannot pick them yet other than by addressing one member.

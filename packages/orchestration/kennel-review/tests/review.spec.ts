@@ -243,10 +243,12 @@ describe('review kind start', () => {
 
 describe('review plugin', () => {
   it('registers the kind for the plugin lifetime with guidance for the selection model, and bounds its configuration', async () => {
-    expect(defaults).toEqual({ maxReviewers: 2, maxTargets: 5 })
+    expect(defaults).toEqual({ maxReviewers: 2, maxTargets: 5, maxReworks: 2 })
     expect(() => Config({ maxReviewers: 0 })).toThrow()
     expect(() => Config({ maxReviewers: 5 })).toThrow()
     expect(() => Config({ maxTargets: 0 })).toThrow()
+    expect(() => Config({ maxReworks: 0 })).toThrow()
+    expect(() => Config({ maxReworks: 6 })).toThrow()
     expect(plugin.inject).toEqual(['kennelCollaborations', 'orchestrations'])
     const ctx = new Context()
     contexts.push(ctx)
@@ -259,10 +261,10 @@ describe('review plugin', () => {
     ctx.provide('orchestrations', {} as never)
     const fiber = ctx.plugin(plugin, defaults)
     await fiber.await()
-    expect(registered.map(value => value.kind)).toEqual(['review', 'rework'])
+    expect(registered.map(value => value.kind)).toEqual(['review', 'rework', 'rereview'])
     expect(registered[0]?.guidance).toContain('评审')
-    expect(registered.map(value => typeof value.outcome)).toEqual(['function', 'function'])
+    expect(registered.map(value => typeof value.outcome)).toEqual(['function', 'function', 'function'])
     await fiber.dispose()
-    await vi.waitFor(() => { expect(dispose).toHaveBeenCalledTimes(2) })
+    await vi.waitFor(() => { expect(dispose).toHaveBeenCalledTimes(3) })
   })
 })

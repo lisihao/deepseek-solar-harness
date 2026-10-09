@@ -140,6 +140,8 @@ export interface KennelWorkGraphInput {
   readonly offer: KennelWorkOffer
   /** The task text the member receives. */
   readonly text: string
+  /** Title of the task in the room, bounded by the Host; the task text when absent. */
+  readonly title?: string
 }
 
 /** A request to start the collaboration the user chose. */
