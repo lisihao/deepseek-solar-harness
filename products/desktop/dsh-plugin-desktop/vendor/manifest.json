@@ -285,6 +285,11 @@
       "name": "Kennel room shows members working and keeps reasoning out of results",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "73a107bb024d0a37e89a6660f15d18833a7acf12"
+    },
+    {
+      "name": "Web app base-row comment no longer names the retired TUI",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "c126ab40ea09e176cb688ed72f5612ed64565e3c"
     }
   ],
   "sourcePackages": {
@@ -501,7 +506,7 @@
     "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "79a4bbc05eff042b5e7960e660e742a20ecb909aa8376875377106fab120743c",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "f9ecb9781bd709faa4b3c905b5695917af78436bd5007afc79ddfa5311b1cee6",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "6c105fb5fbee7043f0075bba956fca8e0e8d37b214e5b01355dc0de6a16573d1",
-    "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "97c9e6e8ac3698e464f98493d6c13b68be32a0202a6d5119c50d5440b22d6c12",
+    "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "33cc4399e8543eb20d1fbb99a6a83984f18fb3701688c812e80ae6b73d1178aa",
     "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "558a81f41bff84561b3b20bc14750ef2f118ef90c8fa5991443571ee2dcdc194",
     "dsh-packages/dsh-better-sidebar-0.15.0-solar.1.tgz": "e5ef31ca74a46a4d7e023fdc5f2dafd37aa458622f0db4824ad0393819e256fc",
     "dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz": "a630eee30376920234619fe3fed5e1f965632016b28d468530cbe5b733209b18",
