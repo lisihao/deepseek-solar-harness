@@ -304,8 +304,9 @@
 #
 # Every row below composes what ONE agent contributes to the host registries:
 # its tools, its prompt sections, its delegation backends. The base keeps them
-# for the TUI, which is single-session and composes its agent process-wide; the
-# Web surface disables them here and lets each session mount a preset instead.
+# for single-session compositions that build their agent process-wide, such as
+# the headless one-shot profile; the Web surface disables them here and lets
+# each session mount a preset instead.
 #
 # Disabling rather than deleting is deliberate: the base is shared, and a row
 # absent from a surface overlay would silently reappear the day someone reorders
