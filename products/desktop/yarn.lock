@@ -4976,7 +4976,7 @@ __metadata:
 
 "@deepseek-ai/dsh-web-app@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-web-app@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz::hash=c42416&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-web-app@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz::hash=f0e0bf&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-agent-presets": "npm:^0.1.0-rc.5"
     "@deepseek-ai/dsh-api-remotes": "npm:^0.1.0-rc.5"
@@ -5048,7 +5048,7 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-shell-env": ^0.1.0-rc.5
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
-  checksum: 10c0/72f94e5fb755ec908e730336bf4d2c800a4e44c9e60a3f25442af858b46e66144e6cb3e6afe845f0aa190d56b3a8f8fe93e4fc2d5048394cb832fd24c59cc4e1
+  checksum: 10c0/71f4b73ce554807387cc71dece52bf02b7513153035e3b2d725550d29851b51e592b9909892fb172212539fca584fbecc6be1ebd404f69c3d5e5e6b2071eaa21
   languageName: node
   linkType: hard
 
