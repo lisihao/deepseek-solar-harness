@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
-  freeLoopbackPort, generateKeyPair, installKey, openTunnel, scanHostKey, shellQuote, SshError, sshExec, SYSTEM_SSH,
-  type SshHostTarget,
+  freeLoopbackPort, generateKeyPair, installKey, openTunnel, pinnedFingerprint, resolveTailscale, scanHostKey, shellQuote, SshError, sshExec,
+  SYSTEM_SSH, TAILSCALE_CANDIDATES, type SshHostTarget,
 } from '../src/gouzi-ssh.ts'
+import { fakeTailscale } from './fixtures/fake-tailscale.ts'
 import { passwordSsh, SSHD_AVAILABLE, startTestSshd, type TestSshd } from './fixtures/test-sshd.ts'
 
 describe.skipIf(!SSHD_AVAILABLE)('SSH helpers', () => {
@@ -122,6 +123,101 @@ describe('shellQuote', () => {
   it('survives quotes and spaces', () => {
     expect(shellQuote("/Applications/DSH Desktop.app")).toBe("'/Applications/DSH Desktop.app'")
     expect(shellQuote("it's")).toBe("'it'\\''s'")
+  })
+})
+
+describe.skipIf(!SSHD_AVAILABLE)('SSH through Tailscale', () => {
+  let server: TestSshd
+  let scratch: string
+  let tailscale: ReturnType<typeof fakeTailscale>
+  let binaries: typeof SYSTEM_SSH
+  let target: SshHostTarget
+  const route = { via: 'tailscale', socket: '/var/run/tailscale/test.sock' } as const
+
+  beforeAll(async () => {
+    server = await startTestSshd()
+    scratch = mkdtempSync(join(tmpdir(), 'dsh-gouzi-tailscale-'))
+    tailscale = fakeTailscale(scratch)
+    binaries = { ...SYSTEM_SSH, tailscale: tailscale.path }
+    const key = await scanHostKey(binaries, '127.0.0.1', server.port, route)
+    writeFileSync(join(scratch, 'known_hosts'), `${key.line}\n`)
+    target = { address: '127.0.0.1', port: server.port, user: server.user, keyPath: server.identity, knownHostsPath: join(scratch, 'known_hosts'), route }
+  }, 60_000)
+
+  afterAll(async () => {
+    await server.stop()
+    rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('reads the host key through the relay, passing the socket, and records the line later connections look up', async () => {
+    const key = await scanHostKey(binaries, '127.0.0.1', server.port, route)
+    expect(key).toMatchObject({ keyType: 'ssh-ed25519', fingerprint: server.fingerprint })
+    expect(key.line).toContain(`[127.0.0.1]:${String(server.port)}`)
+    expect(tailscale.calls().at(-1)).toEqual(['--socket=/var/run/tailscale/test.sock', 'nc', '127.0.0.1', String(server.port)])
+    expect(await pinnedFingerprint(binaries, join(scratch, 'known_hosts'))).toBe(server.fingerprint)
+  })
+
+  it('runs commands and keeps a forward open through the relay', async () => {
+    expect((await sshExec(binaries, target, 'echo over-tailscale')).trim()).toBe('over-tailscale')
+    const before = tailscale.calls().length
+    const local = await freeLoopbackPort()
+    const tunnel = await openTunnel(binaries, target, local, server.port)
+    try {
+      expect(tailscale.calls().length).toBeGreaterThan(before)
+    } finally {
+      tunnel.close()
+      await tunnel.closed
+    }
+  })
+
+  it('leaves the socket out when none is configured, so the CLI uses its default', async () => {
+    await scanHostKey(binaries, '127.0.0.1', server.port, { via: 'tailscale' })
+    expect(tailscale.calls().at(-1)).toEqual(['nc', '127.0.0.1', String(server.port)])
+  })
+
+  it('treats a socket path as data: shell metacharacters in it run nothing', async () => {
+    const marker = join(scratch, 'pwned')
+    const hostile = { via: 'tailscale', socket: `/tmp/a b'; touch ${marker}; '` } as const
+    await scanHostKey(binaries, '127.0.0.1', server.port, hostile)
+    expect(tailscale.calls().at(-1)?.[0]).toBe(`--socket=${hostile.socket}`)
+    expect(existsSync(marker)).toBe(false)
+  })
+
+  it('says Tailscale is not running or its socket is wrong, instead of a generic failure', async () => {
+    tailscale.setDown(true)
+    try {
+      await expect(scanHostKey(binaries, '127.0.0.1', server.port, route)).rejects.toMatchObject({ code: 'UNREACHABLE', message: expect.stringContaining('Tailscale 没有运行') })
+      await expect(sshExec(binaries, target, 'true')).rejects.toMatchObject({ code: 'UNREACHABLE', message: expect.stringContaining('Tailscale 没有运行') })
+    } finally {
+      tailscale.setDown(false)
+    }
+  })
+
+  it('does not follow the user ssh configuration: a routed host is looked up under its own address', async () => {
+    const other = await startTestSshd()
+    try {
+      const wrong: SshHostTarget = { ...target, port: other.port, keyPath: other.identity }
+      await expect(sshExec(binaries, wrong, 'true')).rejects.toMatchObject({ code: 'HOST_KEY_CHANGED' })
+    } finally {
+      await other.stop()
+    }
+  })
+})
+
+describe('finding the Tailscale CLI', () => {
+  it('uses the configured path when it exists and otherwise names every path it tried', () => {
+    expect(resolveTailscale('/custom/tailscale', path => path === '/custom/tailscale')).toBe('/custom/tailscale')
+    expect(() => resolveTailscale('/custom/tailscale', () => false)).toThrow(/\/custom\/tailscale/u)
+    for (const candidate of TAILSCALE_CANDIDATES) expect(() => resolveTailscale('', () => false)).toThrow(candidate)
+  })
+
+  it('takes the first installed candidate, and never a path ssh would expand', () => {
+    expect(resolveTailscale('', path => path === TAILSCALE_CANDIDATES[1])).toBe(TAILSCALE_CANDIDATES[1])
+    expect(() => resolveTailscale('/odd/%h/tailscale', () => true)).toThrow(SshError)
+  })
+
+  it('reports a missing CLI when a routed host is scanned', async () => {
+    await expect(scanHostKey({ ...SYSTEM_SSH, tailscale: '/definitely/not/here' }, '127.0.0.1', 22, { via: 'tailscale' })).rejects.toMatchObject({ code: 'COMMAND_FAILED' })
   })
 })
 

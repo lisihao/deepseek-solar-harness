@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { RemoteGouziHosts } from '../src/gouzi-remote.ts'
 import { SYSTEM_SSH } from '../src/gouzi-ssh.ts'
+import { fakeTailscale } from './fixtures/fake-tailscale.ts'
 import { passwordSsh, SSHD_AVAILABLE, startTestSshd, type TestSshd } from './fixtures/test-sshd.ts'
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -129,6 +130,51 @@ describe.skipIf(!SSHD_AVAILABLE).sequential('Gouzi SSH hosts', { timeout: STEP_T
     expect(installed.trim()).toBe(readFileSync(join(directory, 'id_ed25519.pub'), 'utf8').trim())
   }, 60_000)
 
+  it('reaches a machine over Tailscale and back, keeping its identity, as long as it presents the pinned key', async () => {
+    const tailscale = fakeTailscale(scratch)
+    const routed = new RemoteGouziHosts({ root: hostsRoot, binaries: { ...SYSTEM_SSH, ssh: passwordSsh(scratch, PASSWORD, server), tailscale: tailscale.path }, remoteApp })
+    const route = { via: 'tailscale', socket: '/var/run/tailscale/test.sock' } as const
+    const updated = await routed.reroute({ hostId, address: '127.0.0.1', port: server.port, route })
+    expect(updated).toMatchObject({ hostId, label: 'Mac mini', appVersion: '3.36.0', route })
+    expect(tailscale.calls().some(call => call.includes('--socket=/var/run/tailscale/test.sock'))).toBe(true)
+    expect(JSON.parse(readFileSync(join(hostsRoot, 'hosts.json'), 'utf8')).hosts[0].route).toEqual(route)
+    // The relayed commands (browse) work, and a later instance reads the route from the catalog.
+    expect((await routed.browse(hostId, scratch)).path).toContain('dsh-gouzi-remote-')
+    const direct = await routed.reroute({ hostId, address: '127.0.0.1', port: server.port })
+    expect(direct).not.toHaveProperty('route')
+    expect(JSON.parse(readFileSync(join(hostsRoot, 'hosts.json'), 'utf8')).hosts[0]).not.toHaveProperty('route')
+    routed.dispose()
+  }, 90_000)
+
+  it('refuses to move a host onto a machine with another key, leaving its pin and settings alone', async () => {
+    const other = await startTestSshd()
+    try {
+      const pin = join(hostsRoot, hostId, 'known_hosts')
+      const before = { pin: readFileSync(pin, 'utf8'), catalog: readFileSync(join(hostsRoot, 'hosts.json'), 'utf8') }
+      await expect(hosts.reroute({ hostId, address: '127.0.0.1', port: other.port })).rejects.toMatchObject({ code: 'HOST_KEY_CHANGED' })
+      expect(readFileSync(pin, 'utf8')).toBe(before.pin)
+      expect(readFileSync(join(hostsRoot, 'hosts.json'), 'utf8')).toBe(before.catalog)
+    } finally {
+      await other.stop()
+    }
+  })
+
+  it('puts the old pin back when the machine behind the new route cannot run the agent', async () => {
+    const tailscale = fakeTailscale(scratch)
+    const routed = new RemoteGouziHosts({ root: hostsRoot, binaries: { ...SYSTEM_SSH, ssh: passwordSsh(scratch, PASSWORD, server), tailscale: tailscale.path }, remoteApp })
+    const pin = join(hostsRoot, hostId, 'known_hosts')
+    const before = { pin: readFileSync(pin, 'utf8'), catalog: readFileSync(join(hostsRoot, 'hosts.json'), 'utf8') }
+    setVersion('3.35.0')
+    try {
+      await expect(routed.reroute({ hostId, address: '127.0.0.1', port: server.port, route: { via: 'tailscale' } })).rejects.toThrow(/太旧/u)
+    } finally {
+      setVersion('3.36.0')
+    }
+    expect(readFileSync(pin, 'utf8')).toBe(before.pin)
+    expect(readFileSync(join(hostsRoot, 'hosts.json'), 'utf8')).toBe(before.catalog)
+    routed.dispose()
+  }, 90_000)
+
   it('inspects directories without mutation and prepares plain directories on the remote machine', async () => {
     const listing = await hosts.browse(hostId, scratch)
     expect(listing.entries).toContainEqual({ name: 'PetGoGo', path: expect.stringContaining('PetGoGo'), git: true })
@@ -154,11 +200,19 @@ describe.skipIf(!SSHD_AVAILABLE).sequential('Gouzi SSH hosts', { timeout: STEP_T
     // A new main instance finds the forward again from the stored catalog and keeps the same endpoint.
     hosts.dispose()
     expect(await reachable(started.endpoint)).toBe(false)
-    const restarted = new RemoteGouziHosts({ root: hostsRoot, binaries: { ...SYSTEM_SSH, ssh: passwordSsh(scratch, PASSWORD, server) }, remoteApp })
+    const tailscale = fakeTailscale(scratch)
+    const restarted = new RemoteGouziHosts({ root: hostsRoot, binaries: { ...SYSTEM_SSH, ssh: passwordSsh(scratch, PASSWORD, server), tailscale: tailscale.path }, remoteApp })
     restarted.restore()
     const deadline = Date.now() + 15_000
     while (!(await reachable(started.endpoint)) && Date.now() < deadline) await new Promise(resolveWait => setTimeout(resolveWait, 200))
     expect(await reachable(started.endpoint)).toBe(true)
+
+    // Moving the host onto Tailscale reopens the member's forward through the relay, on the same local port.
+    await restarted.reroute({ hostId, address: '127.0.0.1', port: server.port, route: { via: 'tailscale' } })
+    const reopened = Date.now() + 15_000
+    while (!(await reachable(started.endpoint)) && Date.now() < reopened) await new Promise(resolveWait => setTimeout(resolveWait, 200))
+    expect(await reachable(started.endpoint)).toBe(true)
+    expect(tailscale.calls().filter(call => call[0] === 'nc').length).toBeGreaterThanOrEqual(2)
 
     expect(await restarted.stop(hostId, 'gouzi-remote-1', { reclaimResident: true })).toEqual({ processTreeStopped: true })
     expect(await reachable(started.endpoint)).toBe(false)
