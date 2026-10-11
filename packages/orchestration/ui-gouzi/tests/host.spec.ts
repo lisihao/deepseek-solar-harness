@@ -604,8 +604,8 @@ describe('Gouzi Host route', () => {
     expect(host!.rerouted.at(-1)).toEqual({ hostId: 'ssh-1', address: 'mini.local', port: 22 })
     host!.sshHosts = [{ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh', address: 'lisihao@100.114.161.62:10022', route: { via: 'tailscale' } }]
     const reader = await send('GET', undefined, { authorization: 'Bearer pocket-token' }, true)
-    expect(reader.body.hosts[1]).toEqual({ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh' })
-    expect((await send('GET')).body.hosts[1]).toMatchObject({ route: { via: 'tailscale' } })
+    expect(reader.body.hosts?.[1]).toEqual({ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh' })
+    expect((await send('GET')).body.hosts?.[1]).toMatchObject({ route: { via: 'tailscale' } })
   })
 
   it.each([
