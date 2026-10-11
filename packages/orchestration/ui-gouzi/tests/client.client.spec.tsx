@@ -102,6 +102,14 @@ describe('Gouzi avatars', () => {
 })
 
 describe('Gouzi sidebar entry and roster', () => {
+  it('lists members unchanged when the roster also names retired members', async () => {
+    const { request } = fakeRequest({ roster: dashboard([member()], { used: 1, retired: [{ gouziId: 'g0', name: 'Old' }] }) })
+    render(<GouziManager request={request} folders={fakeFolders().folders} />)
+    const page = await screen.findByRole('region', { name: '狗子' })
+    expect(await within(page).findByText('1 / 10 个名额')).toBeTruthy()
+    expect(within(page).getByText('Mochi')).toBeTruthy()
+    expect(within(page).queryByText('Old')).toBe(null)
+  })
   it('shows the member count and describes each member in one primary state', async () => {
     const { request } = fakeRequest({ roster: dashboard([member(), member({ gouziId: 'g2', name: 'Pixel', state: 'working', activity: 'working' })]) })
     render(<GouziManager request={request} folders={fakeFolders().folders} />)

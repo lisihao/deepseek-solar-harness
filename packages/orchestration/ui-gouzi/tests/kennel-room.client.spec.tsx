@@ -490,6 +490,12 @@ describe('room source and transport', () => {
     const invalid = { ...room(), tasks: [{ runId: 'r', title: 'task', state: 'done', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [{ nodeId: 'n', title: 'node', state: 'done', attempt: 1, capabilityGeneration: 1, evidenceRefs: [], operatorId: 'actual', result: { sequence: 1, time: '2026-10-06T00:00:00.000Z', evidenceRef: 'ref', outputPreview: 'wrong', accepted: true, operatorId: 'other' } }] }] }
     await expect(loadKennelRoom(vi.fn(async () => Response.json(invalid)) as never, 's')).rejects.toThrow('Invalid kennel room reply')
   })
+  it('accepts retired member names from the Host only when each has an id and a name', async () => {
+    const load = (retired: unknown) => loadKennelRoom(vi.fn(async () => Response.json({ ...room(), dashboard: { ...room().dashboard, ...retired === undefined ? {} : { retired } } })), 's')
+    expect((await load([{ gouziId: 'gone', name: '旧狗' }])).dashboard.retired).toEqual([{ gouziId: 'gone', name: '旧狗' }])
+    expect((await load(undefined)).dashboard.retired).toBeUndefined()
+    for (const bad of ['旧狗', [{ gouziId: 'gone' }], [{ gouziId: '', name: '旧狗' }], [null]]) await expect(load(bad)).rejects.toThrow('Invalid kennel room reply')
+  })
   it('shows the outcomes of collaborations about a task on that task, and accepts them from the Host only when well-formed', async () => {
     const task = (outcomes: unknown) => ({
       runId: 'r', title: '被评审任务', state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now', nodes: [], ...outcomes === undefined ? {} : { outcomes },
@@ -579,5 +585,50 @@ describe('room source and transport', () => {
     expect(evidenceUrl.searchParams.get('evidence_ref')).toBe('evidence/x')
     request.mockImplementation(async () => Response.json({ message: 'forbidden evidence' }, { status: 403 }))
     await expect(readKennelEvidence(request, 's', 'r', 'e')).rejects.toThrow('forbidden evidence')
+  })
+})
+
+/** Rule: kennel text names members and says what happened; it never prints an internal id or a bare status. */
+describe('kennel room labels', () => {
+  const RETIRED = 'gouzi-0b09750d-92d6-4616-8022-cbf5a2746a5e'
+  const UNKNOWN = 'gouzi-9b542789-6abf-4b6c-96a3-8b0e5b8dda69'
+  const INTERNAL_ID = /gouzi-[0-9a-f]{8}-|orch:|run-[0-9a-f]{8}/
+  /** Real operator ids embed the member id (`gouzi.<id>.codex`), so the gate catches a path that prints one. */
+  const sealed = (gouziId: string, outputPreview: string, accepted: boolean) => ({ sequence: 1, time: '2026-10-06T00:00:00.000Z', evidenceRef: 'ref', outputPreview, accepted, operatorId: `gouzi.${gouziId}.codex` })
+  const taskOf = (runId: string, title: string, gouziId: string, result: ReturnType<typeof sealed>) => ({
+    runId, title, state: 'completed', revision: 1, createdAt: 'now', updatedAt: 'now',
+    nodes: [{ nodeId: 'n', title, state: 'passed', attempt: 1, capabilityGeneration: 1, gouziId, evidenceRefs: ['ref'], operatorId: result.operatorId, result }],
+  })
+  const said = (seq: number, text: string, gouziId: string) => ({ kind: 'user' as const, seq, time: seq, content: [{ type: 'text' as const, text: encodeKennelMessage(text, { gouziId, generation: 1, mode: 'standard' }) }], source: null })
+  function mixed() {
+    const h = harness()
+    patchRoom(h, current => ({
+      ...current,
+      dashboard: { ...current.dashboard, retired: [{ gouziId: RETIRED, name: '小研' }] },
+      tasks: [taskOf('run-aaaaaaaa', '旧任务', RETIRED, sealed(RETIRED, '旧结论', true)), taskOf('run-bbbbbbbb', '新任务', UNKNOWN, sealed(UNKNOWN, '', false))] as never,
+    }))
+    h.session.update((d) => { d.nodes = [said(1, '发给退役成员', RETIRED), said(2, '发给查无此人', UNKNOWN)] })
+    return h
+  }
+  it('names a retired member, says so for a member it cannot name, and prints no internal id', () => {
+    const { container } = all(mixed())
+    for (const button of screen.getAllByRole('button', { name: '展开执行记录' })) fireEvent.click(button)
+    expect(screen.getAllByText(/^执行者：/)).toHaveLength(2)
+    expect(container.textContent).not.toMatch(INTERNAL_ID)
+    expect(screen.getAllByText(/小研（已退役）/).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText(/已不在名单中的狗子/).length).toBeGreaterThanOrEqual(2)
+  })
+  it('explains a result that carries no text instead of showing only a status word', () => {
+    const { container } = all(mixed())
+    const cards = [...container.querySelectorAll('article')].filter(card => card.textContent?.includes('任务结果'))
+    expect(cards).toHaveLength(2)
+    expect(cards.find(card => card.textContent?.includes('已不在名单中的狗子'))?.textContent ?? '').toContain('这次执行失败，没有产出文字')
+    expect(cards.find(card => card.textContent?.includes('旧结论'))?.textContent ?? '').toContain('小研（已退役）')
+  })
+  it('says an accepted result without text wrote nothing', () => {
+    const h = harness()
+    patchRoom(h, current => ({ ...current, tasks: [taskOf('r', '任务', 'g1', sealed('g1', '', true))] as never }))
+    const { container } = all(h)
+    expect(container.textContent).toContain('这次执行没有文字输出')
   })
 })

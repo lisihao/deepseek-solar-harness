@@ -288,6 +288,7 @@ async function projectHosts(ctx: Context): Promise<readonly GouziHostProjection[
 async function dashboard(ctx: Context, control: GouziControl, authority: RemoteRequestAuthority): Promise<GouziDashboardV1> {
   const { members, hosts } = await control.list()
   const labels = new Map(hosts.map(value => [String(value.hostId), value.label]))
+  const retired = members.filter(member => member.membership === 'archived').map(member => ({ gouziId: String(member.gouziId), name: member.name }))
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
@@ -300,6 +301,7 @@ async function dashboard(ctx: Context, control: GouziControl, authority: RemoteR
     members: members
       .filter(member => member.membership !== 'archived')
       .map(member => project(member, labels.get(String(member.hostId)) ?? String(member.hostId))),
+    ...retired.length === 0 ? {} : { retired },
   }
 }
 

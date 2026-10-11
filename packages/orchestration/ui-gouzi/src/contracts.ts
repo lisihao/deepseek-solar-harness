@@ -158,6 +158,8 @@ export interface GouziDashboardV1 {
   /** The local machine first, then every SSH host the user added. */
   readonly hosts: readonly GouziHostProjection[]
   readonly members: readonly GouziMemberProjection[]
+  /** Retired members, kept only so earlier messages and results can still name them; absent when there are none. */
+  readonly retired?: readonly { readonly gouziId: string; readonly name: string }[]
 }
 
 /** State-changing requests; every one targets this main instance's own members. */

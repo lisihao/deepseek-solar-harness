@@ -29,12 +29,21 @@ export type KennelRoomProps = PropsRuntime<'conversation.room.content'> & RoomBu
 /** Composer props include the core owner's inert and model-block state. */
 export type KennelRoomComposerProps = PropsRuntime<'conversation.room.composer'> & RoomBusinessProps
 
+/** A member the roster no longer lists: named when it was retired, otherwise described, never shown as its id. */
+function absentMember(room: GouziRoomSnapshotV1 | null | undefined, id: string): string {
+  const retired = room?.dashboard.retired?.find(m => m.gouziId === id)
+  return retired ? `${retired.name}（已退役）` : '已不在名单中的狗子'
+}
 function memberLabel(room: GouziRoomSnapshotV1 | null | undefined, id: string): string {
   const member = room?.dashboard.members.find(m => m.gouziId === id)
-  return member ? `${member.name} · ${member.hostLabel} · ${GOUZI_ROLE_COPY[member.role].label}` : id
+  return member ? `${member.name} · ${member.hostLabel} · ${GOUZI_ROLE_COPY[member.role].label}` : absentMember(room, id)
 }
 function memberName(room: GouziRoomSnapshotV1 | null | undefined, id: string): string {
-  return room?.dashboard.members.find(m => m.gouziId === id)?.name ?? id
+  return room?.dashboard.members.find(m => m.gouziId === id)?.name ?? absentMember(room, id)
+}
+/** What a sealed result says when it carries no text, so its card never shows only a status word. */
+function emptyResult(accepted: boolean): string {
+  return accepted ? '这次执行没有文字输出。' : '这次执行失败，没有产出文字。'
 }
 function recipientBlock(state: KennelRoomReadState | undefined, recipient: KennelRecipient | null): string | null {
   if (!recipient) return null
@@ -184,7 +193,7 @@ export function KennelRoomAside({ useRoom, useStore, actions }: KennelRoomAsideP
             {node.result ? <p>执行结束 · {node.result.accepted ? '结果已接纳' : '结果未接纳'}</p> : <p>{noResult(node.state)}</p>}
             <Button size="sm" onClick={() => { actions.evidence(key) }}>{expanded[key] ? '收起执行记录' : '展开执行记录'}</Button>
             {expanded[key] && <div className={css.muted}><p>尝试 {node.attempt} · generation {node.capabilityGeneration}</p>
-              <p>执行者：{node.operatorId ?? '尚未封存执行者'}</p><p>证据：{node.evidenceRefs.length ? node.evidenceRefs.join('，') : '暂无'}</p>
+              <p>执行者：{node.gouziId ? memberLabel(room, node.gouziId) : '尚未封存执行者'}</p><p>证据：{node.evidenceRefs.length ? node.evidenceRefs.join('，') : '暂无'}</p>
             </div>}
           </div>
         })}
@@ -298,12 +307,12 @@ export function KennelRoomContent({ useRoom, useSession, useStore, actions, read
           let decoded: ReturnType<typeof decodeKennelMessage> = { text }
           let invalid = false
           if (user) { try { decoded = decodeKennelMessage(text) } catch { decoded = { text: '指定对象记录格式无效，请核对原记录。' }; invalid = true } }
-          return <article className={css.message} data-room-anchor={`${node.kind}:${node.seq}`} key={`${node.kind}:${node.seq}`}><strong>{user ? '我' : node.kind === 'assistant' ? '总管' : '执行记录'}</strong>{decoded.recipient && <p className={css.muted}>发给 {memberName(room, decoded.recipient.gouziId)}</p>}{text || invalid ? <MarkdownText text={decoded.text} /> : <p>{node.kind === 'assistant' ? '总管正在执行工具或生成非文本内容。' : `${node.kind} · 序号 ${node.seq}`}</p>}</article>
+          return <article className={css.message} data-room-anchor={`${node.kind}:${node.seq}`} key={`${node.kind}:${node.seq}`}><strong>{user ? '我' : node.kind === 'assistant' ? '总管' : '执行记录'}</strong>{decoded.recipient && <p className={css.muted}>发给 {memberName(room, decoded.recipient.gouziId)}</p>}{text || invalid ? <MarkdownText text={decoded.text} /> : <p>{node.kind === 'assistant' ? '总管正在执行工具或生成非文本内容。' : '这条记录没有可显示的文字。'}</p>}</article>
         }
         const { task, node, result, key } = row.entry
-        const who = node.gouziId ? memberLabel(room, node.gouziId) : result?.operatorId || '执行'
+        const who = node.gouziId ? memberLabel(room, node.gouziId) : '执行成员'
         if (!result) return <article className={css.progress} data-node-state={node.state} role="status" key={key}><strong>{who} · {taskState(node.state)}</strong>{WORKING_STATES.has(node.state) && <span className={css.dots} aria-hidden="true" />}</article>
-        return <article className={css.result} key={key}><strong>{who} · 任务结果</strong>{task.title !== node.title && <p className={css.muted}>{task.title} / {node.title}</p>}<p className={css.muted}>{result.accepted ? '结果已接纳' : '结果未接纳'}</p><MarkdownText text={result.outputPreview} /><Button size="sm" onClick={() => { void toggleEvidence(key, task.runId, result.evidenceRef) }}>{expanded[key] ? '收起证据' : '查看证据'}</Button>{expanded[key] && <div><p className={css.muted}>尝试 {node.attempt} · generation {node.capabilityGeneration}</p>{evidence[key]?.loading && <p>正在读取证据…</p>}{evidence[key]?.error && <p className={css.error} role="alert">{evidence[key].error}</p>}{evidence[key]?.text !== undefined && <pre className={css.evidence}>{evidence[key].text}</pre>}</div>}</article>
+        return <article className={css.result} key={key}><strong>{who} · 任务结果</strong>{task.title !== node.title && <p className={css.muted}>{task.title} / {node.title}</p>}<p className={css.muted}>{result.accepted ? '结果已接纳' : '结果未接纳'}</p>{result.outputPreview.trim() === '' ? <p>{emptyResult(result.accepted)}</p> : <MarkdownText text={result.outputPreview} />}<Button size="sm" onClick={() => { void toggleEvidence(key, task.runId, result.evidenceRef) }}>{expanded[key] ? '收起证据' : '查看证据'}</Button>{expanded[key] && <div><p className={css.muted}>尝试 {node.attempt} · generation {node.capabilityGeneration}</p>{evidence[key]?.loading && <p>正在读取证据…</p>}{evidence[key]?.error && <p className={css.error} role="alert">{evidence[key].error}</p>}{evidence[key]?.text !== undefined && <pre className={css.evidence}>{evidence[key].text}</pre>}</div>}</article>
       })}
 
       {queued.map(({ item, decoded }) => <article className={css.message} key={`queue:${item.messageId}`}>

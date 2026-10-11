@@ -49,6 +49,8 @@ function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapsho
     && typeof member.state === 'string' && Object.hasOwn(GOUZI_STATE_COPY, member.state)
     && ['provisioning', 'enabled', 'retiring', 'archived'].includes(String(member.membership))
     && ['online', 'unreachable'].includes(String(member.connection)))
+  const retired = value.dashboard.retired === undefined || Array.isArray(value.dashboard.retired)
+    && value.dashboard.retired.every((member: unknown) => record(member) && id(member.gouziId) && typeof member.name === 'string')
   const execution = value.execution.every((entry: unknown) => record(entry) && id(entry.gouziId)
     && integer(entry.generation) && entry.generation > 0 && strings(entry.projectScopes)
     && entry.projectScopes.every(id) && Array.isArray(entry.operators)
@@ -70,7 +72,7 @@ function validRoom(value: unknown, sessionId: string): value is GouziRoomSnapsho
         && typeof node.result.outputPreview === 'string' && typeof node.result.accepted === 'boolean'
         && id(node.result.operatorId) && node.result.operatorId === node.operatorId
   }))
-  return members && execution && tasks && validCollaborations(value.collaborations)
+  return members && retired && execution && tasks && validCollaborations(value.collaborations)
 }
 /**
  * Read the exact session room, rejecting invalid wire fields before they can authorize a send.

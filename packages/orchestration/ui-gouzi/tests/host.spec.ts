@@ -163,6 +163,7 @@ interface Body {
   message?: string
   gouziId: string
   members: Array<{ state: string; name: string; avatarId: string; role: string }>
+  retired?: Array<{ gouziId: string; name: string }>
 }
 interface Reply { status: number; body: Body }
 
@@ -699,8 +700,10 @@ describe('Gouzi Host route', () => {
       'archive:{"credentialsRevoked":true,"workSettled":true,"processTreeStopped":true}',
     ])
     expect(control.members[0]!.membership).toBe('archived')
-    // An archived member is gone from the roster and cannot be retired again.
-    expect((await send('GET')).body.members).toEqual([])
+    // An archived member is gone from the roster and cannot be retired again, but its name stays so earlier messages can still name it.
+    const roster = (await send('GET')).body
+    expect(roster.members).toEqual([])
+    expect(roster.retired).toEqual([{ gouziId: id, name: 'Mochi' }])
     expect(await send('POST', { action: 'retire', gouziId: id }, CONTROL)).toMatchObject({ status: 409 })
     expect(await send('POST', { action: 'wake', gouziId: id }, CONTROL)).toMatchObject({ status: 409 })
   })
