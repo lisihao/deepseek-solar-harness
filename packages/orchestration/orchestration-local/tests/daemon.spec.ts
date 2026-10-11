@@ -798,6 +798,70 @@ describe('orchestration daemon', () => {
     expect(new Set(calls)).toEqual(new Set(['operator.providers']))
   })
 
+  it('reports a registered Gouzi member unreachable after repeated missed probes, and online again when it answers', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-probe-'))
+    const root = join(home, 'orchestrations')
+    const registry = new OrchestrationStore(root)
+    registry.gouzi.pairHost({ hostId: GouziHostId('host-1'), label: 'Host', authorityEpoch: GouziAuthorityEpoch('epoch-1'), credentialRef: 'HOST_TOKEN' })
+    registry.gouzi.create({ gouziId: GouziId('dog'), ownerId: GouziOwnerId('owner'), hostId: GouziHostId('host-1'), name: 'dog', avatarId: 'shiba', role: 'development', grantDeadlineMs: 60_000 })
+    registry.gouzi.setMembership(GouziId('dog'), 'enabled')
+    registry.gouzi.setEndpoint(GouziId('dog'), 'http://127.0.0.1:13301')
+    const scopes = [home, await realpath(home)]
+    let answering = true
+    let probes = 0
+    vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON body')
+      const call = JSON.parse(init.body) as { rpcId: string }
+      probes += 1
+      if (!answering) throw new TypeError('fetch failed')
+      const value = [{
+        operatorId: 'codex', product: 'codex', displayName: 'Native', description: 'Native', tags: ['coding'], maxConcurrency: 1,
+        gouziWorkspace: { gouziId: 'dog', generation: 1, projectId: 'a'.repeat(64), projectScopes: scopes },
+        injectionBoundaries: [], available: true, authentication: 'native-subscription', productVersion: 'test',
+        protocolHash: 'test', models: [],
+      }]
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }))
+    const daemon = createDaemon(root, home, new FakeResidentClient(), 20)
+    await daemon.start()
+    const realNow = Date.now.bind(Date)
+    let skew = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow() + skew)
+    cleanup.push(async () => {
+      vi.restoreAllMocks()
+      registry.close()
+      await daemon.close()
+      await rm(home, { recursive: true, force: true })
+    })
+    const connection = () => registry.gouzi.read(GouziId('dog'))?.connection
+    /** Let the registered member's refresh deadline pass and wait for the probe it triggers. */
+    const probeOnce = async () => {
+      const before = probes
+      skew += 6_000
+      while (probes === before) await new Promise(resolve => setTimeout(resolve, 10))
+      await new Promise(resolve => setTimeout(resolve, 30))
+    }
+    expect(connection()).toBe('online')
+
+    // One missed probe is not a loss, and an answer clears the count.
+    answering = false
+    await probeOnce()
+    expect(connection()).toBe('online')
+    answering = true
+    await probeOnce()
+    answering = false
+    await probeOnce()
+    expect(connection()).toBe('online')
+
+    // A run of misses reports the member unreachable, which is what lets the panel offer to wake it.
+    await probeOnce()
+    expect(connection()).toBe('unreachable')
+
+    answering = true
+    await probeOnce()
+    expect(connection()).toBe('online')
+  })
+
   it('binds a graph to a set of Gouzi recipients and refuses a set that no longer holds', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-gouzi-recipients-'))
     const root = join(home, 'orchestrations')
