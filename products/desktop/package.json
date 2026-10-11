@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "3.40.3",
+  "version": "3.40.4",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -132,7 +132,7 @@
     "@deepseek-ai/dsh-session-stats": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session-telemetry": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session-telemetry-otel": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-session-title": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-title": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-session-title-first-prompt-llm": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session-title-llm": "0.1.0-rc.6",
     "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
