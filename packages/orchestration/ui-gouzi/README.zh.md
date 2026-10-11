@@ -30,7 +30,7 @@
 
 确认领养后，系统再次只读检查全部选中目录并检查十只成员的容量，然后按顺序为每个不同的已解析 source 调用 `prepareRepository`。只有选中目录位于 Git 仓库之外时才初始化 Git；准备过程不暂存文件、不提交，也不修改 origin。`GouziProjectSource` 包含不透明的 SHA-256 `projectId`、用户确切选中目录的真实路径 `source`，以及可选的规范 origin 信息 `repository`。确认页明确显示第一个选中项目为默认项目，并将其持久化为 `defaultProjectId`。准备失败不会创建成员或配对宿主，也不占用名额；错误会列出已经完成准备的目录，并保留其中的元数据。准备完成后，系统只配对一次所选宿主，以 `provisioning` 创建成员，配置项目映射、启动进程、记录端点，再启用成员。启动失败仍以 `provisioning` 占着名额，并报告 `GOUZI_START_FAILED`；唤醒会重试启动。领养逐个进行。退役在归档前停止成员及其 Resident 进程树；正在工作的成员不能休息或退役。[目录领养决策](../../../.agents/notes/implemented/feature/2026-10-06-gouzi-directory-adoption.md)记录执行与恢复语义。
 
-添加机器分两个请求，让用户在任何登录发生之前先决定是否信任。`host-inspect` 不登录，只读取这台机器出示的密钥并返回指纹。`host-add` 带上用户确认过的指纹和登录密码；Provider 发现密钥在两次请求之间变了就拒绝，只登录一次、安装一把专用密钥，并检查对方装有带狗子 agent 的 DSH Desktop。密码只出现在这一个同源请求体里，不保存、不记日志，也不出现在任何响应中。宿主上还有存活成员时 `host-remove` 会被拒绝，`browse` 列出宿主上的一层文件夹。凡是指明宿主的请求，都需要与领养相同的管理权限。
+添加机器分两个请求，让用户在任何登录发生之前先决定是否信任。`host-inspect` 不登录，只读取这台机器出示的密钥并返回指纹。`host-add` 带上用户确认过的指纹和登录密码；Provider 发现密钥在两次请求之间变了就拒绝，只登录一次、安装一把专用密钥，并检查对方装有带狗子 agent 的 DSH Desktop。密码只出现在这一个同源请求体里，不保存、不记日志，也不出现在任何响应中。默认直连；`host-inspect`、`host-add` 或 `host-route` 带上 `route: { via: "tailscale", socket? }` 时，连接经 Tailscale 命令行中继，所以主机在任何网络下都能用。请求只提供可选的绝对路径 `socket`，不能指定命令行程序或任何命令，命令行程序由 Provider 自己查找。`host-route` 用来修改已有主机的连接方式，只有对方出示的主机密钥与已登记的一致时才会接受。宿主上还有存活成员时 `host-remove` 会被拒绝，`browse` 列出宿主上的一层文件夹。凡是指明宿主的请求，都需要与领养相同的管理权限。
 
 `GouziHostService` 是管理宿主、并在宿主上启动和停止成员进程的 Service Definition。本包是它的 Consumer，Desktop 产品提供它。没有该服务的 Server 仍能列出成员，但会报告 `hostAvailable: false`，并以 `GOUZI_HOST_UNAVAILABLE` 拒绝领养、唤醒、休息和退役。
 

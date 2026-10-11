@@ -36,6 +36,7 @@ import {
   type GouziMemberProjection,
   type GouziModelOptions,
   type GouziProjectsCheck,
+  type GouziSshRoute,
 } from './contracts.ts'
 import { sessionCollaborations } from './history.ts'
 import { gouziRoom, gouziRoomEvidence } from './room.ts'
@@ -103,6 +104,8 @@ export const Config: z<Config> = z.object({
 const LOCAL_HOST_LABEL = '这台 Mac'
 const HOST_ADDRESS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
 const HOST_USER_PATTERN = /^[A-Za-z_][A-Za-z0-9_.-]*$/u
+const ROUTE_SOCKET_LIMIT = 512
+const ROUTE_SOCKET_PATTERN = /^[A-Za-z0-9._/+@~=-]+$/u
 const FINGERPRINT_PATTERN = /^SHA256:[A-Za-z0-9+/]+={0,2}$/u
 const PASSWORD_LIMIT = 256
 const MAX_BODY_BYTES = 16 * 1024
@@ -169,14 +172,31 @@ function role(value: string): (typeof GOUZI_ROLE_IDS)[number] {
   return value as (typeof GOUZI_ROLE_IDS)[number]
 }
 
-function sshTarget(body: Record<string, unknown>): { address: string; port: number; user: string } {
+function hostAddress(body: Record<string, unknown>): { address: string; port: number } {
   const address = text(body, 'address').trim()
   if (!HOST_ADDRESS_PATTERN.test(address) || address.length > 253) throw new GouziInputError('address must be a host name or IP address')
-  const user = text(body, 'user').trim()
-  if (!HOST_USER_PATTERN.test(user) || user.length > 64) throw new GouziInputError('user must be a login name')
   const port = body.port
   if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65_535) throw new GouziInputError('port must be 1 to 65535')
-  return { address, port, user }
+  return { address, port }
+}
+
+/** The optional route of a host. The socket is quoted into a shell command and expanded by ssh, so only plain path characters pass. */
+function sshRoute(body: Record<string, unknown>): { route?: GouziSshRoute } {
+  const route = body.route
+  if (route === undefined || route === null) return {}
+  if (typeof route !== 'object' || Array.isArray(route) || (route as Record<string, unknown>).via !== 'tailscale') throw new GouziInputError('route must be {"via":"tailscale"}')
+  const socket = (route as Record<string, unknown>).socket
+  if (socket === undefined || socket === '') return { route: { via: 'tailscale' } }
+  if (typeof socket !== 'string' || socket.length > ROUTE_SOCKET_LIMIT || !isAbsolute(socket) || !ROUTE_SOCKET_PATTERN.test(socket)) {
+    throw new GouziInputError('route socket must be an absolute path without spaces, quotes, or %')
+  }
+  return { route: { via: 'tailscale', socket } }
+}
+
+function sshTarget(body: Record<string, unknown>): { address: string; port: number; user: string; route?: GouziSshRoute } {
+  const user = text(body, 'user').trim()
+  if (!HOST_USER_PATTERN.test(user) || user.length > 64) throw new GouziInputError('user must be a login name')
+  return { ...hostAddress(body), user, ...sshRoute(body) }
 }
 
 /**
@@ -219,6 +239,7 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
         ...label === undefined || label.length === 0 ? {} : { label: label.slice(0, NAME_LIMIT) },
       }
     }
+    case 'host-route': return { action, hostId: text(body, 'hostId'), ...hostAddress(body), ...sshRoute(body) }
     case 'host-remove': return { action, hostId: text(body, 'hostId') }
     case 'browse': {
       const path = optionalText(body, 'path')
@@ -489,12 +510,23 @@ type ExecuteResult =
 
 async function execute(ctx: Context, control: GouziControl, request: GouziControlRequest, grantDeadlineMs: number): Promise<ExecuteResult> {
   switch (request.action) {
-    case 'host-inspect': return requireHost(ctx).inspectHost({ address: request.address, port: request.port, user: request.user })
+    case 'host-inspect':
+      return requireHost(ctx).inspectHost({
+        address: request.address, port: request.port, user: request.user, ...request.route === undefined ? {} : { route: request.route },
+      })
+    case 'host-route':
+      return requireHost(ctx).rerouteHost({
+        hostId: request.hostId,
+        address: request.address,
+        port: request.port,
+        ...request.route === undefined ? {} : { route: request.route },
+      })
     case 'host-add':
       return requireHost(ctx).addHost({
         address: request.address,
         port: request.port,
         user: request.user,
+        ...request.route === undefined ? {} : { route: request.route },
         password: request.password,
         fingerprint: request.fingerprint,
         ...request.label === undefined ? {} : { label: request.label },
