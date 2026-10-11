@@ -813,10 +813,15 @@ describe('orchestration daemon', () => {
     let hold: Promise<void> | undefined
     vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {
       if (typeof init?.body !== 'string') throw new Error('expected JSON body')
-      const call = JSON.parse(init.body) as { rpcId: string }
-      probes += 1
-      await hold
-      if (!answering) throw new TypeError('fetch failed')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      if (call.method === 'gouzi.hello') {
+        // The liveness probe: a cheap question, not the Provider listing that registration makes.
+        probes += 1
+        await hold
+        if (!answering) throw new TypeError('fetch failed')
+        return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value: { gouziId: 'dog', generation: 1 } } })
+      }
+      if (call.method !== 'operator.providers') throw new Error(`unexpected call ${call.method}`)
       const value = [{
         operatorId: 'codex', product: 'codex', displayName: 'Native', description: 'Native', tags: ['coding'], maxConcurrency: 1,
         gouziWorkspace: { gouziId: 'dog', generation: 1, projectId: 'a'.repeat(64), projectScopes: scopes },
