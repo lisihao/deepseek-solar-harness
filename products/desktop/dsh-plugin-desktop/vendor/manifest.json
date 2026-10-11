@@ -290,6 +290,11 @@
       "name": "Web app base-row comment no longer names the retired TUI",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "c126ab40ea09e176cb688ed72f5612ed64565e3c"
+    },
+    {
+      "name": "Gouzi members that stop answering are reported unreachable so the panel can offer to wake them",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "e857771cf5319ba202a9147ddddd66db494cd64e"
     }
   ],
   "sourcePackages": {
@@ -468,7 +473,7 @@
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "2abb1112a13d28db66203cbbaefc2d5c833937e392fa01b3088fe32f96d1b770",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "47cff98eb94dfcbc9273cee79a2d55b76ac782d6eef802e5cc03c145f30bd42b",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "f23461005a365ff5187301c71d2e5690957b91e64ac734444da3765e27adf9dd",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "8f6ec6d2b22f48d3a0626817710c70b71e67d0a5774434c75831a5d26776af77",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "d42439b1fe380642a0e8357a97d0be0a11f246c5f8f4ed67095768bd2f052a3e",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "2ef397368e994f1f5fb22958ff64f110e696e77bcdd2702c3d2f58e13821f36b",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "ff739e592e964c0af34c4b13b9598d61aeba26090e6b41ccabaaee4296a0da2b",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "70c32494b88d6ad6cbc68dfca97cb9644f92bd69c66b3a1ec28a4ee5b8fff11d",
