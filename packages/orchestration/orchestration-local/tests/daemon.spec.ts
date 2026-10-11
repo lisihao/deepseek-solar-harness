@@ -809,10 +809,13 @@ describe('orchestration daemon', () => {
     const scopes = [home, await realpath(home)]
     let answering = true
     let probes = 0
+    /** When set, an answer waits for it, so a test can read the state the previous probe left. */
+    let hold: Promise<void> | undefined
     vi.stubGlobal('fetch', vi.fn(async (_input: unknown, init?: RequestInit) => {
       if (typeof init?.body !== 'string') throw new Error('expected JSON body')
       const call = JSON.parse(init.body) as { rpcId: string }
       probes += 1
+      await hold
       if (!answering) throw new TypeError('fetch failed')
       const value = [{
         operatorId: 'codex', product: 'codex', displayName: 'Native', description: 'Native', tags: ['coding'], maxConcurrency: 1,
@@ -834,32 +837,48 @@ describe('orchestration daemon', () => {
       await rm(home, { recursive: true, force: true })
     })
     const connection = () => registry.gouzi.read(GouziId('dog'))?.connection
-    /** Let the registered member's refresh deadline pass and wait for the probe it triggers. */
+    /**
+     * Let the registered member's refresh deadline pass and wait for the probe it starts. A probe starts only after the
+     * previous refresh has finished, so what the previous probe recorded is settled once this returns.
+     */
     const probeOnce = async () => {
       const before = probes
-      skew += 6_000
-      while (probes === before) await new Promise(resolve => setTimeout(resolve, 10))
-      await new Promise(resolve => setTimeout(resolve, 30))
+      const deadline = realNow() + 3_000
+      // The next deadline is set from the skewed clock when a refresh ends, so the clock keeps moving until a probe starts.
+      while (probes === before) {
+        if (realNow() > deadline) throw new Error('the daemon did not probe the member')
+        skew += 6_000
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
     }
+    const settled = (state: string) => eventually(async () => connection(), value => value === state)
     expect(connection()).toBe('online')
 
-    // One missed probe is not a loss, and an answer clears the count.
+    // One missed probe is not a loss, and an answer clears the count: two misses split by an answer never add up.
+    // The last answer is held back, so the state read is the one the miss before it left.
     answering = false
     await probeOnce()
-    expect(connection()).toBe('online')
     answering = true
     await probeOnce()
     answering = false
     await probeOnce()
+    let release = () => {}
+    hold = new Promise<void>((resolve) => { release = resolve })
+    answering = true
+    await probeOnce()
     expect(connection()).toBe('online')
+    hold = undefined
+    release()
 
     // A run of misses reports the member unreachable, which is what lets the panel offer to wake it.
+    answering = false
     await probeOnce()
-    expect(connection()).toBe('unreachable')
+    await probeOnce()
+    await settled('unreachable')
 
     answering = true
     await probeOnce()
-    expect(connection()).toBe('online')
+    await settled('online')
   })
 
   it('binds a graph to a set of Gouzi recipients and refuses a set that no longer holds', async () => {
