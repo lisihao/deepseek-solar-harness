@@ -113,6 +113,16 @@ export class RemoteSyncHttpClient {
     return clusterInstallReceipt(await this.call('cluster.install', request, signal))
   }
 
+  /**
+   * Ask a Gouzi member's Server who it is. The answer is in memory on the member, so it shows the Server is alive without the
+   * Provider qualification `operator.providers` may do.
+   * @param signal - optional request cancellation signal.
+   * @returns the member's hello, which the caller does not read.
+   */
+  async gouziHello(signal?: AbortSignal): Promise<unknown> {
+    return this.call('gouzi.hello', {}, signal)
+  }
+
   private async call(method: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
     const rpcId = RpcId(randomUUID())
     const body: ClientRequest = { type: 'client-request', rpcId, method, payload }

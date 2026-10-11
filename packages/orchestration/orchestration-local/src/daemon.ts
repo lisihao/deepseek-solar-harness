@@ -2102,12 +2102,12 @@ export class OrchestrationDaemon {
   }
 
   /**
-   * Ask a registered member's Server for its Providers, the call that registration made, and record whether it answered.
+   * Ask a registered member's Server who it is, a cheap call that needs no Provider qualification, and record whether it answered.
    * Its operators stay registered either way: they report their own availability, and a woken member re-registers on its new endpoint.
    */
   private async probeGouziMember(server: RemotePhysicalOperatorServer): Promise<void> {
     try {
-      await new RemoteSyncHttpClient(server.endpoint, server.accessToken).operatorProviders(AbortSignal.timeout(GOUZI_PROBE_TIMEOUT_MS))
+      await new RemoteSyncHttpClient(server.endpoint, server.accessToken).gouziHello(AbortSignal.timeout(GOUZI_PROBE_TIMEOUT_MS))
     } catch {
       // Any transport failure or timeout is a missed probe; only a run of them changes the member's connection.
       const misses = (this.gouziProbeMisses.get(server.id) ?? 0) + 1
