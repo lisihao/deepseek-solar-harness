@@ -434,6 +434,10 @@
       "kind": "migration-debt",
       "note": "fix(session): refresh cold activity metadata"
     },
+    "packages/session/session-title/src/index.ts": {
+      "kind": "seam",
+      "note": "Add registerTextProjection so a plugin that stores an envelope inside a user message can keep it out of titles; kennel messages addressed to a member use it."
+    },
     "packages/subagent/subagent-claude-code/src/index.ts": {
       "kind": "migration-debt",
       "note": "feat: require subscription auth for physical operators"

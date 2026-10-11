@@ -26,6 +26,17 @@ export function encodeKennelMessage(text: string, recipient: KennelRecipient | n
   return PREFIX + JSON.stringify({ version: 1, gouziId: recipient.gouziId, generation: recipient.generation, mode: recipient.mode }) + '\n' + text
 }
 /**
+ * The text a session title is derived from: the body of a kennel message, without its recipient envelope. Text that
+ * is not an envelope, or whose envelope is malformed, is returned unchanged, so a title is never refused over it.
+ * @param text - durable message text.
+ * @returns the body.
+ */
+export function kennelTitleText(text: string): string {
+  try { return decodeKennelMessage(text).text }
+  catch { return text }
+}
+
+/**
  * Decode one leading envelope, preserving ordinary text and the body. A plain-text
  * envelope returns its complete body without interpreting any marker inside it.
  * @param text - durable text.

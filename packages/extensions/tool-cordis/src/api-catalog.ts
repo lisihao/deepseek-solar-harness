@@ -2387,6 +2387,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'provider', description: 'provider identity, cadence, and generation function.' }],
         returns: 'exact Cordis effect disposer, which settles after active calls quiesce.',
       },
+      {
+        signature: 'registerTextProjection(projection: SessionTitleTextProjection): () => Promise<void>',
+        description: 'Register a mapping from a user message\'s durable text to the text titles are derived from. It applies to the built-in fallback, to the eligibility of a message, and to the messages a provider receives.',
+        parameters: [{ name: 'projection', description: 'the mapping; see {@link SessionTitleTextProjection}.' }],
+        returns: 'exact Cordis effect disposer; after it runs, titles are derived from the unmapped text again.',
+      },
     ],
   },
   {
@@ -6618,6 +6624,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionTitleSource',
     declaration: 'export type SessionTitleSource = {\n    readonly kind: \'fallback\';\n} | {\n    readonly kind: \'provider\';\n    readonly provider: SessionTitleProviderId;\n    readonly model?: SessionTitleModelProvenance;\n} | {\n    readonly kind: \'user\';\n};',
+  },
+  {
+    name: 'SessionTitleTextProjection',
+    declaration: 'export type SessionTitleTextProjection = (text: string) => string;',
   },
   {
     name: 'SessionTitleUserMessage',
