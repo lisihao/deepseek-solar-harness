@@ -17,6 +17,7 @@ import {
   type GouziMemberView,
 } from '@deepseek-ai/dsh-orchestration'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-session-title'
 import {
   GOUZI_AVATARS,
   GOUZI_CONTROL_HEADER,
@@ -43,6 +44,7 @@ import type { GouziProjectSource } from './host-service.ts'
 import { installKennelDispatch, type KennelDispatchConfig } from './dispatcher.ts'
 import { KennelCollaborationRegistry } from './collaboration.ts'
 import { GouziRecipientResolver, installKennelRecipientGuard } from './recipient.ts'
+import { kennelTitleText } from './recipient-message.ts'
 
 export * from './contracts.ts'
 export { GouziHostService, type GouziProcessInfo, type GouziProjectSource, type GouziProvisionInput, type GouziSshTarget } from './host-service.ts'
@@ -546,6 +548,11 @@ export function apply(ctx: Context, config: Config = {}): void {
   new KennelCollaborationRegistry(ctx)
   if (resolved.dispatcher) installKennelDispatch(ctx, resolved.dispatcher)
   installKennelRecipientGuard(ctx)
+  // The recipient envelope is part of the durable message text; a title must come from the body. session-title is a
+  // separately versioned package, and one that predates the projection must not make this plugin fail.
+  ctx.inject(['sessionTitle'], (titleCtx) => {
+    if (typeof titleCtx.sessionTitle.registerTextProjection === 'function') titleCtx.sessionTitle.registerTextProjection(kennelTitleText)
+  })
   const grantDeadlineMs = config.grantDeadlineMs ?? 2 * 60 * 60_000
   const roomPollIntervalMs = GOUZI_ROOM_POLL_INTERVAL_SCHEMA(config.roomPollIntervalMs)
   // Adoption changes the member count and starts a process; two requests must not interleave.

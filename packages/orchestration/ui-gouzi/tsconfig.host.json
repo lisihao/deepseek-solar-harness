@@ -40,6 +40,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../session/session-title"
+    },
+    {
       "path": "../../physical-operator/physical-operator"
     },
     {

@@ -119,6 +119,13 @@ export interface SessionTitleUserMessage {
   readonly text: string
 }
 
+/**
+ * Maps the durable text of a user message to the text a title should be derived from. A plugin that stores a
+ * machine-readable envelope inside the message registers one so the envelope never reaches a title. It must not
+ * throw; a projection that does is skipped for that message.
+ */
+export type SessionTitleTextProjection = (text: string) => string
+
 /** Automatic generation cadence owned by a registered provider. */
 export type SessionTitleAutomaticMode = 'first-prompt' | 'all-prompts'
 
@@ -162,21 +169,25 @@ export interface SessionTitleProvider {
  * Collect human text-bearing user messages in log order.
  * @param events - session log or persisted replay.
  * @param throughSeq - optional inclusive event boundary.
+ * @param project - optional mapping from a message's durable text to the text titles are derived from; a message whose
+ * projected text is empty is not eligible.
  * @returns eligible messages with exact source seqs.
  */
 export function collectSessionTitleMessages(
   events: readonly SessionEvent[],
   throughSeq?: number,
+  project?: SessionTitleTextProjection,
 ): SessionTitleUserMessage[] {
   const messages: SessionTitleUserMessage[] = []
   for (const event of events) {
     if (throughSeq !== undefined && event.seq > throughSeq) break
     if (event.type !== 'user/message' || event.data.source.kind !== 'user') continue
     const content = event.data.content
-    const text = content
+    const raw = content
       .filter((block): block is Extract<(typeof content)[number], { type: 'text' }> => block.type === 'text')
       .map(block => block.text)
       .join('\n')
+    const text = project === undefined ? raw : project(raw)
     if (normalizeSessionTitle(text, Number.MAX_SAFE_INTEGER).length === 0) continue
     messages.push({ seq: event.seq, text })
   }
@@ -269,6 +280,7 @@ export class SessionTitleService extends Service {
   private readonly config: ResolvedConfig
   private readonly ownerFiber: Fiber
   private registration: ProviderRegistration | undefined
+  private readonly projections = new Set<SessionTitleTextProjection>()
   private readonly work = new Map<Session, SessionTitleWorkState>()
   private readonly lifetime = new AbortController()
   private readonly inFlight = new Set<Promise<unknown>>()
@@ -396,7 +408,7 @@ export class SessionTitleService extends Service {
       throw new Error(`session "${session.id}" is not live in this store`)
     }
     const registration = this.registration
-    const messages = collectSessionTitleMessages(session.events)
+    const messages = this.collect(session.events)
     const latest = messages.at(-1)
     if (registration === undefined || registration.closing || latest === undefined) {
       // Explicit refresh is the unpin even without a provider: a standing
@@ -458,15 +470,45 @@ export class SessionTitleService extends Service {
     return dispose
   }
 
+  /**
+   * Register a mapping from a user message's durable text to the text titles are derived from. It applies to the
+   * built-in fallback, to the eligibility of a message, and to the messages a provider receives.
+   * @param projection - the mapping; see {@link SessionTitleTextProjection}.
+   * @returns exact Cordis effect disposer; after it runs, titles are derived from the unmapped text again.
+   */
+  registerTextProjection(projection: SessionTitleTextProjection): () => Promise<void> {
+    return this.ctx.effect(() => {
+      this.projections.add(projection)
+      return () => { this.projections.delete(projection) }
+    }, 'sessionTitle.registerTextProjection()')
+  }
+
+  /** Eligible messages with every registered projection applied. */
+  private collect(events: readonly SessionEvent[], throughSeq?: number): SessionTitleUserMessage[] {
+    return collectSessionTitleMessages(events, throughSeq, text => this.project(text))
+  }
+
+  private project(text: string): string {
+    let current = text
+    for (const projection of this.projections) {
+      try {
+        current = projection(current)
+      } catch {
+        // A throwing projection must not stop a title; the text stays as the previous projection left it.
+      }
+    }
+    return current
+  }
+
   /** Schedule fallback creation and any provider cadence for one eligible event. */
   private onUserMessage(session: Session, event: Extract<SessionEvent, { type: 'user/message' }>): void {
     if (!this.serviceActive()) return
-    if (event.data.source.kind !== 'user' || collectSessionTitleMessages([event]).length === 0) return
+    if (event.data.source.kind !== 'user' || this.collect([event]).length === 0) return
     // A user rename pins the title: no automatic revision may override it.
     if (this.get(session)?.source.kind === 'user') return
     const registration = this.registration
     if (registration !== undefined && !registration.closing) {
-      const messages = collectSessionTitleMessages(session.events, event.seq)
+      const messages = this.collect(session.events, event.seq)
       const shouldSchedule = registration.provider.automatic === 'all-prompts'
         || (session.header.parentSession === undefined && messages.length === 1 && this.get(session) === undefined)
       if (shouldSchedule) {
@@ -557,7 +599,7 @@ export class SessionTitleService extends Service {
       this.assertCurrent(session, work)
       await this.ensureFallback(session)
       this.assertCurrent(session, work)
-      const messages = collectSessionTitleMessages(session.events, work.throughSeq)
+      const messages = this.collect(session.events, work.throughSeq)
       const result = await work.registration.provider.generate({
         session,
         messages,
@@ -755,8 +797,19 @@ export class SessionTitleService extends Service {
   private async ensureFallback(session: Session): Promise<SessionTitleSnapshot | undefined> {
     this.assertServiceActive()
     const current = this.get(session)
-    if (current !== undefined) return current
-    const [first] = collectSessionTitleMessages(session.events)
+    const [first] = this.collect(session.events)
+    if (current !== undefined) {
+      // A built-in title that is exactly what the unprojected text gave, while the projected text gives another, was
+      // made before the projection existed; a new fallback event replaces it.
+      const [raw] = collectSessionTitleMessages(session.events)
+      if (current.source.kind === 'fallback' && raw !== undefined && first !== undefined
+        && current.title === fallbackSessionTitle(raw.text, this.config.fallbackMaxWords, this.config.fallbackMaxBytes)) {
+        const title = fallbackSessionTitle(first.text, this.config.fallbackMaxWords, this.config.fallbackMaxBytes)
+        if (title.length > 0 && title !== current.title) this.appendFallback(session, first)
+        return this.get(session)
+      }
+      return current
+    }
     if (first === undefined) return undefined
     const title = fallbackSessionTitle(
       first.text,
