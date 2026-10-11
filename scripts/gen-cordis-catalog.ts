@@ -715,6 +715,7 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   GouziSshTarget: 'SSH machine address is owned by packages/orchestration/ui-gouzi/src/host-service.ts',
   GouziHostProjection: 'host projection is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
   GouziHostInspection: 'host key inspection is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
+  GouziSshRoute: 'the route of an SSH host is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
   GouziFolderListing: 'folder listing is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
   GouziProcessInfo: 'member process facts are owned by packages/orchestration/ui-gouzi/src/host-service.ts',
   KennelCollaborationKind: 'collaboration kind contract is owned by packages/orchestration/orchestration/src/kennel-collaboration.ts and documented in packages/orchestration/ui-gouzi/README.md',
