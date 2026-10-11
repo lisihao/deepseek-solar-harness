@@ -138,6 +138,7 @@ import {
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
 import {
@@ -696,6 +697,10 @@ function browserBindingArtifact(value: unknown): BrowserBindingArtifactV1 {
   }
 }
 
+/** Longest wait for a registered Gouzi member to answer a liveness probe. */
+const GOUZI_PROBE_TIMEOUT_MS = 2_000
+/** Consecutive missed probes after which a member is reported unreachable; one slow answer is not a loss. */
+const GOUZI_PROBE_MISSES_BEFORE_UNREACHABLE = 2
 const MAX_UPSTREAM_CONTEXT_PREVIEW = 4_000
 const MAX_OPERATOR_OBSERVATION_PREVIEW = 1_600
 const MAX_OPERATOR_OBSERVATION_NAME = 160
@@ -1238,6 +1243,8 @@ export class OrchestrationDaemon {
     readonly dispose: readonly (() => Promise<void>)[]
   }>()
   private remoteOperatorRefreshAt = 0
+  /** Consecutive missed liveness probes of each registered Gouzi member, by Server id. */
+  private readonly gouziProbeMisses = new Map<string, number>()
   /** Operator id of each attempt's sealed plan; an attempt's plan never changes, so it is read once. */
   private readonly attemptOperators = new Map<string, string>()
   private clusterActionAt = 0
@@ -1988,7 +1995,14 @@ export class OrchestrationDaemon {
       if (desired.has(serverId)) continue
       await Promise.allSettled(registration.dispose.map(dispose => dispose()))
       this.remoteOperatorRegistrations.delete(serverId)
+      this.gouziProbeMisses.delete(serverId)
     }
+    // A registered member is not registered again while its Server description is unchanged, so its liveness is read here.
+    await Promise.all(registrations.flatMap(({ server, member }) => {
+      const existing = this.remoteOperatorRegistrations.get(server.id)
+      return member !== undefined && existing?.signature === JSON.stringify([server, member.generation, member.hostId])
+        ? [this.probeGouziMember(server)] : []
+    }))
     for (const { server, member } of registrations) {
       const signature = JSON.stringify([server, member?.generation, member?.hostId])
       const existing = this.remoteOperatorRegistrations.get(server.id)
@@ -2085,6 +2099,24 @@ export class OrchestrationDaemon {
       }
     }
     return servers
+  }
+
+  /**
+   * Ask a registered member's Server for its Providers, the call that registration made, and record whether it answered.
+   * Its operators stay registered either way: they report their own availability, and a woken member re-registers on its new endpoint.
+   */
+  private async probeGouziMember(server: RemotePhysicalOperatorServer): Promise<void> {
+    try {
+      await new RemoteSyncHttpClient(server.endpoint, server.accessToken).operatorProviders(AbortSignal.timeout(GOUZI_PROBE_TIMEOUT_MS))
+    } catch {
+      // Any transport failure or timeout is a missed probe; only a run of them changes the member's connection.
+      const misses = (this.gouziProbeMisses.get(server.id) ?? 0) + 1
+      this.gouziProbeMisses.set(server.id, misses)
+      if (misses >= GOUZI_PROBE_MISSES_BEFORE_UNREACHABLE) this.observeGouzi(server, 'unreachable')
+      return
+    }
+    this.gouziProbeMisses.delete(server.id)
+    this.observeGouzi(server, 'online')
   }
 
   private observeGouzi(server: RemotePhysicalOperatorServer, connection: 'online' | 'unreachable'): void {
