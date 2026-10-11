@@ -20,7 +20,7 @@
 
 不变量伴随插件在追加提交前检查同一 Session 中此前已提交的记录关系：request 必须有真实用户消息，submission 必须在 request 后选中 work 候选，admitted 必须有先前 submission，control 必须匹配所选候选及结果 Run；它拒绝孤立或不匹配的记录，不监听 flush，也不证明持久化。
 
-`GET /api/gouzi` 返回 `GouziDashboardV1`：十只的上限、已占用名额数、当前调用方能否管理、这个 Host 能否启动成员，以及所有未归档的成员。每个成员带有 `membership`、`connection`、`activity`，以及由 `gouziPrimaryState` 归约出的一个 `state`：不在 `enabled` 的成员显示其 membership，联系不上的成员先显示这一点而不是它最后的活动，其余显示活动。`POST` 接收 `GouziControlRequest`，并要求带 `x-dsh-gouzi-control: 1` 头；本机回环属主、`cockpit` 与 `admin` 设备可以管理，`pocket` 设备只读，`gouzi` 凭据会被拒绝。
+`GET /api/gouzi` 返回 `GouziDashboardV1`：十只的上限、已占用名额数、当前调用方能否管理、这个 Host 能否启动成员，以及所有未归档的成员。`retired` 列出每个已归档成员的编号和名字，让狗窝房间里更早的消息和结果仍能称呼它，而不是显示编号。每个成员带有 `membership`、`connection`、`activity`，以及由 `gouziPrimaryState` 归约出的一个 `state`：不在 `enabled` 的成员显示其 membership，联系不上的成员先显示这一点而不是它最后的活动，其余显示活动。`POST` 接收 `GouziControlRequest`，并要求带 `x-dsh-gouzi-control: 1` 头；本机回环属主、`cockpit` 与 `admin` 设备可以管理，`pocket` 设备只读，`gouzi` 凭据会被拒绝。
 
 成员可以固定到一个原生模型。编辑表单提供 `models` 操作返回的模型：它不重复地列出该成员当前可用运行环境的模型目录，成员离线时返回空列表；已固定但没有任何运行环境提供的模型仍可选中，并标为不可用。`edit` 设置 `model`，传 `null` 则清除。调度器只通过目录中包含该模型的运行环境提供已固定的成员，把模型写入任务节点的 `operator.profile`，并在成员的模型于调度决定之后变化时拒绝启动。已固定的模型没有可用运行环境提供时，该成员不进入候选；未固定的成员由 Smart Auto 选择模型。
 
