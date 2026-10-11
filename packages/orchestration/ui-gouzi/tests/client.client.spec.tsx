@@ -625,6 +625,15 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
     await waitFor(() => { expect(harness.posts.at(-1)!.body).toEqual({ action: 'host-route', hostId: 'ssh-1', address: '192.168.2.200', port: 10_022 }) })
   })
 
+  it('opens the reroute form with an empty address and the default port when a host shows no readable address', async () => {
+    const harness = fakeRequest({ roster: dashboard([], { hosts: [LOCAL_HOST, { hostId: 'ssh-9', label: '旧主机', kind: 'ssh' }] }), reply: () => Response.json(MINI_HOST) })
+    await openHostStep(harness)()
+    fireEvent.click(screen.getByRole('button', { name: /修改 旧主机 的连接方式/ }))
+    expect(screen.getByLabelText(/地址（IP/)).toHaveProperty('value', '')
+    expect(screen.getByLabelText('端口')).toHaveProperty('value', '22')
+    expect(screen.getByRole('button', { name: '检查并切换' })).toHaveProperty('disabled', true)
+  })
+
   it('shows why a machine could not be reached and keeps the form', async () => {
     const harness = fakeRequest({
       roster: dashboard([]),
