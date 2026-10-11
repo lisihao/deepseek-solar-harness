@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.40.3",
+  "version": "3.40.4",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -255,7 +255,7 @@
     "@deepseek-ai/dsh-session-query": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session-stats": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session-telemetry": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-session-title": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-title": "file:vendor/dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-session-title-llm": "0.1.0-rc.6",
     "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
     "@deepseek-ai/dsh-settings-file": "0.1.0-rc.6",

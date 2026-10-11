@@ -3799,20 +3799,20 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-session-title@npm:0.1.0-rc.6":
-  version: 0.1.0-rc.6
-  resolution: "@deepseek-ai/dsh-session-title@npm:0.1.0-rc.6"
+"@deepseek-ai/dsh-session-title@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-session-title@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz::hash=09d69c&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     zod: "npm:^4.4.3"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
-    "@deepseek-ai/dsh-brand": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-session": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-session-projection": ^0.1.0-rc.6
-  checksum: 10c0/11b0eceb64d0ea3cf16a07bcad50aaaec39277608fa041f4f3535e6e42f327bbc385841ff6bfee673580812d1d7e575f897e3f10c12c3abd2d3ad4e1c8c04554
+    "@deepseek-ai/dsh-brand": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-session": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-session-projection": ^0.1.0-rc.5
+  checksum: 10c0/25a0a97f04c529102eccd68b15ebb480eaccd5a32b05ea32de0cd09009f358f4fe7d5e4fd43c23f958106242bb1725754e4210e6d86355e3dbe22bbec9a63aa9
   languageName: node
   linkType: hard
 
@@ -9485,7 +9485,7 @@ __metadata:
     "@deepseek-ai/dsh-session-query": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session-stats": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session-telemetry": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-session-title": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-session-title": "file:vendor/dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-session-title-llm": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-settings": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-settings-file": "npm:0.1.0-rc.6"

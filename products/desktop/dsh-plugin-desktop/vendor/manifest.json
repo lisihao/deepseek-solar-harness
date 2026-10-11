@@ -300,6 +300,11 @@
       "name": "Kennel recipient envelope kept out of session titles (ui-gouzi registers the projection when session-title offers it)",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "19dfe9f689fc85a7df8f407ea9277e4b508e6821"
+    },
+    {
+      "name": "session-title sealed with ui-gouzi so kennel messages are titled by their body",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "06988618ad7aaa8d47a8c6b604a8fdbb032fd2a3"
     }
   ],
   "sourcePackages": {
@@ -371,6 +376,7 @@
     "dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz": "packages/sdk/protocol/package.json",
     "dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz": "packages/session/session-persistence/package.json",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "packages/session/session-projection-cache/package.json",
+    "dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz": "packages/session/session-title/package.json",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "packages/subagent/subagent-codex/package.json",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "packages/core/system-prompt/package.json",
     "dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz": "packages/prompt/task-template/package.json",
@@ -497,6 +503,7 @@
     "dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz": "5d822cc449d78e5118d717c8055b12d8a37868c9c2723412b109664427a69db1",
     "dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz": "12aaddd353eeee53df8119d0ccf04531c60e5fdd8b22abe998fb8be7d56609a1",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "c709a3d9f4b96adf0763151bf7277252ae874534fa46074a14c26a386e107a1d",
+    "dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz": "dbfd441e4d240a237faafbdbefb5858f24f15901313bff702d63ada7c1a7bd75",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "ee70fd611079f1dbcd8347508fe825444c59f7a4e28f43b0af1aa25b1100c690",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "02a8710891620f7eaba2e4c8ede65e339cbf21c48d0e23b28adbb70353556de2",
     "dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz": "81e5a20ed5af79c804c648cb3e436a4113eda93e71230e9d2522baa6714d5309",
