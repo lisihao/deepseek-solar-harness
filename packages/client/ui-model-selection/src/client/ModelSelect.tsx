@@ -331,7 +331,7 @@ export function ModelSelect(
                   <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
                 </div>
               )}
-              <FailureNote items={state.failures} onRetry={reload} t={t} />
+              <FailureNote items={state.failures} expandedByDefault={state.groups.length === 0} onRetry={reload} t={t} />
               <div className={clsx(css.groups, 'scrollable')}>
                 {state.groups.map((group) => {
                   const headingId = `${id}-${group.id}`

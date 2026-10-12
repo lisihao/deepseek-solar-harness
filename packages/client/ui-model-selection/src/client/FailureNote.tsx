@@ -15,22 +15,26 @@ export interface FailedSource {
 }
 
 /**
- * Render nothing without failures; otherwise a collapsed summary that expands to each source's reason and a retry.
- * @param props - the failed sources, the retry action, and the translator.
+ * Render nothing without failures; otherwise a summary that expands to each source's reason and a retry. Until the
+ * user toggles it, it follows `expandedByDefault`, which the model pane sets while no model is available, because the
+ * reasons are then the only thing to act on; the user's own toggle wins from then on.
+ * @param props - the failed sources, the default expansion, the retry action, and the translator.
  * @returns the notice, or null when nothing failed.
  */
 export function FailureNote(
-  { items, onRetry, t }: { items: readonly FailedSource[]; onRetry: () => void; t: TranslateNS<'model'> },
+  { items, expandedByDefault = false, onRetry, t }:
+  { items: readonly FailedSource[]; expandedByDefault?: boolean; onRetry: () => void; t: TranslateNS<'model'> },
 ) {
-  const [open, setOpen] = useState(false)
+  const [chosen, setChosen] = useState<boolean | null>(null)
   if (items.length === 0) return null
+  const open = chosen ?? expandedByDefault
   return (
     <div className={css.failureNote}>
       <button
         type="button"
         className={css.failureToggle}
         aria-expanded={open}
-        onClick={() => { setOpen(value => !value) }}
+        onClick={() => { setChosen(!open) }}
       >
         <span>{t('failure.summary', { count: String(items.length) })}</span>
         <span className={css.failureAction}>{open ? t('failure.hide') : t('failure.show')}</span>
