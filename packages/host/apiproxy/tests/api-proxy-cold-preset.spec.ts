@@ -22,13 +22,15 @@ import { RpcId, type RpcRequest } from '../src/api/rpc.ts'
 import { createApiProxy } from '../src/api-proxy.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 
+const REVISION = SessionPersistenceRevision('jsonl:r1')
+
 let nextRpc = 1
 function request<P>(payload: P): RpcRequest<P> {
   return { rpcId: RpcId(`cold-preset-${String(nextRpc++)}`), payload }
 }
 
 /** A host with storage on `pool`, the projection registry and cache, and a persistence double over `logs`. */
-async function host(pool: MemoryMediaPool, logs: Map<string, SessionEvent[]>, header?: SessionHeader) {
+async function host(pool: MemoryMediaPool, logs: Map<string, SessionEvent[]>, known: { header?: SessionHeader } = {}) {
   const ctx = new Context()
   await ctx.plugin(Storage)
   ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
@@ -40,24 +42,29 @@ async function host(pool: MemoryMediaPool, logs: Map<string, SessionEvent[]>, he
   await ctx.plugin(SessionProjectionRegistry)
   const readFrom = vi.fn(async (id: SessionId, fromSeq: number) => {
     const events = logs.get(String(id))
+    const { header } = known
     if (events === undefined || header === undefined) throw new Error(`session "${id}" not found`)
     return { meta: header, events: events.filter(event => event.seq >= fromSeq) }
   })
   ctx.provide('sessionPersistence', {
     readFrom,
     locate: () => undefined,
-    listSnapshots: () => Promise.resolve(header === undefined ? [] : [{ header, revision: SessionPersistenceRevision('jsonl:r1') }]),
+    listSnapshots: () => Promise.resolve(known.header === undefined ? [] : [{ header: known.header, revision: REVISION }]),
   } as never)
   return { ctx, readFrom }
 }
 
 describe('sessions.list cold preset', () => {
-  it('refolds a version 1 cache row once, then serves the logged preset from the cache and matches the attached row', async () => {
+  it.each([
+    ['a live checkpoint', false],
+    ['a cold-read row bound to the persistence revision, which the 3.42 list writes back for every cold session', true],
+  ])('refolds a version 1 cache row (%s) once, then serves the logged preset from the cache and matches the attached row', async (_name, revisionBound) => {
     const pool = new MemoryMediaPool()
     const logs = new Map<string, SessionEvent[]>()
+    const known: { header?: SessionHeader } = {}
 
     // Host A: the 3.42 unit (version 1, no preset) checkpoints the session at detach.
-    const old = await host(pool, logs)
+    const old = await host(pool, logs, known)
     await old.ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })
     old.ctx.sessionProjections.register({
       key: 'sessionListMetadata',
@@ -71,11 +78,18 @@ describe('sessions.list cold preset', () => {
     const session: Session = old.ctx.sessions.create(SessionId('cold-kennel'), { meta: { cwd: '/proj', agentPreset: 'standard' } })
     session.append('agent-preset/selected', { agentPreset: 'kennel' })
     logs.set(String(session.id), [...session.events])
-    await old.ctx.sessionProjectionCache.write(session)
     const header = session.header
+    known.header = header
+    await old.ctx.sessionProjectionCache.write(session)
+    // The 3.42 cold list then rewrote the row bound to the persistence revision, which later lists serve with no I/O.
+    if (revisionBound) await old.ctx.sessionProjectionCache.coldSnapshot(header.id, undefined, REVISION)
+    const stored = pool.media.get('session_projcache')?.tables.get('sessions')?.get(String(header.id)) as
+      { sourceRevision?: string; rows: Record<string, { ver: number }> } | undefined
+    expect(stored?.rows.sessionListMetadata?.ver).toBe(1)
+    expect(stored?.sourceRevision).toBe(revisionBound ? String(REVISION) : undefined)
 
     // Host B: the shipped unit (version 2) lists the now-cold session.
-    const upgraded = await host(pool, logs, header)
+    const upgraded = await host(pool, logs, { header })
     await upgraded.ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })
     const api = createApiProxy(upgraded.ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
 
@@ -100,7 +114,7 @@ describe('sessions.list cold preset', () => {
     const writer = await host(pool, logs)
     const session: Session = writer.ctx.sessions.create(SessionId('cold-standard'), { meta: { cwd: '/proj', agentPreset: 'standard' } })
     logs.set(String(session.id), [...session.events])
-    const reader = await host(pool, logs, session.header)
+    const reader = await host(pool, logs, { header: session.header })
     await reader.ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })
     const api = createApiProxy(reader.ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
     const listed = await api.sessions.list(request({}))
