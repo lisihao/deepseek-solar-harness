@@ -22,6 +22,7 @@ import {
   IconWarningOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { FailureNote, type FailedSource } from './FailureNote.tsx'
 import type { ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
 
@@ -70,7 +71,11 @@ export function ModelSelect(
   // action was a load.
   const lastActionRef = useRef<'load' | 'select'>('load')
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
-  const [refreshState, setRefreshState] = useState<{ running: boolean; lines: readonly string[] }>({ running: false, lines: [] })
+  const [refreshState, setRefreshState] = useState<{
+    running: boolean
+    lines: readonly string[]
+    failures: readonly FailedSource[]
+  }>({ running: false, lines: [], failures: [] })
   const alive = useRef(true)
   useEffect(() => () => { alive.current = false }, [])
   const toastSeq = useRef(0)
@@ -149,7 +154,7 @@ export function ModelSelect(
 
   const refreshCatalogs = (): void => {
     if (refreshState.running) return
-    setRefreshState({ running: true, lines: [] })
+    setRefreshState({ running: true, lines: [], failures: [] })
     void refresh().then((report) => {
       if (!alive.current) return
       const lines = [
@@ -158,11 +163,12 @@ export function ModelSelect(
             ? t('refresh.none')
             : t('refresh.added', { count: String(report.added.length), names: report.added.join('、') })
           : t('refresh.directoryFailed', { message: report.directoryError }),
-        ...report.lines.flatMap(line => line.ok
-          ? line.message === undefined ? [] : [t('refresh.note', { name: line.name, message: line.message })]
-          : [t('refresh.failed', { name: line.name, message: line.message ?? '' })]),
+        ...report.lines.flatMap(line => line.ok && line.message !== undefined
+          ? [t('refresh.note', { name: line.name, message: line.message })]
+          : []),
       ]
-      setRefreshState({ running: false, lines })
+      const failures = report.lines.flatMap(line => line.ok ? [] : [{ name: line.name, message: line.message ?? '' }])
+      setRefreshState({ running: false, lines, failures })
     })
   }
 
@@ -310,6 +316,7 @@ export function ModelSelect(
               </button>
               {refreshState.running && <div className={css.status}>{t('refresh.running')}</div>}
               {refreshState.lines.map(line => <div className={css.status} key={line}>{line}</div>)}
+              <FailureNote items={refreshState.failures} onRetry={refreshCatalogs} t={t} />
             </>
           )}
 
@@ -324,12 +331,7 @@ export function ModelSelect(
                   <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
                 </div>
               )}
-              {state.failures.map(failure => (
-                <div className={css.warning} key={failure.id}>
-                  <span>{t('warning.groupLoad', { name: failure.name, message: failure.message })}</span>
-                  <button type="button" className={css.retry} onClick={reload}>{t('retry')}</button>
-                </div>
-              ))}
+              <FailureNote items={state.failures} onRetry={reload} t={t} />
               <div className={clsx(css.groups, 'scrollable')}>
                 {state.groups.map((group) => {
                   const headingId = `${id}-${group.id}`

@@ -25,7 +25,10 @@ export const zh = {
   'status.loading': '正在刷新模型列表…',
   'error.action': '模型操作失败：{message}',
   'action.reload': '重新加载',
-  'warning.groupLoad': '{name} 加载失败：{message}',
+  'failure.summary': '{count} 个模型来源暂时不可用',
+  'failure.show': '查看原因',
+  'failure.hide': '收起',
+  'failure.item': '{name}：{message}',
   'empty.models': '没有可用的模型。',
   'blocked.composer': '当前模型不可用，请先选择模型',
   'empty.efforts': '当前模型未提供推理等级。',
@@ -34,7 +37,6 @@ export const zh = {
   'refresh.added': '新增 {count} 个：{names}',
   'refresh.none': '模型列表已是最新',
   'refresh.directoryFailed': '模型目录刷新失败：{message}',
-  'refresh.failed': '{name} 刷新失败：{message}',
   'refresh.note': '{name}：{message}',
 } satisfies Record<string, string>
 
@@ -58,7 +60,10 @@ export const en = {
   'status.loading': 'Refreshing model list…',
   'error.action': 'Model operation failed: {message}',
   'action.reload': 'Reload',
-  'warning.groupLoad': '{name} failed to load: {message}',
+  'failure.summary': '{count} model sources are unavailable',
+  'failure.show': 'Show why',
+  'failure.hide': 'Hide',
+  'failure.item': '{name}: {message}',
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',
@@ -67,6 +72,5 @@ export const en = {
   'refresh.added': '{count} new: {names}',
   'refresh.none': 'Model list is up to date',
   'refresh.directoryFailed': 'Model directory refresh failed: {message}',
-  'refresh.failed': '{name} refresh failed: {message}',
   'refresh.note': '{name}: {message}',
 } satisfies Record<ModelKey, string>

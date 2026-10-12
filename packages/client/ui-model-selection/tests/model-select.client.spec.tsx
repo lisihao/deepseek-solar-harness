@@ -222,6 +222,60 @@ describe('ModelSelect reasoning effort', () => {
   })
 })
 
+describe('ModelSelect source failures', () => {
+  const failures = [
+    { id: 'claude', name: 'Claude Code', message: 'Claude Code is not authenticated with a claude.ai subscription' },
+    { id: 'chatgpt-web', name: 'ChatGPT Web', message: 'could not identify one visible Latest model row' },
+  ]
+
+  it('shows one quiet line for failed sources and reveals the reasons and a retry on request', () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({ failures }))
+    const load = vi.fn()
+    render(<ModelSelect locked={false} available directory={directory} load={load} refresh={vi.fn()} select={vi.fn()} t={t} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
+    expect(screen.getByText('2 个模型来源暂时不可用')).toBeTruthy()
+    expect(screen.queryByText(/not authenticated/)).toBeNull()
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+
+    const toggle = screen.getByRole('button', { name: /2 个模型来源暂时不可用/ })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('Claude Code：Claude Code is not authenticated with a claude.ai subscription')).toBeTruthy()
+    expect(screen.getByText('ChatGPT Web：could not identify one visible Latest model row')).toBeTruthy()
+    const callsBefore = load.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(load.mock.calls.length).toBe(callsBefore + 1)
+
+    fireEvent.click(toggle)
+    expect(screen.queryByText(/not authenticated/)).toBeNull()
+  })
+
+  it('shows nothing when every source loaded', () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state())
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} refresh={vi.fn()} select={vi.fn()} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
+    expect(screen.queryByText(/模型来源/)).toBeNull()
+  })
+
+  it('collapses refresh failures the same way, keeps a reason-less failure listed, and retries the refresh', async () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state())
+    const refresh = vi.fn(async (): Promise<ModelRefreshReport> => ({
+      added: [], lines: [{ name: 'Claude Code', ok: false }],
+    }))
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} refresh={refresh} select={vi.fn()} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '刷新模型与算子' }))
+    fireEvent.click(await screen.findByRole('button', { name: /1 个模型来源暂时不可用/ }))
+    expect(screen.getByText('Claude Code：')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => { expect(refresh).toHaveBeenCalledTimes(2) })
+  })
+})
+
 describe('ModelSelect catalog refresh', () => {
   it('refreshes from the root menu and reports new models and per-catalog failures', async () => {
     const directory = createSnapshotStore<ModelDirectoryState>(state())
@@ -255,7 +309,9 @@ describe('ModelSelect catalog refresh', () => {
       ],
     })
     await waitFor(() => { expect(screen.getByText('新增 1 个：DeepSeek-V4.1-Flash')).toBeTruthy() })
-    expect(screen.getByText('ChatGPT Web 刷新失败：HTTP 503')).toBeTruthy()
+    expect(screen.queryByText(/HTTP 503/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /1 个模型来源暂时不可用/ }))
+    expect(screen.getByText('ChatGPT Web：HTTP 503')).toBeTruthy()
     expect(screen.getByText('原生算子：Codex 6 个模型')).toBeTruthy()
     expect(screen.queryByText(/Quiet/)).toBeNull()
     expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: '刷新模型与算子' }).disabled).toBe(false)
