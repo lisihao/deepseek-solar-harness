@@ -163,4 +163,44 @@ describe('ui-workspace apply', () => {
     expect(b.slots.entries('conversation.hero.workspace')).toHaveLength(0)
     // expect(b.slots.entries('conversation.empty.workspace')).toHaveLength(0)
   })
+
+  it('lets a plugin hide sessions from the browser through ctx.sessionListFilters, and lets go when it unloads', async () => {
+    const b = await bench()
+    declare(b.slots, 'sidebar.workspaces')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const browser = (b.slots.entries('sidebar.workspaces')[0]!.inject as () => WorkspaceBrowserInjected)()
+    const source = browser.hooks.hiddenSessions
+    expect(source.getSnapshot()).toBeUndefined()
+    const seen = vi.fn()
+    const stop = source.subscribe(seen)
+    const session = (preset: string) => ({ id: 's', displayTitle: 's', running: false, blank: false, updatedAt: 1, agentPreset: preset }) as never
+
+    const fiber = b.ctx.plugin({
+      name: 'tenant',
+      inject: ['sessionListFilters'],
+      apply: (inner: typeof b.ctx) => { inner.effect(() => inner.sessionListFilters.hide(summary => summary.agentPreset === 'room'), 'tenant: hide') },
+    })
+    await fiber.await()
+    const rule = source.getSnapshot()!
+    expect(rule(session('room'))).toBe(true)
+    expect(rule(session('chat'))).toBe(false)
+    expect(seen).toHaveBeenCalledTimes(1)
+
+    // A second rule combines with the first; the combined rule changes identity only when a rule comes or goes.
+    const releaseSecond = b.ctx.sessionListFilters.hide(summary => summary.agentPreset === 'other')
+    expect(source.getSnapshot()).not.toBe(rule)
+    expect(source.getSnapshot()!(session('other'))).toBe(true)
+    expect(source.getSnapshot()!(session('room'))).toBe(true)
+    releaseSecond()
+    releaseSecond()
+    expect(source.getSnapshot()!(session('other'))).toBe(false)
+
+    // Unloading the plugin (HMR) removes its rule, and the browser is told.
+    await fiber.dispose()
+    expect(source.getSnapshot()).toBeUndefined()
+    stop()
+    const afterStop = seen.mock.calls.length
+    b.ctx.sessionListFilters.hide(() => true)()
+    expect(seen).toHaveBeenCalledTimes(afterStop)
+  })
 })

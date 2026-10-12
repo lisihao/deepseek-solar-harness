@@ -31,6 +31,7 @@ import type {
   SessionId, SessionSearchResultItem, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { createWorkspaceViewStore } from '../stores.ts'
+import type { SessionHidden } from '../tree.ts'
 
 /**
  * Owner share of the directory-flow holes: the complete conversation between
@@ -90,6 +91,10 @@ export type DirectoryPickingHooks = {
  * browsing region drives.
  */
 export type WorkspaceBrowserInjected = DirectoryPickingInjected & {
+  hooks: {
+    /** The combined rule that withholds sessions from the lists, or `undefined` while none is registered. */
+    hiddenSessions: HostObservable<SessionHidden | undefined>
+  }
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and
    * open it; without an explicit workspace, inherit the current Session
@@ -144,6 +149,7 @@ export type WorkspaceBrowserProps =
   & PropsStore<ReturnType<typeof createWorkspaceViewStore>>
   & Omit<WorkspaceBrowserInjected, 'hooks'>
   & DirectoryPickingHooks
+  & { useHiddenSessions: SnapshotSelectorHook<SessionHidden | undefined> }
   & PropsLocale<'workspace'>
 
 /**
