@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
@@ -260,6 +260,24 @@ describe('ModelSelect source failures', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
     expect(screen.getByRole('button', { name: /2 个模型来源暂时不可用/ }).getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('Claude Code：Claude Code is not authenticated with a claude.ai subscription')).toBeTruthy()
+  })
+
+  it('collapses once models arrive after the pane opened empty, and keeps a choice the user made', () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({ groups: [], failures: [], status: 'loading' }))
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} refresh={vi.fn()} select={vi.fn()} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
+    act(() => { directory.set(state({ groups: [], failures })) })
+    const toggle = screen.getByRole('button', { name: /2 个模型来源暂时不可用/ })
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    act(() => { directory.set(state({ failures })) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    act(() => { directory.set(state({ groups: [], failures })) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle)
+    act(() => { directory.set(state({ groups: [], failures })) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('shows nothing when every source loaded', () => {
