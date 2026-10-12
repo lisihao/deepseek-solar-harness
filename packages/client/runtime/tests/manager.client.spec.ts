@@ -760,6 +760,21 @@ describe('remaining branches', () => {
     expect(await manager.create()).toMatchObject({ ok: false })
   })
 
+  it('create forwards the agent preset on both the workspace and the directory path and records the confirmed preset', async () => {
+    const api = new FakeApiClient()
+    api.onCreate = () => Promise.resolve(ok({ sessionId: S1, agentPreset: 'kennel' }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.create({ workspaceId: 'w1' as never, agentPreset: 'kennel' })
+    await manager.create({ cwd: '/tmp/w', sessionId: S1, agentPreset: 'kennel' })
+    await manager.create({ workspaceId: 'w1' as never })
+    expect(api.callsOf('session.create')).toEqual([
+      { workspaceId: 'w1', agentPreset: 'kennel' },
+      { cwd: '/tmp/w', sessionId: S1, agentPreset: 'kennel' },
+      { workspaceId: 'w1' },
+    ])
+    expect(manager.getListSnapshot().items[0]).toMatchObject({ sessionId: S1, agentPreset: 'kennel' })
+  })
+
   it('publishes a real Ungrouped summary from workspace-attach-failed', async () => {
     const api = new FakeApiClient()
     api.onCreate = () => Promise.resolve(err({

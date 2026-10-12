@@ -17,7 +17,7 @@ async function boot(order: 'workspace-first' | 'gouzi-first') {
   ctx.provide('workspaces', { create: vi.fn(), startSession: vi.fn(), rename: vi.fn(), insertSessionBefore: vi.fn(), list: { getSnapshot: () => ({ items: [], archivedSessionIds: [] }), subscribe: () => () => undefined } } as never)
   ctx.provide('sessions', { open: vi.fn(), search: vi.fn(), searchResultLimit: 20, binding: vi.fn(), fork: vi.fn(), list: { getSnapshot: () => ({ ids: [], byId: {} }), subscribe: () => () => undefined } } as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
-  ctx.provide('connection', { request: vi.fn(), api: { agentPresets: { select: vi.fn() } } } as never)
+  ctx.provide('connection', { request: vi.fn() } as never)
   ctx.provide('conversation', { blocks: { storeFor: () => ({ getSnapshot: () => undefined }) } } as never)
   const loadWorkspace = () => ctx.plugin({ inject: [...workspaceUi.inject], apply: workspaceUi.apply }).await()
   const loadGouzi = () => ctx.plugin({ inject: [...gouzi.inject], apply: gouzi.apply }).await()

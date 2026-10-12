@@ -1,6 +1,6 @@
 /** Browser half: sidebar entry, Settings management, and the session-scoped kennel room. */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle as ApiConnectionHandle, SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -31,7 +31,6 @@ export const inject = ['slots', 'connection', 'workspaces', 'sessions', 'convers
  */
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
-  const { api } = ctx.get('connection') as unknown as ApiConnectionHandle
   const { workspaces, sessions } = ctx
   const roomStore = createKennelRoomStore()
   const sources = new Map<SessionId, KennelRoomSource>()
@@ -93,7 +92,7 @@ export function apply(ctx: ClientContext): void {
       reload: async () => { liveScope(id); await source.reload(); liveScope(id) },
       threads: {
         open: (threadId) => { sessions.open(threadId) },
-        create: async (workspaceId) => { await createKennelThread({ sessions, workspaces, api }, workspaceId) },
+        create: async (workspaceId) => { await createKennelThread({ sessions, workspaces }, workspaceId) },
         rename: async (threadId, title) => {
           const session = sessions.binding(threadId)?.session
           if (session === undefined) throw new Error('这个话题已不存在。')
@@ -142,7 +141,7 @@ export function apply(ctx: ClientContext): void {
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'kennel', order: 90, label: '狗窝',
-    inject: () => ({ request: connection.request, open: () => openKennel({ sessions, workspaces, api }) }),
+    inject: () => ({ request: connection.request, open: () => openKennel({ sessions, workspaces }) }),
   }, KennelEntry))
 
   ctx.slots.inject('conversation.room.header', () => ctx.slots.register({
