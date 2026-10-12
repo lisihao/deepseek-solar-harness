@@ -265,6 +265,11 @@ const CHATGPT_WEB_OPERATOR_ID = 'chatgpt-web'
 const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
 /** Terminal code of a run whose model the account can only use with extra paid usage credits. */
 const CREDITS_REQUIRED_CODE = 'MODEL_REQUIRES_CREDITS'
+/** Codes of a dispatch the Resident daemon refused for its profile before accepting it, so it never became the lane's profile. */
+const PROFILE_REFUSAL_CODES: ReadonlySet<string> = new Set(['EXECUTION_PROFILE_CONFLICT', 'EXECUTION_PROFILE_UNSUPPORTED'])
+const PROFILE_CONFLICT_CODE = 'EXECUTION_PROFILE_CONFLICT'
+/** The daemon's wording of a conflict: which model and effort the session is locked to. */
+const PROFILE_LOCK_PATTERN = /is locked to (\S+)/u
 
 /** The native product's own wording when the selected model needs usage credits the subscription does not include. */
 const CREDITS_REQUIRED_PATTERN = /requires? (?:extra )?usage credits/iu
@@ -1053,6 +1058,16 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
           commandId: dispatch.commandId,
           code,
         }, { ignorable: true })
+        if (code === PROFILE_CONFLICT_CODE) {
+          const locked = PROFILE_LOCK_PATTERN.exec(error instanceof Error ? error.message : '')?.[1]
+          throw new PhysicalOperatorError(
+            `${operatorDisplayName(dispatch.operatorId)} 在这个会话里已锁定为 ${locked ?? '先前的模型和强度'}，`
+            + `而这一轮要求${dispatch.residentProfile === undefined ? '另一种配置' : ` ${dispatch.residentProfile.model}/${dispatch.residentProfile.effort ?? 'default'}`}。`
+            + '常驻会话为保住上下文，中途不会换模型或强度：请把模型和强度改回锁定的值，或新建一个会话再换。',
+            PROFILE_CONFLICT_CODE,
+            { cause: error },
+          )
+        }
         const fallbackAllowed = creditsRequired || (run === undefined && smartAutoUnavailable(code))
         if (fallbackAllowed && dispatch.fallbackOperatorId !== undefined) {
           throw new PhysicalOperatorError(
@@ -1531,7 +1546,7 @@ function selectedOperatorProfile(
   ctx: Context,
   agent: Agent,
   operatorId: string,
-): PhysicalOperatorExecutionPreference | undefined {
+): { readonly profile: PhysicalOperatorExecutionPreference; readonly explicit: boolean } | undefined {
   const snapshot = readModelSelection(agent)
   const selection = snapshot.installed ? snapshot.selection : undefined
   if (selection?.provider !== ROUTER_PROVIDER) return undefined
@@ -1540,7 +1555,32 @@ function selectedOperatorProfile(
   const model = nativeModel ?? routerCatalogs.get(ctx)?.entries.flagship(operatorId)?.model
   if (model === undefined) return undefined
   const effort = PROFILE_EFFORTS.find(value => value === selection.reasoningEffort)
-  return { model, ...effort === undefined ? {} : { effort } }
+  // Only a native model the user named is a choice; the catalog's current flagship is a default that moves over time.
+  return { profile: { model, ...effort === undefined ? {} : { effort } }, explicit: nativeModel !== undefined }
+}
+
+/**
+ * The profile a resident lane was last accepted with. The Resident daemon locks a lane to its first accepted
+ * profile, so a later dispatch with another model or effort is refused; the host therefore reuses this one.
+ * @param events - one Session's ordered durable log.
+ * @param operatorId - the physical operator the dispatch targets.
+ * @returns the profile of the latest accepted resident dispatch to that operator, if any.
+ */
+export function residentLaneProfile(
+  events: readonly SessionEvent[],
+  operatorId: string,
+): PhysicalOperatorExecutionPreference | undefined {
+  const refused = new Set<string>()
+  for (const event of events) {
+    if (event.type === 'physical-operator/dispatch-terminal' && PROFILE_REFUSAL_CODES.has(event.data.code)) refused.add(event.data.commandId)
+  }
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type === 'physical-operator/dispatch' && event.data.operatorId === operatorId
+      && event.data.executionMode === 'resident' && event.data.residentProfile !== undefined
+      && !refused.has(event.data.commandId)) return event.data.residentProfile
+  }
+  return undefined
 }
 
 /** Render one captured model selection in its durable routing explanation. */
@@ -1598,9 +1638,7 @@ function newHostRoute(
 ): PendingHostRoute {
   const executionMode = executionModeFor(ctx, operatorId)
   const residentProfile = executionMode === 'resident' && isPhysicalOperatorProfileOwner(operatorId)
-    ? allocatedProfile
-      ?? selectedOperatorProfile(ctx, agent, operatorId)
-      ?? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
+    ? residentDispatchProfile(ctx, agent, operatorId, allocatedProfile)
     : undefined
   return {
     commandId: `resident-${createHash('sha256').update(`${agent.id}\0${messageId}`).digest('hex').slice(0, 32)}`,
@@ -1612,6 +1650,25 @@ function newHostRoute(
     executionMode,
     ...residentProfile === undefined ? {} : { residentProfile },
   }
+}
+
+/**
+ * Choose the profile a new resident dispatch carries. A native model the user named wins, and the daemon then tells
+ * the user plainly if the lane is locked to another. Otherwise the lane's accepted profile is reused, so neither the
+ * allocator nor the catalog's moving flagship can contradict a lane the daemon has already locked.
+ */
+function residentDispatchProfile(
+  ctx: Context,
+  agent: Agent,
+  operatorId: PhysicalOperatorProfileOwner,
+  allocatedProfile: PhysicalOperatorExecutionPreference | undefined,
+): PhysicalOperatorExecutionPreference | undefined {
+  const selected = selectedOperatorProfile(ctx, agent, operatorId)
+  if (selected?.explicit === true) return selected.profile
+  return residentLaneProfile(agent.session.events, operatorId)
+    ?? allocatedProfile
+    ?? selected?.profile
+    ?? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
 }
 
 function recoveredHostRoute(recoverable: DispatchRecord, requestedByMessageId: string): PendingHostRoute {

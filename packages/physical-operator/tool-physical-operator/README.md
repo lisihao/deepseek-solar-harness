@@ -31,6 +31,8 @@ Automatic routing still needs a decision source, but it does not require DeepSee
 
 The prompt must contain the complete work for this turn. An ephemeral Provider receives it in a fresh product context; a Resident Provider continues only the caller-owned lane within the canonical workspace. Large Resident results can return a content-addressed artifact reference instead of inline bytes.
 
+The Resident daemon locks a lane to the first profile it accepts, so a host chat dispatch reuses the profile of the session's latest accepted Resident dispatch to the same operator, whichever route (the allocator or the selected primary model) chose the turn. A native model the user names is the one exception: it is sent as chosen, and a lane locked to another profile answers `EXECUTION_PROFILE_CONFLICT`, which the user sees as a sentence naming the locked profile and saying a new session changes it. A dispatch the daemon refused for its profile never becomes the lane's profile. `residentLaneProfile(events, operatorId)` exposes this choice for tests and diagnostics.
+
 Each admitted `run` builds a sealed operator-context envelope from the active runtime snapshot and a template selected for the delegated prompt itself. It never reuses a template attached to an earlier parent task. The Session records the exact envelope and delegated template receipt with the Provider receipt so the child input can be reconstructed after replay.
 
 ## Model Experience

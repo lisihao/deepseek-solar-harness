@@ -31,6 +31,8 @@ Resident 原生进度页会在运行结束（或运行报告错误）后复制�
 
 prompt 必须包含本轮所需的完整工作。Ephemeral Provider 会在全新的产品上下文中接收它；Resident Provider 只会继续规范化 workspace 内由调用方拥有的 lane。大型 Resident 结果可以返回内容寻址的产物引用，而不内联原始字节。
 
+Resident daemon 会把 lane 锁定在它接受的第一个 profile 上，所以宿主聊天派发会沿用本会话里最近一次被接受、发往同一算子的 Resident 派发的 profile，不论这一轮是分配器还是所选主模型选的路径。用户点名的原生模型是唯一的例外：它按所选原样发送，lane 若已锁定为别的 profile，守护进程会返回 `EXECUTION_PROFILE_CONFLICT`，用户看到的是一句指明锁定 profile、并说明新建会话才能更换的话。被守护进程因 profile 拒绝的派发不会成为该 lane 的 profile。`residentLaneProfile(events, operatorId)` 把这一选择开放给测试和诊断。
+
 每次获准的 `run` 都会从当前运行时快照和为委派提示词自身选出的模板构建密封算子上下文信封，绝不会复用附着在更早父任务上的模板。Session 会把精确的信封和委派模板回执与 Provider 回执一并记录，以便回放时重建子任务输入。
 
 ## 模型体验
