@@ -332,7 +332,8 @@ describe('web e2e: kennel room replay send UI', () => {
       const roomSession = new URL((await roomRead).url()).searchParams.get('session_id')
       expect(roomSession).toBeTruthy()
       const agent = scaffold.ctx.agents.get(SessionId(roomSession!))!
-      expect(agent.session.events.filter(event => event.type === 'agent-preset/selected').at(-1)).toMatchObject({ data: { agentPreset: 'kennel' } })
+      // Created with the kennel preset, so the session header (the only part a cold list after a restart reads) records it.
+      expect(agent.session.header.agentPreset).toBe('kennel')
       const input = page.getByRole('textbox', { name: '消息', exact: true })
       const seat = page.locator('[class*="composerSeat"]')
       expect(await seat.evaluate(el => getComputedStyle(el, '::before').content)).toBe('none')

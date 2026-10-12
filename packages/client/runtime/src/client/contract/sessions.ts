@@ -74,10 +74,11 @@ export interface ISessions {
   /**
    * Create an independent blank session in a registered Workspace without opening it.
    * On resolution its list row and binding are synchronously available.
-   * @param opts - target registered workspace.
+   * @param opts - target registered workspace, and optionally the agent preset the session is built from; the Host
+   *   stores it on the session header, so the preset survives a restart before the session is next opened.
    * @returns the created session id.
    */
-  create(opts: { workspaceId: WorkspaceId }): Promise<SessionId>
+  create(opts: { workspaceId: WorkspaceId; agentPreset?: string }): Promise<SessionId>
   /** Clear the current selection into the no-session view state. */
   clear(): void
   /**

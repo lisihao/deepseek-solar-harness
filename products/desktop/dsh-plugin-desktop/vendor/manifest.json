@@ -305,12 +305,18 @@
       "name": "session-title sealed with ui-gouzi so kennel messages are titled by their body",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "06988618ad7aaa8d47a8c6b604a8fdbb032fd2a3"
+    },
+    {
+      "name": "ui-workspace sealed so ui-gouzi can keep kennel threads out of the workspace lists (ctx.sessionListFilters)",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "756c377a10"
     }
   ],
   "sourcePackages": {
     "dsh-packages/aegis-2.8.5-solar.1.tgz": "plugins/managed/aegis/package.json",
     "dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz": "apps/cli/package.json",
     "dsh-packages/deepseek-ai-dsh-agent-0.1.0-rc.5.tgz": "packages/core/agent/package.json",
+    "dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz": "packages/client/ui-workspace/package.json",
     "dsh-packages/deepseek-ai-dsh-subagent-0.1.0-rc.5.tgz": "packages/subagent/subagent/package.json",
     "dsh-packages/deepseek-ai-dsh-subagent-in-process-driver-0.1.0-rc.5.tgz": "packages/subagent/subagent-in-process-driver/package.json",
     "dsh-packages/deepseek-ai-dsh-api-remotes-0.1.0-rc.5.tgz": "packages/api/remotes/package.json",
@@ -428,6 +434,7 @@
     "agent-presets/kennel/agent.cordis.yml": "71c878d965e5a8c995e501447f7cacb758de7f7103cc83039c0a137041a8ff5e",
     "agent-presets/kennel/kennel-context.mjs": "54443a5f1dc37b567f00e113a8943e30c11f30f257a654d94ced4664c9447b20",
     "agent-presets/kennel/preset.yml": "e53f75176a50c86dddff928a4f2e70e52286aeb8ae1e962b389e28af2d11c8eb",
+    "dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz": "78bac3ab0bdcaba35ab0cb199bc847efcbba9c0cf6a28bb0a77a3ea14f9515ea",
     "scheduling-evidence-python/LICENSE-WineChord-Codex-Radar": "5e3c7d3539fd4f5ed943bfb143c2e02cd384add58a7f6fa8aaa97b0fbde54012",
     "scheduling-evidence-python/ai_frontier_provider/__init__.py": "408900f23085a7436ba3bbcbfc586a894bf435106bd7156889442b0d5f2352b9",
     "scheduling-evidence-python/ai_frontier_provider/cli.py": "8b8e88e3a64e45513a437447107b90920d063eeec4b6930a89ea992757e0eef0",

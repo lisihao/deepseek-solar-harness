@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-04-kennel-workspace-navigation.md
-2026-10-04-kennel-workspace-navigation.md: 7083b44e21fcd9a4c4ec5af4b54072345f512284
-2026-10-04-kennel-workspace-navigation.zh.md: f33d030bec0fad97237799db494e242dc00b0288
+2026-10-04-kennel-workspace-navigation.md: 79fe973087ef3b4ae09a6430b90c1238aa55502a
+2026-10-04-kennel-workspace-navigation.zh.md: 11ed616d11c9eb06979e9464c590b6ea71e6d224

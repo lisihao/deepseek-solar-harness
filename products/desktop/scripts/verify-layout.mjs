@@ -57,6 +57,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-session-projection-cache',
   '@deepseek-ai/dsh-session-persistence',
   '@deepseek-ai/dsh-session-title',
+  '@deepseek-ai/dsh-client-ui-workspace',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-llm-deepseek',

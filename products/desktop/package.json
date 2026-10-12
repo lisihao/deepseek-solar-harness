@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "3.41.0",
+  "version": "3.42.0",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -65,7 +65,7 @@
     "@deepseek-ai/dsh-client-ui-trajectory": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-trajectory-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-user-questions": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-workflow-run": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-workspace": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-workspace": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-web-react": "0.1.0-rc.6",
     "@deepseek-ai/dsh-cmdline": "0.1.0-rc.6",
     "@deepseek-ai/dsh-code-runtime": "0.1.0-rc.6",
