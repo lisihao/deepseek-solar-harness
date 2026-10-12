@@ -7,6 +7,7 @@ import { Button, MarkdownText, Pill } from '@deepseek-ai/dsh-client-ui-primitive
 import { decodeKennelMessage, type KennelRecipient } from '../recipient-message.ts'
 import { GOUZI_ROLE_COPY, GOUZI_STATE_COPY, type GouziRoomSnapshotV1, type GouziRoomTaskV1, type GouziRoomNodeV1, type GouziRoomResultV1 } from '../contracts.ts'
 import { GouziAvatarImage } from './avatars.tsx'
+import { KennelThreads, type KennelThreadActions } from './KennelThreads.tsx'
 import type { KennelRoomReadState } from './room-source.ts'
 import type { KennelRoomStore } from './room-store.ts'
 import css from './KennelRoom.module.css'
@@ -18,6 +19,8 @@ export interface KennelRoomInjected {
   readEvidence: (runId: string, ref: string) => Promise<unknown>
   loadOlder: () => Promise<void>
   reload: () => Promise<void>
+  /** Thread list actions: switching, starting, renaming, and archiving kennel conversations. */
+  threads: KennelThreadActions
 }
 type RoomBusinessProps = PropsStore<KennelRoomStore> & InjectFace<KennelRoomInjected>
 /** Header props derive from the header's own slot currency. */
@@ -136,13 +139,14 @@ export function KennelRoomHeader({ useRoom, useWorkspaces, useSessions, sessionI
 }
 
 /** @param props - framework room props. @returns persistent members and exact-session task cards. */
-export function KennelRoomAside({ useRoom, useStore, actions }: KennelRoomAsideProps) {
+export function KennelRoomAside({ useRoom, useStore, actions, useSessions, useWorkspaces, threads }: KennelRoomAsideProps) {
   const state = useRoom(s => s)
   const filter = useStore(s => s.filter)
   const recipient = useStore(s => s.recipient)
   const expanded = useStore(s => s.expandedEvidence)
   const room = state.room
   return <aside className={css.aside} aria-label="房间成员与任务">
+    <KennelThreads useSessions={useSessions} useWorkspaces={useWorkspaces} actions={threads} />
     <details open className={css.section}><summary>房间成员</summary>
       <div className={css.filters}><Button size="sm" variant={filter === 'all' ? 'outline' : 'ghost'} onClick={() => { actions.filter('all') }}>全部</Button><Button size="sm" onClick={() => { actions.filter('manager') }}>总管</Button></div>
       <p className={css.muted}>我 · 总管</p>

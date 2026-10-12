@@ -80,6 +80,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     insertSessionBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
+    useHiddenSessions: bindSnapshotSelector({ getSnapshot: () => undefined, subscribe: () => () => {} }),
     renderSlot: ((_name: string, owner: { open: boolean }) => (owner.open ? <div data-testid="directory-flow" /> : null)) as never,
     t,
     ...overrides,
@@ -712,6 +713,36 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByRole('menu')).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'alpha' })).toBeNull()
     expect(screen.getByTestId('directory-flow')).toBeTruthy()
+  })
+
+  it('lists no session a plugin hides, in grouped, flat, and search views, and shows it again when the rule goes', async () => {
+    let rule: ((session: SessionSummary) => boolean) | undefined = session => session.agentPreset === 'room'
+    const listeners = new Set<() => void>()
+    const useHiddenSessions = bindSnapshotSelector({
+      getSnapshot: () => rule,
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    })
+    const sessions = sessionState([summary('chat', 2), summary('room-thread', 3, { agentPreset: 'room' })])
+    const b = mount({
+      useSessions: hook(sessions), useWorkspaces: hook(workspaceState([workspace('alpha', ['chat', 'room-thread'])])), useHiddenSessions,
+      searchSessions: vi.fn(async () => ({ items: [{ sessionId: sid('room-thread'), snippet: 'x' }], hasMore: false })),
+    })
+    b.store.actions.setGroupExpanded('alpha', true)
+    expect(await screen.findByText('chat')).toBeTruthy()
+    expect(screen.queryByText('room-thread')).toBeNull()
+
+    b.store.actions.setGroupBy('flat')
+    expect(await screen.findByText('chat')).toBeTruthy()
+    expect(screen.queryByText('room-thread')).toBeNull()
+
+    const box = screen.getByPlaceholderText('搜索会话…')
+    fireEvent.change(box, { target: { value: 'room' } })
+    await waitFor(() => { expect(b.props.searchSessions).toHaveBeenCalled() })
+    expect(screen.queryByText('room-thread')).toBeNull()
+    fireEvent.change(box, { target: { value: '' } })
+
+    act(() => { rule = undefined; for (const listener of listeners) listener() })
+    expect(await screen.findByText('room-thread')).toBeTruthy()
   })
 
   it('hides the add button when no directory-flow occupant is composed', () => {

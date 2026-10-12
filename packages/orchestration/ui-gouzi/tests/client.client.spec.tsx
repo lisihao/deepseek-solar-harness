@@ -2,10 +2,10 @@
 import { useState } from 'react'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionRuntime, SlotRegistry, WorkspaceRuntime } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
+import { apply, createKennelThread, GouziAvatarImage, GouziManager, inject, KennelEntry, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
 import type { GouziFolders } from '../src/client/index.ts'
 import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection, type GouziRoomSnapshotV1 } from '../src/contracts.ts'
 
@@ -704,7 +704,7 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
 describe('the kennel row', () => {
   it('shows the dogs and how many are awake, and opens the kennel on click', async () => {
     const harness = fakeRequest({ roster: dashboard([member(), member({ gouziId: 'g2', name: 'Pixel', connection: 'unreachable', state: 'unreachable' })]) })
-    const open = vi.fn(async () => undefined)
+    const open = vi.fn(async () => ({ kind: 'opened' as const, threadId: 't1' as never }))
     render(<KennelEntry wide request={harness.request} open={open} />)
     expect(await screen.findByText('1/2')).toBeTruthy()
     expect(screen.getAllByRole('img')).toHaveLength(2)
@@ -714,7 +714,7 @@ describe('the kennel row', () => {
 
   it('invites the user to adopt when there are no dogs, and keeps the collapsed form label-free', async () => {
     const harness = fakeRequest({ roster: dashboard([]) })
-    render(<KennelEntry wide={false} request={harness.request} open={vi.fn(async () => undefined)} />)
+    render(<KennelEntry wide={false} request={harness.request} open={vi.fn(async () => ({ kind: 'opened' as const, threadId: 't1' as never }))} />)
     await waitFor(() => { expect(harness.calls).toHaveBeenCalled() })
     expect(screen.getByRole('button', { name: '狗窝' }).textContent).toBe('')
     expect(screen.getAllByRole('img')).toHaveLength(1)
@@ -723,13 +723,51 @@ describe('the kennel row', () => {
   it('stays disabled while opening and shows why it could not open', async () => {
     const harness = fakeRequest({ roster: dashboard([member()]) })
     let release: (() => void) | undefined
-    const open = vi.fn(() => new Promise<void>((resolveOpen, rejectOpen) => { release = () => { rejectOpen(new Error('没能新建狗窝会话')) }; void resolveOpen }))
+    const open = vi.fn(() => new Promise<never>((_resolveOpen, rejectOpen) => { release = () => { rejectOpen(new Error('没能新建狗窝会话')) } }))
     render(<KennelEntry wide request={harness.request} open={open} />)
     fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
     await waitFor(() => { expect(screen.getByRole('button', { name: '狗窝' })).toHaveProperty('disabled', true) })
     release?.()
     expect((await screen.findByRole('alert')).textContent).toContain('没能新建狗窝会话')
     expect(screen.getByRole('button', { name: '狗窝' })).toHaveProperty('disabled', false)
+  })
+
+  it('says so when the user is already in a kennel thread, then drops the note by itself', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const harness = fakeRequest({ roster: dashboard([member()]) })
+      const open = vi.fn(async () => ({ kind: 'already' as const, threadId: 't1' as never }))
+      render(<KennelEntry wide request={harness.request} open={open} />)
+      fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
+      expect((await screen.findByRole('status')).textContent).toContain('已经在狗窝里')
+      expect(screen.queryByRole('alert')).toBeNull()
+      await act(async () => { await vi.advanceTimersByTimeAsync(6_000) })
+      expect(screen.queryByRole('status')).toBeNull()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('stops waiting for an open that never settles, says why, and can be tried again', async () => {
+    const harness = fakeRequest({ roster: dashboard([member()]) })
+    const open = vi.fn(() => new Promise<never>(() => {}))
+    render(<KennelEntry wide request={harness.request} open={open} timeoutMs={40} />)
+    fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
+    expect(screen.getByRole('button', { name: '狗窝' })).toHaveProperty('disabled', true)
+    expect((await screen.findByRole('alert')).textContent).toContain('打开狗窝超时')
+    expect(screen.getByRole('button', { name: '狗窝' })).toHaveProperty('disabled', false)
+    fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
+    await waitFor(() => { expect(open).toHaveBeenCalledTimes(2) })
+    await waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
+  })
+
+  it('clears an earlier failure when the next attempt starts', async () => {
+    const harness = fakeRequest({ roster: dashboard([member()]) })
+    const open = vi.fn(async () => { throw new Error('狗窝要在一个工作区里开始：请先在侧栏添加一个工作区') })
+    render(<KennelEntry wide request={harness.request} open={open} />)
+    fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('先在侧栏添加一个工作区')
+    open.mockImplementationOnce(() => new Promise<never>(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: '狗窝' }))
+    await waitFor(() => { expect(screen.queryByRole('alert')).toBeNull() })
   })
 })
 
@@ -809,7 +847,7 @@ describe('openKennel', () => {
     expect(fake.raw.list.getSnapshot().current).toBe('new-kennel')
   })
 
-  it('reuses only the latest unarchived kennel in the target workspace with its history intact', async () => {
+  it('opens the most recently updated unarchived kennel thread of any project, with its history intact', async () => {
     const fake = fakeSessions({
       ids: ['old', 'a1', 'a2', 'archived', 'other'], current: 'old',
       byId: {
@@ -822,19 +860,43 @@ describe('openKennel', () => {
     })
     const before = fake.raw.list.getSnapshot().byId
     const { api, select } = fakeApi({ ok: true })
-    await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old', 'a1', 'a2', 'archived']), workspace('b', ['other'])], 'b', ['archived']), api })
-    expect(fake.raw.open).toHaveBeenCalledWith('a2')
+    const result = await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old', 'a1', 'a2', 'archived']), workspace('b', ['other'])], 'b', ['archived']), api })
+    expect(result).toEqual({ kind: 'opened', threadId: 'other' })
+    expect(fake.raw.open).toHaveBeenCalledWith('other')
     expect(fake.raw.create).not.toHaveBeenCalled()
     expect(select).not.toHaveBeenCalled()
     expect(fake.raw.list.getSnapshot().byId).toBe(before)
   })
 
-  it('preserves another workspace kennel while creating the target workspace kennel', async () => {
+  it('opens a thread from another project instead of creating one, and leaves that thread untouched', async () => {
     const fake = origin()
     fake.set({ ...fake.raw.list.getSnapshot(), ids: ['old', 'other'], byId: { ...fake.raw.list.getSnapshot().byId, other: { id: 'other', blank: false, updatedAt: 99, agentPreset: KENNEL_PRESET } } })
-    await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old']), workspace('b', ['other'])], 'b'), api: fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } }).api })
-    expect(fake.raw.create).toHaveBeenCalledWith({ workspaceId: 'a' })
+    const result = await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old']), workspace('b', ['other'])], 'b'), api: fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } }).api })
+    expect(result).toEqual({ kind: 'opened', threadId: 'other' })
+    expect(fake.raw.create).not.toHaveBeenCalled()
     expect(fake.raw.list.getSnapshot().byId.other).toMatchObject({ blank: false, agentPreset: KENNEL_PRESET })
+  })
+
+  it('changes nothing and says so when the current conversation already is a kennel thread', async () => {
+    const fake = fakeSessions({ ids: ['k1', 'k2'], current: 'k1', byId: {
+      k1: { id: 'k1', blank: false, updatedAt: 1, agentPreset: KENNEL_PRESET }, k2: { id: 'k2', blank: false, updatedAt: 9, agentPreset: KENNEL_PRESET },
+    } })
+    const { api, select } = fakeApi({ ok: true })
+    const result = await openKennel({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['k1', 'k2'])]), api })
+    expect(result).toEqual({ kind: 'already', threadId: 'k1' })
+    expect(fake.raw.open).not.toHaveBeenCalled()
+    expect(fake.raw.create).not.toHaveBeenCalled()
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('creates a thread in the chosen project with createKennelThread', async () => {
+    const fake = origin()
+    const { api, select } = fakeApi({ ok: true, value: { agentPreset: KENNEL_PRESET } })
+    const id = await createKennelThread({ sessions: fake.sessions, workspaces: kennelWorkspaces([workspace('a', ['old']), workspace('b', [])]), api }, 'b' as never)
+    expect(id).toBe('n')
+    expect(fake.raw.create).toHaveBeenCalledWith({ workspaceId: 'b' })
+    expect(select).toHaveBeenCalledWith({ sessionId: 'n', agentPreset: KENNEL_PRESET })
+    expect(fake.raw.open).toHaveBeenCalledWith('n')
   })
 
   it.each([['a', 'a'], ['missing', 'b'], [null, 'b']])('uses a valid recent workspace or the newest when the current session has no membership (%s)', async (recent, target) => {
@@ -914,7 +976,7 @@ describe('openKennel with the real client runtime', () => {
     expect(sessions.list.getSnapshot().byId[created]?.agentPreset).toBe(KENNEL_PRESET)
     expect(sessions.list.getSnapshot().byId[old]?.agentPreset).toBe('standard')
     expect(workspaces.list.getSnapshot().items[0]?.sessionIds).toEqual([old, created])
-    await openKennel({ sessions, workspaces, api: api as never })
+    expect(await openKennel({ sessions, workspaces, api: api as never })).toEqual({ kind: 'already', threadId: created })
     expect(create).toHaveBeenCalledOnce()
     expect(select).toHaveBeenCalledOnce()
     await expect({
@@ -946,7 +1008,7 @@ function requestUrl(input: string | URL | Request): URL {
   return input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url, 'http://localhost')
 }
 
-async function roomRegistration() {
+async function roomRegistration(filters?: { hide: (rule: (session: { agentPreset?: string }) => boolean) => () => void }) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
@@ -1002,6 +1064,7 @@ async function roomRegistration() {
   const workspaces = kennelWorkspaces([{ workspaceId: 'w', sessionIds: ['a', 'b'], updatedAt: 'now' }])
   ctx.provide('connection', { request, api: fakeApi({ ok: true }).api } as never)
   ctx.provide('workspaces', workspaces)
+  if (filters !== undefined) ctx.provide('sessionListFilters', filters as never)
   ctx.set('sessions', { ...fake.raw, scope, binding } as never)
   const blocks = new Map<string, { reason: string }>()
   class ScopedConversation extends Service {
@@ -1027,6 +1090,27 @@ async function roomRegistration() {
 }
 
 describe('Gouzi client registration', () => {
+  it('keeps kennel threads out of the workspace lists through the filter service, and lets go when it unloads', async () => {
+    const release = vi.fn()
+    const hide = vi.fn((_rule: (session: { agentPreset?: string }) => boolean) => release)
+    const h = await roomRegistration({ hide })
+    expect(hide).toHaveBeenCalledOnce()
+    const rule = hide.mock.calls[0]![0]
+    expect(rule({ agentPreset: KENNEL_PRESET })).toBe(true)
+    expect(rule({ agentPreset: 'standard' })).toBe(false)
+    expect(rule({})).toBe(false)
+    expect(release).not.toHaveBeenCalled()
+    await h.fiber.dispose()
+    expect(release).toHaveBeenCalledOnce()
+  })
+
+  it('still works with a workspace browser that has no filter service', async () => {
+    const h = await roomRegistration()
+    try {
+      expect(h.slots.entries('sidebar.footer.action')).toHaveLength(1)
+    } finally { await h.fiber.dispose() }
+  })
+
   it('sends ordinary text through a real SessionRuntime scope without requiring property injection', async () => {
     const h = await roomRegistration()
     try {
@@ -1061,9 +1145,11 @@ describe('Gouzi client registration', () => {
     const h = await roomRegistration()
     const sidebar = h.slots.entries('sidebar.footer.action')
     expect(sidebar.map(entry => [entry.options.id, entry.options.order])).toEqual([['kennel', 90]])
-    const row = (sidebar[0]!.inject as () => { request: unknown; open: () => Promise<void> })()
+    const row = (sidebar[0]!.inject as () => { request: unknown; open: () => Promise<{ kind: string; threadId: string }> })()
     expect(row.request).toBe(h.request)
-    await row.open(); expect(h.fake.raw.open).toHaveBeenCalledWith('a')
+    // The current conversation is already a kennel thread, so entering the kennel changes nothing and says so.
+    expect(await row.open()).toEqual({ kind: 'already', threadId: 'a' })
+    expect(h.fake.raw.open).not.toHaveBeenCalled()
     const settings = h.slots.entries('settings.section')
     expect(settings.map(entry => [entry.options.id, entry.options.order])).toEqual([['gouzi', 38]])
     expect((settings[0]!.options.label as () => string)()).toBe('狗子')
@@ -1083,7 +1169,7 @@ describe('Gouzi client registration', () => {
       expect(select({ agentPreset: undefined, blank: true })).toBe(null)
       const injected = (entry.inject as unknown as (id: SessionId) => import('../src/client/KennelRoom.tsx').KennelRoomInjected)('a' as SessionId)
       expect(injected.hooks.room).toBe(h.face('a').hooks.room)
-      expect(Object.keys(injected).sort()).toEqual(['hooks', 'loadOlder', 'readEvidence', 'reload', 'send'])
+      expect(Object.keys(injected).sort()).toEqual(['hooks', 'loadOlder', 'readEvidence', 'reload', 'send', 'threads'])
     }
     expect(h.face('a').hooks.room).not.toBe(h.face('b').hooks.room)
     const handle = h.content.store as ReturnType<typeof import('../src/client/room-store.ts').createKennelRoomStore>

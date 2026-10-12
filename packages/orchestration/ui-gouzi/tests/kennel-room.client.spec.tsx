@@ -25,8 +25,9 @@ function harness() {
   const readEvidence = vi.fn(async (_runId: string, _ref: string) => ({ actual: true }))
   const loadOlder = vi.fn(async () => {})
   const reload = vi.fn(async () => {})
-  const props = { useRoom: bindSnapshotSelector(state), useStore: bindSnapshotSelector(store), actions: store.actions, useSession: bindSnapshotSelector(session), useSessions: bindSnapshotSelector(createSnapshotStore({ byId: { s: { cwd: '/work/room' } } })), useWorkspaces: bindSnapshotSelector(createSnapshotStore({ items: [{ title: '项目', sessionIds: ['s'] }] })), sessionId: 's', inert: false, blocked: undefined, send, readEvidence, loadOlder, reload } as unknown as KennelRoomProps & KennelRoomComposerProps
-  return { state, store, session, send, readEvidence, loadOlder, reload, props }
+  const threads = { open: vi.fn(), create: vi.fn(async () => {}), rename: vi.fn(async () => {}), archive: vi.fn(async () => {}) }
+  const props = { useRoom: bindSnapshotSelector(state), useStore: bindSnapshotSelector(store), actions: store.actions, useSession: bindSnapshotSelector(session), useSessions: bindSnapshotSelector(createSnapshotStore({ ids: ['s'], byId: { s: { id: 's', displayTitle: '讨论', agentPreset: 'kennel', cwd: '/work/room', blank: false, running: false, updatedAt: 5 } }, current: 's' })), useWorkspaces: bindSnapshotSelector(createSnapshotStore({ items: [{ workspaceId: 'w1', title: '项目', path: '/work/room', sessionIds: ['s'], createdAt: 'now', updatedAt: 'now' }], archivedSessionIds: [], recentWorkspaceId: undefined })), sessionId: 's', inert: false, blocked: undefined, send, readEvidence, loadOlder, reload, threads } as unknown as KennelRoomProps & KennelRoomComposerProps
+  return { state, store, session, send, readEvidence, loadOlder, reload, threads, props }
 }
 function patchRoom(h: ReturnType<typeof harness>, edit: (current: GouziRoomSnapshotV1) => GouziRoomSnapshotV1): void {
   const state = h.state.getSnapshot()
@@ -169,7 +170,7 @@ describe('kennel room interaction', () => {
   it('keeps two members visible and filters independently from stable recipient identity', () => {
     const h = harness(); all(h)
     expect(screen.getByRole('heading', { name: '狗窝' })).toBeTruthy()
-    expect(screen.getByText('项目')).toBeTruthy()
+    expect(within(screen.getByRole('heading', { name: '狗窝' }).closest('header')!).getByText('项目')).toBeTruthy()
     point(); fireEvent.click(screen.getByRole('button', { name: '查看 同名 · 机器1 · 开发 的消息' }))
     expect(h.store.getSnapshot()).toMatchObject({ filter: 'g2', recipient: { gouziId: 'g1', generation: 1 } })
     expect(screen.getAllByRole('button', { name: /^发给 同名 · 机器/ })).toHaveLength(2)
@@ -630,5 +631,95 @@ describe('kennel room labels', () => {
     patchRoom(h, current => ({ ...current, tasks: [taskOf('r', '任务', 'g1', sealed('g1', '', true))] as never }))
     const { container } = all(h)
     expect(container.textContent).toContain('这次执行没有文字输出')
+  })
+})
+
+describe('kennel threads', () => {
+  const thread = (id: string, title: string, updatedAt: number, patch: Record<string, unknown> = {}) => ({
+    id, displayTitle: title, agentPreset: 'kennel', cwd: '/work/room', blank: false, running: false, updatedAt, ...patch,
+  })
+  const workspace = (workspaceId: string, title: string, sessionIds: string[]) => ({ workspaceId, title, path: `/work/${title}`, sessionIds, createdAt: 'now', updatedAt: 'now' })
+  const projects = () => [workspace('w1', '甲项目', ['t1', 't2']), workspace('w2', '乙项目', ['t3'])]
+  function threadHarness(sessions: Array<Record<string, unknown>>, current: string, workspaces = projects(), archived: string[] = []) {
+    const h = harness()
+    const ids = sessions.map(session => String(session.id))
+    const byId = Object.fromEntries(sessions.map(session => [String(session.id), session]))
+    h.props.useSessions = bindSnapshotSelector(createSnapshotStore({ ids, byId, current })) as never
+    const known = { items: workspaces, archivedSessionIds: archived, recentWorkspaceId: undefined }
+    h.props.useWorkspaces = bindSnapshotSelector(createSnapshotStore(known)) as never
+    return h
+  }
+  const list = () => within(screen.getByRole('list', { name: '狗窝话题' }))
+
+  it('lists every kennel thread across projects, newest first, with its project, and marks the current one', () => {
+    const h = threadHarness([thread('t1', '评审方案', 10), thread('t2', '周报', 30), thread('t3', '调研', 20), { ...thread('x', '普通会话', 99), agentPreset: undefined }], 't3')
+    all(h)
+    const rows = screen.getAllByRole('listitem').filter(row => row.closest('ul')?.getAttribute('aria-label') === '狗窝话题')
+    expect(rows.map(row => row.querySelector('strong')?.textContent)).toEqual(['周报', '调研', '评审方案'])
+    expect(rows[0]!.textContent).toContain('甲项目')
+    expect(rows[1]!.textContent).toContain('乙项目')
+    expect(list().getByRole('button', { name: /^调研/ }).getAttribute('aria-current')).toBe('true')
+    expect(list().queryByText('普通会话')).toBeNull()
+  })
+
+  it('leaves out archived threads and a blank thread nobody has written in, unless it is the current one', () => {
+    const everything = [workspace('w1', '甲项目', ['t1', 't2', 't3', 't4'])]
+    const h = threadHarness([thread('t1', '保留', 10), thread('t2', '已归档', 20), thread('t3', '', 30, { blank: true }), thread('t4', '空白当前', 40, { blank: true })], 't4', everything, ['t2'])
+    all(h)
+    expect(list().queryByText('已归档')).toBeNull()
+    expect(list().getAllByRole('button', { name: /^新话题/ })).toHaveLength(1)
+    expect(list().getByText('保留')).toBeTruthy()
+  })
+
+  it('switches thread on click, and does nothing for the thread already open', () => {
+    const h = threadHarness([thread('t1', '评审方案', 10), thread('t2', '周报', 30)], 't2')
+    all(h)
+    fireEvent.click(list().getByRole('button', { name: /^周报/ }))
+    expect(h.threads.open).not.toHaveBeenCalled()
+    fireEvent.click(list().getByRole('button', { name: /^评审方案/ }))
+    expect(h.threads.open).toHaveBeenCalledExactlyOnceWith('t1')
+  })
+
+  it('starts a thread in the chosen project, defaulting to the current thread project', async () => {
+    const h = threadHarness([thread('t1', '评审方案', 10), thread('t3', '调研', 20)], 't3')
+    all(h)
+    const select = screen.getByRole('combobox', { name: /项目/ })
+    expect(select).toHaveProperty('value', 'w2')
+    fireEvent.click(screen.getByRole('button', { name: '新话题' }))
+    await waitFor(() => { expect(h.threads.create).toHaveBeenCalledWith('w2') })
+    fireEvent.change(select, { target: { value: 'w1' } })
+    fireEvent.click(screen.getByRole('button', { name: '新话题' }))
+    await waitFor(() => { expect(h.threads.create).toHaveBeenLastCalledWith('w1') })
+  })
+
+  it('renames a thread, and shows why a rename or a new thread failed', async () => {
+    const h = threadHarness([thread('t1', '评审方案', 10)], 't1')
+    all(h)
+    fireEvent.click(screen.getByRole('button', { name: '重命名 评审方案' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '话题名称' }), { target: { value: '  发布评审  ' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(h.threads.rename).toHaveBeenCalledExactlyOnceWith('t1', '发布评审') })
+    h.threads.create.mockRejectedValueOnce(new Error('Host 拒绝了狗窝配置'))
+    fireEvent.click(screen.getByRole('button', { name: '新话题' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('Host 拒绝了狗窝配置')
+  })
+
+  it('archives a thread and moves to another one when the current thread is archived', async () => {
+    const h = threadHarness([thread('t1', '评审方案', 10), thread('t2', '周报', 30)], 't2')
+    all(h)
+    fireEvent.click(screen.getByRole('button', { name: '归档 周报' }))
+    await waitFor(() => { expect(h.threads.archive).toHaveBeenCalledExactlyOnceWith('t2') })
+    await waitFor(() => { expect(h.threads.open).toHaveBeenCalledExactlyOnceWith('t1') })
+    fireEvent.click(screen.getByRole('button', { name: '归档 评审方案' }))
+    await waitFor(() => { expect(h.threads.archive).toHaveBeenCalledTimes(2) })
+    expect(h.threads.open).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains an empty list and a missing project instead of offering a dead button', () => {
+    const h = threadHarness([], 'none', [])
+    all(h)
+    expect(screen.getByText(/还没有话题/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '新话题' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('combobox', { name: /项目/ }).textContent).toContain('还没有工作区')
   })
 })

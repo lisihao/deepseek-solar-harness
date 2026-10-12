@@ -27,3 +27,5 @@ The outward browser `ISessions` interface explicitly declares workspace-scoped `
 A kennel click retains the selected workspace without asking the user to select it again. Each workspace keeps its own kennel conversation, while the kennel remains an ordinary session composed from the existing preset. This changes browser navigation and explicitly declares the existing workspace-scoped create operation on `ISessions`; it changes neither the creation implementation nor its writer and introduces no second Scheduler.
 
 The typed creation result establishes session identity, not task execution or acceptance. This decision does not demonstrate installed UI behavior, actual GUI acceptance, or a remote native worker reading repository contents.
+
+Reusing one kennel session per workspace has since been replaced by the cross-project [thread space](../feature/2026-10-12-kennel-thread-space.md); choosing the target workspace and creating through the workspace-scoped operation are unchanged.

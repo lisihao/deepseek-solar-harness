@@ -34,6 +34,16 @@
 .comment { flex-basis: 100%; }
 .comment summary { cursor: pointer; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .task { border-top: 1px solid var(--dsw-alias-border-l2); margin-top: 8px; padding-top: 6px; }
+.threads { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.thread { display: flex; align-items: center; gap: 4px; }
+.thread > * { min-width: 0; }
+.aside .threadOpen { flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 8px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; color: inherit; cursor: pointer; }
+.threadOpen strong, .threadOpen span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.threadOpen[aria-current='true'] { border-color: var(--dsw-alias-brand-primary); }
+.renameThread, .newThread { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
+.newThread { margin-top: 4px; }
+.newThread select { max-width: 150px; margin-left: 6px; }
+.error { color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 18px; }
 .muted, .empty { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
 .empty { padding: 16px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; }
 .error { color: var(--dsw-alias-state-error-primary); margin: 4px 0; padding: 0 12px; }

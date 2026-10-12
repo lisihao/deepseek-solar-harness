@@ -262,6 +262,26 @@
       "kind": "migration-debt",
       "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
     },
+    "packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx": {
+      "kind": "seam",
+      "note": "seam: ctx.sessionListFilters lets a plugin keep its own sessions out of the workspace lists; the browser knows no session kind"
+    },
+    "packages/client/ui-workspace/src/client/contract/slots.ts": {
+      "kind": "seam",
+      "note": "seam: ctx.sessionListFilters lets a plugin keep its own sessions out of the workspace lists; the browser knows no session kind"
+    },
+    "packages/client/ui-workspace/src/client/index.ts": {
+      "kind": "seam",
+      "note": "seam: ctx.sessionListFilters lets a plugin keep its own sessions out of the workspace lists; the browser knows no session kind"
+    },
+    "packages/client/ui-workspace/src/client/tree.ts": {
+      "kind": "seam",
+      "note": "seam: ctx.sessionListFilters lets a plugin keep its own sessions out of the workspace lists; the browser knows no session kind"
+    },
+    "packages/client/ui-workspace/src/invariant.ts": {
+      "kind": "seam",
+      "note": "invariant explanation covers the session list filter registry"
+    },
     "packages/client/web/src/app-shell.ts": {
       "kind": "migration-debt",
       "note": "feat: ship dual-mode workbench orchestration"

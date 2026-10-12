@@ -16,6 +16,7 @@
     "src/client/index.ts",
     "src/client/kennel.ts",
     "src/client/KennelEntry.tsx",
+    "src/client/KennelThreads.tsx",
     "src/client/RemoteFolderPicker.tsx",
     "src/client/KennelRoom.tsx",
     "src/client/room-source.ts",
@@ -49,6 +50,9 @@
     },
     {
       "path": "../../client/ui-slots"
+    },
+    {
+      "path": "../../client/ui-workspace"
     }
   ]
 }
