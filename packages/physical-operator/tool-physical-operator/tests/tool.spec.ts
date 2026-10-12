@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
@@ -15,6 +15,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorStartRequest,
 } from '@deepseek-ai/dsh-physical-operator'
 import * as tool from '../src/index.ts'
+import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
 function fakeAgent(): Agent {
   const session = Session.create(SessionId(`parent-${++agents}`))
@@ -193,6 +194,57 @@ describe('physical_operator tool', () => {
       signal,
     })
     expect(operator.disposed).toBe(1)
+  })
+
+  it.each(['ephemeral', 'resident'] as const)('rejects a registered Gouzi id in %s mode before any handoff side effects', async (mode) => {
+    const operator = new ScriptedOperator()
+    operator.descriptor.id = PhysicalOperatorId('gouzi.gouzi-b7a1.codex')
+    const { ctx } = await setup(operator)
+    const parent = fakeAgent()
+    parent.session.append('request/header', {
+      header: { config: { provider: 'deepseek', model: 'deepseek' }, system: 'fixture system' },
+      reason: 'initial',
+    })
+    const eventsBefore = [...parent.session.events]
+    const assemble = vi.spyOn(ctx.systemPrompt, 'assemble')
+    const derive = vi.spyOn(parent.session, 'deriveMessages')
+    const bind = vi.spyOn(PhysicalOperatorModelToolBridge.prototype, 'bind')
+    const start = vi.spyOn(ctx.physicalOperators, 'start')
+    try {
+      const result = await call(ctx, {
+        action: 'run', operator_id: String(operator.descriptor.id), description: 'read repository',
+        prompt: 'Read README and report its purpose.', mode,
+      }, { agent: parent })
+      expect(result.isError).toBe(true)
+      if (!result.isError) throw new Error('expected TaskGraph-only rejection')
+      expect(result.error.info).toEqual({ name: 'PhysicalOperatorError', code: 'OPERATOR_MODE_UNSUPPORTED' })
+      expect(text(result)).toContain('TaskGraph-only')
+      expect(text(result)).toContain('orchestration.start')
+      expect(text(result)).toContain("TaskGraph node's operator.preferredIds")
+      expect(text(result)).toContain('physical_operator cannot dispatch it directly')
+      expect(assemble).not.toHaveBeenCalled()
+      expect(derive).not.toHaveBeenCalled()
+      expect(bind).not.toHaveBeenCalled()
+      expect(start).not.toHaveBeenCalled()
+      expect(operator.lastRequest).toBeUndefined()
+      expect(operator.disposed).toBe(0)
+      expect(parent.session.events).toEqual(eventsBefore)
+    } finally {
+      assemble.mockRestore()
+      derive.mockRestore()
+      bind.mockRestore()
+      start.mockRestore()
+    }
+  })
+
+  it('still requires a calling agent before diagnosing a Gouzi-only execution id', async () => {
+    const { ctx, operator } = await setup()
+    const result = await call(ctx, {
+      action: 'run', operator_id: 'gouzi.gouzi-b7a1.codex', description: 'read repository', prompt: 'Read README.',
+    }, { agent: undefined })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('requires a calling agent')
+    expect(operator.lastRequest).toBeUndefined()
   })
 
   it('requires exact run fields and a calling agent without silently ignoring list fields', async () => {

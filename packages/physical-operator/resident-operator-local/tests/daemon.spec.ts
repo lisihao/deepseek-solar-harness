@@ -1,18 +1,26 @@
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { DatabaseSync } from 'node:sqlite'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
+import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
+import { createCodexRlmToolHandler } from '../src/drivers.ts'
+import { JsonRpcLineTransport, LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
 import type {
+  ResidentTurnResult,
   ResidentDriverExecuteRequest,
   ResidentDriverCompactRequest,
   ResidentProductDriver,
+  ResidentProviderQueryOptions,
   ResidentProviderStatus,
 } from '@deepseek-ai/dsh-resident-operator'
 import {
   ResidentOperatorError,
+  ResidentCommandRefusal,
+  ResidentOperatorCommandId,
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -20,7 +28,7 @@ import { ResidentDaemonClient } from '../src/client.ts'
 import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
 import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
 import { unwrapWire } from '../src/protocol.ts'
-import { ResidentStore } from '../src/store.ts'
+import { canonicalRequestHash, ResidentStore } from '../src/store.ts'
 
 const CODEX_VERSION = 'codex-cli 0.151.0'
 const CODEX_SCHEMA_SHA256 = '2442b15801bc019ad55987ad03e0f0ae60c51417825b9b6d708db640e6c2651c'
@@ -32,6 +40,15 @@ const MODELS = [{
   description: 'Balanced everyday test model',
   supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'] as const,
   defaultEffort: 'medium' as const,
+  isDefault: true,
+  supportsAdaptiveThinking: false,
+}]
+const REFRESHED_MODELS = [{
+  model: 'gpt-refreshed',
+  displayName: 'GPT Refreshed',
+  description: 'Fresh model catalog',
+  supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'] as const,
+  defaultEffort: 'high' as const,
   isDefault: true,
   supportsAdaptiveThinking: false,
 }]
@@ -260,7 +277,7 @@ class MemoryDriver implements ResidentProductDriver {
     })
   }
 
-  async execute(request: ResidentDriverExecuteRequest) {
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId?: string }> {
     this.commandIds.push(String(request.commandId))
     this.profiles.push(request.profile)
     this.systemPrompts.push(request.systemPrompt)
@@ -306,6 +323,7 @@ class BlockingQualificationDriver extends MemoryDriver {
   qualificationCount = 0
   activeQualifications = 0
   maximumActiveQualifications = 0
+  readonly qualificationOptions: Array<ResidentProviderQueryOptions | undefined> = []
   readonly blockingQualificationEntered: Promise<void>
   readonly releaseQualification: () => void
   private readonly markBlockingQualificationEntered: () => void
@@ -326,8 +344,9 @@ class BlockingQualificationDriver extends MemoryDriver {
     this.blockQualifications = true
   }
 
-  override async qualify(): Promise<ResidentProviderStatus> {
+  override async qualify(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus> {
     this.qualificationCount += 1
+    this.qualificationOptions.push(options)
     this.activeQualifications += 1
     this.maximumActiveQualifications = Math.max(this.maximumActiveQualifications, this.activeQualifications)
     try {
@@ -335,7 +354,8 @@ class BlockingQualificationDriver extends MemoryDriver {
         this.markBlockingQualificationEntered()
         await this.qualificationReleased
       }
-      return await super.qualify()
+      const status = await super.qualify()
+      return options?.refreshModels === true ? { ...status, models: REFRESHED_MODELS } : status
     } finally {
       this.activeQualifications -= 1
     }
@@ -567,6 +587,109 @@ function client(root: string): ResidentDaemonClient {
 }
 
 describe('ResidentDaemon', () => {
+  it('inspects durable commands read-only through the daemon before and after settlement', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new BlockingDriver()
+    const execute = vi.spyOn(driver, 'execute')
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const commandId = ResidentOperatorCommandId('receipt-inspection')
+    try {
+      await expect(connected.inspectCommand(commandId)).resolves.toBeUndefined()
+      await expect(qualifiedRawRequest(daemon.socketPath, 'command.inspect', { command_id: commandId })).resolves.toBeNull()
+      expect(await connected.list()).toEqual([])
+      expect(execute).not.toHaveBeenCalled()
+      const turn = await connected.execute({
+        commandId, operatorId: 'codex', workspace,
+        prompt: [{ type: 'text', text: 'inspect receipt' }], signal: new AbortController().signal,
+      })
+      const before = await connected.inspectTurn(turn.turnId)
+      const sessions = await connected.list()
+      const events = await connected.readEvents(turn.sessionId)
+      expect(await connected.inspectCommand(commandId)).toEqual(before)
+      await expect(connected.execute({
+        commandId, operatorId: 'codex', workspace,
+        prompt: [{ type: 'text', text: 'conflicting replay' }], signal: new AbortController().signal,
+      })).rejects.toBeInstanceOf(ResidentCommandRefusal)
+      expect(await connected.inspectCommand(commandId)).toEqual(before)
+      expect(await connected.list()).toEqual(sessions)
+      expect(await connected.readEvents(turn.sessionId)).toEqual(events)
+      expect(execute).toHaveBeenCalledTimes(1)
+      await connected.interrupt(turn.sessionId, turn.turnId)
+      await turn.result.catch(() => {})
+      const settled = await connected.inspectTurn(turn.turnId)
+      expect(settled.state).toBe('settled')
+      expect(await connected.inspectCommand(commandId)).toEqual(settled)
+      expect(execute).toHaveBeenCalledTimes(1)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('tags a correlated execute refusal but leaves lookup and local failures untagged', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new MemoryDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const commandId = ResidentOperatorCommandId('refused-command')
+    try {
+      await expect(connected.execute({
+        commandId, operatorId: 'missing-provider', workspace,
+        prompt: [{ type: 'text', text: 'never admitted' }], signal: new AbortController().signal,
+      })).rejects.toBeInstanceOf(ResidentCommandRefusal)
+      await expect(connected.inspectCommand(commandId)).resolves.toBeUndefined()
+      const lookupError = await connected.inspectTurn('missing-turn').catch((error: unknown) => error)
+      expect(lookupError).toBeInstanceOf(ResidentOperatorError)
+      expect(lookupError).not.toBeInstanceOf(ResidentCommandRefusal)
+      const localError = await connected.execute({
+        commandId, operatorId: 'codex', workspace: join(root, 'missing-workspace'),
+        prompt: [{ type: 'text', text: 'never sent' }], signal: new AbortController().signal,
+      }).catch((error: unknown) => error)
+      expect(localError).not.toBeInstanceOf(ResidentCommandRefusal)
+      expect(driver.commandIds).toEqual([])
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('does not tag an aborted execute RPC as refusal or treat concurrent absent lookup as final', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    await connected.ready()
+    driver.beginBlocking()
+    const signal = new AbortController()
+    const commandId = ResidentOperatorCommandId('delayed-admission')
+    const pending = connected.execute({
+      commandId, operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'admission continues after caller detaches' }], signal: signal.signal,
+    }).catch((error: unknown) => error)
+    try {
+      await driver.blockingQualificationEntered
+      await expect(connected.inspectCommand(commandId)).resolves.toBeUndefined()
+      signal.abort(new Error('caller stopped awaiting admission'))
+      const error = await pending
+      expect(error).toBeInstanceOf(Error)
+      expect(error).not.toBeInstanceOf(ResidentCommandRefusal)
+      driver.releaseQualification()
+      await expect.poll(async () => (await connected.inspectCommand(commandId))?.state).toBe('settled')
+      expect(driver.commandIds).toEqual([commandId])
+    } finally {
+      driver.releaseQualification()
+      await daemon.close()
+    }
+  })
+
   it('starts one Claude login only after read-only qualification proves auth is required', async () => {
     const root = temporaryRoot()
     const driver = new AuthRequiredClaudeDriver()
@@ -688,6 +811,55 @@ describe('ResidentDaemon', () => {
     } finally {
       driver.releaseQualification()
       await Promise.all([first, second])
+      await daemon.close()
+    }
+  })
+
+  it('queues one model refresh after a normal qualification and shares it across callers', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    await connected.ready()
+    driver.beginBlocking()
+    const ordinary = connected.providers()
+    try {
+      await driver.blockingQualificationEntered
+      const firstRefresh = connected.providers({ refreshModels: true })
+      const secondRefresh = connected.providers({ refreshModels: true })
+      await new Promise<void>(resolve => setTimeout(resolve, 25))
+      expect(driver.qualificationCount).toBe(1)
+      driver.releaseQualification()
+      const [ordinaryProviders, firstRefreshedProviders, secondRefreshedProviders] = await Promise.all([
+        ordinary,
+        firstRefresh,
+        secondRefresh,
+      ])
+      expect(ordinaryProviders[0]?.models).toEqual(MODELS)
+      expect(firstRefreshedProviders[0]?.models).toEqual(REFRESHED_MODELS)
+      expect(secondRefreshedProviders[0]?.models).toEqual(REFRESHED_MODELS)
+      expect(driver.qualificationOptions).toEqual([undefined, { refreshModels: true }])
+      expect(driver.qualificationCount).toBe(2)
+      expect(driver.maximumActiveQualifications).toBe(1)
+      expect(driver.commandIds).toEqual([])
+    } finally {
+      driver.releaseQualification()
+      await daemon.close()
+    }
+  })
+
+  it('rejects malformed model refresh intent before native qualification', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    try {
+      await expect(qualifiedRawRequest(daemon.socketPath, 'operator.list', { refresh_models: 'yes' }))
+        .rejects.toMatchObject({ code: 'INVALID_RESULT' })
+      expect(driver.qualificationCount).toBe(0)
+      expect(driver.commandIds).toEqual([])
+    } finally {
       await daemon.close()
     }
   })
@@ -831,6 +1003,9 @@ describe('ResidentDaemon', () => {
       instructions: 'retain architecture decisions',
     }
     const compacted = await connected.compact(request)
+    await expect(connected.inspectCommand(ResidentOperatorCommandId(request.commandId))).rejects.toMatchObject({
+      code: 'COMMAND_CONFLICT',
+    })
     expect(compacted).toMatchObject({
       nativeSessionId: 'native-1',
       session: {
@@ -1143,6 +1318,86 @@ describe('ResidentDaemon', () => {
     await daemon.close()
   })
 
+  it('records actual Driver inputs privately before execution and preserves them on daemon replay', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    const alias = join(root, 'workspace-alias')
+    mkdirSync(workspace)
+    symlinkSync(workspace, alias)
+    const readAdmission = () => {
+      const db = new DatabaseSync(join(root, 'state.sqlite'), { readOnly: true })
+      try {
+        return db.prepare('SELECT data_json FROM resident_events WHERE type = \'turn.accepted\'').all()
+          .map(row => JSON.parse(String(row.data_json)) as Record<string, unknown>)
+      } finally {
+        db.close()
+      }
+    }
+    class RecordedDriver extends MemoryDriver {
+      override async execute(request: ResidentDriverExecuteRequest) {
+        expect(readAdmission()[0]?.inputSnapshot).toEqual({
+          workspace: request.workspace, prompt: request.prompt, systemPrompt: request.systemPrompt,
+          nativeContext: { version: 1, digest: 'e'.repeat(64) }, nativeToolPolicy: request.nativeToolPolicy,
+        })
+        return super.execute(request)
+      }
+    }
+    const driver = new RecordedDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const request = {
+      commandId: 'private-admission', operatorId: 'codex', workspace: alias,
+      profile: { model: 'gpt-test', effort: 'medium' as const },
+      prompt: [{ type: 'text' as const, text: 'private sender task /private/tmp/source' }],
+      systemPrompt: 'private receiver system', nativeContext: { version: 1 as const, digest: 'e'.repeat(64) },
+      nativeToolPolicy: 'disabled' as const, signal: new AbortController().signal,
+    }
+    let turnId: string
+    try {
+      const connected = client(root)
+      const first = await connected.execute(request)
+      turnId = first.turnId
+      await first.result
+      const expectedInput = {
+        workspace: realpathSync(workspace), prompt: request.prompt, systemPrompt: request.systemPrompt,
+        nativeContext: request.nativeContext, nativeToolPolicy: request.nativeToolPolicy,
+      }
+      expect(readAdmission()[0]?.inputSnapshot).toEqual(expectedInput)
+      const db = new DatabaseSync(join(root, 'state.sqlite'), { readOnly: true })
+      try {
+        expect(db.prepare('SELECT request_hash FROM command_receipts WHERE command_id = ?').get(request.commandId))
+          .toMatchObject({ request_hash: canonicalRequestHash(
+            'codex', expectedInput.workspace, request.prompt, driver.profiles[0]!, undefined, 'legacy', undefined,
+            request.systemPrompt, request.nativeToolPolicy, request.nativeContext,
+          ) })
+      } finally {
+        db.close()
+      }
+      expect((await connected.readEvents(first.sessionId)).events
+        .find(event => event.type === 'turn.accepted')?.data).not.toHaveProperty('inputSnapshot')
+      const replay = await connected.execute(request)
+      expect(replay.turnId).toBe(first.turnId)
+      await replay.result
+      await expect(connected.execute({ ...request, systemPrompt: 'changed system' })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+      expect(readAdmission()).toHaveLength(1)
+      expect(driver.commandIds).toEqual(['private-admission'])
+    } finally {
+      await daemon.close()
+    }
+    const restartedDriver = new RecordedDriver()
+    const restarted = new ResidentDaemon({ root, drivers: [restartedDriver] })
+    await restarted.start()
+    try {
+      const replay = await client(root).execute(request)
+      expect(replay.turnId).toBe(turnId)
+      await replay.result
+      expect(readAdmission()).toHaveLength(1)
+      expect(restartedDriver.commandIds).toEqual([])
+    } finally {
+      await restarted.close()
+    }
+  })
+
   it('returns a settled receipt for an identical command and conflicts on a changed request', async () => {
     const root = temporaryRoot()
     const workspace = join(root, 'workspace')
@@ -1188,6 +1443,7 @@ describe('ResidentDaemon', () => {
     const connected = client(root)
     const first = await connected.execute({
       commandId: 'no-tools', operatorId: 'codex', workspace,
+      profile: { model: 'gpt-test', effort: 'medium' },
       prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'disabled',
       signal: new AbortController().signal,
     })
@@ -1195,6 +1451,7 @@ describe('ResidentDaemon', () => {
     expect(driver.nativeToolPolicies).toEqual(['disabled'])
     await expect(connected.execute({
       commandId: 'no-tools', operatorId: 'codex', workspace,
+      profile: { model: 'gpt-test', effort: 'medium' },
       prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'inherit',
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
@@ -1205,7 +1462,8 @@ describe('ResidentDaemon', () => {
       tools: [{ name: 'typescript_repl', description: 'Execute TypeScript.', inputSchema: { type: 'object' } }],
     }
     const bridged = await connected.execute({
-      commandId: 'rlm-tools', operatorId: 'codex', workspace,
+      commandId: 'rlm-tools', operatorId: 'codex', workspace, laneId: 'rlm-tools',
+      profile: { model: 'gpt-test', effort: 'medium' },
       prompt: [{ type: 'text', text: 'reason with the repl' }], nativeToolPolicy: 'disabled', modelToolBridge,
       signal: new AbortController().signal,
     })
@@ -1227,7 +1485,7 @@ describe('ResidentDaemon', () => {
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
     const authoritative = await connected.execute({
-      commandId: 'dsh-tools', operatorId: 'codex', workspace,
+      commandId: 'dsh-tools', operatorId: 'codex', workspace, laneId: 'dsh-tools',
       prompt: [{ type: 'text', text: 'use DSH tools' }], nativeToolPolicy: 'dsh-tools-authoritative',
       modelToolBridge: {
         version: 1, socketPath: join(root, 'bridge.sock'), sessionId: 'bridge-session',
@@ -1238,5 +1496,145 @@ describe('ResidentDaemon', () => {
     await authoritative.result
     expect(driver.nativeToolPolicies).toEqual(['disabled', 'disabled', 'dsh-tools-authoritative'])
     await daemon.close()
+  })
+})
+
+
+it.each(['dsh-tools-authoritative', 'disabled'] as const)('reattaches %s native callbacks without replaying the turn', async (policy) => {
+  const root = temporaryRoot()
+  const workspace = join(root, 'workspace')
+  mkdirSync(workspace)
+  const calls: string[] = []
+  const toolName = policy === 'disabled' ? 'typescript_repl' : 'echo'
+  const makeBridge = async (owner: string) => {
+    const socketPath = localIpcAddress(root, owner)
+    const server = new LocalJsonRpcRequestServer({ path: socketPath }, (method) => {
+      if (method === 'tool.describe') {
+        if (policy === 'disabled') throw new Error('RLM bridge only supports tool.call')
+        return Promise.resolve({ version: 1, sessionId: 'binding', tools: [toolName] })
+      }
+      calls.push(owner)
+      return Promise.resolve({ value: owner })
+    })
+    await server.start()
+    const descriptor: PhysicalOperatorModelToolBridgeV1 = {
+      version: 1, socketPath, sessionId: 'binding',
+      tools: [{ name: toolName, description: 'Echo through DSH', inputSchema: { type: 'object' } }],
+    }
+    return { server, descriptor }
+  }
+  const oldOwner = await makeBridge('old-owner')
+  const newOwner = await makeBridge('new-owner')
+  const firstCall = Promise.withResolvers<true>()
+  const resume = Promise.withResolvers<true>()
+  let executions = 0
+  class BridgedDriver extends MemoryDriver {
+    override async execute(request: ResidentDriverExecuteRequest) {
+      executions += 1
+      const bridge = request.modelToolBridge
+      if (bridge === undefined) throw new Error('expected bridge')
+      const handler = createCodexRlmToolHandler(String(request.commandId), bridge, request.signal, () => {
+        const current = request.modelToolBridge
+        if (current === undefined) throw new Error('bridge detached')
+        return current
+      })
+      request.onRunning('native-reattach', 'native-turn')
+      const call = { threadId: 'native-reattach', turnId: 'native-turn', tool: toolName, arguments: {} }
+      await handler({ ...call, callId: 'first' })
+      firstCall.resolve(true)
+      await resume.promise
+      const result = await handler({ ...call, callId: 'second' })
+      return { nativeSessionId: 'native-reattach', output: [{ type: 'text' as const, text: result.text }], stopReason: 'completed' as const }
+    }
+  }
+  const daemon = new ResidentDaemon({ root, drivers: [new BridgedDriver()] })
+  await daemon.start()
+  const ownerSignal = new AbortController()
+  const request = {
+    commandId: 'bridge-owner-reattach', operatorId: 'codex', workspace,
+    profile: { model: 'gpt-test', effort: 'medium' as const },
+    prompt: [{ type: 'text', text: 'two calls across Host restart' }],
+    nativeToolPolicy: policy,
+  }
+  try {
+    const original = await client(root).execute({ ...request, modelToolBridge: oldOwner.descriptor, signal: ownerSignal.signal })
+    await firstCall.promise
+    ownerSignal.abort(new Error('Host stopped'))
+    await expect(original.result).rejects.toThrow('Host stopped')
+    await oldOwner.server.dispose()
+    const attached = await client(root).execute({ ...request, modelToolBridge: newOwner.descriptor, signal: new AbortController().signal })
+    expect(attached.turnId).toBe(original.turnId)
+    resume.resolve(true)
+    await expect(attached.result).resolves.toMatchObject({ output: [{ text: '{"value":"new-owner"}' }] })
+    expect(executions).toBe(1)
+    expect(calls).toEqual(['old-owner', 'new-owner'])
+    await expect(client(root).execute({
+      ...request, commandId: 'changed-native-catalog', signal: new AbortController().signal,
+      modelToolBridge: { ...newOwner.descriptor, tools: [{ name: toolName, description: 'Different tool', inputSchema: { type: 'object' } }] },
+    })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+    expect(executions).toBe(1)
+
+  } finally {
+    resume.resolve(true)
+    await daemon.close()
+    await oldOwner.server.dispose()
+    await newOwner.server.dispose()
+  }
+})
+
+describe('Codex direct-model daemon admission', () => {
+  it('forwards sealed generation/workspace budgets without native qualification or invented session identity', async () => {
+    const root = temporaryRoot()
+    const workspace = temporaryRoot()
+    const driver = new MemoryDriver()
+    const qualify = vi.spyOn(driver, 'qualify')
+    const execute = vi.spyOn(driver, 'execute').mockImplementation(async (request) => {
+      expect(request.profile).toEqual({ model: 'already-qualified-model', effort: 'high' })
+      expect(request.generationLimits).toEqual({ maxTokens: 100, maxOutputBytes: 4096, maxToolCalls: 3 })
+      expect(request.governedWorkspacePolicy).toMatchObject({ version: 1, readScopes: ['input.txt'], writeScopes: ['output.txt'] })
+      expect(request.governedToolRoot).toBe(join(root, 'model-tools'))
+      request.onRunning()
+      return { output: [{ type: 'text' as const, text: 'direct API result' }], stopReason: 'completed' as const }
+    })
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const request = {
+      commandId: ResidentOperatorCommandId('governed-task'), operatorId: 'codex', workspace, laneId: 'new-governed-lane',
+      prompt: [{ type: 'text' as const, text: 'work within declared scopes' }], profile: { model: 'already-qualified-model', effort: 'high' as const },
+      nativeToolPolicy: 'dsh-tools-authoritative' as const,
+      generationLimits: { maxTokens: 100, maxOutputBytes: 4096, maxToolCalls: 3 },
+      governedWorkspacePolicy: { version: 1 as const, sourceWorkspace: '/original/source', readScopes: ['input.txt'], writeScopes: ['output.txt'], forbiddenScopes: [],
+        limits: { maxToolCalls: 3, maxFileBytes: 1024, maxOutputBytes: 4096, maxSearchFiles: 20 } },
+      signal: new AbortController().signal,
+    }
+    try {
+      const turn = await connected.execute(request)
+      await expect(turn.result).resolves.toMatchObject({ output: [{ type: 'text', text: 'direct API result' }] })
+      expect(qualify).not.toHaveBeenCalled()
+      expect((await connected.inspect(turn.sessionId)).nativeSessionId).toBeUndefined()
+      await expect(connected.execute({ ...request, generationLimits: { ...request.generationLimits, maxTokens: 101 } }))
+        .rejects.toBeInstanceOf(ResidentCommandRefusal)
+      await expect(connected.execute({ ...request, governedWorkspacePolicy: { ...request.governedWorkspacePolicy, writeScopes: ['different.txt'] } })).rejects.toBeInstanceOf(ResidentCommandRefusal)
+      expect(execute).toHaveBeenCalledTimes(1)
+    } finally { await daemon.close() }
+  })
+
+  it('requires an explicit direct-model identity instead of filling model or effort through native qualification', async () => {
+    const root = temporaryRoot()
+    const workspace = temporaryRoot()
+    const driver = new MemoryDriver()
+    const qualify = vi.spyOn(driver, 'qualify')
+    const execute = vi.spyOn(driver, 'execute')
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    try {
+      await expect(client(root).execute({ commandId: ResidentOperatorCommandId('no-profile'), operatorId: 'codex', workspace,
+        prompt: [{ type: 'text', text: 'hello' }], nativeToolPolicy: 'disabled', generationLimits: { maxTokens: 100, maxOutputBytes: 4096 },
+        signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'EXECUTION_PROFILE_UNSUPPORTED' })
+      expect(qualify).not.toHaveBeenCalled()
+      expect(execute).not.toHaveBeenCalled()
+    } finally { await daemon.close() }
   })
 })

@@ -63,6 +63,36 @@ describe('Resident owner authentication UI', () => {
     expect(screen.getByText(/API_KEY=\[REDACTED\]/)).toBeTruthy()
   })
 
+  it('does not present a normally ended provider turn as accepted task completion', async () => {
+    window.history.replaceState({}, '', '/')
+    const time = '2026-09-29T20:38:52.090Z'
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      generatedAt: time, providers: [],
+      sessions: [{
+        sessionId: 'session-1', operatorId: 'codex', workspace: '/workspace', workspaceDisplay: '/workspace',
+        laneId: 'lane-1', lifecycle: 'idle', health: 'ok', stateRevision: 2,
+        latestTurn: { commandId: 'command-1', turnId: 'turn-1', state: 'settled', taskLabel: 'Create and test a file', updatedAt: time },
+        updatedAt: time,
+      }],
+      events: [
+        { sequence: 1, type: 'turn.observation', time, data: { commandId: 'command-1', kind: 'public-output', preview: 'Cannot write files; tests were not run.' } },
+        { sequence: 2, type: 'turn.settled', time, data: { commandId: 'command-1', stopReason: 'completed' } },
+      ],
+      activities: [{
+        commandId: 'command-1', turnId: 'turn-1', taskLabel: 'Create and test a file', status: 'completed',
+        startedAt: time, updatedAt: time,
+      }],
+      hiddenDiagnosticSessions: 0, activeWorkers: 0,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })) as BrowserRequest
+
+    render(<ResidentOperatorsPanel request={request} />)
+    fireEvent.click(screen.getByRole('button', { name: /物理算子/ }))
+    expect((await screen.findAllByText('执行结束（未验收）')).length).toBeGreaterThan(0)
+    expect(screen.getByText('Cannot write files; tests were not run.')).toBeTruthy()
+    expect(screen.queryByText('任务已完成')).toBeNull()
+    expect(screen.queryByText('已完成')).toBeNull()
+  })
+
   it('shows a callback-listener failure and opens no replacement login until another click', async () => {
     window.history.replaceState({}, '', '/')
     let loginAttempts = 0

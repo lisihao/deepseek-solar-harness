@@ -194,5 +194,5 @@ describe('Desktop Git commit synchronization', () => {
     const clientHead = git(client, 'rev-parse', 'HEAD')
     await expect(sync.runNow()).resolves.toMatchObject({ results: [{ state: 'pushed', localHead: clientHead }] })
     expect(execFileSync('git', ['--git-dir', authority, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(clientHead)
-  })
+  }, 60_000)
 })

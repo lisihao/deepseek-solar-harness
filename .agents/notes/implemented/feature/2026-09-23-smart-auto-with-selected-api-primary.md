@@ -6,7 +6,7 @@ English | [中文](2026-09-23-smart-auto-with-selected-api-primary.zh.md)
 
 ## Problem
 
-Desktop always installs a model selection, so every request carries a selected primary model. The primary-ownership rule from the [ChatGPT Web coordination](../../proposed/feature/2026-09-23-chatgpt-web-coordination.md) change returned before Smart Auto evaluated a selected API primary. Smart Auto therefore never routed recognized work to a physical operator in Desktop; its only automatic path ran without an installed selection, the path its routing test used. A `taskgraph-candidate` decision was an ignorable log event that nothing read, so the model received no request to build the TaskGraph that the decision described. Any request of 180 or more characters counted as parallel, so a long pasted document was labeled a TaskGraph candidate.
+Desktop always installs a model selection, so every request carries a selected primary model. The primary-ownership rule from the [ChatGPT Web coordination](../../rejected/feature/2026-09-23-chatgpt-web-coordination.md) change returned before Smart Auto evaluated a selected API primary. Smart Auto therefore never routed recognized work to a physical operator in Desktop; its only automatic path ran without an installed selection, the path its routing test used. A `taskgraph-candidate` decision was an ignorable log event that nothing read, so the model received no request to build the TaskGraph that the decision described. Any request of 180 or more characters counted as parallel, so a long pasted document was labeled a TaskGraph candidate.
 
 ## Decision
 

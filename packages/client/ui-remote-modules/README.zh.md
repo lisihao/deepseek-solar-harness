@@ -39,10 +39,11 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 | `instances[].url` | 完整 HTTP(S) 目标网页；支持路径、查询和片段，拒绝内嵌凭据及主动 URL scheme。 |
 | `instances[].relayPort` | 回环中继端口；`0` 使用临时端口。如果目标按 Origin 保存登录状态，应配置稳定的非零端口。 |
 | `instances[].order` | 纵向整数顺序，默认 `100`。 |
+| `instances[].direct` | `true` 时不启动中继，直接加载 `url`，适用于 X 这类无法从中继 origin 登录的站点。Desktop 在应用内的独立页面（Electron `<webview>`）中打开，并保存该站点自己的登录；网页版则用系统浏览器打开。默认 `false`；直接实例的 `relayPort` 会被忽略，也可以与其他实例的端口重复。 |
 
 ## 运行边界
 
-每个实例都会启动一个仅监听本机、目标固定的中继。所有路径始终落在唯一配置的 origin 上，因此它不是开放代理。中继保留目标 HTML、JavaScript、CSS、Cookie、重定向、方法、流式响应与 WebSocket upgrade；它只移除 `X-Frame-Options` 和 CSP 的 `frame-ancestors` 指令，因为这两项会阻止部署者授权的应用显示在 Harness 中，其余 CSP 指令保持不变。Host 只在 `/remote-webpages/v1/instances` 发布实例清单；React 随后直接在 iframe 中加载各中继地址。
+每个实例都会启动一个仅监听本机、目标固定的中继。所有路径始终落在唯一配置的 origin 上，因此它不是开放代理。中继保留目标 HTML、JavaScript、CSS、Cookie、重定向、方法、流式响应与 WebSocket upgrade；它只移除 `X-Frame-Options` 和 CSP 的 `frame-ancestors` 指令，因为这两项会阻止部署者授权的应用显示在 Harness 中，其余 CSP 指令保持不变。目标站点把入口 URL 重定向到另一个公网域名时（例如 `http://www.x.com` → `https://twitter.com/` → `https://x.com/`），中继把固定目标移到该 origin（最多八次），并把重定向改写成自己的地址，所以 iframe 不会离开中继；到回环、私有或 IP 字面量主机的重定向不会被跟随，从这些主机发出的也一样。自身没有 `Cache-Control` 的重定向响应以 `no-store` 发出，因为被缓存的永久重定向若指向中继自己的 URL 会形成循环。Host 只在 `/remote-webpages/v1/instances` 发布实例清单；React 随后直接在 iframe 中加载各中继地址。对话框标题栏提供四个操作：在新窗口打开中继地址、用系统浏览器打开原网址、重新加载和关闭。
 
 对于转发到回环地址的远程服务，SSH 仍由部署负责。每个 `url` 应指向相应的本机转发地址，SSH 监听端口与中继端口都应只绑定 MacBook 回环地址。私人主机名、地址与凭据只属于用户 profile 设置，绝不作为产品默认值发布。
 
@@ -60,6 +61,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 
 - **受信任配置**——目标 URL 是部署者控制的配置。如果移除某个不可信站点的反嵌入策略会违背其安全意图，就不要把实例指向该站点。
 - **仅限本机显示**——中继地址绑定 `127.0.0.1`，浏览器必须与 Harness 运行在同一台 Mac 上。远程浏览器发布需要另行设计带认证的权限边界。
-- **兼容性归目标应用所有**——硬编码绝对 API origin、Service Worker、OAuth 重定向白名单和第三方 Cookie 策略仍是被嵌入应用的属性，可能需要目标侧部署配置。
+- **兼容性归目标应用所有**——硬编码绝对 API origin、Service Worker、OAuth 重定向白名单和第三方 Cookie 策略仍是被嵌入应用的属性，可能需要目标侧部署配置；X 这类大型单页应用即使页面已由中继送达，也可能在 iframe 中显示空白，或因 CORS 使 API 请求失败。这类站点请标记 `direct: true`：Desktop 会在应用内的独立页面中打开它，站点在自己的 origin 下使用自己保存的登录（见下）。对话框里的“用系统浏览器打开原网址”是备选。
+- **直连页面是访客，不是 DSH 页面**——`direct` 实例是放在以模块命名的持久分区里的 Electron `<webview>`，其 Cookie 在重启后保留，且不与 DSH 或其他模块共享。Desktop 窗口只允许不含凭据的 `http(s)` 页面、并且在这类分区中使用 `<webview>`，会去掉任何 preload、Node.js 集成，以及对沙箱和 web security 的覆盖。网页弹窗（用 Google 或 Apple 登录）以无特权窗口在同一分区中打开；邮件链接交给系统处理。该分区的 user agent 会去掉 `Electron/…` 和 `DSHDesktop/…` 标记，因为 X 这类登录页会把 Electron 的 user agent 当作嵌入或自动化浏览器而卡住。
 - **SSH 生命周期归部署所有**——本包不会创建、认证或重连 SSH 隧道。
 - **配置重启后生效**——设置编辑器会立即保存，但目标网页和中继监听端口只在 Harness 重启后切换。

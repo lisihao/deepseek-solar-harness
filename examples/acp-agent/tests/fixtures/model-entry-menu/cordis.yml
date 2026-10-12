@@ -1,0 +1,40 @@
+# Keyless model-menu composition: the real physical-operator route and
+# allocator with the Solar product's entry configuration (ChatGPT Web plus
+# Codex's two newest models) and a DeepSeek catalog narrowed to V4-Pro and
+# V4.1-Flash. The fixture replaces only the native Codex, Claude Code, and
+# ChatGPT Web product boundaries, and every catalog read counts as stale so a
+# plain menu read always rereads it in the background.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ../../../cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@deepseek-ai/dsh-llm-deepseek'
+        config:
+          thinking: enabled
+          reasoningEffort: max
+          discoverModels: false
+          models:
+            - id: deepseek-v4-pro
+              name: DeepSeek-V4-Pro
+            - id: deepseek-flash
+              name: DeepSeek-V4.1-Flash
+      - insert:
+          - id: user-questions
+            name: '@deepseek-ai/dsh-user-questions'
+          - id: physical-operator
+            name: '@deepseek-ai/dsh-physical-operator'
+          - id: model-entry-menu-operators
+            name: './tests/fixtures/model-entry-menu/operators.ts'
+          - id: model-allocation
+            name: '@deepseek-ai/dsh-model-allocation-local'
+          - id: tool-physical-operator
+            name: '@deepseek-ai/dsh-tool-physical-operator'
+            config:
+              entryOperatorIds: [chatgpt-web]
+              latestModelEntries:
+                - operatorId: codex
+                  count: 2
+              stateRoot: !!js process.env.DSH_HOME + '/physical-operator'
+              catalogMaxAgeMs: 0

@@ -20,6 +20,10 @@ export interface WebModelCatalog {
 export interface WebModelPreferences {
   readonly model?: string
   readonly effort?: string
+  /** Whether the primary model menu pins this Session's Web model. */
+  readonly modelSelectionPinned?: boolean
+  /** Whether the primary model menu pins this Session's Web reasoning effort. */
+  readonly effortSelectionPinned?: boolean
 }
 
 /** Server acknowledgment for one explicit ChatGPT Web profile change. */
@@ -70,10 +74,15 @@ export function parseWebModelPreferences(value: unknown): WebModelPreferences | 
   if (!isRecord(value)) return undefined
   const model = optionalText(value, 'model')
   const effort = optionalText(value, 'effort')
-  if (model === INVALID_TEXT || effort === INVALID_TEXT) return undefined
+  const modelSelectionPinned = optionalBoolean(value, 'modelSelectionPinned')
+  const effortSelectionPinned = optionalBoolean(value, 'effortSelectionPinned')
+  if (model === INVALID_TEXT || effort === INVALID_TEXT
+    || modelSelectionPinned === INVALID_BOOLEAN || effortSelectionPinned === INVALID_BOOLEAN) return undefined
   return {
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
+    ...(modelSelectionPinned === undefined ? {} : { modelSelectionPinned }),
+    ...(effortSelectionPinned === undefined ? {} : { effortSelectionPinned }),
   }
 }
 
@@ -110,6 +119,7 @@ export function WebModelControls({
   onChange,
 }: WebModelControlsProps) {
   const [busy, setBusy] = useState(false)
+  const [reading, setReading] = useState(false)
   const [error, setError] = useState<string>()
   const alive = useRef(true)
   const busyRef = useRef(false)
@@ -123,16 +133,44 @@ export function WebModelControls({
 
   const savedModel = profile?.model
   const savedEffort = profile?.effort
+  const modelSelectionPinned = profile?.modelSelectionPinned === true
+  const effortSelectionPinned = profile?.effortSelectionPinned === true
   const selectedModel = savedModel ?? catalog?.selectedModel
   const modelKnown = savedModel !== undefined && catalog?.models.some(choice => choice.id === savedModel)
   const effortKnown = savedEffort !== undefined && catalog?.efforts.some(choice => choice.id === savedEffort)
   const modelCatalogMismatch = savedModel !== undefined
     && catalog !== undefined
     && catalog.selectedModel !== savedModel
-  const modelDisabled = disabled || busy || catalog === undefined || catalog.models.length === 0
-  const effortDisabled = disabled || busy || catalog === undefined || catalog.efforts.length === 0
+  const modelDisabled = modelSelectionPinned || disabled || busy || reading || catalog === undefined || catalog.models.length === 0
+  const effortDisabled = effortSelectionPinned || disabled || busy || reading || catalog === undefined || catalog.efforts.length === 0
     || selectedModel === undefined || modelCatalogMismatch
   const hasProfile = savedModel !== undefined || savedEffort !== undefined
+
+  const readCatalog = async (): Promise<void> => {
+    if (disabled || busyRef.current) return
+    busyRef.current = true
+    if (alive.current) {
+      setReading(true)
+      setError(undefined)
+    }
+    try {
+      const url = new URL('/api/chatgpt-web', window.location.origin)
+      url.searchParams.set('catalog', '1')
+      url.searchParams.set('refresh', '1')
+      url.searchParams.set('session_id', sessionId)
+      const response = await request(url, { cache: 'no-store' })
+      const parsed = parseWebModelStatus(await readResponse(response))
+      if (parsed?.catalog === undefined) throw new Error('ChatGPT Web 模型目录响应无效。')
+      if (!alive.current) return
+      onChangeRef.current(parsed.profile ?? profile ?? {}, parsed.catalog)
+    } catch (reason: unknown) {
+      if (!alive.current) return
+      setError(webCatalogReadError(reason))
+    } finally {
+      busyRef.current = false
+      if (alive.current) setReading(false)
+    }
+  }
 
   const save = async (next: WebModelPreferences): Promise<void> => {
     if (disabled || busyRef.current) return
@@ -173,6 +211,7 @@ export function WebModelControls({
   }
 
   const chooseEffort = (value: string): void => {
+    if (effortSelectionPinned) return
     if (selectedModel === undefined) return
     if (value !== '' && catalog?.efforts.some(choice => choice.id === value) !== true) return
     void save({
@@ -182,6 +221,7 @@ export function WebModelControls({
   }
 
   const clearEffort = (): void => {
+    if (effortSelectionPinned) return
     if (selectedModel === undefined) {
       void save({})
       return
@@ -196,8 +236,11 @@ export function WebModelControls({
         <small>选项来自当前 ChatGPT 网页；部分推理档位会同时切换实际模型。按网站设置会清除对应的 DSH 偏好。</small>
       </div>
       {catalog === undefined && (
-        <p role="status">尚未读取 ChatGPT Web 模型目录，请点击“刷新模型与算子”。</p>
+        <p role="status">尚未读取 ChatGPT Web 模型目录；读取会打开 ChatGPT 网页查看可选模型，不发送提示词。</p>
       )}
+      <button type="button" disabled={disabled || busy || reading} onClick={() => { void readCatalog() }}>
+        {reading ? '正在读取网页模型…' : catalog === undefined ? '读取网页模型与推理强度' : '重新读取网页模型'}
+      </button>
       <label>
         <span>网页模型</span>
         <select
@@ -212,6 +255,7 @@ export function WebModelControls({
           )}
           {catalog?.models.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select>
+        {modelSelectionPinned && <small>模型跟随主模型菜单</small>}
       </label>
       <label>
         <span>推理强度</span>
@@ -227,12 +271,13 @@ export function WebModelControls({
           )}
           {!modelCatalogMismatch && catalog?.efforts.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
         </select>
+        {effortSelectionPinned && <small>推理强度跟随主模型菜单</small>}
       </label>
       {modelCatalogMismatch && (
         <p role="status">当前保存的模型与 ChatGPT Web 目录不一致；请刷新后重新选择模型，推理强度暂不可用。</p>
       )}
       {catalog !== undefined && catalog.efforts.length === 0 && savedEffort !== undefined && (
-        <button type="button" disabled={disabled || busy} onClick={clearEffort}>
+        <button type="button" disabled={effortSelectionPinned || disabled || busy} onClick={clearEffort}>
           清除推理强度
         </button>
       )}
@@ -253,6 +298,7 @@ export function WebModelControls({
 }
 
 const INVALID_TEXT = Symbol('invalid web model text')
+const INVALID_BOOLEAN = Symbol('invalid web model pinned flag')
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -267,6 +313,11 @@ function optionalText(record: Record<string, unknown>, key: string): string | un
   const value = record[key]
   if (typeof value !== 'string' || value.trim() === '') return INVALID_TEXT
   return value
+}
+
+function optionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined | typeof INVALID_BOOLEAN {
+  if (!hasOwn(record, key)) return undefined
+  return typeof record[key] === 'boolean' ? record[key] : INVALID_BOOLEAN
 }
 
 function parseChoices(value: unknown): readonly WebModelChoice[] | undefined {
@@ -296,6 +347,14 @@ class WebModelResponseError extends Error {
     super(`ChatGPT Web 模型偏好保存失败（HTTP ${String(status)}）`)
     this.name = 'WebModelResponseError'
   }
+}
+
+function webCatalogReadError(reason: unknown): string {
+  if (reason instanceof WebModelResponseError) {
+    if (reason.status === 409) return '当前有进行中的 ChatGPT Web 请求，请等待完成后再读取网页模型。'
+    return `读取 ChatGPT Web 模型目录失败（HTTP ${String(reason.status)}）；请确认 ChatGPT 网页已登录后重试。`
+  }
+  return reason instanceof Error ? `读取 ChatGPT Web 模型目录失败：${reason.message}` : `读取 ChatGPT Web 模型目录失败：${String(reason)}`
 }
 
 function webModelSaveError(reason: unknown): string {

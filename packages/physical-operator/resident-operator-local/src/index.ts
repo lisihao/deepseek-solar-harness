@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import ResidentOperatorService, {
+  type ResidentOperatorCommandId,
   type ResidentEventPage,
   type ResidentEventReadRequest,
   type ResidentCompactRequest,
@@ -15,6 +16,7 @@ import ResidentOperatorService, {
   type ResidentExecuteRequest,
   type ResidentIndeterminateResolutionRequest,
   type ResidentInterruptRequest,
+  type ResidentProviderQueryOptions,
   type ResidentProviderStatus,
   type ResidentResetRequest,
   type ResidentSessionSnapshot,
@@ -56,7 +58,7 @@ export interface Config {
   readonly dshHome?: string
   /** Start an independent local daemon when no compatible socket is reachable. */
   readonly autoStart?: boolean
-  /** Bounded socket connection and daemon startup wait in milliseconds. */
+  /** Bounded socket connection, daemon startup, and model-tool bridge admission wait in milliseconds. */
   readonly connectTimeoutMs?: number
   /** Turn-settlement polling interval in milliseconds. */
   readonly pollIntervalMs?: number
@@ -84,6 +86,8 @@ export const Config: z<Config> = z.object({
 class LocalResidentOperatorService extends ResidentOperatorService {
   private readonly client: ResidentDaemonClient
   private readonly runtimes: CliRuntimeManager
+  private catalogSnapshot: ReturnType<ResidentOperatorService['providerSnapshot']>
+  private catalogGeneration = 0
 
   constructor(
     ctx: Context,
@@ -107,11 +111,20 @@ class LocalResidentOperatorService extends ResidentOperatorService {
     })
   }
 
-  providers(): Promise<ResidentProviderStatus[]> {
-    return this.client.providers()
+  async providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]> {
+    const generation = ++this.catalogGeneration
+    const providers = await this.client.providers(options)
+    if (generation === this.catalogGeneration) this.catalogSnapshot = { observedAt: Date.now(), providers }
+    return providers
+  }
+
+  override providerSnapshot(): ReturnType<ResidentOperatorService['providerSnapshot']> {
+    return this.catalogSnapshot
   }
 
   override authenticate(operatorId: string): Promise<ResidentProviderStatus> {
+    this.catalogSnapshot = undefined
+    this.catalogGeneration++
     return this.client.authenticate(operatorId)
   }
 
@@ -142,6 +155,8 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
+      ...request.generationLimits === undefined ? {} : { generationLimits: request.generationLimits },
+      ...request.governedWorkspacePolicy === undefined ? {} : { governedWorkspacePolicy: request.governedWorkspacePolicy },
       signal: request.signal,
     })
     return {
@@ -164,6 +179,11 @@ class LocalResidentOperatorService extends ResidentOperatorService {
   inspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
     return this.client.inspectTurn(turnId)
   }
+
+  override inspectCommand(commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined> {
+    return this.client.inspectCommand(commandId)
+  }
+
 
   readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage> {
     return this.client.readEvents(

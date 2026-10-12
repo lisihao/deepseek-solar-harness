@@ -42,6 +42,11 @@ in the browser — **displaying USD when the UI language is English**.
   can merge its MacBook history baseline with every configured Server ledger.
   The panel preserves the local history, each reachable Server total, and any
   temporarily unavailable source instead of presenting the aggregate as one Server.
+- **Off-peak reminder**: during the off-peak (discounted) window the sidebar cost
+  entry shows a green "Off-peak" tag (a green dot when the sidebar is collapsed),
+  and the panel opens with the discount and the time it lasts until; during peak
+  pricing the panel says when off-peak starts. The discount is the largest
+  off-peak-to-peak price ratio in the policy table.
 - **Read-only endpoints** (loopback by default): `GET /billing/state`,
   `GET /billing/session/<id>`.
 

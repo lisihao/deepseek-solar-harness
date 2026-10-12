@@ -29,6 +29,7 @@ async function filesBelow(directory) {
 const actual = [
   ...await filesBelow(join(vendorRoot, 'agent-presets')),
   ...await filesBelow(join(vendorRoot, 'dsh-packages')),
+  ...await filesBelow(join(vendorRoot, 'scheduling-evidence-python')),
 ].sort()
 const expected = Object.keys(manifest.files).sort()
 if (JSON.stringify(actual) !== JSON.stringify(expected)) {
@@ -147,6 +148,17 @@ for (const path of expected) {
   const digest = createHash('sha256').update(contents).digest('hex')
   if (digest !== manifest.files[path]) {
     throw new Error(`verify-vendored-inputs: SHA-256 mismatch for ${path}`)
+  }
+}
+
+// The Python collectors ship as copies of the tracked sources; the license travels with them.
+for (const path of actual.filter(entry => entry.startsWith('scheduling-evidence-python/'))) {
+  const inner = path.slice('scheduling-evidence-python/'.length)
+  const source = inner.startsWith('LICENSE')
+    ? join(repositoryRoot, 'python/scheduling-evidence', inner)
+    : join(repositoryRoot, 'python/scheduling-evidence/src', inner)
+  if (!(await readFile(source)).equals(await readFile(join(vendorRoot, path)))) {
+    throw new Error(`verify-vendored-inputs: ${path} is stale relative to ${relative(repositoryRoot, source)}`)
   }
 }
 

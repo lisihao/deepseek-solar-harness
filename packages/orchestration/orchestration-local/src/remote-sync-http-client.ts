@@ -34,6 +34,21 @@ export class RemoteSyncRejectedError extends Error {
   }
 }
 
+/**
+ * Statuses the Server returns for a request it rejected while validating or authorizing it, before any command
+ * began. They are explicit refusals, not a missing response, so the caller may treat the command as not started.
+ */
+const EXPLICIT_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 403, 404, 409, 422])
+
+async function errorBodyText(response: Response): Promise<string> {
+  try {
+    return (await response.text()).slice(0, 500)
+  } catch {
+    // The status still determines the error classification when its explanation is unreadable.
+    return 'no explanation'
+  }
+}
+
 /** Stateless HTTP-up client used by detached Schedulers and Electron main. */
 export class RemoteSyncHttpClient {
   private readonly base: URL
@@ -98,6 +113,16 @@ export class RemoteSyncHttpClient {
     return clusterInstallReceipt(await this.call('cluster.install', request, signal))
   }
 
+  /**
+   * Ask a Gouzi member's Server who it is. The answer is in memory on the member, so it shows the Server is alive without the
+   * Provider qualification `operator.providers` may do.
+   * @param signal - optional request cancellation signal.
+   * @returns the member's hello, which the caller does not read.
+   */
+  async gouziHello(signal?: AbortSignal): Promise<unknown> {
+    return this.call('gouzi.hello', {}, signal)
+  }
+
   private async call(method: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
     const rpcId = RpcId(randomUUID())
     const body: ClientRequest = { type: 'client-request', rpcId, method, payload }
@@ -116,8 +141,14 @@ export class RemoteSyncHttpClient {
       throw new RemoteSyncTransportError(`remote operator ${method} transport failed`, { cause })
     }
     if (!response.ok) {
+      if (EXPLICIT_REFUSAL_STATUSES.has(response.status)) {
+        throw new RemoteSyncRejectedError(
+          `remote operator ${method} refused: HTTP ${String(response.status)}: ${await errorBodyText(response)}`,
+          `HTTP_${String(response.status)}`,
+        )
+      }
       throw new RemoteSyncTransportError(
-        `remote operator ${method} transport failed: HTTP ${String(response.status)}`,
+        `remote operator ${method} transport failed: HTTP ${String(response.status)}: ${await errorBodyText(response)}`,
       )
     }
     let envelope

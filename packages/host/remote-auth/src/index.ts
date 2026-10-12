@@ -16,8 +16,11 @@ import { readOwnerOnlyText } from './private-file.ts'
 
 export type { RemoteCommandBeginResult, RemoteCommandResponse } from './command-receipts.ts'
 
-/** Fixed product scopes; this is deliberately not a generic RBAC vocabulary. */
-export type RemoteDeviceScope = 'cockpit' | 'pocket' | 'admin'
+/**
+ * Fixed product scopes; this is deliberately not a generic RBAC vocabulary. `gouzi` is the credential a main
+ * instance holds for one execution member: it reaches only the operator execution methods and `describe`.
+ */
+export type RemoteDeviceScope = 'cockpit' | 'pocket' | 'admin' | 'gouzi'
 
 /** Authenticated device identity carried across Server request boundaries. */
 export interface RemotePrincipal {
@@ -397,7 +400,7 @@ function digest(value: string): string {
 }
 
 function isScope(value: unknown): value is RemoteDeviceScope {
-  return value === 'cockpit' || value === 'pocket' || value === 'admin'
+  return value === 'cockpit' || value === 'pocket' || value === 'admin' || value === 'gouzi'
 }
 
 function isDeviceDocument(value: unknown): value is DeviceDocument {

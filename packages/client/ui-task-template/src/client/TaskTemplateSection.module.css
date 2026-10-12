@@ -1,4 +1,5 @@
 .page {
+  container-type: inline-size;
   display: grid;
   gap: 18px;
   width: min(1120px, 100%);
@@ -27,6 +28,16 @@
   gap: 20px;
 }
 
+.hero > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.hero .primary {
+  flex: none;
+  white-space: nowrap;
+}
+
 .hero p,
 .empty,
 .group > p,
@@ -35,6 +46,14 @@
   color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
   line-height: 20px;
+}
+
+.catalog .empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  text-align: center;
 }
 
 .messages:empty {
@@ -399,7 +418,7 @@
   background: var(--dsw-alias-state-success-tertiary);
 }
 
-@media (max-width: 900px) {
+@container (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
   }
@@ -409,7 +428,7 @@
   }
 }
 
-@media (max-width: 640px) {
+@container (max-width: 640px) {
   .hero {
     align-items: stretch;
     flex-direction: column;

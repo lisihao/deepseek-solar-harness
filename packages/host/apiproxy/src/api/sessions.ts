@@ -125,6 +125,12 @@ export interface ModelCatalogModel {
   name: string
   /** Optional provider-supplied description. */
   description?: string
+  /** Present only for a model confirmed available by a persistent catalog source. */
+  availability?: 'available'
+  /** ISO timestamp of the discovery observation that confirmed availability. */
+  checkedAt?: string
+  /** Persistent discovery source display name when a provider groups several sources. */
+  sourceName?: string
   /** Exact-route reasoning metadata when the adapter exposes it. */
   reasoning?: ModelReasoning
 }
@@ -141,9 +147,9 @@ export interface ModelProviderGroup {
 
 /** A provider whose asynchronous catalog lookup failed. */
 export interface ModelCatalogFailure {
-  /** Provider route id. */
+  /** Provider route id for a legacy adapter, or source id for a persistent catalog source. */
   id: string
-  /** Provider display name. */
+  /** Provider or persistent-source display name. */
   name: string
   /** Lookup failure diagnostic. */
   message: string
@@ -285,10 +291,12 @@ export interface SessionsApi {
   Promise<RpcResponse<{ events: HistoryEntry[]; hasMore: boolean; projections?: SessionProjectionsBlock }>>
 
   /**
-   * Reads a fresh advisory model directory for an ordinary session. Provider
-   * lookups run independently; subagents reject with `agent-busy`. Set
-   * `refresh` to ask adapters that support live discovery to refresh their
-   * catalog; omission keeps the adapter's existing cached/static behavior.
+   * Reads a fresh advisory model directory for an ordinary session. Unmanaged
+   * provider lookups run independently; subagents reject with `agent-busy`.
+   * When the optional persistent catalog service is mounted, its active
+   * sources own their provider rows: ordinary reads use stored snapshots and
+   * `refresh` calls that service once. Unmanaged adapters retain their
+   * adapter-local discovery behavior.
    */
   models(request: RpcRequest<{ sessionId: SessionId; refresh?: boolean }>): Promise<RpcResponse<SessionModels>>
 

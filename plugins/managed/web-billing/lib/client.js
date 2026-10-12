@@ -8,7 +8,7 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		//#region billing.module.css
 		const css = ".b8l_chip{color:var(--dsw-alias-label-tertiary);border-radius:10px;padding:0 6px;font-size:12px;line-height:24px;white-space:nowrap;cursor:help}.b8l_chip:hover{color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-interactive-bg-hover)}.b8l_wrap{position:relative;display:inline-flex}.b8l_badge{display:inline-flex;align-items:center;gap:4px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:var(--dsw-alias-interactive-bg-hover);border:none;border-radius:12px;padding:2px 10px;font-size:12px;line-height:20px;white-space:nowrap}.b8l_badge:hover{color:var(--dsw-alias-label-secondary)}.b8l_badge[data-open]{color:var(--dsw-alias-label-primary)}.b8l_backdrop{position:fixed;inset:0;z-index:29}.b8l_panel{position:absolute;top:calc(100% + 6px);right:0;z-index:30;box-sizing:border-box;background:var(--dsw-alias-bg-primary);border:1px solid var(--dsw-alias-border-secondary);border-radius:12px;box-shadow:var(--dsw-shadow-popover,0 8px 24px rgba(0,0,0,.12));width:300px;padding:12px 14px}.b8l_head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.b8l_headLabel{color:var(--dsw-alias-label-secondary);font-size:12px;white-space:nowrap}.b8l_headValues{display:flex;align-items:baseline;gap:10px}.b8l_headValue{color:var(--dsw-alias-label-primary);font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:24px;white-space:nowrap}.b8l_headValue.b8l_save{color:#16a34a}.b8l_headValue.b8l_small{font-size:14px;font-weight:600}.b8l_sub{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;margin-top:2px}.b8l_sub .b8l_save{color:#16a34a}.b8l_sep{border-top:1px solid var(--dsw-alias-border-secondary);margin:9px 0}.b8l_gridHead{display:grid;grid-template-columns:1fr 1fr;gap:3px 18px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;margin-bottom:3px}.b8l_gridHead[data-kind=cost],.b8l_gridHead[data-kind=save]{grid-template-columns:1fr}.b8l_gridHead .b8l_save{color:#16a34a;text-align:right}.b8l_grid{display:grid;grid-template-columns:1fr 1fr;gap:3px 18px}.b8l_grid[data-kind=cost],.b8l_grid[data-kind=save]{grid-template-columns:1fr}.b8l_cell{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;line-height:19px;white-space:nowrap}.b8l_k{color:var(--dsw-alias-label-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis}.b8l_v{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;text-align:right}.b8l_cell.b8l_save .b8l_v{color:#16a34a}.b8l_section{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;margin-bottom:3px}.b8l_modelRow{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12px;line-height:20px;white-space:nowrap}.b8l_name{color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis}.b8l_cost{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;text-align:right}.b8l_modelRow.b8l_save .b8l_cost{color:#16a34a}.b8l_footer{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;margin-top:9px}";
-		const sidebarCss = ".b8l_sidebarWrap{position:relative;display:block;width:100%}.b8l_sidebarBadge{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;text-align:left}.b8l_sidebarBadge:hover,.b8l_sidebarBadge[data-open]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.b8l_sidebarIcon{display:inline-flex;align-items:center;justify-content:center;width:18px;font-weight:700}.b8l_sidebarLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.b8l_sidebarValue{font-variant-numeric:tabular-nums;white-space:nowrap}.b8l_sidebarWrap[data-wide=false] .b8l_sidebarBadge{width:32px;padding:0;justify-content:center}.b8l_sidebarBackdrop{z-index:1000}.b8l_sidebarPanel{position:fixed;top:auto;right:auto;left:280px;bottom:12px;z-index:1001;width:320px;max-height:calc(100vh - 24px);overflow:auto}.b8l_sidebarWrap[data-wide=false] .b8l_sidebarPanel{left:72px}@media(max-width:760px){.b8l_sidebarPanel,.b8l_sidebarWrap[data-wide=false] .b8l_sidebarPanel{left:12px;right:12px;bottom:58px;width:auto}}";
+		const sidebarCss = ".b8l_sidebarWrap{position:relative;display:block;width:100%}.b8l_sidebarBadge{display:flex;align-items:center;gap:8px;width:100%;height:34px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;text-align:left}.b8l_sidebarBadge:hover,.b8l_sidebarBadge[data-open]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.b8l_sidebarIcon{display:inline-flex;align-items:center;justify-content:center;width:18px;font-weight:700}.b8l_sidebarLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.b8l_sidebarValue{font-variant-numeric:tabular-nums;white-space:nowrap}.b8l_sidebarWrap[data-wide=false] .b8l_sidebarBadge{width:32px;padding:0;justify-content:center}.b8l_offPeakTag{flex:none;height:18px;padding:0 6px;border-radius:9px;background:var(--dsw-alias-state-success-tertiary,rgba(22,163,74,.16));color:var(--dsw-alias-state-success-primary,#16a34a);font-size:11px;font-weight:600;line-height:18px;white-space:nowrap}.b8l_sidebarBadge[data-offpeak]{position:relative}.b8l_sidebarWrap[data-wide=false] .b8l_sidebarBadge[data-offpeak]::after{content:'';position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-state-success-primary,#16a34a)}.b8l_offPeakBanner{margin:0 0 10px;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-state-success-tertiary,rgba(22,163,74,.16));color:var(--dsw-alias-state-success-primary,#16a34a);font-size:12px;font-weight:600;line-height:18px}.b8l_peakBanner{margin:0 0 10px;padding:6px 10px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}.b8l_sidebarBackdrop{z-index:1000}.b8l_sidebarPanel{position:fixed;top:auto;right:auto;left:280px;bottom:12px;z-index:1001;width:320px;max-height:calc(100vh - 24px);overflow:auto}.b8l_sidebarWrap[data-wide=false] .b8l_sidebarPanel{left:72px}@media(max-width:760px){.b8l_sidebarPanel,.b8l_sidebarWrap[data-wide=false] .b8l_sidebarPanel{left:12px;right:12px;bottom:58px;width:auto}}";
 		const opaquePanelCss = ".b8l_panel{background:linear-gradient(var(--dsw-alias-bg-base,transparent),var(--dsw-alias-bg-base,transparent)),#fff}body[data-ds-dark-theme] .b8l_panel{background:linear-gradient(var(--dsw-alias-bg-base,transparent),var(--dsw-alias-bg-base,transparent)),#151517}";
 		const tagId = "dsh-web-billing/billing.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -48,7 +48,10 @@ window.__ModuleLoader__.load({
 			"sidebarLabel": "b8l_sidebarLabel",
 			"sidebarValue": "b8l_sidebarValue",
 			"sidebarBackdrop": "b8l_sidebarBackdrop",
-			"sidebarPanel": "b8l_sidebarPanel"
+			"sidebarPanel": "b8l_sidebarPanel",
+			"offPeakTag": "b8l_offPeakTag",
+			"offPeakBanner": "b8l_offPeakBanner",
+			"peakBanner": "b8l_peakBanner"
 		};
 		//#endregion
 		//#region lib/types/client/controller.js
@@ -374,6 +377,25 @@ window.__ModuleLoader__.load({
 					price: `${t("pricing.cacheHit")} ${formatUnitPrice(symbol, unit.cacheRead)} · ${t("pricing.cacheMiss")} ${formatUnitPrice(symbol, unit.input)} · ${t("pricing.output")} ${formatUnitPrice(symbol, unit.output)}`
 				};
 			});
+			// 峰谷政策下的当前时段提醒：空闲（优惠）时段在侧边栏与面板顶部明确标出。
+			const peakOffPeak = pricing?.activePolicy?.kind === "peak-offpeak";
+			const offPeakNow = peakOffPeak && pricing.effectiveNow === "offPeak";
+			const switchAt = Number.isFinite(pricing?.nextTransitionAt)
+				? `${formatPricingTime(pricing.nextTransitionAt, pricing.timezone)}${t("offPeak.timezone")}`
+				: null;
+			const ratio = pricing?.offPeakPriceRatio;
+			const discount = typeof ratio === "number" && ratio > 0 && ratio < 1
+				? (Math.abs(ratio - 0.5) < 1e-9 ? t("offPeak.half") : `${t("offPeak.shareBefore")}${Math.round(ratio * 100)}%${t("offPeak.shareAfter")}`)
+				: null;
+			const offPeakText = !offPeakNow ? null : [
+				t("offPeak.title"),
+				discount,
+				switchAt === null ? null : `${t("offPeak.until")} ${switchAt}`
+			].filter((part) => part !== null).join(" · ");
+			const peakText = !peakOffPeak || offPeakNow ? null : [
+				t("pricing.peakNow"),
+				switchAt === null ? null : `${t("offPeak.startsBefore")}${switchAt}${t("offPeak.startsAfter")}`
+			].filter((part) => part !== null).join(" · ");
 			const pricingSchedule = pricing?.nextTransitionAt === null || pricing?.nextTransitionAt === void 0
 				? t("pricing.hourly")
 				: `${t("pricing.nextSwitch")} ${formatPricingTime(pricing.nextTransitionAt, pricing.timezone)} · ${t("pricing.hourly")}`;
@@ -426,13 +448,15 @@ window.__ModuleLoader__.load({
 									className: css_default.sidebarBadge,
 									"data-open": open || void 0,
 									"aria-expanded": open,
-									title: `${t("scope.note")} · ${t("calls")} ${formatNumber(active.calls)}`,
+									"data-offpeak": offPeakNow || void 0,
+									title: `${offPeakText === null ? "" : `${offPeakText}\n`}${t("scope.note")} · ${t("calls")} ${formatNumber(active.calls)}`,
 									onClick: () => {
 										setOpen(!open);
 									},
 									children: wide ? [
 										react_jsx_runtime.jsx("span", { className: css_default.sidebarIcon, children: symbol }, "icon"),
 										react_jsx_runtime.jsx("span", { className: css_default.sidebarLabel, children: t("sidebar.title") }, "label"),
+										offPeakNow && react_jsx_runtime.jsx("span", { className: css_default.offPeakTag, children: t("offPeak.tag") }, "offpeak"),
 										react_jsx_runtime.jsx("span", { className: css_default.sidebarValue, children: totalsMoney }, "value")
 									] : react_jsx_runtime.jsx("span", { className: css_default.sidebarIcon, children: symbol })
 								}),
@@ -445,6 +469,15 @@ window.__ModuleLoader__.load({
 								open && react_jsx_runtime.jsxs("div", {
 									className: `${css_default.panel} ${css_default.sidebarPanel}`,
 									children: [
+										offPeakText !== null && react_jsx_runtime.jsx("div", {
+											className: css_default.offPeakBanner,
+											role: "status",
+											children: offPeakText
+										}),
+										peakText !== null && react_jsx_runtime.jsx("div", {
+											className: css_default.peakBanner,
+											children: peakText
+										}),
 										react_jsx_runtime.jsx("div", {
 											className: css_default.head,
 											children: [
@@ -653,7 +686,16 @@ window.__ModuleLoader__.load({
 			"scope.sources": "费用来源",
 			"scope.sourceUnavailable": "不可用",
 			"tokens.short": "tok",
-			"sidebar.title": "费用"
+			"sidebar.title": "费用",
+			"offPeak.tag": "优惠中",
+			"offPeak.title": "DeepSeek 优惠时段",
+			"offPeak.half": "价格为高峰的一半",
+			"offPeak.shareBefore": "价格为高峰的 ",
+			"offPeak.shareAfter": "",
+			"offPeak.until": "持续到",
+			"offPeak.startsBefore": "",
+			"offPeak.startsAfter": " 起进入优惠时段",
+			"offPeak.timezone": "（北京时间）"
 		};
 		/** English dictionary, checked complete against the zh key set. */
 		const en = {
@@ -701,7 +743,16 @@ window.__ModuleLoader__.load({
 			"scope.sources": "Billing sources",
 			"scope.sourceUnavailable": "Unavailable",
 			"tokens.short": "tok",
-			"sidebar.title": "Usage"
+			"sidebar.title": "Usage",
+			"offPeak.tag": "Off-peak",
+			"offPeak.title": "DeepSeek off-peak discount",
+			"offPeak.half": "half the peak price",
+			"offPeak.shareBefore": "",
+			"offPeak.shareAfter": " of the peak price",
+			"offPeak.until": "until",
+			"offPeak.startsBefore": "off-peak from ",
+			"offPeak.startsAfter": "",
+			"offPeak.timezone": " (pricing timezone)"
 		};
 		//#endregion
 		//#region lib/types/client/currency.js

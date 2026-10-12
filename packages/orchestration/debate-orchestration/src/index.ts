@@ -33,6 +33,8 @@ import type {
   OrchestrationEvent,
   OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
+import { kennelDebatePlugin } from './kennel.ts'
+import { gouziAdmission } from './members.ts'
 import type {
   DebateTaskGraphAdapterOptions,
   DebateTaskGraphNodeIdentityV1,
@@ -536,6 +538,7 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
       throw new DebateError(preflight.limit.reason, 'DEBATE_BUDGET_EXCEEDED')
     }
     const plan = this.plan(request)
+    const members = await gouziAdmission(request.turns, this.orchestrations.gouzi)
     const sourceSessionId = request.turns.find(turn => turn.sourceSessionId !== undefined)?.sourceSessionId
       ?? `debate:${request.runId}`
     const compilation = await this.orchestrations.compile({
@@ -550,6 +553,7 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
         policy: 'auto',
         route: 'taskgraph',
         sourceSessionId,
+        ...members,
         ...request.turns[0]?.runtimeContext === undefined
           ? {}
           : { runtimeContext: request.turns[0].runtimeContext },
@@ -756,4 +760,5 @@ export function apply(ctx: Context, config: Config): void {
     ...(config.providerId === undefined ? {} : { providerId: config.providerId }),
     ...(config.providerVersion === undefined ? {} : { providerVersion: config.providerVersion }),
   })
+  ctx.plugin(kennelDebatePlugin)
 }

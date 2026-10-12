@@ -53,6 +53,98 @@ const claude = {
   models: [],
 }
 
+const RESIDENT_TIME = '2026-09-29T20:38:52.090Z'
+const RESIDENT_SESSION_ID = 'physical-routing-resident-session'
+const RESIDENT_TURN_ID = 'physical-routing-resident-turn'
+const RESIDENT_COMMAND_ID = 'physical-routing-resident-command'
+const RESIDENT_TASK_LABEL = 'Create and test a file'
+
+const residentEvents = [
+  {
+    sequence: 1,
+    sessionId: RESIDENT_SESSION_ID,
+    type: 'turn.accepted',
+    time: RESIDENT_TIME,
+    data: {
+      commandId: RESIDENT_COMMAND_ID,
+      turnId: RESIDENT_TURN_ID,
+      taskLabel: RESIDENT_TASK_LABEL,
+    },
+  },
+  {
+    sequence: 2,
+    sessionId: RESIDENT_SESSION_ID,
+    type: 'turn.running',
+    time: RESIDENT_TIME,
+    data: {
+      commandId: RESIDENT_COMMAND_ID,
+      turnId: RESIDENT_TURN_ID,
+      taskLabel: RESIDENT_TASK_LABEL,
+    },
+  },
+  {
+    sequence: 3,
+    sessionId: RESIDENT_SESSION_ID,
+    type: 'turn.observation',
+    time: RESIDENT_TIME,
+    data: {
+      commandId: RESIDENT_COMMAND_ID,
+      turnId: RESIDENT_TURN_ID,
+      kind: 'public-output',
+      preview: 'Cannot write files; tests were not run.',
+    },
+  },
+  {
+    sequence: 4,
+    sessionId: RESIDENT_SESSION_ID,
+    type: 'turn.settled',
+    time: RESIDENT_TIME,
+    data: {
+      commandId: RESIDENT_COMMAND_ID,
+      turnId: RESIDENT_TURN_ID,
+      stopReason: 'completed',
+    },
+  },
+]
+
+const residentTurn = {
+  commandId: RESIDENT_COMMAND_ID,
+  turnId: RESIDENT_TURN_ID,
+  sessionId: RESIDENT_SESSION_ID,
+  stateRevision: 4,
+  state: 'settled',
+  taskLabel: RESIDENT_TASK_LABEL,
+  stopReason: 'completed',
+  updatedAt: RESIDENT_TIME,
+  result: {
+    output: [{ type: 'text', text: 'Cannot write files; tests were not run.' }],
+    stopReason: 'completed',
+  },
+}
+
+const residentSession = {
+  sessionId: RESIDENT_SESSION_ID,
+  operatorId: 'codex',
+  workspace: '/workspace/physical-routing',
+  laneId: 'web-e2e',
+  lifecycle: 'idle',
+  health: 'ok',
+  control: 'automation',
+  stateRevision: 4,
+  executionProfile: { model: 'fake-codex-main', effort: 'medium' },
+  executionProfileSource: 'manual',
+  latestTurn: {
+    commandId: RESIDENT_COMMAND_ID,
+    turnId: RESIDENT_TURN_ID,
+    state: 'settled',
+    taskLabel: RESIDENT_TASK_LABEL,
+    stopReason: 'completed',
+    updatedAt: RESIDENT_TIME,
+  },
+  latestEvent: residentEvents[residentEvents.length - 1],
+  updatedAt: RESIDENT_TIME,
+}
+
 function residentOperators() {
   const runtimes = [
     { product: 'claude-code', currentVersion: '2.1.239', latestVersion: '2.1.281', updateAvailable: true, managed: false },
@@ -71,13 +163,14 @@ function residentOperators() {
       await recordQualification()
       return [codex, claude]
     },
+    providerSnapshot() { return undefined },
     async authenticate() {
       throw Object.assign(new Error('fake Claude subscription is not authenticated'), { code: 'AUTH_MODE_MISMATCH' })
     },
-    async list() { return [] },
-    async inspect() { throw new Error('fake Resident inspect is not used by this test') },
-    async inspectTurn() { throw new Error('fake Resident inspectTurn is not used by this test') },
-    async readEvents() { return { events: [], nextSequence: 0 } },
+    async list() { return [residentSession] },
+    async inspect() { return residentSession },
+    async inspectTurn() { return residentTurn },
+    async readEvents() { return { events: residentEvents, nextSequence: residentEvents.length + 1 } },
     async execute() { throw new Error('fake Resident execute is not used by this test') },
     async interrupt() {},
     async compact() { throw new Error('fake Resident compact is not used by this test') },

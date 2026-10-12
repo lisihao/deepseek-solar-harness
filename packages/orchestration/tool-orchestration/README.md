@@ -10,7 +10,7 @@ The model-facing Consumer for `ctx.orchestrations`. It registers one `orchestrat
 
 #### What the model sees
 
-The `orchestration` tool schema and one stable policy section describing complex-task admission, explicit Graph authority, automatic low-risk start, human approval for risky work, restart-safe inspection, and parallel fan-out without a phase-wide barrier. Each compilation records the current `auto | direct | codex | claude-code` collaboration policy as TaskGraph admission metadata; the normal parallel bound is four workers.
+The `orchestration` tool schema and one stable policy section describing complex-task admission, explicit Graph authority, automatic low-risk start, human approval for risky work, restart-safe inspection, and parallel fan-out without a phase-wide barrier. The `graph_json` description includes a complete read-only example with the required graph and node fields; its workspace and work limits must be replaced with observed, authorized values. Gouzi ids belong in node `operator.preferredIds`, including for a single read-only task. A `GRAPH_INVALID` response calls for repairing the named field and resubmitting compilation, not diagnosing an offline member or switching to `physical_operator`. Each compilation records the current `auto | direct | codex | claude-code` collaboration policy as TaskGraph admission metadata; the normal parallel bound is four workers.
 
 #### Token effect
 

@@ -8,7 +8,7 @@
  * @module dsh-llm-deepseek/adapter
  */
 
-import { attributionHeaders, contentHasImage, CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError, isQuotaExceededError, LlmAdapter, LlmError, ProviderRequestId, QUOTA_EXCEEDED_CODE, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { attributionHeaders, contentHasImage, CONTEXT_WINDOW_EXCEEDED_CODE, INSUFFICIENT_BALANCE_CODE, isContextWindowExceededError, isQuotaExceededError, LlmAdapter, LlmError, ProviderRequestId, QUOTA_EXCEEDED_CODE, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
   LlmModelInfo,
@@ -69,6 +69,8 @@ export interface DeepSeekConnectionOptions {
   defaultContextWindow: number
   /** Advisory models exposed to discovery consumers; requests remain unrestricted. */
   models: readonly DeepSeekCatalogModel[]
+  /** Whether an explicit refresh adds the endpoint's `GET /models` ids to `models`. */
+  discoverModels: boolean
   /** Maximum provider idle time while one stream read is outstanding. */
   streamIdleTimeoutMs: number
   /** Maximum accumulated base64 image payload in one request. */
@@ -92,6 +94,16 @@ export interface DeepSeekAdapterOptions {
   resolveUserId: () => AnonymousUserId
   /** Resolve the current durable attachment service; absence rejects image input. */
   resolveAttachments?: () => AttachmentStore | undefined
+}
+
+/** Snapshot used by the persistent catalog source to separate configuration from live listing evidence. */
+export interface DeepSeekCatalogSnapshot {
+  /** Models configured for this provider route, whether or not the endpoint listed them. */
+  readonly configuredModels: readonly DeepSeekCatalogModel[]
+  /** IDs returned by the last successful endpoint listing, in endpoint order. */
+  readonly discoveredModelIds: readonly string[]
+  /** Whether the provider is configured to perform endpoint discovery. */
+  readonly discoveryEnabled: boolean
 }
 
 /** Default maximum idle interval while an adapter stream read is outstanding. */
@@ -157,14 +169,18 @@ function requestId(headers: Headers): ReturnType<typeof ProviderRequestId> | und
 export function httpErrorCode(status: number, error?: WireError['error']): string {
   if (status === 401 || status === 403) return 'AUTH'
   if (status === 413) return 'INVALID_REQUEST'
+  if (status >= 500) return 'SERVER'
+  if (status === 408) return 'HTTP_408'
   const detail = [error?.code, error?.type, error?.message].filter(Boolean).join(' ')
+  if (status === 402 || /\binsufficient[\s_-]+balance\b/i.test(detail) || detail.includes('余额不足')) {
+    return INSUFFICIENT_BALANCE_CODE
+  }
   if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE
   if (status === 429) return 'RATE_LIMIT'
   if (status === 400) {
     if (isContextWindowExceededError(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE
     return 'INVALID_REQUEST'
   }
-  if (status >= 500) return 'SERVER'
   return `HTTP_${status}`
 }
 
@@ -193,26 +209,49 @@ export class DeepSeekAdapter extends LlmAdapter {
     return this.config.options().retryPolicy
   }
 
+  /**
+   * Refresh the endpoint catalog and return the evidence-separated snapshot.
+   * @param signal - optional caller cancellation for the directory request.
+   * @returns configured models and the latest successfully observed model IDs.
+   */
+  async refreshCatalog(signal?: AbortSignal): Promise<DeepSeekCatalogSnapshot> {
+    const connection = this.config.options()
+    if (!connection.discoverModels) {
+      return {
+        configuredModels: connection.models,
+        discoveredModelIds: [],
+        discoveryEnabled: false,
+      }
+    }
+    const scope = discoveryScope(connection)
+    const generation = (this.discoveryGenerations.get(scope) ?? 0) + 1
+    this.discoveryGenerations.set(scope, generation)
+    const apiKey = await this.config.resolveApiKey(connection)
+    const userId = this.config.resolveUserId()
+    const discovered = await discoverDeepSeekModels({
+      baseURL: connection.baseURL,
+      apiKey,
+      userId: String(userId),
+      timeoutMs: connection.streamIdleTimeoutMs,
+      ...signal === undefined ? {} : { signal },
+    })
+    if (this.discoveryGenerations.get(scope) === generation) {
+      this.discoveredModelIds.set(scope, discovered)
+    }
+    return {
+      configuredModels: connection.models,
+      discoveredModelIds: this.discoveredModelIds.get(scope) ?? [],
+      discoveryEnabled: true,
+    }
+  }
+
   override async listModels(
     provider: string,
     options?: { readonly refresh?: boolean },
   ): Promise<readonly LlmModelInfo[]> {
     const connection = this.config.options()
-    const scope = discoveryScope(connection)
-    if (options?.refresh === true) {
-      const generation = (this.discoveryGenerations.get(scope) ?? 0) + 1
-      this.discoveryGenerations.set(scope, generation)
-      const apiKey = await this.config.resolveApiKey(connection)
-      const userId = this.config.resolveUserId()
-      const discovered = await discoverDeepSeekModels({
-        baseURL: connection.baseURL,
-        apiKey,
-        userId: String(userId),
-        timeoutMs: connection.streamIdleTimeoutMs,
-      })
-      if (this.discoveryGenerations.get(scope) === generation) {
-        this.discoveredModelIds.set(scope, discovered)
-      }
+    if (options?.refresh === true && connection.discoverModels) {
+      await this.refreshCatalog()
     }
     return this.catalog(provider, connection)
   }

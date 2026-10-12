@@ -8,7 +8,7 @@ Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index
 
 ## `ToolDefinition` — a registered tool
 
-A `ToolSchema` (the model-facing fields) plus a mandatory canonical output declaration, the `execute` function, host-only scheduler metadata, an optional final-content callback, and optional UI presenters. The registry holds these; the loop dispatches calls through them. The registry's `schemas()` builds the model-facing `ToolSchema[]` by an explicit allowlist — `output`/`execute`/`finalizeContent`/`timeoutMs`/`isConcurrencySafe`/`presentCall`/`presentResult` must never leak into a model request.
+A `ToolSchema` (the model-facing fields) plus a mandatory canonical output declaration, the `execute` function, host-only scheduler metadata, an optional final-content callback, and optional UI presenters. The registry holds these; the loop dispatches calls through them. The registry's `schemas()` builds the model-facing `ToolSchema[]` by an explicit allowlist — `delegation`/`output`/`execute`/`finalizeContent`/`timeoutMs`/`isConcurrencySafe`/`presentCall`/`presentResult` must never leak into a model request.
 
 ```ts type-equiv
 /** Tool-owned canonical output contract used after the body returns a JSON value. */
@@ -25,6 +25,12 @@ interface ToolOutputDefinition {
 ```ts type-equiv
 /** A registered tool: its schema plus the execution function. */
 interface ToolDefinition extends ToolSchema {
+  /** Internal dispatcher identity; absent actions means every call delegates execution. Never model-visible. */
+  readonly delegation?: {
+    readonly family: 'physical-operator' | 'subagent'
+    /** Only these action values delegate when this list is present. */
+    readonly actions?: readonly string[]
+  }
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
@@ -94,6 +100,8 @@ interface ToolDefinition extends ToolSchema {
 ```
 
 `execute` receives `args: unknown` — a raw `ToolDefinition` validates its own input. First-party tools don't write that by hand; they use `defineTool`, which validates and narrows the arguments, infers the body return from `output.schema`, and types both output projectors. `finalizeContent` deliberately receives the immutable execution instead of typed arguments because invalid-input and outer pipeline failures reach it too; it may enforce a tool-owned content bound while preserving `isError`, canonical value, structured error identity, deferred contexts, and presentation metadata.
+
+`delegation` identifies an internal `physical-operator` or `subagent` dispatcher. When `actions` is present, only those action values delegate execution; omission marks every call as delegating. It is excluded from model-facing schemas. Each `ToolExecution` captures this metadata from the actual definition selected at entry. Before invoking a body, dispatch retains the current visibility and execution-mode checks and requires that same definition: a call reaching body dispatch after unloading or replacement during asynchronous preparation returns `UNKNOWN_TOOL`, executing neither the captured body nor a replacement. The package's [execution lifecycle](../../packages/core/tools/README.md#execution-lifecycle) defines this behavior.
 
 ## The unified JSON-value schema DSL
 
@@ -289,6 +297,8 @@ interface CodeDispatchLog {
  * observers run.
  */
 interface ToolExecution extends ToolExecutionInput {
+  /** Internal dispatcher identity captured with this execution's actual definition; never model-visible or durable. */
+  readonly delegation?: ToolDefinition['delegation']
   /** Root model-requested call, resolved for every root and nested execution. */
   readonly rootCallId: CallId
   /** Registry-assigned identity shared with nested calls only as their opaque `parent` token. */
@@ -571,7 +581,7 @@ async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>
 
 Types: [ScopeKey](scope.md)
 
-Source: [`packages/core/tools/src/index.ts:789`](../../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:798`](../../packages/core/tools/src/index.ts)
 
 <a id="tools-events"></a>
 

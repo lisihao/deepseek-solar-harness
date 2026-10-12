@@ -18,6 +18,7 @@ import { z } from 'zod'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorNativeToolPolicy,
+  PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorReasoningEffort,
 } from '@deepseek-ai/dsh-physical-operator'
 import type {
@@ -26,6 +27,7 @@ import type {
   ResidentModelOption,
   ResidentObservation,
   ResidentProductDriver,
+  ResidentProviderQueryOptions,
   ResidentProviderStatus,
   ResidentQuotaPool,
   ResidentQuotaWindow,
@@ -45,6 +47,10 @@ import {
   type CodexAppServerRateLimit,
 } from '@deepseek-ai/dsh-subagent-codex'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { readFreshCodexCatalog } from './codex-catalog.ts'
+import { generateCodexJudgment } from './codex-judgment.ts'
+import { generateCodexBridgeTurn } from './codex-bridge-turn.ts'
+import { generateCodexGovernedTurn } from './codex-governed-turn.ts'
 import { openCodexDaemonStream } from './codex-transport.ts'
 import {
   callModelToolBridge,
@@ -52,6 +58,7 @@ import {
   modelToolCommandId,
   RESIDENT_RLM_TOOL_NAME,
   validateResidentModelToolBridge,
+  verifyModelToolBridgeReady,
 } from './model-tool-bridge.ts'
 
 const execFileAsync = promisify(execFile)
@@ -345,16 +352,72 @@ function ensureModelToolBridge(request: ResidentDriverExecuteRequest): NonNullab
   return validateResidentModelToolBridge(request.modelToolBridge, request.nativeToolPolicy)
 }
 
+async function admitModelToolBridge(request: ResidentDriverExecuteRequest): Promise<PhysicalOperatorModelToolBridgeV1 | undefined> {
+  const bridge = ensureModelToolBridge(request)
+  if (request.nativeToolPolicy === 'dsh-tools-authoritative') {
+    if (bridge === undefined) {
+      throw new ResidentOperatorError('DSH-authoritative execution requires an active model tool bridge', 'PROTOCOL_MISMATCH')
+    }
+    const signal = request.modelToolBridgeAdmissionTimeoutMs === undefined
+      ? request.signal
+      : AbortSignal.any([request.signal, AbortSignal.timeout(request.modelToolBridgeAdmissionTimeoutMs)])
+    await verifyModelToolBridgeReady(bridge, signal)
+  }
+  return bridge
+}
+
+function attachedModelToolBridge(request: ResidentDriverExecuteRequest): PhysicalOperatorModelToolBridgeV1 {
+  const bridge = ensureModelToolBridge(request)
+  if (bridge === undefined) throw new ResidentOperatorError('model tool bridge owner is detached', 'RUNTIME_UNAVAILABLE')
+  return bridge
+}
+
 function isRlmOnlyBridge(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): boolean {
   return bridge.tools.length === 1 && bridge.tools[0]?.name === RESIDENT_RLM_TOOL_NAME
 }
 
-function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
-  const bridge = ensureModelToolBridge(request)
+/** Codex keeps the `mcp__` namespace for its own MCP servers and rejects a dynamic tool whose name starts with it. */
+const CODEX_RESERVED_TOOL_PREFIX = 'mcp__'
+const CODEX_ALIAS_PREFIX = 'dsh_'
+
+/**
+ * The name under which a bridge tool is offered to Codex. A DSH tool that comes from an MCP server is already called
+ * `mcp__<server>__<tool>`, which Codex refuses, so it is offered as `dsh_mcp__<server>__<tool>`; every other name is
+ * unchanged.
+ * @param name - the tool's name in the DSH bridge.
+ * @returns the name Codex is given and calls back with.
+ */
+export function codexToolName(name: string): string {
+  return name.startsWith(CODEX_RESERVED_TOOL_PREFIX) ? `${CODEX_ALIAS_PREFIX}${name}` : name
+}
+
+/**
+ * Describe the bridge tools to Codex under names it accepts.
+ * @param bridge - the sealed model tool bridge, when the turn has one.
+ * @returns one dynamic tool per bridge tool.
+ * @throws ResidentOperatorError - when two bridge tools would end up with the same Codex name.
+ */
+export function codexDynamicToolSpecs(
+  bridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+): readonly CodexDynamicToolSpec[] {
   if (bridge === undefined) return []
-  return bridge.tools.map(spec => ({
-    type: 'function', name: spec.name, description: spec.description, inputSchema: spec.inputSchema, deferLoading: false,
-  }))
+  const seen = new Set<string>()
+  return bridge.tools.map((spec) => {
+    const name = codexToolName(spec.name)
+    if (seen.has(name)) {
+      throw new ResidentOperatorError(`Codex tool name ${JSON.stringify(name)} collides with another DSH bridge tool`, 'PROTOCOL_MISMATCH')
+    }
+    seen.add(name)
+    return {
+      type: 'function', name,
+      description: `DSH model-tool bridge tool ${JSON.stringify(name)}. This tool executes through DSH permissions and logging. ${spec.description}`,
+      inputSchema: spec.inputSchema, deferLoading: false,
+    }
+  })
+}
+
+function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
+  return codexDynamicToolSpecs(ensureModelToolBridge(request))
 }
 
 /**
@@ -362,12 +425,14 @@ function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly Code
  * @param executionId - outer Physical Operator execution identity.
  * @param bridge - sealed owner-local model tool bridge.
  * @param signal - turn cancellation signal.
+ * @param resolveBridge - current owner endpoint for each new call; in-flight calls are never replayed.
  * @returns the configured Claude Agent SDK MCP server.
  */
 export function createClaudeRlmMcpServer(
   executionId: string,
   bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
   signal: AbortSignal,
+  resolveBridge: () => PhysicalOperatorModelToolBridgeV1 = () => bridge,
 ): ReturnType<typeof createSdkMcpServer> {
   const name = claudeBridgeName(bridge)
   return createSdkMcpServer({
@@ -384,7 +449,7 @@ export function createClaudeRlmMcpServer(
       async (args, extra) => {
         const commandId = modelToolCommandId(executionId, 'claude', claudeMcpRequestId(extra))
         const result = bridgeToolResult(await callModelToolBridge(
-          bridge,
+          resolveBridge(),
           toolSpec.name,
           args,
           commandId,
@@ -405,22 +470,26 @@ export function createClaudeRlmMcpServer(
  * @param executionId - outer Physical Operator execution identity.
  * @param bridge - sealed owner-local model tool bridge.
  * @param signal - turn cancellation signal.
+ * @param resolveBridge - current owner endpoint for each new call; in-flight calls are never replayed.
  * @returns a callback that settles Codex dynamic tool calls through the bridge.
  */
 export function createCodexRlmToolHandler(
   executionId: string,
   bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
   signal: AbortSignal,
+  resolveBridge: () => PhysicalOperatorModelToolBridgeV1 = () => bridge,
 ): (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult> {
   return async (call) => {
-    if (!bridge.tools.some(spec => spec.name === call.tool)) {
+    // Codex calls a tool by the name it was offered, which for an MCP-origin tool is the renamed one.
+    const allowed = bridge.tools.find(spec => codexToolName(spec.name) === call.tool)
+    if (allowed === undefined) {
       throw new ResidentOperatorError(
         `Codex requested a model tool that is not allowlisted: ${JSON.stringify(call.tool)}`,
         'PROTOCOL_MISMATCH',
       )
     }
     const commandId = modelToolCommandId(executionId, 'codex', call.callId)
-    const result = bridgeToolResult(await callModelToolBridge(bridge, call.tool, call.arguments, commandId, signal))
+    const result = bridgeToolResult(await callModelToolBridge(resolveBridge(), allowed.name, call.arguments, commandId, signal))
     return { success: !result.isError, text: bridgeToolText(result) }
   }
 }
@@ -660,27 +729,12 @@ export async function codexDaemonVersion(executable = 'codex'): Promise<CodexDae
     : undefined
 }
 
-async function codexModelsAndQuota(): Promise<{
+async function codexModelsAndQuota(executable: string): Promise<{
   readonly models: ResidentModelOption[]
   readonly quotaPools: ResidentQuotaPool[]
   readonly quotaUnavailableReason?: string
 }> {
-  const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
-  if (!existsSync(socketPath)) throw new Error('Codex app-server control socket is unavailable')
-  const signal = AbortSignal.timeout(15_000)
-  const stream = await openCodexDaemonStream(socketPath, signal)
-  const wire = new CodexAppServerWire(stream, stream, 'require')
-  try {
-    wire.start()
-    await wire.initialize(signal)
-    return await collectCodexModelsAndQuota(
-      () => wire.listModels(signal),
-      () => wire.readRateLimits(signal),
-    )
-  } finally {
-    wire.close()
-    stream.destroy()
-  }
+  return readFreshCodexCatalog(executable, collectCodexModelsAndQuota)
 }
 
 function textPrompt(prompt: readonly ContentBlock[], product: string): string[] {
@@ -702,11 +756,13 @@ function textPrompt(prompt: readonly ContentBlock[], product: string): string[] 
  * Append the sealed no-tool contract to the product-owned instruction channel.
  * @param systemPrompt - optional caller-owned instructions.
  * @param policy - sealed native product-tool authority.
+ * @param bridge - exact DSH tools exposed to this native turn.
  * @returns effective product system prompt, or undefined when no prompt is needed.
  */
 export function nativeToolSystemPrompt(
   systemPrompt: string | undefined,
   policy?: PhysicalOperatorNativeToolPolicy,
+  bridge?: PhysicalOperatorModelToolBridgeV1,
 ): string | undefined {
   if (policy === 'inherit' || policy === undefined) return systemPrompt
   const authority = policy === 'disabled'
@@ -719,6 +775,10 @@ export function nativeToolSystemPrompt(
       'This execution plan grants tool authority only through the DSH model-tool bridge.',
       'Do not invoke product-native shell, filesystem, network, browser, search, other tools, or any MCP server except the DSH model-tool bridge.',
       'Use the DSH tools exposed for this turn; any product-native approval request will be declined.',
+      ...(bridge === undefined ? [] : [
+        `The DSH bridge tools for this turn are: ${bridge.tools.map(tool => JSON.stringify(tool.name)).join(', ')}.`,
+        'These named tools are DSH-owned even when their names describe shell or file operations. They are permitted through the bridge; the native read-only sandbox does not describe their DSH permissions. Do not search for a separate tool literally named model-tool bridge.',
+      ]),
     ].join(' ')
   return systemPrompt === undefined ? authority : `${systemPrompt}\n\n${authority}`
 }
@@ -746,18 +806,26 @@ export function claudeNativeToolOptions(policy?: PhysicalOperatorNativeToolPolic
 export function codexApprovalBehavior(
   policy?: PhysicalOperatorNativeToolPolicy,
 ): 'decline' | 'require' {
-  return policy === 'dsh-tools-authoritative' ? 'decline' : 'require'
+  return policy === 'disabled' || policy === 'dsh-tools-authoritative' ? 'decline' : 'require'
 }
 
 /**
- * Seal a read-only, no-approval native Codex environment while DSH tools remain dynamic functions.
+ * Seal a read-only, no-network native Codex environment without permission upgrades.
+ * Disabled execution fails before native startup: permission profiles do not disable inherited MCP servers.
  *
  * @param policy Sealed native product-tool authority for the turn.
- * @returns Codex execution boundary for DSH-authoritative turns, otherwise undefined.
+ * @returns Codex execution limits for DSH-authoritative native tools, otherwise undefined.
+ * @throws ResidentOperatorError when disabled native execution cannot be isolated from inherited external tools.
  */
 export function codexExecutionBoundary(
   policy?: PhysicalOperatorNativeToolPolicy,
 ): CodexAppServerExecutionBoundary | undefined {
+  if (policy === 'disabled') {
+    throw new ResidentOperatorError(
+      'Codex nativeToolPolicy=disabled cannot isolate inherited MCP servers; use a provider without native tools',
+      'INVALID_RESULT',
+    )
+  }
   return policy === 'dsh-tools-authoritative'
     ? { approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled' }
     : undefined
@@ -986,15 +1054,25 @@ export function codexExecutionFailure(error: unknown): ResidentOperatorError {
 /** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
 export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   readonly operatorId = 'claude-code' as const
-  private modelCatalog: { readonly executable: string; readonly promise: Promise<ResidentModelOption[]> } | undefined
+  private modelCatalog: {
+    readonly executable: string
+    readonly promise: Promise<ResidentModelOption[]>
+    settled: boolean
+  } | undefined
 
-  private models(executable: string): Promise<ResidentModelOption[]> {
-    if (this.modelCatalog?.executable === executable) return this.modelCatalog.promise
-    const catalog = { executable, promise: claudeModels(executable) }
+  private models(executable: string, refreshModels = false): Promise<ResidentModelOption[]> {
+    if (this.modelCatalog?.executable === executable && (!refreshModels || !this.modelCatalog.settled)) {
+      return this.modelCatalog.promise
+    }
+    const catalog = { executable, promise: claudeModels(executable), settled: false }
     this.modelCatalog = catalog
-    void catalog.promise.catch(() => {
-      if (this.modelCatalog === catalog) this.modelCatalog = undefined
-    })
+    void catalog.promise.then(
+      () => { catalog.settled = true },
+      () => {
+        catalog.settled = true
+        if (this.modelCatalog === catalog) this.modelCatalog = undefined
+      },
+    )
     return catalog.promise
   }
 
@@ -1018,13 +1096,13 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     return this.qualify()
   }
 
-  async qualify(): Promise<ResidentProviderStatus> {
+  async qualify(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus> {
     try {
       const { stdout: version, executable } = await command('claude', ['--version'])
       const parsed = await claudeAuthenticationStatus(executable)
       const subscription = isClaudeNativeSubscription(parsed)
       const exactVersion = claudeCliCompatible(version)
-      const models = subscription && exactVersion ? await this.models(executable) : []
+      const models = subscription && exactVersion ? await this.models(executable, options?.refreshModels === true) : []
       const catalogReady = models.length > 0
       const unavailableCode = !subscription
         ? 'AUTH_MODE_MISMATCH'
@@ -1062,6 +1140,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   }
 
   async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
+    const modelToolBridge = await admitModelToolBridge(request)
     const qualification = await this.qualify()
     if (!qualification.available) {
       throw new ResidentOperatorError(
@@ -1083,8 +1162,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     let approvalRequired: string | undefined
     const running = new Set<string>()
     const observedToolNames = new Map<string, string>()
-    const modelToolBridge = ensureModelToolBridge(request)
-    const effectiveSystemPrompt = nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy)
+    const effectiveSystemPrompt = nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy, modelToolBridge)
     const modelToolNames = new Set(modelToolBridge === undefined ? [] : claudeQualifiedToolNames(modelToolBridge))
     const canUseTool: CanUseTool = (toolName, _input, options) => {
       if (modelToolNames.has(toolName)) return Promise.resolve({ behavior: 'allow' })
@@ -1098,7 +1176,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     }
     const rlmServer = modelToolBridge === undefined
       ? undefined
-      : createClaudeRlmMcpServer(String(request.commandId), modelToolBridge, controller.signal)
+      : createClaudeRlmMcpServer(String(request.commandId), modelToolBridge, controller.signal, () => attachedModelToolBridge(request))
     const query = claudeQuery({
       prompt: texts.join(''),
       options: {
@@ -1257,24 +1335,26 @@ export class CodexResidentDriver implements ResidentProductDriver {
 
   async qualify(): Promise<ResidentProviderStatus> {
     try {
+      const codexExecutable = resolveProductExecutable('codex')
       const [{ stdout: version }, login] = await Promise.all([
-        command('codex', ['--version']),
-        command('codex', ['login', 'status']),
+        command(codexExecutable, ['--version']),
+        command(codexExecutable, ['login', 'status']),
       ])
       const subscription = `${login.stdout}\n${login.stderr}`.includes('Logged in using ChatGPT')
       let transportError: unknown
       try {
-        await command('codex', ['app-server', 'daemon', 'start'])
+        await command(codexExecutable, ['app-server', 'daemon', 'start'])
       } catch (error) {
         transportError = error
       }
       const transportReady = transportError === undefined
       // The daemon serves its own managed package; qualify the binary it runs.
-      const server = transportReady ? await codexDaemonVersion() : undefined
-      const protocol = await codexProtocol(server?.managedCodexPath ?? 'codex')
+      const server = transportReady ? await codexDaemonVersion(codexExecutable) : undefined
+      const qualifiedExecutable = server?.managedCodexPath ?? codexExecutable
+      const protocol = await codexProtocol(qualifiedExecutable)
       const compatible = protocol.missing.length === 0
       const productVersion = server === undefined ? version.trim() : `codex-cli ${server.appServerVersion}`
-      const catalog = transportReady && compatible ? await codexModelsAndQuota().catch((error: unknown) => {
+      const catalog = transportReady && compatible ? await codexModelsAndQuota(qualifiedExecutable).catch((error: unknown) => {
         transportError = error
         return { models: [], quotaPools: [], quotaUnavailableReason: undefined }
       }) : { models: [], quotaPools: [], quotaUnavailableReason: undefined }
@@ -1293,6 +1373,8 @@ export class CodexResidentDriver implements ResidentProductDriver {
         operatorId: this.operatorId,
         product: this.operatorId,
         displayName: 'Codex',
+        supportsGenerationLimits: true,
+        supportsGovernedWorkspacePolicy: true,
         description: 'Persistent native Codex implementation, debugging, testing, and repository review.',
         tags: ['coding', 'implementation', 'debugging', 'testing', 'review', 'subscription'],
         maxConcurrency: 4,
@@ -1320,14 +1402,20 @@ export class CodexResidentDriver implements ResidentProductDriver {
     }
   }
 
-  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId?: string }> {
+    if (request.nativeToolPolicy === 'disabled' && request.modelToolBridge !== undefined) return generateCodexBridgeTurn(request)
+    if (request.nativeToolPolicy === 'disabled') return generateCodexJudgment(request)
+    if (request.governedWorkspacePolicy !== undefined) return generateCodexGovernedTurn(request)
+    if (request.generationLimits !== undefined) {
+      throw new ResidentOperatorError('Codex generation limits require model-only or governed workspace execution', 'INVALID_RESULT')
+    }
+    const executionBoundary = codexExecutionBoundary(request.nativeToolPolicy)
+    const modelToolBridge = await admitModelToolBridge(request)
     await this.requireAvailable()
     const texts = textPrompt(request.prompt, 'Codex')
     request.onProgress('connecting')
     const stream = await this.openStream(request.signal)
-    const modelToolBridge = ensureModelToolBridge(request)
     const dynamicTools = codexDynamicTools(request)
-    const executionBoundary = codexExecutionBoundary(request.nativeToolPolicy)
     const wire = new CodexAppServerWire(
       stream,
       stream,
@@ -1335,7 +1423,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
       dynamicTools,
       modelToolBridge === undefined
         ? undefined
-        : createCodexRlmToolHandler(String(request.commandId), modelToolBridge, request.signal),
+        : createCodexRlmToolHandler(String(request.commandId), modelToolBridge, request.signal, () => attachedModelToolBridge(request)),
       (observation) => { request.onObservation(observation) },
     )
     const abort = (): void => { wire.interrupt() }
@@ -1350,7 +1438,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
           request.signal,
           false,
           request.profile,
-          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy, modelToolBridge),
           executionBoundary,
         )
       } else {
@@ -1359,7 +1447,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
           request.workspace,
           request.signal,
           request.profile,
-          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy, modelToolBridge),
           executionBoundary,
         )
       }

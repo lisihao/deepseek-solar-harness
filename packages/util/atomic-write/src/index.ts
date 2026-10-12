@@ -7,6 +7,7 @@
  * writers of one file through a `wx`-created `<file>.lock` sibling, so a
  * read-modify-write cycle can never resurrect a state another writer just
  * replaced; readers stay lock-free because the rename commit is atomic.
+ * On Windows the rename retries briefly while another handle holds the target.
  * @module @deepseek-ai/dsh-atomic-write
  */
 
@@ -34,6 +35,36 @@ export interface WriteFileAtomicOptions {
 }
 
 /**
+ * Windows rename-retry constants. These bound a robustness workaround for the
+ * OS file-sharing rule, not a deployment tunable: a rename over a target that
+ * another handle holds open fails transiently, and the backoff (10, 20, 40,
+ * 80, 160 ms) outlasts the brief open of a watcher or poll reader.
+ */
+const RENAME_RETRY_LIMIT = 5
+const RENAME_RETRY_INITIAL_MS = 10
+
+/**
+ * Whether a rename failure is the transient Windows sharing violation raised
+ * while another handle holds the target open.
+ * @param error - the rename rejection.
+ * @returns true only on win32 for `EPERM`, `EACCES`, or `EBUSY`.
+ */
+function isRenameSharingViolation(error: unknown): boolean {
+  if (process.platform !== 'win32') return false
+  const code = (error as NodeJS.ErrnoException).code
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
+}
+
+/**
+ * Backoff before the rename retry that follows the failed `attempt`.
+ * @param attempt - zero-based index of the rename attempt that failed.
+ * @returns the delay in milliseconds.
+ */
+function renameRetryDelayMs(attempt: number): number {
+  return RENAME_RETRY_INITIAL_MS * 2 ** attempt
+}
+
+/**
  * Replace `filename` with `content` in one atomic step, creating parent
  * directories. The content is first written to a random-suffix sibling opened
  * with exclusive create (`wx`): the open refuses to follow a symlink planted
@@ -41,7 +72,11 @@ export interface WriteFileAtomicOptions {
  * rename, so replacing a wider-permission file narrows it without a chmod
  * race. The rename also replaces a symlinked target itself instead of writing
  * through to its referent, and the same-directory sibling keeps the rename on
- * one filesystem. On any failure the temp file is removed and the failure
+ * one filesystem. On Windows, a rename that fails with `EPERM`, `EACCES`, or
+ * `EBUSY` because another handle (a watcher or concurrent reader) holds the
+ * target open is retried with exponential backoff for about 300 ms before the
+ * last error is rethrown; a genuine permission failure therefore surfaces
+ * after that delay. On any failure the temp file is removed and the failure
  * rethrown. Crash durability (fsync) is out of scope.
  * @param filename - final path receiving the content.
  * @param content - complete next file content.
@@ -57,7 +92,15 @@ export async function writeFileAtomic(filename: string, content: string, options
   const temp = `${filename}.${randomBytes(6).toString('hex')}.tmp`
   try {
     await writeFile(temp, content, { mode: options.mode, flag: 'wx' })
-    await rename(temp, filename)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await rename(temp, filename)
+        break
+      } catch (error) {
+        if (attempt >= RENAME_RETRY_LIMIT || !isRenameSharingViolation(error)) throw error
+      }
+      await new Promise(resolve => setTimeout(resolve, renameRetryDelayMs(attempt)))
+    }
   } catch (error) {
     await rm(temp, { force: true })
     throw error
@@ -67,7 +110,8 @@ export async function writeFileAtomic(filename: string, content: string, options
 /**
  * Synchronous counterpart for state owners whose public contract is already
  * synchronous. It preserves the same exclusive temp-file and atomic-rename
- * semantics as {@link writeFileAtomic} without fire-and-forget persistence.
+ * semantics as {@link writeFileAtomic} without fire-and-forget persistence,
+ * including the Windows rename retry, whose backoff blocks the calling thread.
  * @param filename - final path receiving the content.
  * @param content - complete next file content.
  * @param options - permission bits for the replacement inode.
@@ -80,7 +124,15 @@ export function writeFileAtomicSync(filename: string, content: string, options: 
   const temp = `${filename}.${randomBytes(6).toString('hex')}.tmp`
   try {
     writeFileSync(temp, content, { mode: options.mode, flag: 'wx' })
-    renameSync(temp, filename)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameSync(temp, filename)
+        break
+      } catch (error) {
+        if (attempt >= RENAME_RETRY_LIMIT || !isRenameSharingViolation(error)) throw error
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, renameRetryDelayMs(attempt))
+    }
   } catch (error) {
     rmSync(temp, { force: true })
     throw error

@@ -36,8 +36,9 @@ const MAX_OBSERVATION_NAME_CHARS = 160
 
 /**
  * Bound trace text and remove the small set of credential-shaped values that
- * native products can echo in an otherwise public response. This store never
- * receives prompts, stderr, environment values, or complete tool results.
+ * native products can echo in an otherwise public response. Public observations
+ * exclude complete prompts, stderr, environment values, and complete tool results;
+ * private admission records separately retain the inputs passed to the Driver.
  */
 function scrubObservationPreview(value: string): string {
   return value
@@ -85,6 +86,7 @@ interface SessionRow {
   health_reason: string | null
   revision: number
   native_session_id: string | null
+  native_tool_catalog_sha256: string | null
   model_id: string | null
   reasoning_effort: string | null
   profile_source: string | null
@@ -119,6 +121,22 @@ interface CompactReceiptRow {
   error_message: string | null
   resolution: string | null
   updated_at: string
+}
+
+/** Resolved workspace and prompt inputs retained only in the private admission event. */
+export interface ResidentAcceptedInputSnapshot {
+  readonly workspace: string
+  readonly prompt: readonly ContentBlock[]
+  readonly systemPrompt?: string
+  readonly nativeContext?: NativeContext
+  readonly nativeToolPolicy: PhysicalOperatorNativeToolPolicy
+}
+
+/** Remove private admission inputs from every public event projection. */
+function publicEventData(type: string, json: string): Record<string, unknown> {
+  const data = JSON.parse(json) as Record<string, unknown>
+  if (type === 'turn.accepted') delete data.inputSnapshot
+  return data
 }
 
 /** Durable receipt projection returned immediately after admission or replay. */
@@ -185,6 +203,43 @@ export function canonicalRequestHash(
         nativeContext: { version: nativeContext.version, digest: nativeContext.digest },
       },
     }))
+    .digest('hex')
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson)
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([key, nested]) => [key, canonicalJson(nested)]),
+    )
+  }
+  return value
+}
+
+/**
+ * Hash the immutable native tool policy and tool specifications that a Codex
+ * thread can retain across Resident turns. Endpoint and bridge-session
+ * identities are deliberately excluded because owner reattachment changes
+ * them without changing the native tool catalog.
+ * @param nativeToolPolicy - sealed native product tool authority for the turn.
+ * @param modelToolBridge - optional DSH-owned tools exposed to the native turn.
+ * @returns lowercase SHA-256 digest independent of tool and schema key order.
+ */
+export function canonicalNativeToolCatalogHash(
+  nativeToolPolicy: PhysicalOperatorNativeToolPolicy,
+  modelToolBridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+): string {
+  const tools = [...(modelToolBridge?.tools ?? [])]
+    .map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: canonicalJson(tool.inputSchema),
+    }))
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+  return createHash('sha256')
+    .update(JSON.stringify({ nativeToolPolicy, tools }))
     .digest('hex')
 }
 
@@ -270,7 +325,8 @@ export class ResidentStore {
   private configure(): void {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4
+      && version !== 5 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident state schema ${version} is incompatible with ${RESIDENT_STATE_SCHEMA_VERSION}`,
         'PROTOCOL_MISMATCH',
@@ -287,6 +343,7 @@ export class ResidentStore {
         health_reason TEXT,
         revision INTEGER NOT NULL,
         native_session_id TEXT,
+        native_tool_catalog_sha256 TEXT,
         model_id TEXT,
         reasoning_effort TEXT,
         profile_source TEXT,
@@ -341,6 +398,9 @@ export class ResidentStore {
       this.db.exec('ALTER TABLE command_receipts ADD COLUMN task_label TEXT;')
     }
     if (version >= 1 && version <= 3) this.migrateLaneSchema()
+    if ((version === 4 || version === 5) && !this.residentSessionHasColumn('native_tool_catalog_sha256')) {
+      this.db.exec('ALTER TABLE resident_sessions ADD COLUMN native_tool_catalog_sha256 TEXT;')
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS session_compaction_receipts (
         command_id TEXT PRIMARY KEY,
@@ -377,6 +437,7 @@ export class ResidentStore {
         health_reason TEXT,
         revision INTEGER NOT NULL,
         native_session_id TEXT,
+        native_tool_catalog_sha256 TEXT,
         model_id TEXT,
         reasoning_effort TEXT,
         profile_source TEXT,
@@ -386,9 +447,9 @@ export class ResidentStore {
       ) STRICT;
       INSERT INTO resident_sessions
         (id, operator_id, workspace, lane_id, lifecycle, health, health_reason, revision,
-         native_session_id, model_id, reasoning_effort, profile_source, active_turn_id, updated_at)
+         native_session_id, native_tool_catalog_sha256, model_id, reasoning_effort, profile_source, active_turn_id, updated_at)
       SELECT id, operator_id, workspace, 'legacy', lifecycle, health, health_reason, revision,
-        native_session_id, model_id, reasoning_effort, profile_source, active_turn_id, updated_at
+        native_session_id, NULL, model_id, reasoning_effort, profile_source, active_turn_id, updated_at
       FROM resident_sessions_v3;
       CREATE TABLE command_receipts (
         command_id TEXT PRIMARY KEY,
@@ -491,8 +552,11 @@ export class ResidentStore {
  * @param supersedesCommandId - optional uniquely linked abandoned indeterminate command.
  * @param taskLabel - bounded display-only summary, never the raw prompt.
  * @param laneId - caller-owned native-context isolation lane.
-   * @returns accepted or existing receipt projection.
-   */
+ * @param nativeToolPolicy - sealed native product tool authority for this command.
+ * @param modelToolBridge - optional DSH-owned native tool descriptor.
+ * @param inputSnapshot - complete private inputs, recorded atomically only for a new admission.
+ * @returns accepted or existing receipt projection.
+ */
   accept(
     commandId: string,
     requestHash: string,
@@ -503,6 +567,9 @@ export class ResidentStore {
     supersedesCommandId?: string,
     taskLabel?: string,
     laneId = 'legacy',
+    nativeToolPolicy: PhysicalOperatorNativeToolPolicy = 'inherit',
+    modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
+    inputSnapshot?: ResidentAcceptedInputSnapshot,
   ): AcceptedTurn {
     return this.transaction(() => {
       if (this.compactReceiptByCommand(commandId) !== undefined) {
@@ -578,6 +645,7 @@ export class ResidentStore {
           'EXECUTION_PROFILE_CONFLICT',
         )
       }
+      this.assertCodexNativeToolCatalog(session, nativeToolPolicy, modelToolBridge)
       if (session.active_turn_id !== null || session.lifecycle !== 'idle') {
         throw new ResidentOperatorError(
           session.active_turn_id === null
@@ -608,6 +676,7 @@ export class ResidentStore {
         taskLabel: taskLabel ?? null,
         profile,
         supersedesCommandId: superseded?.command_id ?? null,
+        ...inputSnapshot === undefined ? {} : { inputSnapshot },
       }, now)
       return {
         sessionId: session.id,
@@ -623,9 +692,15 @@ export class ResidentStore {
    * @param commandId - admitted durable command identity.
    * @param nativeSessionId - authoritative product Session or thread identity.
    * @param nativeTurnId - optional product turn identity.
+   * @param nativeToolCatalogSha256 - current immutable Codex tool-catalog digest.
    * @returns updated receipt projection.
    */
-  markRunning(commandId: string, nativeSessionId?: string, nativeTurnId?: string): AcceptedTurn {
+  markRunning(
+    commandId: string,
+    nativeSessionId?: string,
+    nativeTurnId?: string,
+    nativeToolCatalogSha256?: string,
+  ): AcceptedTurn {
     return this.transaction(() => {
       const receipt = this.requireReceipt(commandId)
       if (receipt.state !== 'accepted' && receipt.state !== 'running') return this.acceptedFrom(receipt)
@@ -636,8 +711,11 @@ export class ResidentStore {
       `).run(nativeTurnId ?? null, now, commandId)
       if (nativeSessionId !== undefined) {
         this.db.prepare(`
-          UPDATE resident_sessions SET native_session_id = ?, revision = revision + 1, updated_at = ? WHERE id = ?
-        `).run(nativeSessionId, now, receipt.session_id)
+          UPDATE resident_sessions
+          SET native_session_id = ?, native_tool_catalog_sha256 = COALESCE(?, native_tool_catalog_sha256),
+              revision = revision + 1, updated_at = ?
+          WHERE id = ?
+        `).run(nativeSessionId, nativeToolCatalogSha256 ?? null, now, receipt.session_id)
       }
       this.db.prepare('UPDATE session_leases SET heartbeat_at = ? WHERE session_id = ?').run(now, receipt.session_id)
       this.appendEvent(receipt.session_id, 'turn.running', {
@@ -751,6 +829,39 @@ export class ResidentStore {
   }
 
   /**
+   * Fence one turn whose file or provider effect has no proven durable outcome.
+   * @param commandId - admitted durable command identity.
+   * @param message - bounded caller-redacted diagnostic.
+   * @returns the indeterminate receipt, requiring explicit reconciliation before replay.
+   */
+  markTurnIndeterminate(commandId: string, message: string): TurnInspection {
+    return this.transaction(() => {
+      const receipt = this.requireReceipt(commandId)
+      if (receipt.state === 'indeterminate') return this.inspectTurn(receipt.turn_id)
+      if (receipt.state === 'settled') {
+        throw new ResidentOperatorError(`command ${commandId} is already settled`, 'COMMAND_CONFLICT')
+      }
+      const now = new Date().toISOString()
+      this.db.prepare(`
+        UPDATE command_receipts
+        SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, updated_at = ?
+        WHERE command_id = ?
+      `).run(message, now, commandId)
+      this.db.prepare(`
+        UPDATE resident_sessions
+        SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed',
+            active_turn_id = NULL, revision = revision + 1, updated_at = ?
+        WHERE id = ?
+      `).run(now, receipt.session_id)
+      this.db.prepare('DELETE FROM session_leases WHERE session_id = ?').run(receipt.session_id)
+      this.appendEvent(receipt.session_id, 'turn.indeterminate', {
+        commandId, turnId: receipt.turn_id, reason: 'external_outcome_unproven',
+      }, now)
+      return this.inspectTurn(receipt.turn_id)
+    })
+  }
+
+  /**
    * Settle one product or infrastructure failure after caller-side diagnostic redaction.
    * @param commandId - admitted durable command identity.
    * @param code - stable failure code.
@@ -761,7 +872,7 @@ export class ResidentStore {
   fail(commandId: string, code: string, message: string, stopReason: ResidentStopReason = 'error'): TurnInspection {
     return this.transaction(() => {
       const receipt = this.requireReceipt(commandId)
-      if (receipt.state === 'settled') return this.inspectTurn(receipt.turn_id)
+      if (receipt.state === 'settled' || receipt.state === 'indeterminate') return this.inspectTurn(receipt.turn_id)
       const now = new Date().toISOString()
       const result: ResidentTurnResult = { output: [], stopReason }
       this.db.prepare(`
@@ -780,6 +891,19 @@ export class ResidentStore {
       }, now)
       return this.inspectTurn(receipt.turn_id)
     })
+  }
+
+  /**
+   * Read a durable turn receipt without admitting or replaying the command.
+   * @param commandId - caller-owned durable command identity.
+   * @returns its current turn snapshot, or undefined when no turn receipt exists at query time.
+   */
+  inspectCommand(commandId: ResidentOperatorCommandId): ResidentTurnSnapshot | undefined {
+    const receipt = this.receiptByCommand(commandId)
+    if (receipt === undefined && this.compactReceiptByCommand(commandId) !== undefined) {
+      throw new ResidentOperatorError(`command ${commandId} belongs to a Session compaction`, 'COMMAND_CONFLICT')
+    }
+    return receipt === undefined ? undefined : this.inspectTurn(receipt.turn_id)
   }
 
   /**
@@ -881,7 +1005,7 @@ export class ResidentStore {
         sessionId: ResidentOperatorSessionId(row.session_id),
         type: row.type,
         time: row.time,
-        data: JSON.parse(row.data_json) as Record<string, unknown>,
+        data: publicEventData(row.type, row.data_json),
       })),
       nextSequence: rows.at(-1)?.sequence ?? afterSequence,
     }
@@ -899,7 +1023,8 @@ export class ResidentStore {
       this.requireIdleRevision(sessionId, expectedRevision)
       const now = new Date().toISOString()
       this.db.prepare(`
-        UPDATE resident_sessions SET native_session_id = NULL, model_id = NULL, reasoning_effort = NULL,
+        UPDATE resident_sessions
+        SET native_session_id = NULL, native_tool_catalog_sha256 = NULL, model_id = NULL, reasoning_effort = NULL,
           profile_source = NULL, health = 'ok', health_reason = NULL,
           revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(now, sessionId)
@@ -1164,6 +1289,39 @@ export class ResidentStore {
     return this.sessionRow(sessionId).native_session_id ?? undefined
   }
 
+  private residentSessionHasColumn(name: string): boolean {
+    return (this.db.prepare('PRAGMA table_info(resident_sessions)').all() as Array<{ name: string }>)
+      .some(column => column.name === name)
+  }
+
+  /**
+   * Reject an unsafe Codex thread resume before the command receipt is created.
+   * @param session - existing durable Resident Session row.
+   * @param nativeToolPolicy - sealed native product tool authority for the new command.
+   * @param modelToolBridge - current DSH-owned native tool descriptor.
+   */
+  private assertCodexNativeToolCatalog(
+    session: SessionRow,
+    nativeToolPolicy: PhysicalOperatorNativeToolPolicy,
+    modelToolBridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+  ): void {
+    if (session.operator_id !== 'codex' || session.native_session_id === null) return
+    const catalogSha256 = canonicalNativeToolCatalogHash(nativeToolPolicy, modelToolBridge)
+    if (session.native_tool_catalog_sha256 === null) {
+      if (nativeToolPolicy !== 'dsh-tools-authoritative') return
+      throw new ResidentOperatorError(
+        `Codex native session ${session.native_session_id} has no recorded DSH tool catalog; call session.reset before resuming an authoritative bridged turn`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
+    if (session.native_tool_catalog_sha256 !== catalogSha256) {
+      throw new ResidentOperatorError(
+        `Codex native session ${session.native_session_id} has a different DSH tool catalog; call session.reset before resuming`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
+  }
+
   private releaseSession(sessionId: string, now: string, runtimeHealthy: boolean): void {
     this.db.prepare('DELETE FROM session_leases WHERE session_id = ?').run(sessionId)
     this.db.prepare(`
@@ -1299,7 +1457,7 @@ export class ResidentStore {
       sessionId: ResidentOperatorSessionId(row.session_id),
       type: row.type,
       time: row.time,
-      data: JSON.parse(row.data_json) as Record<string, unknown>,
+      data: publicEventData(row.type, row.data_json),
     }
   }
 

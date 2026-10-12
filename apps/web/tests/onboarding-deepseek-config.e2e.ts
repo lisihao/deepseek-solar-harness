@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+import type { ModelCatalogSource } from '@deepseek-ai/dsh-model-catalog-local'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
@@ -234,13 +235,83 @@ describe.skipIf(MODE === 'record')('web e2e: first-run DeepSeek credential setup
     // trigger — on the page; the scaffold boots without one.
     await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'model-fallback-e2e')
 
+    // Keep the shipped DeepSeek source mounted for the settings/onboarding
+    // path, but disable its live `/models` probe before the assembled refresh.
+    // The controlled source below supplies the observed shortlist without any
+    // external request or credentialed provider call.
+    await scaffold.ctx.settings.mutate(settingsNamespace('llm-deepseek'), [{
+      op: 'set', path: ['discoverModels'], value: false,
+    }])
+    const disposeFixtureCatalog = scaffold.ctx.modelCatalogs.register({
+      id: 'fixture:deepseek',
+      name: 'Fixture DeepSeek',
+      provider: 'deepseek-official',
+      menuVisible: true,
+      refresh: async (signal) => {
+        if (signal.aborted) throw signal.reason ?? new Error('fixture DeepSeek refresh aborted')
+        return {
+          available: true,
+          models: [
+            {
+              id: 'observed-flash',
+              name: 'Observed DeepSeek Flash',
+              provider: 'deepseek-official',
+              model: 'observed-flash',
+              availability: 'available',
+              evidence: 'api-list',
+              featuredRank: 0,
+            },
+            {
+              id: 'observed-pro',
+              name: 'Observed DeepSeek Pro',
+              provider: 'deepseek-official',
+              model: 'observed-pro',
+              availability: 'available',
+              evidence: 'api-list',
+              featuredRank: 1,
+            },
+            {
+              id: 'observed-extra',
+              name: 'Observed DeepSeek Extra',
+              provider: 'deepseek-official',
+              model: 'observed-extra',
+              availability: 'available',
+              evidence: 'api-list',
+            },
+          ],
+        }
+      },
+    } satisfies ModelCatalogSource)
+
     const modelTrigger = page.getByRole('button', { name: '选择模型', exact: true })
     await modelTrigger.waitFor({ timeout: 10_000 })
     await modelTrigger.click()
-    await page.getByRole('menuitem', { name: /^模型/ }).click()
+    const modelMenu = page.getByRole('menu', { name: '模型与推理等级' })
+    await modelMenu.getByRole('menuitem', { name: /^模型/ }).click()
     expect(await page.getByText('deepseek-v4-flash', { exact: true }).count()).toBe(0)
-    await page.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash-Vision-Exp' }).waitFor({ timeout: 10_000 })
-    await page.getByRole('menuitemradio', { name: 'Private Preview' }).waitFor({ timeout: 10_000 })
+    expect(await page.getByRole('menuitemradio').count()).toBe(0)
+    await expect.poll(
+      () => page.getByText(/尚未刷新，请点击刷新模型与算子/).count(),
+      { timeout: 10_000 },
+    ).toBeGreaterThan(0)
+
+    await modelTrigger.click()
+    await modelTrigger.click()
+    await modelMenu.getByRole('menuitem', { name: '刷新模型与算子' }).click()
+    await expect.poll(
+      () => modelMenu.getByRole('menuitem', { name: '刷新模型与算子' }).isEnabled(),
+      { timeout: 15_000 },
+    ).toBe(true)
+    await modelMenu.getByRole('menuitem', { name: /^模型/ }).click()
+    await expect.poll(() => page.getByRole('menuitemradio').count(), { timeout: 15_000 }).toBe(2)
+    expect((await page.getByRole('menuitemradio').allTextContents())
+      .map(text => text.replace(/可用$/u, '').trim())).toEqual([
+      'Observed DeepSeek Flash',
+      'Observed DeepSeek Pro',
+    ])
+    expect(await page.getByRole('menuitemradio', { name: /Private Preview/ }).count()).toBe(0)
+    expect(await page.getByRole('menuitemradio', { name: /DeepSeek-V4-Flash-Vision-Exp/ }).count()).toBe(0)
+    await disposeFixtureCatalog()
     expect(tripwire.warnings).toEqual([])
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)

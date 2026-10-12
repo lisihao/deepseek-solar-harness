@@ -12,6 +12,8 @@ export interface WebpageRelayOptions {
   id: string
   targetUrl: string
   port: number
+  /** Decides whether the relay follows a target redirect to another origin; defaults to {@link followsPublicAlias}. */
+  followsRedirect?: (from: URL, to: URL) => boolean
 }
 
 /** Running loopback relay and its deterministic browser-facing URL. */
@@ -20,6 +22,17 @@ export interface WebpageRelay {
   embedUrl: string
   close: () => Promise<void>
 }
+
+/** Mutable fixed target: moves only along redirects that the target's own site issues to a public alias. */
+interface RelayState {
+  target: URL
+  followed: number
+  followsRedirect: (from: URL, to: URL) => boolean
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+/** Upper bound on origin changes one relay follows, so a redirect loop cannot move the target forever. */
+const MAX_FOLLOWED_REDIRECTS = 8
 
 const HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -40,6 +53,50 @@ export function parseWebpageTarget(field: string, value: string): URL {
     throw new Error(`ui-remote-modules: ${field} must be an HTTP(S) URL without credentials`)
   }
   return target
+}
+
+function isPublicDnsName(hostname: string): boolean {
+  return hostname.includes('.') && !hostname.includes(':') && !/^[\d.]+$/.test(hostname)
+    && !hostname.endsWith('.localhost') && !hostname.endsWith('.local')
+}
+
+/**
+ * Default rule for a target redirect that leaves the configured origin, such as
+ * `http://www.x.com` to `https://twitter.com/` to `https://x.com/`. Both ends must be
+ * public DNS names, so a loopback or private-address target never moves and a public
+ * site cannot send the relay to an internal address.
+ * @param from - Origin the relay currently forwards to.
+ * @param to - Absolute redirect destination.
+ * @returns Whether the relay should forward to the destination from now on.
+ */
+export function followsPublicAlias(from: URL, to: URL): boolean {
+  return isPublicDnsName(from.hostname) && isPublicDnsName(to.hostname)
+    && to.username === '' && to.password === ''
+}
+
+/**
+ * Make a protocol-relative `Location` (`//host/path`, or the backslash form a browser reads the same way) absolute
+ * against the current target. Left as is, the browser would resolve it against the relay's own scheme and send the
+ * frame straight to that host, past both the redirect rule and the proxy rewrite.
+ * @param location - `Location` header of the upstream response.
+ * @param target - Origin the relay currently forwards to.
+ * @returns the header with a protocol-relative destination made absolute; any other value unchanged.
+ */
+function absoluteLocation(location: string | undefined, target: URL): string | undefined {
+  if (location === undefined || !/^[\\/]{2}/u.test(location)) return location
+  try { return new URL(location, target).href } catch { return location }
+}
+
+function followRedirect(state: RelayState, status: number, location: string | undefined): void {
+  if (!REDIRECT_STATUSES.has(status) || location === undefined) return
+  let destination: URL
+  try { destination = new URL(location) } catch { return }
+  if ((destination.protocol !== 'http:' && destination.protocol !== 'https:')
+    || destination.origin === state.target.origin
+    || state.followed >= MAX_FOLLOWED_REDIRECTS
+    || !state.followsRedirect(state.target, destination)) return
+  state.followed += 1
+  state.target = new URL(destination.origin)
 }
 
 function incomingPath(requestUrl: string | undefined, target: URL): string {
@@ -131,13 +188,20 @@ function upstreamRequest(
   return upstream
 }
 
-function handleHttp(req: IncomingMessage, res: ServerResponse, target: URL, port: number, id: string): void {
-  const upstream = upstreamRequest(req, target, port, (response, origin) => {
-    res.writeHead(
-      response.statusCode ?? 502,
-      response.statusMessage,
-      responseHeaders(response.headers, target, origin, id),
+function handleHttp(req: IncomingMessage, res: ServerResponse, state: RelayState, port: number, id: string): void {
+  const upstream = upstreamRequest(req, state.target, port, (response, origin) => {
+    const status = response.statusCode ?? 502
+    const location = absoluteLocation(response.headers.location, state.target)
+    followRedirect(state, status, location)
+    const headers = responseHeaders(
+      location === undefined ? response.headers : { ...response.headers, location },
+      state.target,
+      origin,
+      id,
     )
+    // A followed alias can turn a redirect into a link to the same relay URL; a cached permanent one would loop.
+    if (REDIRECT_STATUSES.has(status) && headers['cache-control'] === undefined) headers['cache-control'] = 'no-store'
+    res.writeHead(status, response.statusMessage, headers)
     response.pipe(res)
   })
   upstream.on('error', (error) => {
@@ -166,9 +230,10 @@ function handleUpgrade(
   req: IncomingMessage,
   client: Duplex,
   head: Buffer,
-  target: URL,
+  state: RelayState,
   port: number,
 ): void {
+  const { target } = state
   const origin = relayOrigin(req, port)
   const headers = requestHeaders(req.headers, target, origin)
   headers.connection = 'Upgrade'
@@ -209,20 +274,22 @@ function listen(server: Server, port: number): Promise<number> {
 
 /**
  * Start one local-only fixed-target relay. The relay is not an open proxy: all
- * incoming paths stay on the single configured origin.
+ * incoming paths stay on the single configured origin, which moves only when that
+ * site redirects to another public DNS name (see {@link followsPublicAlias}).
  * @param options - Validated instance id, target URL, and loopback port.
  * @returns The running relay, public embed URL, and async disposer.
  */
 export async function startWebpageRelay(options: WebpageRelayOptions): Promise<WebpageRelay> {
   const target = parseWebpageTarget(`${options.id}.url`, options.targetUrl)
   const sockets = new Set<Duplex>()
+  const state: RelayState = { target, followed: 0, followsRedirect: options.followsRedirect ?? followsPublicAlias }
   let boundPort = options.port
-  const server = createServer((req, res) => { handleHttp(req, res, target, boundPort, options.id) })
+  const server = createServer((req, res) => { handleHttp(req, res, state, boundPort, options.id) })
   server.on('connection', (socket) => {
     sockets.add(socket)
     socket.once('close', () => { sockets.delete(socket) })
   })
-  server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head, target, boundPort) })
+  server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head, state, boundPort) })
   boundPort = await listen(server, options.port)
   const base = `http://localhost:${String(boundPort)}`
   const embedUrl = `${base}${target.pathname}${target.search}${target.hash}`

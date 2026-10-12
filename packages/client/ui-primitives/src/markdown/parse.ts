@@ -32,13 +32,16 @@ export function parseGfm(text: string): Root {
 
 /**
  * Parse GFM markdown plus TeX math with the compatibility delimiters
- * (the settled arm's grammar).
+ * (the settled arm's grammar). micromark tries constructs from later
+ * extensions first, so `mathCompatibility()` follows `math()` to claim a
+ * `$$` line with TeX after the fence before upstream reads that TeX as
+ * fence metadata.
  * @param text - Markdown source.
  * @returns The mdast root.
  */
 export function parseGfmWithMath(text: string): Root {
   return fromMarkdown(text, {
-    extensions: [gfm(), cjkFriendlyStrong(), mathCompatibility(), math()],
+    extensions: [gfm(), cjkFriendlyStrong(), math(), mathCompatibility()],
     mdastExtensions: [gfmFromMarkdown(), mathFromMarkdown()],
   })
 }

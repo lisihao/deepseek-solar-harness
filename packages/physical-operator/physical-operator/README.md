@@ -25,6 +25,10 @@ Callers may attach a versioned operator-context envelope containing the exact cu
 | `CONTEXT_ENVELOPE_INVALID` | The receipt does not identify the supplied envelope. |
 | `CONTEXT_ENVELOPE_REJECTED` | The Provider explicitly refused to materialize the envelope. |
 
+`residentCatalog()` may provide `gouziWorkspace` with `gouziId`, `generation`, `projectId`, and `projectScopes` for a current Gouzi default-project binding. The Provider owns verification of the member-local directory; generic operators omit the field. Consumers match this data to actual registrations and member generations rather than deriving directory permission from online status or model metadata. An absent field supplies no project scopes.
+
+A fresh Resident catalog must explicitly attest `supportsGenerationLimits` and `supportsGovernedWorkspacePolicy` for callers that require those policies; absent fields mean unsupported. Older disabled, tool-free requests may omit `generationLimits` and retain provider defaults; omission does not declare a token cap. `generationLimits` bounds observed output bytes, reported output tokens, and optional tool calls. `governedWorkspacePolicy` seals source workspace, read/write scopes, forbidden scopes, and file-tool limits. Snapshot input and mutation-return fields carry the exact current checkpoint and returned edits without transferring ownership of the original source directory.
+
 ## Authority boundary
 
 This package was extracted from the useful identity and execution boundary of AI4Research, not by copying its retired physical-operator daemon. It does not read `physical-operators.json`, mutate Solar or AI4Research state, infer operator selection, or create a second scheduler. Provider implementations remain free to evolve behind this contract.

@@ -19,8 +19,7 @@
     "python/sdk-runtime"
   ],
   "ignoreDependencies": [
-    "@yarnpkg/cli-dist",
-    "lightningcss"
+    "@yarnpkg/cli-dist"
   ],
   "workspaces": {
     ".": {
@@ -56,9 +55,8 @@
         "headless-agent/tests/fixtures/e2b/e2b/bin.ts",
         "acp-agent/tests/snapshots/lsp-definition/workspace/subject.ts",
         "acp-agent/tests/fixtures/chatgpt-composer/browser.ts",
-        "acp-agent/tests/fixtures/web-mcp-coordination/browser.ts",
-        "acp-agent/tests/fixtures/web-mcp-coordination/native-operator.ts",
         "acp-agent/tests/fixtures/model-route-switch/external-providers.ts",
+        "acp-agent/tests/fixtures/model-entry-menu/operators.ts",
         "acp-agent/tests/fixtures/child-question-tripwire.ts",
         "acp-agent/tests/fixtures/parent-sandbox-override.ts",
         "acp-agent/tests/fixtures/partial-landlock-sandbox.ts",
@@ -66,7 +64,6 @@
         "acp-agent/tests/fixtures/subagent-report-fence.ts",
         "acp-agent/tests/fixtures/subagent-settlement-marker.ts",
         "acp-agent/tests/fixtures/workspace-context-compaction.ts",
-        "acp-agent/tests/fixtures/debate-loader.ts",
         "acp-agent/tests/fixtures/subagent/subagent-acp/mock-delegating-llm.ts",
         "acp-agent/tests/fixtures/subagent/subagent-acp/driver.ts",
         "acp-agent/tests/fixtures/subagent/subagent-claude-code/fixture.ts",
@@ -878,6 +875,11 @@
       ]
     },
     "packages/orchestration/rlm-strategy": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/ui-gouzi": {
       "project": [
         "src/**/*.ts"
       ]

@@ -710,6 +710,22 @@ describe('Mnemon memory subagent coordinator', () => {
     expect(reviewCall.agentOptions).toBeUndefined()
   })
 
+  it('pins a child to the parent\'s latest API route, never a physical-operator route', async () => {
+    const host = subagents({ summary: 'No mutation needed.', action: 'skipped', memoryBodyIds: [] }, 'completed', ['spawn', 'fork'])
+    const coordinator = new MnemonSubagentCoordinator(host.value, undefined, undefined, toolRegistry().value, () => undefined)
+    const header = (provider: string, model: string) => ({ type: 'request/header', data: { header: { config: { provider, model } } } })
+    const root = parent()
+    root.session.events = [
+      header('deepseek-official', 'deepseek-flash'),
+      header('dsh-physical-operator', 'chatgpt-web'),
+    ] as unknown as typeof root.session.events
+
+    await coordinator.review(root, new AbortController().signal)
+
+    const call = host.start.mock.calls[0] as unknown as [string, { agentOptions?: unknown }]
+    expect(call[1].agentOptions).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
+  })
+
   it('merges a fixed task Agent model with the per-op maxTokens for short-lived delegates', async () => {
     const host = subagents({
       summary: 'Merged two compatible profile preferences locally.',

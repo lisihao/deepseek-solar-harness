@@ -273,3 +273,63 @@ test('shows the current pricing phase, exact unit prices, next switch, and hourl
   assert.match(text, /命中 ¥0\.10 · 未命中 ¥3\.00 · 输出 ¥9\.00/)
   assert.match(text, /下次切换（北京时间） 08\/18 12:00 · 每小时自动刷新/)
 })
+
+function offPeakPricing(effectiveNow, nextTransitionAt, offPeakPriceRatio = 0.5) {
+  return {
+    mode: 'auto',
+    timezone: 'Asia/Shanghai',
+    activePolicy: { kind: 'peak-offpeak', label: '峰谷定价' },
+    effectiveNow,
+    offPeakPriceRatio,
+    nextTransitionAt: Date.parse(nextTransitionAt),
+    currentUnitPrices: [],
+  }
+}
+
+function findByClass(node, className) {
+  if (node === null || node === undefined || typeof node !== 'object') return []
+  if (Array.isArray(node)) return node.flatMap(child => findByClass(child, className))
+  const own = String(node.props?.className ?? '').split(' ').includes(className) ? [node] : []
+  return [...own, ...findByClass(node.props?.children, className)]
+}
+
+test('marks the DeepSeek off-peak discount on the sidebar entry and at the top of its panel', async () => {
+  const closed = await loadBadge()
+  const badgeTree = renderBadge(closed.Badge, closed.dictionaries, {
+    pricing: offPeakPricing('offPeak', '2026-09-30T09:00:00+08:00'),
+  })
+  const [tag] = findByClass(badgeTree, 'b8l_offPeakTag')
+  assert.equal(textOf(tag), '优惠中')
+  const [button] = findByClass(badgeTree, 'b8l_sidebarBadge')
+  assert.equal(button.props['data-offpeak'], true)
+  assert.match(button.props.title, /^DeepSeek 优惠时段 · 价格为高峰的一半 · 持续到 09\/30 09:00（北京时间）\n/)
+
+  const opened = await loadBadge({ open: true })
+  const panelTree = renderBadge(opened.Badge, opened.dictionaries, {
+    open: true,
+    pricing: offPeakPricing('offPeak', '2026-09-30T09:00:00+08:00', 0.6),
+  })
+  const [banner] = findByClass(panelTree, 'b8l_offPeakBanner')
+  assert.equal(textOf(banner), 'DeepSeek 优惠时段 · 价格为高峰的 60% · 持续到 09/30 09:00（北京时间）')
+  assert.equal(findByClass(panelTree, 'b8l_peakBanner').length, 0)
+})
+
+test('shows no discount marker during peak pricing and says when off-peak starts', async () => {
+  const loaded = await loadBadge({ open: true })
+  const tree = renderBadge(loaded.Badge, loaded.dictionaries, {
+    open: true,
+    pricing: offPeakPricing('peak', '2026-09-29T12:00:00+08:00'),
+  })
+  assert.equal(findByClass(tree, 'b8l_offPeakTag').length, 0)
+  assert.equal(findByClass(tree, 'b8l_offPeakBanner').length, 0)
+  const [button] = findByClass(tree, 'b8l_sidebarBadge')
+  assert.equal(button.props['data-offpeak'], undefined)
+  assert.equal(textOf(findByClass(tree, 'b8l_peakBanner')[0]), '当前为高峰时段 · 09/29 12:00（北京时间） 起进入优惠时段')
+
+  const flat = renderBadge(loaded.Badge, loaded.dictionaries, {
+    open: true,
+    pricing: { mode: 'auto', activePolicy: { kind: 'flat', label: '固定价' }, effectiveNow: 'flat', currentUnitPrices: [] },
+  })
+  assert.equal(findByClass(flat, 'b8l_offPeakBanner').length + findByClass(flat, 'b8l_peakBanner').length, 0)
+})
+

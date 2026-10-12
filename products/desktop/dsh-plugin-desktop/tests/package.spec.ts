@@ -45,6 +45,8 @@ describe('published package surface', () => {
       'dsh-plugin-desktop': 'lib/bin.js',
       'dsh-desktop': 'lib/bin.js',
       'dsh-product-server': 'lib/product-server-bin.js',
+      'dsh-gouzi-agent': 'lib/gouzi-agent-bin.js',
+      'dsh-gouzi-worker': 'lib/gouzi-worker-bin.js',
     })
   })
 
@@ -182,6 +184,10 @@ describe('published package surface', () => {
     expect(config).toContain("'profile-service': 'src/profile-service.ts'")
     expect(config).toContain("'product-server': 'src/product-server.ts'")
     expect(config).toContain("entry: { 'product-server-bin': 'src/product-server-bin.ts' }")
+    expect(config).toContain("'gouzi-worker': 'src/gouzi-worker.ts'")
+    expect(config).toContain("'gouzi-host': 'src/gouzi-host.ts'")
+    expect(config).toContain("entry: { 'gouzi-worker-bin': 'src/gouzi-worker-bin.ts' }")
+    expect(config).toContain("entry: { 'gouzi-agent-bin': 'src/gouzi-agent-bin.ts' }")
     expect(config).toContain("pnpm: 'src/pnpm.ts'")
     expect(config).toContain("profiles: 'src/profiles.ts'")
     expect(config).toContain("terminal: 'src/terminal.ts'")
@@ -225,6 +231,7 @@ describe('published package surface', () => {
       'build/**',
       'lib/**',
       'vendor/agent-presets/**',
+      'vendor/scheduling-evidence-python/**',
       'node_modules/**',
     ])
     expect(manifest.build?.electronFuses).toEqual({ runAsNode: true })
@@ -235,6 +242,7 @@ describe('published package surface', () => {
       'build/tray-icon*.png',
       'docs/**',
       'vendor/agent-presets/**',
+      'vendor/scheduling-evidence-python/**',
       'vendor/dsh-packages/**',
     ]))
     expect(manifest.build?.files).toEqual([
@@ -246,6 +254,7 @@ describe('published package surface', () => {
       'lib/**',
       'package.json',
       'vendor/agent-presets/**',
+      'vendor/scheduling-evidence-python/**',
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.win?.icon).toBe('build/app-icon.png')

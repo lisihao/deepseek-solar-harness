@@ -15,10 +15,12 @@ export const name = 'client-ui-workspace-invariant'
 export const inject = ['invariants']
 
 /**
- * No runtime invariant: a pure-consumer plugin registering presentational
- * components into two host-declared slots plus its locale dictionaries — its
- * inject face is stateless RPC wrappers plus a create-and-open call; it
- * emits no cordis events and owns no cross-plugin mutable state.
+ * No runtime invariant: a plugin registering presentational components into
+ * two host-declared slots plus its locale dictionaries — its inject face is
+ * stateless RPC wrappers plus a create-and-open call; it emits no cordis
+ * events. The one piece of state it owns, the session list filter registry,
+ * is a list of predicates with no relation to other data: adding or removing
+ * one only recombines the rule, and a removed rule's rows reappear.
  */
 const install: InvariantInstaller = () => {}
 

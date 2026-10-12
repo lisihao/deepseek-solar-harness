@@ -21,6 +21,9 @@
       "path": "../../browser/browser"
     },
     {
+      "path": "../../llm/model-catalog-local"
+    },
+    {
       "path": "../physical-operator"
     },
     {
@@ -30,31 +33,19 @@
       "path": "../../runtime-diagnostics/invariants"
     },
     {
-      "path": "../../core/agent"
-    },
-    {
       "path": "../../core/session"
     },
     {
+      "path": "../../core/agent"
+    },
+    {
       "path": "../../util/home-paths"
-    },
-    {
-      "path": "../../util/brand"
-    },
-    {
-      "path": "../../sdk/protocol"
     },
     {
       "path": "../../host/webserver"
     },
     {
       "path": "../../host/remote-auth"
-    },
-    {
-      "path": "../../core/tools"
-    },
-    {
-      "path": "../../llm/llm"
     },
     {
       "path": "../../orchestration/model-worker"

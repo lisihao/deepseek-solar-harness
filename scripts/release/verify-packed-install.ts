@@ -95,6 +95,12 @@ function main(): void {
       version: '0.0.0',
       private: true,
       dependencies: Object.fromEntries([...packed].map(([name, entryPacked]) => [name, entryPacked.url])),
+      // koffi 3.3.2 and 3.3.3 fail to compile from source (uv.cc mixes
+      // `Napi::Value` and `nullptr` in one conditional). `--omit=optional` below
+      // drops its prebuilt platform packages, so this consumer always compiles
+      // it; stay below the first release with that error. Raise the bound only
+      // after a newer release is seen to compile here.
+      overrides: { koffi: '>=3.1.0 <3.3.2' },
     }, null, 2)}\n`)
 
     const environment = consumerEnvironment(consumerRoot)

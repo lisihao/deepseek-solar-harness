@@ -125,11 +125,11 @@ const { installNativeProductRuntime } = await import(runtimeModule)
 const { installDesktopPnpmRuntime } = await import(desktopRuntimeModule)
 const { RESIDENT_PROTOCOL_VERSION, RESIDENT_STATE_SCHEMA_VERSION } = await import(residentContractModule)
 const { ResidentDaemonClient, waitForDaemonSocketRelease } = await import(residentModule)
-if (RESIDENT_PROTOCOL_VERSION !== 13) {
-  throw new Error(`verify-packaged-resident-smoke: expected Resident protocol v13, got v${String(RESIDENT_PROTOCOL_VERSION)}`)
+if (RESIDENT_PROTOCOL_VERSION !== 14) {
+  throw new Error(`verify-packaged-resident-smoke: expected Resident protocol v14, got v${String(RESIDENT_PROTOCOL_VERSION)}`)
 }
-if (RESIDENT_STATE_SCHEMA_VERSION !== 5) {
-  throw new Error(`verify-packaged-resident-smoke: expected Resident state schema v5, got v${String(RESIDENT_STATE_SCHEMA_VERSION)}`)
+if (RESIDENT_STATE_SCHEMA_VERSION !== 6) {
+  throw new Error(`verify-packaged-resident-smoke: expected Resident state schema v6, got v${String(RESIDENT_STATE_SCHEMA_VERSION)}`)
 }
 const temporaryRoot = mkdtempSync('/tmp/dsh-r-')
 const stateRoot = join(temporaryRoot, 'Library', 'Application Support', 'DSH Product Server Canary', 'state', 'dsh-home', 'resident-operators')

@@ -5,10 +5,26 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
-import { assertOwnedDaemonCommand, stopOwnedDaemon, stopProductServerDaemons } from './product-server-processes.mjs'
+import { assertOwnedDaemonCommand, processCommand, stopOwnedDaemon, stopProductServerDaemons } from './product-server-processes.mjs'
 
 function exited(child) {
   return child.exitCode !== null || child.signalCode !== null
+}
+
+/** Spawn a long-lived stand-in daemon whose command line carries `--root <root>`. */
+function spawnDaemon(root) {
+  // `--` keeps `--root` a script argument; Node otherwise rejects it as a bad option and exits at once.
+  return spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--', '--root', root], { stdio: 'ignore' })
+}
+
+/** Wait until `ps` reports the post-exec command line; right after spawn it can still show the parent's. */
+async function waitForRootArgument(pid, root) {
+  const rootArgument = ` --root ${root}`
+  const deadline = Date.now() + 5_000
+  while (!(await processCommand(pid)).includes(rootArgument)) {
+    if (Date.now() >= deadline) throw new Error(`process ${String(pid)} did not report ${rootArgument}`)
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
 }
 
 test('stops daemon pids retained below a Product Server smoke home', async () => {
@@ -17,20 +33,22 @@ test('stops daemon pids retained below a Product Server smoke home', async () =>
   const orchestrationRoot = join(home, 'orchestrations')
   await mkdir(residentRoot, { recursive: true })
   await mkdir(orchestrationRoot, { recursive: true })
-  const resident = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', residentRoot], { stdio: 'ignore' })
-  const orchestration = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', orchestrationRoot], { stdio: 'ignore' })
+  const resident = spawnDaemon(residentRoot)
+  const orchestration = spawnDaemon(orchestrationRoot)
   try {
     assert.ok(resident.pid)
     assert.ok(orchestration.pid)
     await writeFile(join(residentRoot, 'daemon.pid'), `${String(resident.pid)}\n`)
     await writeFile(join(orchestrationRoot, 'daemon.pid'), `${String(orchestration.pid)}\n`)
+    await waitForRootArgument(resident.pid, residentRoot)
+    await waitForRootArgument(orchestration.pid, orchestrationRoot)
     await stopProductServerDaemons(home)
     await Promise.all([
       new Promise(resolve => exited(resident) ? resolve() : resident.once('exit', resolve)),
       new Promise(resolve => exited(orchestration) ? resolve() : orchestration.once('exit', resolve)),
     ])
-    assert.ok(exited(resident))
-    assert.ok(exited(orchestration))
+    assert.equal(resident.signalCode, 'SIGTERM')
+    assert.equal(orchestration.signalCode, 'SIGTERM')
   } finally {
     if (!exited(resident)) resident.kill('SIGKILL')
     if (!exited(orchestration)) orchestration.kill('SIGKILL')
@@ -51,7 +69,7 @@ test('accepts a daemon exit that races an unavailable owner socket', async () =>
   const home = await mkdtemp('/tmp/dsh-product-process-race-')
   const root = join(home, 'resident-operators')
   await mkdir(root, { recursive: true })
-  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  const child = spawnDaemon(root)
   try {
     assert.ok(child.pid)
     await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
@@ -81,7 +99,7 @@ test('accepts a daemon exit that races the proven process signal', async () => {
   const home = await mkdtemp('/tmp/dsh-product-process-signal-race-')
   const root = join(home, 'orchestrations')
   await mkdir(root, { recursive: true })
-  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  const child = spawnDaemon(root)
   try {
     assert.ok(child.pid)
     await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
@@ -111,7 +129,7 @@ test('uses the shared IPC address for a long Product Server root', async () => {
   const home = await mkdtemp(join(tmpdir(), 'dsh-product-process-long-'))
   const root = join(home, 'resident-operators-with-a-root-long-enough-to-require-the-shared-ipc-address-contract')
   await mkdir(root, { recursive: true })
-  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  const child = spawnDaemon(root)
   try {
     assert.ok(child.pid)
     await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
@@ -134,7 +152,7 @@ test('falls back to the legacy control socket before signalling a long-root daem
   const home = await mkdtemp(join(tmpdir(), 'dsh-product-process-legacy-'))
   const root = join(home, 'resident-operators-with-a-root-long-enough-to-require-the-shared-ipc-address-contract')
   await mkdir(root, { recursive: true })
-  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  const child = spawnDaemon(root)
   try {
     assert.ok(child.pid)
     await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)

@@ -22,7 +22,7 @@ Remote Modules 归档由通用的已跟踪 package 重新构建，使已接受�
 
 ## Verification
 
-`yarn verify:vendor` 校验完整 vendor 文件集、不可变摘要、全部已跟踪源码映射、非生成归档内容精确一致、归档与已安装 package 内容精确一致，以及 Anchored Standard delegated-worker 门禁。`pnpm verify-desktop-vendor-build` 在根产物聚合中的 `pnpm build` 之后运行，并拒绝根工作区 tarball 中缺失或陈旧的归档生成文件。Client CSS 测试会从两个物理根路径编译同一 stylesheet，并要求虚拟 ID 与输出完全一致。受管插件归档继续由其组件原生构建与来源检查负责，不归根 pnpm 构建所有。随后 `yarn check` 构建并类型检查 Desktop，运行聚焦与 package 套件，并校验 runtime closure、CLI、loader 和 profile boot。
+`yarn verify:vendor` 校验完整 vendor 文件集、不可变摘要、全部已跟踪源码映射、非生成归档内容精确一致、归档与已安装 package 内容精确一致，以及 Anchored Standard delegated-worker 门禁。`pnpm verify-desktop-vendor-build` 在根产物聚合中的 `pnpm build` 之后运行，并拒绝根工作区 tarball 中缺失或陈旧的归档生成文件。Client CSS 测试会从两个物理根路径编译同一 stylesheet，并要求虚拟 ID 与输出完全一致。受管插件归档继续由其组件原生构建与来源检查负责，不归根 pnpm 构建所有。随后 `yarn check` 构建并类型检查 Desktop，运行聚焦与 package 套件，并校验 runtime closure、CLI、loader 和 profile boot。在 CI 之外，它还会拒绝比包内 `src/` 中最新文件更旧的打包入口（`lib/index.js`、`lib/client.js`、`lib/invariant.js`），因为打包一个从未重新构建的 `lib/` 会让归档与过期输出相同，从而通过内容比较。
 
 ## Alternatives considered
 

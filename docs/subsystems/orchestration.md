@@ -38,6 +38,70 @@ Round projection is per role rather than all-or-nothing. A settled proposer and 
 
 This contract refines the model-allocation fallback paragraph in [TaskGraph-native Smart Collaboration](../../.agents/notes/implemented/feature/2026-08-20-taskgraph-smart-collaboration.md): its provider-neutral preference and hard-pin behavior remain, while fallback now requires explicit admission and durable provenance. The owning contracts are [`model-allocation`](../../packages/orchestration/model-allocation/src/index.ts), [`orchestration`](../../packages/orchestration/orchestration/src/index.ts), and [`debate`](../../packages/orchestration/debate/src/types.ts).
 
+## Fixed Gouzi recipients
+
+`OrchestrationRecipientResolver` resolves only the current logical turn's explicit user selection from ordered durable Session events. The Host confirms that the selected member still exists, is enabled, and has the selected generation, then queries `GouziControl.executionOperators()` for freshly qualified registered entries. `operatorIds` contains the full actual execution IDs returned by that query, never IDs inferred from a member name or a fixed native provider suffix. The resolver confirms membership and generation again after the query; a missing, changed, disabled, or unavailable selection fails rather than choosing another member.
+
+`OrchestrationAdmissionTraceV1.gouziRecipient` carries the confirmed member identity, selection generation, and execution IDs into compilation. Every graph node is pinned to those entries with no fallback. Fixed recipients support Standard execution with RLM and Autonomous disabled. The daemon validates the graph restrictions and current generation and availability during compilation and before a new Run starts; dispatch also rejects a member or registered entry that no longer matches. `gouziRecipients` names at least two distinct members for a graph whose nodes run on different members: every node is pinned to the union of their entries, every member must hold the graph workspace, and a directory snapshot requires every member to be on this machine. The singular field stays the form for one member, and a run never carries both. This selection grants no additional scope, effect, model permission, or parallel capacity. `sourceMessageId` identifies the original user message used for a fresh durable source checkpoint; `automaticDispatch` indicates that the Host consumes kennel user messages before ordinary execution.
+
+Source: [`orchestration/src/index.ts`](../../packages/orchestration/orchestration/src/index.ts) · [`orchestration/src/recipient-resolver.ts`](../../packages/orchestration/orchestration/src/recipient-resolver.ts) · [`ui-gouzi/src/recipient.ts`](../../packages/orchestration/ui-gouzi/src/recipient.ts)
+
+```ts type-equiv
+/** User-selected stable member, its selection generation, and Host-confirmed actual execution entries. */
+interface OrchestrationGouziRecipientV1 {
+  readonly gouziId: GouziId
+  readonly generation: number
+  readonly operatorIds: readonly PhysicalOperatorId[]
+}
+```
+
+```ts type-equiv
+/** User-selected collaboration policy and route captured before TaskGraph compilation. */
+interface OrchestrationAdmissionTraceV1 {
+  readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code'
+  readonly route: 'taskgraph'
+  /** Fixed recipient; every graph node must use only these actual member execution entries. */
+  readonly gouziRecipient?: OrchestrationGouziRecipientV1
+  /**
+   * Fixed set of at least two distinct members, for a graph whose nodes run on different members. Every node must
+   * use only the union of their actual execution entries, and every member must hold the graph workspace. Mutually
+   * exclusive with {@link OrchestrationAdmissionTraceV1.gouziRecipient}, which stays the form for one member.
+   */
+  readonly gouziRecipients?: readonly OrchestrationGouziRecipientV1[]
+  readonly sourceSessionId: string
+  /** Original user-message identity for a fresh, durable source checkpoint. */
+  readonly sourceMessageId?: string
+  /** Current-request dynamic contexts captured before crossing into the daemon. */
+  readonly runtimeContext?: OrchestrationRuntimeContextV1
+  /** Independent user/system choice; RLM is a node strategy, not an operator. */
+  readonly rlm?: RlmExecutionMode
+  /** Autonomous continuation is independent from Goal and reuses the same RLM/TaskGraph authority. */
+  readonly autonomous?: RlmAutonomousMode
+  /** Continuous Harness can be disabled, scoped to this Session, or scoped to a workspace. */
+  readonly continualHarness?: ContinualHarnessMode
+  /** Global quality/cost/throughput preference consumed by the allocation Provider. */
+  readonly optimization?: ModelAllocationObjective
+  /** Prefer Codex Sol for high-tier planning/verification, or choose the best qualified high-tier offer. */
+  readonly plannerVerifierPreference?: PlannerVerifierPreference
+  /** Prefer Codex Luna for execution leaves when qualified, or use ordinary balanced scoring. */
+  readonly executionPreference?: ExecutionModelPreference
+}
+```
+
+```ts type-equiv
+/** Resolves only the current logical turn's explicit user selection. */
+interface OrchestrationRecipientResolver {
+  /** Whether kennel user messages are consumed by Host AI dispatch before ordinary execution. */
+  readonly automaticDispatch?: boolean
+  /**
+   * Confirm the selected member and its available execution entries.
+   * @param events - ordered durable Session events.
+   * @returns confirmed recipient, or undefined when none was selected.
+   */
+  resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined>
+}
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -269,7 +333,106 @@ abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV
 abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
 ```
 
-Source: [`packages/orchestration/debate/src/index.ts:1389`](../../packages/orchestration/debate/src/index.ts)
+Source: [`packages/orchestration/debate/src/index.ts:1390`](../../packages/orchestration/debate/src/index.ts)
+
+<a id="ctxgouzihost--gouzihostservice-abstract-seam"></a>
+
+### `ctx.gouziHost` — `GouziHostService` (abstract seam)
+
+Starts and stops member processes on the machine that runs this Server. The Desktop product provides it; a Server without it can still list members but cannot adopt or wake one.
+
+```ts cordis-catalog
+/**
+ * List the SSH hosts the user added; the local machine is implicit.
+ * @returns the stored SSH hosts.
+ */
+abstract hosts(): Promise<readonly GouziHostProjection[]>
+
+/**
+ * Read the key an SSH machine presents, without logging in.
+ * @param target - machine and login name.
+ * @returns the key type and fingerprint for the user to confirm.
+ * @throws Error - when the machine cannot be reached.
+ */
+abstract inspectHost(target: GouziSshTarget): Promise<GouziHostInspection>
+
+/**
+ * Trust an SSH machine and prepare it: install a dedicated key with the password, then check that DSH Desktop
+ * with Gouzi support is installed. The password is used once and not kept.
+ * @param input - machine, login, password, and the fingerprint the user confirmed.
+ * @returns the stored host.
+ * @throws Error - when the key changed since inspection, the login fails, or DSH Desktop is missing or too old.
+ */
+abstract addHost(input: GouziSshTarget & { readonly password: string readonly fingerprint: string readonly label?: string }): Promise<GouziHostProjection>
+
+/**
+ * Change the address, port, or route through which an existing SSH host is reached. The machine reached must
+ * present the host key already pinned for the host, so a reroute cannot move a member onto another machine.
+ * @param input - host id and its new address, port, and route (absent for a direct connection).
+ * @returns the updated host.
+ * @throws Error - when the host is unknown, unreachable, presents a different key, or lacks a usable DSH Desktop.
+ */
+abstract rerouteHost(input: { readonly hostId: string readonly address: string readonly port: number readonly route?: GouziSshRoute }): Promise<GouziHostProjection>
+
+/**
+ * Forget an SSH host and its dedicated key. The caller has checked that no live member uses it.
+ * @param hostId - host id.
+ */
+abstract removeHost(hostId: string): Promise<void>
+
+/**
+ * List the directories one level below `path` on a host, marking Git repositories.
+ * @param hostId - host id.
+ * @param path - absolute directory; absent lists the login home directory.
+ * @returns the directory and its subdirectories.
+ */
+abstract browse(hostId: string, path?: string): Promise<GouziFolderListing>
+
+/**
+ * Inspect an existing directory without changing it and resolve its host-local project identity.
+ * @param hostId - host id.
+ * @param path - absolute directory path on that host; Git and ordinary directories are accepted.
+ * @returns the project identity, selected real directory path, and optional canonical Git origin.
+ * @throws Error - when the directory is missing, inaccessible, or cannot be inspected.
+ */
+abstract resolveRepository(hostId: string, path: string): Promise<GouziProjectSource>
+
+/**
+ * Prepare a confirmed adoption directory, initializing Git only when it is not already in a repository.
+ * Existing project files are preserved; an origin remote is not required. Call only after all selected
+ * directories pass read-only inspection and a member slot is available.
+ * @param hostId - host id.
+ * @param path - resolved source directory selected for adoption.
+ * @returns the project identity, selected real directory path, and optional canonical Git origin.
+ * @throws Error - when directory inspection or Git initialization fails.
+ */
+abstract prepareRepository(hostId: string, path: string): Promise<GouziProjectSource>
+
+/**
+ * Create the member's home, identity, and project allowlist on its host. Idempotent for the same identity.
+ * @param input - identity and allowlist; `hostId` selects the machine.
+ */
+abstract provision(input: GouziProvisionInput): Promise<void>
+
+/**
+ * Start the member's process, or adopt the one already running.
+ * @param hostId - host of the member.
+ * @param gouziId - member identity.
+ * @returns where the main instance reaches it and which incarnation answered.
+ */
+abstract start(hostId: string, gouziId: string): Promise<GouziProcessInfo>
+
+/**
+ * Stop the member's process.
+ * @param hostId - host of the member.
+ * @param gouziId - member identity.
+ * @param options - `reclaimResident` also stops the Resident daemon the member started.
+ * @returns whether no process of the member remains.
+ */
+abstract stop( hostId: string, gouziId: string, options?: { readonly reclaimResident?: boolean }, ): Promise<{ readonly processTreeStopped: boolean }>
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/host-service.ts:52`](../../packages/orchestration/ui-gouzi/src/host-service.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
@@ -288,6 +451,29 @@ abstract compile(request: IntentCompileRequest): Promise<IntentIRV1>
 
 Source: [`packages/orchestration/intent-compiler/src/index.ts:43`](../../packages/orchestration/intent-compiler/src/index.ts)
 
+<a id="ctxkennelcollaborations--kennelcollaborations"></a>
+
+### `ctx.kennelCollaborations` — `KennelCollaborations`
+
+Registry of the collaboration kinds the kennel dispatcher can offer.
+
+```ts cordis-catalog
+/**
+ * Register a kind.
+ * @param kind - the kind to offer; a repeated or reserved name fails.
+ * @returns the disposer that removes it.
+ */
+register(kind: KennelCollaborationKind): () => void
+
+/**
+ * List the registered kinds.
+ * @returns the kinds in registration order.
+ */
+kinds(): readonly KennelCollaborationKind[]
+```
+
+Source: [`packages/orchestration/orchestration/src/kennel-collaboration.ts:233`](../../packages/orchestration/orchestration/src/kennel-collaboration.ts)
+
 <a id="ctxmodelallocation--modelallocationservice-abstract-seam"></a>
 
 ### `ctx.modelAllocation` — `ModelAllocationService` (abstract seam)
@@ -305,7 +491,7 @@ Scheduler-facing Service Definition; implementations remain replaceable plugins.
 abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 ```
 
-Source: [`packages/orchestration/model-allocation/src/index.ts:177`](../../packages/orchestration/model-allocation/src/index.ts)
+Source: [`packages/orchestration/model-allocation/src/index.ts:293`](../../packages/orchestration/model-allocation/src/index.ts)
 
 <a id="ctxmodelworkers--modelworkerruntime"></a>
 
@@ -336,6 +522,25 @@ execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 ```
 
 Source: [`packages/orchestration/model-worker/src/index.ts:61`](../../packages/orchestration/model-worker/src/index.ts)
+
+<a id="ctxorchestrationrecipients--orchestrationrecipientresolver"></a>
+
+### `ctx.orchestrationRecipients` — `OrchestrationRecipientResolver`
+
+Resolves only the current logical turn's explicit user selection.
+
+```ts cordis-catalog
+/**
+ * Confirm the selected member and its available execution entries.
+ * @param events - ordered durable Session events.
+ * @returns confirmed recipient, or undefined when none was selected.
+ */
+resolve(events: readonly SessionEvent[]): Promise<OrchestrationGouziRecipientV1 | undefined>
+```
+
+Types: [SessionEvent](session.md)
+
+Source: [`packages/orchestration/orchestration/src/recipient-resolver.ts:6`](../../packages/orchestration/orchestration/src/recipient-resolver.ts)
 
 <a id="ctxorchestrations--orchestrationservice-abstract-seam"></a>
 
@@ -454,7 +659,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:657`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:707`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 
@@ -766,4 +971,54 @@ abstract resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1>
 ```
 
 Source: [`packages/orchestration/rlm-strategy/src/index.ts:60`](../../packages/orchestration/rlm-strategy/src/index.ts)
+
+<a id="ctxschedulingevidence--schedulingevidencegateway"></a>
+
+### `ctx.schedulingEvidence` — `SchedulingEvidenceGateway`
+
+Reads collector documents through bounded child processes.
+
+```ts cordis-catalog
+/**
+ * Evidence for the allocator, from the Radar generation held in memory; it never starts a process.
+ * @param offers - the offers the allocator will compare.
+ * @param taskType - the request's task type; evidence exists only for the dataset's own.
+ * @returns the evidence, or undefined when Radar is not configured, nothing usable is stored, or no offer has a record.
+ */
+evidenceFor(offers: readonly ModelExecutionOffer[], taskType: string): ModelAllocationEvidence | undefined
+
+/**
+ * Run one collection and reload cycle now, or join the one already running.
+ * @returns when the cycle ends; a failed cycle is logged and leaves the last stored generation in use.
+ */
+runCycle(): Promise<void>
+
+/**
+ * Read the Radar store and the owner's switches for the settings page. It asks the
+ * collector for the stored generation, so it shows what is on disk rather than only what
+ * the allocator holds.
+ * @returns the page payload; a store that cannot be read is reported inside it, not thrown.
+ */
+async overview(): Promise<SchedulingEvidenceOverview>
+
+/**
+ * Read a collector's storage status.
+ * @param collector - which collector to ask.
+ * @param signal - cancels the call and stops its process tree.
+ * @returns the status document; `ok` is false when no valid generation is stored.
+ * @throws {SchedulingEvidenceError} When the interpreter is unusable or the call times out, is cancelled, or prints no document.
+ */
+status(collector: CollectorId, signal?: AbortSignal): Promise<CollectorResult>
+
+/**
+ * Read a stored generation without contacting the network.
+ * @param collector - which collector to ask.
+ * @param options - `snapshotId` selects an older generation; omitted reads the active one.
+ * @returns the generation document, or `ok: false` when none is stored.
+ * @throws {SchedulingEvidenceError} As for {@link status}.
+ */
+show(collector: CollectorId, options: { readonly snapshotId?: string; readonly signal?: AbortSignal } = {}): Promise<CollectorResult>
+```
+
+Source: [`packages/orchestration/scheduling-evidence/src/index.ts:242`](../../packages/orchestration/scheduling-evidence/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -32,6 +32,7 @@
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font: inherit;
+  text-decoration: none;
 }
 .trigger:hover,
 .configError:hover { background: var(--dsw-alias-interactive-bg-hover); }
@@ -130,6 +131,7 @@
 }
 .iconButton:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .webFrame {
+  display: flex;
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;

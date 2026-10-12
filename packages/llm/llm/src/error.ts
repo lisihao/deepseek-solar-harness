@@ -27,6 +27,9 @@ export const CONTEXT_WINDOW_EXCEEDED_CODE = 'CONTEXT_WINDOW_EXCEEDED'
 /** Canonical provider-neutral code for an exhausted account quota or balance. */
 export const QUOTA_EXCEEDED_CODE = 'QUOTA'
 
+/** Canonical provider-neutral code for a request rejected because the account balance is insufficient. */
+export const INSUFFICIENT_BALANCE_CODE = 'INSUFFICIENT_BALANCE'
+
 /**
  * Canonical provider-neutral code for a response that completed normally but
  * carried no content blocks at all. Providers occasionally emit a degenerate

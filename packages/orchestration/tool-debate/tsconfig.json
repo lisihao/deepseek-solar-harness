@@ -6,13 +6,10 @@
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../core/agent" },
-    { "path": "../../llm/llm" },
+    { "path": "../../preset/agent-presets" },
     { "path": "../../core/tools" },
-    { "path": "../../interaction/commands" },
     { "path": "../../core/system-prompt" },
-    { "path": "../../session/session-projection" },
     { "path": "../debate" },
-    { "path": "../../plan/plan-mode" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

@@ -377,14 +377,19 @@ function localPackageDirectories(): Map<string, string> {
   return packages
 }
 
-function rootProjectReferences(): Set<string> {
+/**
+ * Collect package directories reached by root solution references, including explicit compiler faces.
+ * @param rootDirectory - repository directory containing the root solution.
+ * @returns referenced project directories; unreadable or invalid explicit configs throw.
+ */
+export function rootProjectReferences(rootDirectory: string = root): Set<string> {
   // The root solution references the host and client aggregates (the two
   // sides merge cordis Context under the same keys, so one program cannot see
   // both — but this BFS only collects reference paths, it never forms a
   // program). Seed the solution and follow nested aggregate references to
   // collect the covered leaf project set.
   const collected = new Set<string>()
-  const queue = [resolve(root, 'tsconfig.json')]
+  const queue = [resolve(rootDirectory, 'tsconfig.json')]
   const seen = new Set<string>()
   for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
     if (seen.has(file)) continue
@@ -397,8 +402,10 @@ function rootProjectReferences(): Set<string> {
     for (const reference of references) {
       if (typeof reference.path !== 'string') continue
       const target = resolve(dirname(file), reference.path)
-      if (target.endsWith('.json')) queue.push(target)
-      else collected.add(target)
+      if (target.endsWith('.json')) {
+        collected.add(dirname(target))
+        queue.push(target)
+      } else collected.add(target)
     }
   }
   return collected

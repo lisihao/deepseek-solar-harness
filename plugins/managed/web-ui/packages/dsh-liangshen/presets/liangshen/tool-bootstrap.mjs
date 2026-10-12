@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 /**
  * Keep the first model request on a minimal-shaped input surface, then expose
  * the full preset catalog once the session is safely anchored.
@@ -124,6 +126,14 @@ function isAllowedMessage(message, allowedSources) {
   return kind === 'user' && allowedSources.has(kind)
 }
 
+/**
+ * Whether the message is the user's own task-template instruction. The user wrote the template and it is only
+ * injected when it matched this very task, so with `keepTaskTemplate` it passes phase 1 beside the user message.
+ */
+function isKeptTaskTemplate(message, keepTaskTemplate) {
+  return keepTaskTemplate && message.source?.kind === 'task-template'
+}
+
 /** Whether one pre-step message belongs to a deferred injection kind. */
 function isDeferredMessage(message, deferredSources) {
   const kind = message.source?.kind
@@ -152,6 +162,9 @@ function stateFor(session) {
       steps: 0,
       deferredSteps: 0,
       presentationApplied: false,
+      exempt: false,
+      autoContinued: false,
+      signal: undefined,
     }
     promotionBySession.set(session, state)
   }
@@ -226,8 +239,18 @@ function refresh(agent, policy) {
     scanEvents(state, session)
     if (decidePromotion(state, policy)) state.promoted = true
   }
-  if (state.promoted) applyPresentation(agent, state, policy)
+  if (state.promoted && !state.exempt) applyPresentation(agent, state, policy)
   return state
+}
+
+/**
+ * Whether the session belongs to a delegated child. A child's tool surface is
+ * fixed by its parent's `toolFilter` (for example a result-tool-only
+ * maintenance worker), so it cannot satisfy the shell and common-tool bootstrap
+ * contract.
+ */
+function isSubagentSession(agent) {
+  return agent?.session?.header?.origin === 'subagent'
 }
 
 /**
@@ -253,6 +276,34 @@ function withWorkspaceLine(assembly, agent) {
   }
 }
 
+/**
+ * Text of the follow-up sent when the capped first turn is cut off. `undefined` disables the follow-up.
+ */
+function autoContinueText(value) {
+  if (value === undefined || value === false) return undefined
+  if (value === true) return 'continue'
+  if (typeof value === 'string' && value.length > 0) return value
+  throw new TypeError(`${name}: autoContinueOnMaxTokens must be a boolean or a non-empty string`)
+}
+
+/** Queue the follow-up user message as the next turn. */
+function sendContinuation(agent, text) {
+  agent.followup({
+    id: randomUUID(),
+    role: 'user',
+    content: [{ type: 'text', text }],
+    source: { kind: 'user' },
+  })
+}
+
+/**
+ * Whether the event ends a turn at the output-token ceiling. Phase 1 caps the output budget, so a long first
+ * request can spend all of it on reasoning and end the turn with no answer.
+ */
+function endedAtMaxTokens(event) {
+  return event.type === 'turn/end' && event.data?.reason?.kind === 'max-tokens'
+}
+
 /** Register the per-session bootstrap quarantine and promotion policy. */
 export function apply(ctx, config) {
   const commonTools = stringList(config.commonTools, 'commonTools')
@@ -271,9 +322,25 @@ export function apply(ctx, config) {
     promoteAfterFirstResponse: config.promoteAfterFirstResponse === true,
     maxBootstrapSteps: integerAtLeast(config.maxBootstrapSteps ?? 4, 'maxBootstrapSteps', 1),
     deferredGraceSteps: integerAtLeast(config.deferredGraceSteps ?? 0, 'deferredGraceSteps', 0),
+    autoContinueText: autoContinueText(config.autoContinueOnMaxTokens),
+    keepTaskTemplate: config.keepTaskTemplate === true,
     promotedPresentation: presentation,
     bootstrapMaxTokens,
   }
+
+  // Continuations queued but not yet sent. They are dropped when the plugin unloads or the agent is disposed, and a
+  // cancelled turn is checked again when the timer fires.
+  const pending = new Map()
+  const clearPending = (agent) => {
+    const timer = pending.get(agent)
+    if (timer !== undefined) clearTimeout(timer)
+    pending.delete(agent)
+  }
+  ctx.effect(() => () => {
+    for (const timer of pending.values()) clearTimeout(timer)
+    pending.clear()
+  }, `${name}: pending continuations`)
+  ctx.on('agent/disposed', ({ agent }) => { clearPending(agent) })
 
   // A resumed Agent starts with a fresh process-local tool presenter. Rebuild
   // its presentation from durable session events before the driver can issue
@@ -290,14 +357,28 @@ export function apply(ctx, config) {
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'step/end' && event.type !== 'turn/end') return
     const state = stateFor(session)
+    const capped = !state.promoted && !state.exempt
     if (!state.promoted) {
       scanEvents(state, session)
       if (decidePromotion(state, policy)) state.promoted = true
     }
-    if (state.promoted) {
-      const agent = agentBySession.get(session)
-      if (agent !== undefined) applyPresentation(agent, state, policy)
+    const agent = agentBySession.get(session)
+    // The cut-off first turn never answered. Release the cap and ask once more, so the user does not have to.
+    if (agent !== undefined && capped && policy.autoContinueText !== undefined && policy.bootstrapMaxTokens !== undefined
+      && !state.autoContinued && !isSubagentSession(agent) && endedAtMaxTokens(event)) {
+      state.autoContinued = true
+      state.promoted = true
+      // The activity signal of the capped turn: a cancel aborts it, and a continuation must not outlive that.
+      const turnSignal = state.signal
+      // After the listener returns: the session is still appending this very event.
+      clearPending(agent)
+      pending.set(agent, setTimeout(() => {
+        pending.delete(agent)
+        if (turnSignal?.aborted === true) return
+        sendContinuation(agent, policy.autoContinueText)
+      }, 0))
     }
+    if (state.promoted && !state.exempt && agent !== undefined) applyPresentation(agent, state, policy)
   })
 
   // `prepend: true` puts both filters at the outermost position of their
@@ -315,6 +396,13 @@ export function apply(ctx, config) {
     const selectedShells = shellTools.filter(toolName => available.has(toolName))
     const missingCommon = commonTools.filter(toolName => !available.has(toolName))
     if (selectedShells.length !== 1 || missingCommon.length > 0) {
+      // A delegated child keeps the tool surface its parent filtered for it;
+      // quarantining that surface (or capping its output budget) would break
+      // the child instead of anchoring it.
+      if (isSubagentSession(agent)) {
+        state.exempt = true
+        return assembled
+      }
       throw new Error(
         `${name}: expected exactly one bootstrap shell and every common tool; `
         + `shells=${JSON.stringify(selectedShells)}, missing=${JSON.stringify(missingCommon)}`,
@@ -335,14 +423,17 @@ export function apply(ctx, config) {
   ctx.on('agent/pre-step', async (payload, next) => {
     const agent = payload.agent
     const state = agent === undefined ? undefined : refresh(agent, policy)
+    if (state !== undefined && payload.signal !== undefined) state.signal = payload.signal
     const decision = await next()
     if (agent === undefined || decision.kind !== 'enter') return decision
     if (state === undefined) return decision
 
+    if (state.exempt) return decision
     if (!state.promoted) {
       return {
         ...decision,
-        messages: decision.messages.filter(message => isAllowedMessage(message, messageSources)),
+        messages: decision.messages.filter(message => isAllowedMessage(message, messageSources)
+          || isKeptTaskTemplate(message, policy.keepTaskTemplate)),
       }
     }
     if (state.deferredSteps < policy.deferredGraceSteps) {
@@ -367,8 +458,9 @@ export function apply(ctx, config) {
     // delegating so a cold resume cannot emit one stale native header and
     // switch to `run_code` only after that request has already started.
     const state = agent === undefined ? undefined : refresh(agent, policy)
+    if (state !== undefined && payload.signal !== undefined) state.signal = payload.signal
     const resolved = await next()
-    if (state === undefined || policy.bootstrapMaxTokens === undefined) return resolved
+    if (state === undefined || state.exempt || policy.bootstrapMaxTokens === undefined) return resolved
     if (state.promoted) {
       if (resolved.maxTokens !== policy.bootstrapMaxTokens) return resolved
       const rest = { ...resolved }

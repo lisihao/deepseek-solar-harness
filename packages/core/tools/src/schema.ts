@@ -481,6 +481,8 @@ export function validateArgs(spec: ParameterSchemaSpec, args: unknown): string[]
 
 /** Options for {@link defineTool}. */
 export interface DefineToolOptions<S extends ParameterSchemaSpec, O extends ValueSchemaSpec> {
+  /** Internal dispatcher identity copied to the registered definition. */
+  readonly delegation?: ToolDefinition['delegation']
   /** Tool name (must be unique). */
   readonly name: string
   /** Human-readable description sent to the model. */
@@ -568,6 +570,7 @@ export function defineTool<const S extends ParameterSchemaSpec, const O extends 
   const validate = (args: unknown): string[] => validateJsonSchemaValue(parameters, args, '')
   const tool: ToolDefinition = {
     name: options.name,
+    ...options.delegation === undefined ? {} : { delegation: options.delegation },
     description: options.description,
     parameters: parameters as unknown as Record<string, unknown>,
     output: {

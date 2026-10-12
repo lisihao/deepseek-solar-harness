@@ -10,6 +10,9 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorGenerationLimits,
+  PhysicalOperatorGovernedWorkspacePolicy,
+  PhysicalOperatorProviderResponse,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorProgressPage,
@@ -23,7 +26,7 @@ export { ResidentOperatorError } from './error.ts'
 /** Current local control protocol version. */
 export const RESIDENT_PROTOCOL_VERSION = 14
 /** Current forward-only daemon state schema version. */
-export const RESIDENT_STATE_SCHEMA_VERSION = 5
+export const RESIDENT_STATE_SCHEMA_VERSION = 6
 
 /** Opaque identity for one operator/workspace/lane Resident Session. */
 export type ResidentOperatorSessionId = Branded<'ResidentOperatorSessionId'>
@@ -218,6 +221,10 @@ export interface ResidentCliUpdateResult {
 
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
+  /** Driver implements a direct model-only path with explicit generation limits. */
+  readonly supportsGenerationLimits?: boolean
+  /** Driver enforces sealed file scopes without inherited native tools. */
+  readonly supportsGovernedWorkspacePolicy?: boolean
   readonly operatorId: string
   readonly product: string
   readonly displayName: string
@@ -243,6 +250,8 @@ export interface ResidentProviderStatus {
 
 /** One native product invocation after durable daemon admission. */
 export interface ResidentDriverExecuteRequest {
+  /** Daemon-owned private tool endpoint root; never supplied over external wire. */
+  readonly governedToolRoot?: string
   /** Outer durable command identity used to namespace native model-tool receipts. */
   readonly commandId: ResidentOperatorCommandId
   readonly workspace: string
@@ -252,10 +261,16 @@ export interface ResidentDriverExecuteRequest {
   readonly profile: ResidentExecutionProfile
   readonly nativeSessionId?: string
   readonly signal: AbortSignal
-  /** Genuine host-tool bridge sealed before native thread dispatch. */
-  readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
+  /** Configured owner-connection deadline for bridge admission, in milliseconds. */
+  readonly modelToolBridgeAdmissionTimeoutMs?: number
+  /** Sealed tools with the current owner endpoint; read again for each new tool call. */
+  readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1 | undefined
   /** Daemon-normalized native product tool policy; direct Driver callers inherit when omitted. */
   readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
+  /** Explicit limits for direct model generation. */
+  readonly generationLimits?: PhysicalOperatorGenerationLimits
+  /** Sealed file authority mapped to the driver execution directory. */
+  readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
   /** Persist a bounded product-neutral progress phase for reconnecting observers. */
   readonly onProgress: (phase: ResidentProgressPhase) => void
@@ -273,12 +288,18 @@ export interface ResidentDriverCompactRequest {
   readonly signal: AbortSignal
 }
 
+/** Optional policy for reading native provider model catalogs. */
+export interface ResidentProviderQueryOptions {
+  /** Re-enumerate native product models instead of reusing a Driver catalog. */
+  readonly refreshModels?: boolean
+}
+
 /** Native product qualification and resumable-turn adapter loaded by a daemon Provider. */
 export interface ResidentProductDriver {
   /** Stable physical product identity. */
   readonly operatorId: string
   /** @returns current version, protocol, and native-subscription qualification. */
-  qualify(): Promise<ResidentProviderStatus>
+  qualify(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus>
   /**
    * Start one explicit owner-initiated native-subscription login flow.
    * Drivers must not read, copy, or persist product credentials themselves.
@@ -289,7 +310,7 @@ export interface ResidentProductDriver {
    * @param request - canonical workspace, prompt, prior native Session, signal, and progress callbacks.
    * @returns bounded final result and authoritative native Session identity.
    */
-  execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId: string }>
+  execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId?: string }>
   /** Compact one idle native Session without changing its continuation identity. */
   compact?(request: ResidentDriverCompactRequest): Promise<{ readonly nativeSessionId: string }>
 }
@@ -372,11 +393,17 @@ export interface ResidentExecuteRequest {
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
   /** Native product tool policy; absence preserves the existing native tool surface. */
   readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
+  /** Explicit limits for direct model generation. */
+  readonly generationLimits?: PhysicalOperatorGenerationLimits
+  /** Sealed file authority mapped to the driver execution directory. */
+  readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy
   readonly signal: AbortSignal
 }
 
 /** Bounded final product result or content-addressed reference. */
 export interface ResidentTurnResult {
+  /** Actual provider response provenance; distinct from a native session identity. */
+  readonly providerResponse?: PhysicalOperatorProviderResponse
   readonly output: ContentBlock[]
   readonly stopReason: ResidentStopReason
   readonly usage?: PhysicalOperatorUsage
@@ -474,6 +501,14 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/** A correlated `turn.execute` error response; it does not prove the command was never accepted. */
+export class ResidentCommandRefusal extends ResidentOperatorError {
+  constructor(message: string, code: string) {
+    super(message, code)
+    this.name = 'ResidentCommandRefusal'
+  }
+}
+
 /** Abstract provider-neutral resident session/control surface. */
 export abstract class ResidentOperatorService extends Service {
   constructor(ctx: Context) {
@@ -482,9 +517,18 @@ export abstract class ResidentOperatorService extends Service {
 
   /**
    * Qualify every configured native product provider.
+   * @param options - optional native model catalog refresh policy.
    * @returns current version, protocol, and native-subscription availability snapshots.
    */
-  abstract providers(): Promise<ResidentProviderStatus[]>
+  abstract providers(options?: ResidentProviderQueryOptions): Promise<ResidentProviderStatus[]>
+
+  /**
+   * Read the latest completed qualification without contacting native products.
+   * @returns the observed provider snapshot, or undefined when none is retained.
+   */
+  providerSnapshot(): { readonly observedAt: number; readonly providers: ResidentProviderStatus[] } | undefined {
+    return undefined
+  }
 
   /**
    * Start one explicit owner-local native-subscription login flow.
@@ -539,6 +583,16 @@ export abstract class ResidentOperatorService extends Service {
    * @returns the current receipt state, result reference, and terminal result when available.
    */
   abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>
+
+  /**
+   * Read a durable turn receipt by command identity without admitting or replaying execution.
+   * Absence is an observation at query time and does not exclude concurrent admission.
+   * @param _commandId - caller-owned durable command identity.
+   * @returns the current turn snapshot, or undefined when no receipt exists; unsupported providers throw.
+   */
+  inspectCommand(_commandId: ResidentOperatorCommandId): Promise<ResidentTurnSnapshot | undefined> {
+    throw new ResidentOperatorError('Resident Provider does not support command inspection', 'PROTOCOL_MISMATCH')
+  }
 
   /**
    * Read a bounded page of structured observation events.

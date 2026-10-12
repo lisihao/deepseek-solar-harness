@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Server-owned authentication for DSH remote Frontends. The plugin provides `ctx.remoteAuth` and is the sole writer for one-time pairing challenges, durable device credentials, short-lived access sessions, fixed `cockpit` / `pocket` / `admin` scopes, revocation, and payload-free command receipts. Durable state is kept under `$DSH_HOME/remote-auth/v1`; credentials are represented only by cryptographic digests after their one-time return to the caller, while access tokens remain process-local and expire automatically.
+Server-owned authentication for DSH remote Frontends. The plugin provides `ctx.remoteAuth` and is the sole writer for one-time pairing challenges, durable device credentials, short-lived access sessions, fixed `cockpit` / `pocket` / `admin` / `gouzi` scopes, revocation, and payload-free command receipts. Durable state is kept under `$DSH_HOME/remote-auth/v1`; credentials are represented only by cryptographic digests after their one-time return to the caller, while access tokens remain process-local and expire automatically.
 
 The package deliberately exposes a small product vocabulary rather than a general RBAC framework. The connection carrier authenticates projection and command traffic with the resulting principal; orchestration uses the same principal to restrict remote controls. A remote command is accepted under `deviceId + commandId`, stores only the canonical request hash, and either returns its previously settled bounded response, reports a conflict, or remains fenced as indeterminate after an interrupted accepted operation.
 

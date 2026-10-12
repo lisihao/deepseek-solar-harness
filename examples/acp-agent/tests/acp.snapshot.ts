@@ -71,7 +71,6 @@ const BACKGROUND_TASK_ADMISSION_CONFIG = fileURLToPath(
 )
 const PRODUCT_SUBAGENT_CODEX_CONFIG = fileURLToPath(new URL('../product-subagent-codex.cordis.yml', import.meta.url))
 const PRODUCT_SUBAGENT_BOTH_CONFIG = fileURLToPath(new URL('../product-subagent-both.cordis.yml', import.meta.url))
-const DEBATE_CONFIG = fileURLToPath(new URL('../debate.cordis.yml', import.meta.url))
 const TASK_TEMPLATE_CONFIG = fileURLToPath(
   new URL('./fixtures/task-template/task-template.cordis.yml', import.meta.url),
 )
@@ -183,19 +182,6 @@ const SCENARIOS: Scenario[] = [
     headerClass: 'product-subagent-both',
     systemPromptSource: 'product-subagent-codex',
     configPath: PRODUCT_SUBAGENT_BOTH_CONFIG,
-  },
-  // Authored keyless Debate composition: the Agent starts on the legacy
-  // internal Debate route with no pre-seeded preference or dispatch. The real
-  // host adapter must persist its own dispatch before admitting the prompt.
-  // The fixture Provider records the approval-pending start, accepts the
-  // explicit-route approval, and never starts an external operator.
-  {
-    name: 'debate-tool-turn',
-    hasModelTurn: true,
-    recorded: false,
-    pinsHeader: true,
-    headerClass: 'debate',
-    configPath: DEBATE_CONFIG,
   },
   {
     name: 'session-title-after-turn',
@@ -658,29 +644,6 @@ defineAcpSnapshotSuite({
   scenarios: SCENARIOS,
   mode: snapshotModeFromEnv(process.env.DSH_SNAPSHOT),
   hasPwsh,
-})
-
-const DEBATE_PUBLIC_INTERNAL_MARKER
-  = /(?:constructive-proposer|skeptical-falsifier|evidence-auditor|decision-judge|\((?:participant|judge)\))/
-const DEBATE_PUBLIC_TEXT_KEYS = new Set(['text', 'texts', 'preview', 'outputPreview', 'statement', 'position', 'reason'])
-
-function collectDebatePublicText(value: unknown, key?: string): string[] {
-  if (typeof value === 'string') return key !== undefined && DEBATE_PUBLIC_TEXT_KEYS.has(key) ? [value] : []
-  if (Array.isArray(value)) return value.flatMap(item => collectDebatePublicText(item, key))
-  if (value === null || typeof value !== 'object') return []
-  return Object.entries(value).flatMap(([childKey, child]) => collectDebatePublicText(child, childKey))
-}
-
-it('debate-tool-turn public text omits internal roster identifiers', () => {
-  const stdout = readFileSync(join(SNAPSHOTS_DIR, 'debate-tool-turn', 'stdout.expected.jsonl'), 'utf8')
-    .trimEnd()
-    .split('\n')
-    .flatMap(line => collectDebatePublicText(JSON.parse(line) as unknown))
-  const session = fixtureRecords('debate-tool-turn').flatMap(record => collectDebatePublicText(record))
-  expect(stdout.length).toBeGreaterThan(0)
-  expect(session.length).toBeGreaterThan(0)
-  expect(stdout.join('\n')).not.toMatch(DEBATE_PUBLIC_INTERNAL_MARKER)
-  expect(session.join('\n')).not.toMatch(DEBATE_PUBLIC_INTERNAL_MARKER)
 })
 
 it('packed ACP fixture retains every chunk row kind without changing the logical session', () => {

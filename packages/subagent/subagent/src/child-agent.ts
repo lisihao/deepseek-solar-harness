@@ -9,6 +9,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { readModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -57,8 +58,8 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 }
 
 /**
- * Resolve the child's `AgentOptions`: the parent's provider/model/maxTokens
- * route unless the request overrides it, stamped with the child's own
+ * Resolve the child's `AgentOptions`: the parent's live provider/model route and its maxTokens
+ * unless the request overrides it, stamped with the child's own
  * delegation depth.
  * @param parent - the delegating parent whose route the child inherits.
  * @param requested - per-child overrides, if any.
@@ -70,8 +71,7 @@ export function resolveChildAgentOptions(
   requested: AgentOptions | undefined,
   childDepth: number,
 ): AgentOptions {
-  const parentProvider = parent.options.provider
-  const parentModel = parent.options.model
+  const { provider: parentProvider, model: parentModel } = parentRoute(parent)
   const parentMaxTokens = parent.options.maxTokens
   return {
     ...parentProvider !== undefined ? { provider: parentProvider } : {},
@@ -80,6 +80,17 @@ export function resolveChildAgentOptions(
     ...requested,
     subagentDepth: childDepth,
   }
+}
+
+/**
+ * The provider and model the parent runs on now. A host that installs a mutable model selection changes it
+ * without touching `parent.options`, which keeps the route the Agent was created with.
+ * @param parent - the delegating parent.
+ * @returns the captured selection when one is installed, otherwise the creation options.
+ */
+export function parentRoute(parent: Agent): { provider?: string | undefined; model?: string | undefined } {
+  const { installed, selection } = readModelSelection(parent)
+  return installed && selection !== undefined ? selection : parent.options
 }
 
 /**

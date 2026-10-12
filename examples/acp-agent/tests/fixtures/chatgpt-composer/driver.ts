@@ -12,6 +12,7 @@ try {
   if (operators === undefined) throw new Error('Loader did not mount physicalOperators')
   const run = await operators.start('chatgpt-web', {
     label: 'Composer initialization',
+    residentProfile: { model: 'Latest' },
     prompt: [{ type: 'text', text: 'Return the accepted request result.' }],
     parent: { id: SessionId('keyless-composer-parent') } as unknown as Agent,
     signal: new AbortController().signal,

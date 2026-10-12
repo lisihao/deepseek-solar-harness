@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { REMOTE_SYNC_PROTOCOL } from '@deepseek-ai/dsh-client-connection'
 import { stopProductServerDaemons } from './product-server-processes.mjs'
 
 const REQUIRED_CLIENT_IDS = [
@@ -86,7 +87,7 @@ async function waitForRemoteSync(baseUrl, child, output) {
           type: 'client-request',
           rpcId: 'product-server-describe',
           method: 'describe',
-          payload: { protocol: { major: 1, minor: 4 } },
+          payload: { protocol: REMOTE_SYNC_PROTOCOL },
         }),
       })
       lastStatus = String(response.status)

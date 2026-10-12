@@ -1364,6 +1364,80 @@ function addExplicitServicePackage(root: string, annotation: string, withProtoco
 }
 
 describe('FaceModelEmitter', { timeout: 60_000 }, () => {
+  it('preserves single exported interface layout while retaining complete referenced runtime declarations', async () => {
+    const root = copyFixture('typert-declaration-layout-')
+    const modelPath = join(root, 'packages/host/src/models.ts')
+    writeFileSync(modelPath, [
+      readFileSync(modelPath, 'utf8'),
+      'export interface DisplaySingle {',
+      '  readonly route?: {',
+      '    readonly family: \'native\' | \'subagent\'',
+      '    readonly actions?: readonly string[]',
+      '  }',
+      '}',
+      'export interface DisplayMerged { readonly left: string }',
+      'export interface DisplayMerged { readonly right: number }',
+      'interface PrivateDisplay { readonly value: boolean }',
+      'export class DisplayClass {',
+      '  static readonly kind: string = \'display\'',
+      '  private readonly secret: string = \'hidden\'',
+      '  protected readonly generation: number = 1',
+      '  readonly label: string = \'visible\'',
+      '  constructor() {}',
+      '  read(): string { return this.label + this.secret + String(this.generation) }',
+      '}',
+      '/** @typert object */',
+      'export interface DeclarationConsumer {',
+      '  single: DisplaySingle',
+      '  merged: DisplayMerged',
+      '  internal: PrivateDisplay',
+      '  instance: DisplayClass',
+      '}',
+      '',
+    ].join('\n'))
+    const entryPath = join(root, 'packages/host/src/index.ts')
+    writeFileSync(entryPath, `${readFileSync(entryPath, 'utf8')}\nexport type { DisplaySingle, DisplayMerged, DisplayClass, DeclarationConsumer } from './models.ts'\n`)
+    const model = new WorkspaceAnalyzer({ root }).analyze()
+    const host = model.faces.find(face => face.face === 'host')
+    if (host === undefined) throw new Error('fixture has no host face')
+    const artifact = new FaceModelEmitter(host).emit('@fixture/host')
+    const modulePath = join(root, 'declaration-layout.mjs')
+    writeFileSync(modulePath, artifact.js)
+    const generated = await import(`${pathToFileURL(modulePath).href}?test=${Date.now()}`) as {
+      TYPERT: { model: { objects: { name: string; types: { name: string; declaration: string }[] }[] } }
+    }
+    const consumer = generated.TYPERT.model.objects.find(object => object.name === 'DeclarationConsumer')
+    expect(consumer?.types).toEqual([
+      { name: 'DisplayClass', declaration: [
+        'export class DisplayClass {',
+        '    readonly label: string;',
+        '    read(): string;',
+        '}',
+      ].join('\n') },
+      { name: 'DisplayMerged', declaration: [
+        'export interface DisplayMerged {',
+        '    readonly left: string;',
+        '    readonly right: number;',
+        '}',
+      ].join('\n') },
+      { name: 'DisplaySingle', declaration: [
+        'export interface DisplaySingle {',
+        '    readonly route?: {',
+        "        readonly family: 'native' | 'subagent';",
+        '        readonly actions?: readonly string[];',
+        '    };',
+        '}',
+      ].join('\n') },
+      { name: 'PrivateDisplay', declaration: [
+        'export interface PrivateDisplay {',
+        '    readonly value: boolean;',
+        '}',
+      ].join('\n') },
+    ])
+    expect(consumer?.types.find(type => type.name === 'DisplaySingle')?.declaration)
+      .toBe(host.graph.declarations.find(declaration => declaration.name === 'DisplaySingle')?.text)
+  })
+
   it('emits runnable Zod JavaScript, precise declarations, and runtime package metadata', async () => {
     const model = new WorkspaceAnalyzer({ root: fixtureRoot }).analyze()
     const host = model.faces.find(face => face.face === 'host')

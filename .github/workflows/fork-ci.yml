@@ -102,6 +102,25 @@ jobs:
       - name: Run complete keyless Python suite
         run: uv run --python 3.10 --group test --project python/sdk pytest
 
+  python-scheduling:
+    name: Python 3.12 scheduling evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Run the scheduling evidence collector tests
+        working-directory: python/scheduling-evidence
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests
+
   python-runtime:
     name: Python runtime release-shaped Linux x64
     uses: ./.github/workflows/build-exe-for-python-sdk.yml
@@ -146,7 +165,7 @@ jobs:
     name: all checks passed
     runs-on: ubuntu-latest
     if: always()
-    needs: [linux-primary, node-compat, python-sdk, python-runtime, windows]
+    needs: [linux-primary, node-compat, python-sdk, python-scheduling, python-runtime, windows]
     steps:
       - name: Fail if a required job did not succeed
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')

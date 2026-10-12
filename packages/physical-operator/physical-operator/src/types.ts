@@ -136,6 +136,10 @@ export interface PhysicalOperatorResidentCatalog {
   readonly location: 'local' | 'remote'
   /** Whether workspace mutations can be returned to the Scheduler's integration worktree. */
   readonly supportsWorkspaceMutationReturn: boolean
+  /** Actual receiving driver can enforce the sealed file policy; absence means unsupported. */
+  readonly supportsGovernedWorkspacePolicy?: boolean
+  /** Actual receiving driver can enforce direct model generation bounds; absence means unsupported. */
+  readonly supportsGenerationLimits?: boolean
   readonly available: boolean
   readonly unavailableReason?: string
   readonly quotaUnavailableReason?: string
@@ -144,10 +148,45 @@ export interface PhysicalOperatorResidentCatalog {
   readonly protocolHash: string
   readonly models: readonly PhysicalOperatorResidentModel[]
   readonly quotaPools?: readonly PhysicalOperatorQuotaPool[]
+  /** Current Gouzi default project binding, with verified member-local roots; absent on generic operators. */
+  readonly gouziWorkspace?: {
+    readonly gouziId: string
+    readonly generation: number
+    readonly projectId: string
+    readonly projectScopes: readonly string[]
+  }
+}
+
+/** Optional read policy for registered Resident model catalogs. */
+export interface PhysicalOperatorResidentCatalogOptions {
+  /** Re-enumerate native product models before returning catalogs. */
+  readonly refreshModels?: boolean
 }
 
 /** Native product tool surface allowed for one sealed physical execution. */
 export type PhysicalOperatorNativeToolPolicy = 'inherit' | 'dsh-tools-authoritative' | 'disabled'
+
+/** Caller-owned limits for direct model generation; tool loops additionally enforce aggregate limits. */
+export interface PhysicalOperatorGenerationLimits {
+  readonly maxTokens: number
+  readonly maxOutputBytes: number
+  readonly maxToolCalls?: number
+}
+
+/** Sealed DSH workspace-file authority consumed by the governed direct-model executor. */
+export interface PhysicalOperatorGovernedWorkspacePolicy {
+  readonly version: 1
+  readonly sourceWorkspace: string
+  readonly readScopes: readonly string[]
+  readonly writeScopes: readonly string[]
+  readonly forbiddenScopes: readonly string[]
+  readonly limits: {
+    readonly maxToolCalls: number
+    readonly maxFileBytes: number
+    readonly maxOutputBytes: number
+    readonly maxSearchFiles: number
+  }
+}
 
 /** Caller-owned input for one operator execution. */
 export interface PhysicalOperatorStartRequest {
@@ -177,8 +216,16 @@ export interface PhysicalOperatorStartRequest {
   readonly residentLaneId?: string
   /** Optional genuine model-tool surface resolved before dispatch; never a prompt-encoded pseudo protocol. */
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
+  /** Exact current source inputs, including verified preceding edits, for a remote isolated read or write. */
+  readonly workspaceSnapshotInput?: { readonly baseSha: string; readonly baseBundle: string }
+  /** Return remote edits into the caller-owned clean execution checkout at this exact base. */
+  readonly workspaceMutationReturn?: { readonly baseSha: string; readonly baseBundle?: string }
   /** Native product defaults, a governed DSH writable-effect authority, or a completely disabled tool surface. */
   readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
+  /** Explicit output and tool-call limits for direct model requests. */
+  readonly generationLimits?: PhysicalOperatorGenerationLimits
+  /** Sealed file authority; absence preserves the existing native execution path. */
+  readonly governedWorkspacePolicy?: PhysicalOperatorGovernedWorkspacePolicy
 }
 
 /** Provider-facing request after the service owns identity and mode normalization. */
@@ -210,11 +257,20 @@ export interface PhysicalOperatorUsage {
   readonly costUsd?: number
 }
 
+/** Actual direct-model response metadata; a response id is not a native conversation identity. */
+export interface PhysicalOperatorProviderResponse {
+  readonly provider: string
+  readonly model: string
+  readonly responseId?: string
+}
+
 /** Provider-neutral terminal result. */
 export interface PhysicalOperatorResult {
+  /** Actual direct-model response metadata when this execution did not create a native Session. */
+  readonly providerResponse?: PhysicalOperatorProviderResponse
   /** Final or partial canonical content returned by the backing execution. */
   readonly output: ContentBlock[]
-  /** Why the execution ended. Only `completed` is a successful result. */
+  /** Why the execution ended. `completed` means a normal provider turn end, not verified task acceptance. */
   readonly stopReason: PhysicalOperatorStopReason
   /** Native product usage when the Provider exposes authoritative counters. */
   readonly usage?: PhysicalOperatorUsage
@@ -275,7 +331,7 @@ export interface PhysicalOperator {
   /** Resolve current transport or deployment availability, optionally for one requested lifetime. */
   availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability
   /** Optionally publish the live model/quota catalog for Resident scheduling. */
-  residentCatalog?(): Promise<PhysicalOperatorResidentCatalog>
+  residentCatalog?(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog>
   /** Reattach observation to a previously accepted durable turn after caller restart. */
   reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>
   /** Interrupt an accepted durable turn without deleting its Resident Session. */

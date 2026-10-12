@@ -26,6 +26,7 @@ describe('resident-operators bundle', () => {
       'subagent-codex-native-subscription',
       'subagent-claude-code-native-subscription',
       'physical-operator-dual-mode',
+      'model-allocation',
       'tool-physical-operator',
     ])
     for (const row of rows) {
@@ -40,6 +41,10 @@ describe('resident-operators bundle', () => {
     })
     expect(rows.find(row => row.id === 'resident-operators')?.config).toMatchObject({
       driverModules: [],
+    })
+    expect(rows.find(row => row.id === 'tool-physical-operator')?.config).toMatchObject({
+      entryOperatorIds: ['chatgpt-web'],
+      latestModelEntries: [{ operatorId: 'codex', count: 2 }],
     })
   })
 })

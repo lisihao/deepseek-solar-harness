@@ -15,6 +15,7 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const ROUTE_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-options.json', import.meta.url))
 const CLI_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-cli-runtimes.json', import.meta.url))
+const RESIDENT_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-resident-panel.json', import.meta.url))
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/physical-routing-fixtures.mjs', import.meta.url))
 
@@ -91,20 +92,9 @@ export function apply(ctx) {
       name: ${yamlString(CHATGPT_WEB_OPERATOR)}
       config:
         stateRoot: ${yamlString(join(root, 'chatgpt-web'))}
-        coordinatorEnabled: true
-        connectorName: Fixture ChatGPT Web
-        coordinatorPort: 0
 
     - id: tool-orchestration
       name: '@deepseek-ai/dsh-tool-orchestration'
-
-    - id: debate-orchestration
-      name: '@deepseek-ai/dsh-debate-orchestration'
-      config:
-        dshHome: !!js process.env.DSH_HOME
-
-    - id: tool-debate
-      name: '@deepseek-ai/dsh-tool-debate'
 `)
   return path
 }
@@ -155,13 +145,17 @@ describe('web e2e: physical operator qualification and routing', () => {
     return dialog
   }
 
-  async function setMechanism(dialog: Locator, value: 'debate' | 'standard', expectedLabel: string): Promise<void> {
+  async function setMechanism(dialog: Locator, value: 'standard', expectedLabel: string): Promise<void> {
     const mechanism = dialog.getByRole('combobox', { name: '执行机制' })
     await mechanism.waitFor({ timeout: 10_000 })
     await mechanism.selectOption(value)
     await expect.poll(async () => await mechanism.inputValue(), { timeout: 15_000 }).toBe(value)
     await expect.poll(async () => await page.getByRole('button', { name: expectedLabel }).count(), { timeout: 15_000 })
       .toBe(1)
+  }
+
+  async function showPage(dialog: Locator, name: '基础' | '高级调度'): Promise<void> {
+    await dialog.getByRole('button', { name, exact: true }).click()
   }
 
   async function expectSelectedRoute(dialog: Locator, name: RegExp): Promise<void> {
@@ -174,25 +168,32 @@ describe('web e2e: physical operator qualification and routing', () => {
   it('keeps a selected primary in charge while exposing bounded downstream and Web coordination controls', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-routing'))
     // Neither the closed Resident action nor the closed collaboration control
-    // may qualify native providers or start a native-product operation.
+    // may qualify native providers or start a native-product operation. The
+    // model directory reads its persisted catalog on mount; qualification is
+    // reserved for the explicit refresh action below.
     expect(qualificationRequests).toEqual([])
     const codexQualification = join(
       scaffold.harnessHome,
       'physical-routing-qualification-count',
     )
-    expect(await numberInFile(codexQualification)).toBe(0)
+    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBe(0)
+    const menuQualifications = await numberInFile(codexQualification)
 
     const dialog = await collaborationPanel()
     expect(qualificationRequests).toEqual([])
+    expect(await numberInFile(codexQualification)).toBe(menuQualifications)
+    const basicRoutes = await dialog.getByRole('button', { name: /智能协作|仅主模型|优先 Codex|优先 Claude Code|ChatGPT 网页订阅/ })
+      .evaluateAll(nodes => nodes.filter(node => node.checkVisibility()).map(node => node.querySelector('strong')?.textContent ?? ''))
+    await showPage(dialog, '高级调度')
     await dialog.getByRole('button', { name: /优先 Claude Code/ }).click()
     await expect.poll(() => qualificationRequests.length, { timeout: 10_000 }).toBeGreaterThan(0)
-    await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(0)
     await expect.poll(() => dialog.getByText(/AUTH_MODE_MISMATCH/).isVisible(), { timeout: 10_000 }).toBe(true)
 
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible(), { timeout: 10_000 }).toBe(true)
-    await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
+    await showPage(dialog, '基础')
     await setMechanism(dialog, 'standard', '协作 · Codex')
+    await showPage(dialog, '高级调度')
     await expectSelectedRoute(dialog, /优先 Codex/)
 
     for (const route of [
@@ -201,19 +202,27 @@ describe('web e2e: physical operator qualification and routing', () => {
     ]) {
       await dialog.getByRole('button', { name: route.option }).click()
       await expectSelectedRoute(dialog, route.option)
-      await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
+      await showPage(dialog, '基础')
       await setMechanism(dialog, 'standard', route.label)
+      await showPage(dialog, '高级调度')
       await expectSelectedRoute(dialog, route.option)
     }
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
     await expectSelectedRoute(dialog, /优先 Codex/)
+    await showPage(dialog, '基础')
 
     await dialog.getByRole('button', { name: '关闭协作方式' }).click()
     await page.getByRole('button', { name: /^Select model/ }).click()
-    await page.getByRole('menuitem', { name: /^Model/ }).click()
-    await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+    const modelMenu = page.getByRole('menu', { name: 'Model and reasoning effort' })
+    const refreshModels = modelMenu.getByRole('menuitem', { name: 'Refresh models and operators' })
+    await refreshModels.click()
+    await expect.poll(() => refreshModels.isEnabled(), { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => numberInFile(codexQualification), { timeout: 15_000 }).toBeGreaterThan(menuQualifications)
+    await modelMenu.getByRole('menuitem', { name: /^Model/ }).click()
+    await page.getByRole('menuitemradio', { name: /Codex/ }).first().click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
     const selectedPanel = await collaborationPanel()
+    await showPage(selectedPanel, '高级调度')
     const claudeOption = selectedPanel.getByRole('button', { name: /优先 Claude Code/ })
     const webOption = selectedPanel.getByRole('button', { name: /ChatGPT 网页订阅/ })
     await expect.poll(() => claudeOption.isDisabled()).toBe(false)
@@ -221,26 +230,14 @@ describe('web e2e: physical operator qualification and routing', () => {
     await webOption.click()
     await expectSelectedRoute(selectedPanel, /ChatGPT 网页订阅/)
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
-    await expect.poll(() => selectedPanel.getByRole('combobox', { name: '执行模型' }).isEnabled()).toBe(true)
     const native = {
+      basicRoutes,
       chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
       mainModel: await page.getByRole('button', { name: /^Select model/ }).getAttribute('aria-label'),
       claudeAdvisorDisabled: await claudeOption.isDisabled(),
       webAdvisorDisabled: await webOption.isDisabled(),
       webAdvisorSelected: await webOption.getAttribute('data-selected'),
-      executionModels: await selectedPanel.getByRole('combobox', { name: '执行模型' }).locator('option').allTextContents(),
-    }
-    await setMechanism(selectedPanel, 'debate', '协作 · Debate（多 Agent 辩论）')
-    const debate = {
-      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
-      claudeAdvisorDisabled: await claudeOption.isDisabled(),
-      nativeProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型' }).count(),
-    }
-    await selectedPanel.getByRole('button', { name: '退出 Debate（恢复会话路由）' }).click()
-    await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
-    const restored = {
-      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
-      claudeAdvisorDisabled: await claudeOption.isDisabled(),
+      primaryProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型', exact: true }).count(),
     }
     await selectedPanel.getByRole('button', { name: '关闭协作方式' }).click()
     await page.getByRole('button', { name: /^Select model/ }).click()
@@ -249,14 +246,13 @@ describe('web e2e: physical operator qualification and routing', () => {
     await expect.poll(() => page.getByRole('button', { name: '协作 · ChatGPT 网页版' }).isVisible()).toBe(true)
 
     const webPanel = await collaborationPanel()
-    await webPanel.getByText('连接器：Fixture ChatGPT Web').waitFor({ timeout: 10_000 })
-    const webMode = webPanel.getByRole('group', { name: 'ChatGPT 网页版协作模式' })
+    await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).waitFor({ timeout: 10_000 })
     const webClaudeOption = webPanel.getByRole('button', { name: /优先 Claude Code/ })
-    await expect.poll(() => webMode.getByRole('button', { name: '独立问答' }).getAttribute('aria-pressed')).toBe('true')
-    await expect.poll(() => webClaudeOption.isDisabled()).toBe(true)
+    await expect.poll(() => webPanel.getByText('当前主模型：ChatGPT 网页版（独立问答）').isVisible()).toBe(true)
+    expect(await webClaudeOption.isVisible()).toBe(false)
     expect(await webPanel.getByRole('button', { name: '刷新模型与算子' }).isEnabled()).toBe(true)
-    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).isDisabled()).toBe(true)
-    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' }).isDisabled()).toBe(true)
+    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).isEnabled()).toBe(true)
+    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' }).isEnabled()).toBe(true)
     expect(await webPanel.getByRole('combobox', { name: 'Claude 思考强度' }).count()).toBe(0)
     await webPanel.getByRole('button', { name: '高级调度' }).click()
     await expect.poll(() => webPanel.getByRole('combobox', { name: '模型分配目标' }).isDisabled()).toBe(true)
@@ -265,7 +261,7 @@ describe('web e2e: physical operator qualification and routing', () => {
 
     const primaryBeforeRefresh = await page.getByRole('button', { name: /^Select model/ }).getAttribute('aria-label')
     await webPanel.getByRole('button', { name: '刷新模型与算子' }).click()
-    await expect.poll(() => webPanel.getByText(/模型目录已刷新；原生算子目录已刷新；ChatGPT Web 目录已刷新/).isVisible(), { timeout: 15_000 })
+    await expect.poll(() => webPanel.getByText(/模型目录已刷新/).isVisible(), { timeout: 15_000 })
       .toBe(true)
     const webModel = webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' })
     const webEffort = webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' })
@@ -275,26 +271,15 @@ describe('web e2e: physical operator qualification and routing', () => {
     const webDirect = {
       chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
       mainModel: primaryBeforeRefresh,
-      routingDisabled: await webClaudeOption.isDisabled(),
+      routingVisible: await webClaudeOption.isVisible(),
+      staleSetupNotice: await webPanel.getByText(/Custom MCP|工具协作/).count(),
       taskGraphDisabled: directTaskGraphDisabled,
       claudeEffortCount: await webPanel.getByRole('combobox', { name: 'Claude 思考强度' }).count(),
       webModels: await webModel.locator('option').allTextContents(),
       webEfforts: await webEffort.locator('option').allTextContents(),
     }
 
-    await webMode.getByRole('button', { name: '工具协作' }).click()
-    await expect.poll(() => webMode.getByRole('button', { name: '工具协作' }).getAttribute('aria-pressed'), { timeout: 15_000 }).toBe('true')
-    await expect.poll(() => webClaudeOption.isDisabled()).toBe(false)
-    const coordinatorRoutingDisabled = await webClaudeOption.isDisabled()
-    await webPanel.getByRole('button', { name: '高级调度' }).click()
-    await expect.poll(() => webPanel.getByRole('combobox', { name: '模型分配目标' }).isEnabled()).toBe(true)
-    const webCoordinator = {
-      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
-      routingDisabled: coordinatorRoutingDisabled,
-      taskGraphDisabled: await webPanel.getByRole('combobox', { name: '模型分配目标' }).isDisabled(),
-      toolsNotice: await webPanel.getByText(/工具协作模式允许通过 Custom MCP 使用 DSH 工具和 TaskGraph/).isVisible(),
-    }
-    const transcript = `${JSON.stringify({ native, debate, restored, webDirect, webCoordinator }, null, 2)}\n`
+    const transcript = `${JSON.stringify({ native, webDirect }, null, 2)}\n`
     if (scaffold.mode === 'refresh') await writeFile(ROUTE_SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(ROUTE_SNAPSHOT, 'utf8'))
     expect(tripwire.pageErrors).toEqual([])
@@ -327,6 +312,49 @@ describe('web e2e: physical operator qualification and routing', () => {
     const transcript = `${JSON.stringify({ recommended, activated, afterActivation: await rows(), refused }, null, 2)}\n`
     if (scaffold.mode === 'refresh') await writeFile(CLI_SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(CLI_SNAPSHOT, 'utf8'))
+    await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
+  it('labels a normally ended Resident turn as unverified in the assembled panel', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-resident-unverified'))
+    const action = page.getByRole('button', { name: /^物理算子：/ })
+    await action.waitFor({ timeout: 15_000 })
+    await action.click()
+    const panel = page.getByRole('dialog', { name: 'Resident 物理算子' })
+    await panel.waitFor({ timeout: 15_000 })
+
+    const sessionRow = panel.locator('.dshDesktopResidentSession').filter({ hasText: 'Codex · Create and test a file' })
+    await sessionRow.waitFor({ timeout: 15_000 })
+    await expect.poll(() => sessionRow.getAttribute('data-selected'), { timeout: 15_000 }).toBe('true')
+    await sessionRow.getByText('执行结束（未验收）', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
+
+    const activityRow = panel.locator('.dshDesktopResidentEvents > ol > li > button').filter({ hasText: 'Create and test a file' })
+    await activityRow.waitFor({ timeout: 15_000 })
+    const output = panel.getByText('Cannot write files; tests were not run.', { exact: true })
+    await output.waitFor({ state: 'visible', timeout: 15_000 })
+    const unverified = panel.getByText('执行结束（未验收）', { exact: true })
+    await expect.poll(() => unverified.count(), { timeout: 15_000 }).toBeGreaterThan(0)
+    expect(await panel.getByText('任务已完成', { exact: true }).count()).toBe(0)
+    expect(await panel.getByText('已完成', { exact: true }).count()).toBe(0)
+
+    const transcript = `${JSON.stringify({
+      session: {
+        task: await sessionRow.locator('strong').textContent(),
+        phase: await sessionRow.getByText('执行结束（未验收）', { exact: true }).textContent(),
+      },
+      activity: {
+        task: await activityRow.locator('strong').textContent(),
+        status: await activityRow.locator('span').textContent(),
+      },
+      output: await output.textContent(),
+      unverifiedCount: await unverified.count(),
+      falseCompletedCount: await panel.getByText('任务已完成', { exact: true }).count()
+        + await panel.getByText('已完成', { exact: true }).count(),
+    }, null, 2)}\n`
+    if (scaffold.mode === 'refresh') await writeFile(RESIDENT_SNAPSHOT, transcript)
+    expect(transcript).toBe(await readFile(RESIDENT_SNAPSHOT, 'utf8'))
+
     await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)

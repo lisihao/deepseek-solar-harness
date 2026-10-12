@@ -44,9 +44,11 @@ export interface LlmApi {
   /**
    * Host-scoped model catalog over every registered provider route: the
    * settings surface's models view, needing no session. Per-provider listing
-   * failures ride `failures` without failing the sound groups. Set `refresh`
-   * to ask adapters that support live discovery to refresh their catalog;
-   * omission keeps the adapter's existing cached/static behavior.
+   * failures ride `failures` without failing the sound groups. When the
+   * optional persistent catalog service is mounted, its active sources own
+   * their provider rows: ordinary reads use stored snapshots and `refresh`
+   * calls that service once. Unmanaged routes retain the adapter behavior,
+   * including adapter-local live discovery on `refresh`.
    */
   models(request: RpcRequest<{ refresh?: boolean }>): Promise<RpcResponse<{
     groups: ModelProviderGroup[]

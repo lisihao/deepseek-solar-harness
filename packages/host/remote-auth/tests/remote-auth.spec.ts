@@ -99,6 +99,20 @@ describe('RemoteAuthService', () => {
     expect(() => resumed.exchange(credential.credential)).toThrow(RemoteAuthError)
   })
 
+  it('persists a gouzi credential with its scope across restart', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-remote-auth-'))
+    const auth = await start(home)
+    const credential = await auth.redeemPairing(auth.issuePairing('gouzi').code, 'Mac mini member')
+    expect(credential.scope).toBe('gouzi')
+
+    await fibers.shift()!.dispose()
+    const resumed = await start(home)
+    const session = resumed.exchange(credential.credential)
+    expect(session.scope).toBe('gouzi')
+    expect(resumed.authenticate(session.accessToken)).toMatchObject({ deviceId: credential.deviceId, scope: 'gouzi' })
+    expect(resumed.listDevices()).toEqual([expect.objectContaining({ deviceId: credential.deviceId, scope: 'gouzi' })])
+  })
+
   it('enforces the active-device bound and expires short-lived access tokens', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-23T08:00:00.000Z'))

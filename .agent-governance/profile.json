@@ -152,6 +152,7 @@
       "id": "source-build",
       "label": "Shared source library build",
       "command": ["pnpm", "run", "build:lib"],
+      "env": {"NODE_OPTIONS": "--max-old-space-size=4096"},
       "cwd": ".",
       "select_when": ["source", "tooling", "documentation", "governance", "release"],
       "input_patterns": [
@@ -178,6 +179,7 @@
       "id": "typecheck",
       "label": "Repository TypeScript typecheck",
       "command": ["pnpm", "run", "typecheck:contracts-ready"],
+      "env": {"NODE_OPTIONS": "--max-old-space-size=4096"},
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],

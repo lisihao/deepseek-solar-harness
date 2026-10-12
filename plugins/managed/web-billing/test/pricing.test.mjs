@@ -10,6 +10,7 @@ import {
   costOf,
   isPeak,
   nextPricingTransition,
+  offPeakPriceRatio,
   priceAt,
   priceFor,
   resolvePrice,
@@ -228,4 +229,17 @@ test("savings math: local call at official price yields full savings", () => {
   assert.equal(nominalCost.cost, (1000 * 1 + 100000 * 0.02 + 2000 * 2) / 1e6);
   assert.equal(nominalCost.cost - actual.cost, nominalCost.cost);
   assert.equal(nominalCost.costUsd - actual.costUsd, nominalCost.costUsd);
+});
+
+test("offPeakPriceRatio reports the least discounted off-peak price share", () => {
+  const peakOffPeak = activePolicy(at("2026-09-29T20:00:00+08:00"));
+  assert.equal(offPeakPriceRatio(peakOffPeak), 0.5);
+  assert.equal(offPeakPriceRatio(activePolicy(at("2026-08-10T00:00:00+08:00"))), null);
+  assert.equal(offPeakPriceRatio(undefined), null);
+  const unit = (input, cacheRead, output) => ({ cny: { input, cacheRead, output } });
+  assert.equal(offPeakPriceRatio({
+    peak: { a: unit(10, 1, 20), b: unit(4, 0, 8) },
+    offPeak: { a: unit(5, 0.5, 10), b: unit(3, 0, 4) },
+  }), 0.75);
+  assert.equal(offPeakPriceRatio({ peak: { a: unit(10, 1, 20) }, offPeak: { b: unit(5, 0.5, 10) } }), null);
 });

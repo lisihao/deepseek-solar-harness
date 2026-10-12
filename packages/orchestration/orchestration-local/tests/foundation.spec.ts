@@ -7,7 +7,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { CapabilityCapsuleRef } from '@deepseek-ai/dsh-capability-capsule'
-import { OrchestrationError, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
+import {
+  GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId, OrchestrationError, type LogicalTaskGraphV1,
+} from '@deepseek-ai/dsh-orchestration'
 import { canonicalSha256 } from '../src/canonical.ts'
 import { graphCertificate, nodesConflict, validateGraph } from '../src/graph.ts'
 import { GitWorktreeManager } from '../src/git-worktrees.ts'
@@ -17,7 +19,7 @@ import { OrchestrationStore } from '../src/store.ts'
 const roots: string[] = []
 const run = promisify(execFile)
 afterEach(async () => {
-  for (const root of roots.splice(0)) await import('node:fs/promises').then(fs => fs.rm(root, { recursive: true, force: true }))
+  for (const root of roots.splice(0)) await import('node:fs/promises').then(fs => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
 })
 
 async function temporary(): Promise<string> {
@@ -205,14 +207,58 @@ describe('immutable compilation foundations', () => {
     database.close()
 
     const store = new OrchestrationStore(root)
-    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(4)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'command_receipts'").get())
       .toBeDefined()
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'autonomous_states'").get())
       .toBeDefined()
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cluster_election'").get())
       .toBeDefined()
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'gouzi_members'").get())
+      .toBeDefined()
     store.close()
+  })
+
+  it.each([2, 3, 4])('adds the Gouzi tables when opening a schema-%i store', async (version) => {
+    const root = await temporary()
+    const database = new DatabaseSync(join(root, 'state.sqlite'))
+    database.exec(`PRAGMA user_version = ${String(version)};`)
+    database.close()
+
+    const store = new OrchestrationStore(root)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    expect(store.gouzi.list()).toEqual([])
+    store.close()
+  })
+
+  it('adds the member model column to a schema-5 store and keeps its members on Smart Auto', async () => {
+    const root = await temporary()
+    const created = new OrchestrationStore(root)
+    created.gouzi.pairHost({
+      hostId: GouziHostId('host-1'), label: 'Mac', authorityEpoch: GouziAuthorityEpoch('e1'), credentialRef: 'ref',
+    })
+    created.gouzi.create({
+      gouziId: GouziId('gouzi-1'), ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
+      name: 'Dog', avatarId: 'shiba', role: 'research', grantDeadlineMs: 3_600_000,
+    })
+    created.db.exec('ALTER TABLE gouzi_members DROP COLUMN model; PRAGMA user_version = 5;')
+    created.close()
+
+    const store = new OrchestrationStore(root)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    const migrated = store.gouzi.read(GouziId('gouzi-1'))
+    expect(migrated).toMatchObject({ name: 'Dog' })
+    expect(migrated).not.toHaveProperty('model')
+    expect(store.gouzi.edit(GouziId('gouzi-1'), { model: 'gpt-5.5' }).model).toBe('gpt-5.5')
+    store.close()
+  })
+
+  it('refuses a store from a newer schema instead of opening it', async () => {
+    const root = await temporary()
+    const database = new DatabaseSync(join(root, 'state.sqlite'))
+    database.exec('PRAGMA user_version = 7;')
+    database.close()
+    expect(() => new OrchestrationStore(root)).toThrow('schema 7 is newer than supported 6')
   })
 
   it('requires explicit execute authority for Autonomous shell gates', async () => {

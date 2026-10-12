@@ -260,7 +260,7 @@ Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:55`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:34`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webcompleted--log-only"></a>
 
@@ -289,7 +289,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:71`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:50`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webintent--log-only"></a>
 
@@ -314,7 +314,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:39`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:18`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webprofile--log-only"></a>
 
@@ -345,7 +345,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/model-pre
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:91`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:70`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-websubmission-pending--log-only"></a>
 
@@ -366,7 +366,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:102`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:81`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webterminal--log-only"></a>
 
@@ -383,7 +383,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:111`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:90`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 ### `command/*`
 
@@ -555,42 +555,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orchestration/tool-debate/src/index.ts)
-
-<a id="debatedispatch--log-only"></a>
-
-#### `debate/dispatch` — log-only
-
-```ts persistence-catalog
-/**
- * Durable host admission for one user message while Debate is explicitly enabled.
- * @param commandId Idempotent Debate command identity.
- * @param promptMessageId User message owned by this admission.
- * @param turn Agent turn receiving the message.
- * @param step Agent step replaced by the Debate host adapter.
- * @param planModeActive Effective Plan state captured for this host step.
- */
-'debate/dispatch': {
-  readonly commandId: string
-  readonly promptMessageId: string
-  readonly turn: number
-  readonly step: number
-  readonly planModeActive?: boolean
-}
-```
-
-Source: [`packages/orchestration/tool-debate/src/index.ts:140`](../packages/orchestration/tool-debate/src/index.ts)
-
-<a id="debatepreferences--log-only"></a>
-
-#### `debate/preferences` — log-only
-
-```ts persistence-catalog
-/** Whole-value strategy for future Debate admissions in this Session. */
-'debate/preferences': DebateExecutionPreferences
-```
-
-Source: [`packages/orchestration/tool-debate/src/index.ts:124`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:73`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -605,7 +570,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:124`](../packages/orch
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:152`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:84`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 
@@ -688,6 +653,101 @@ Source: [`packages/hooks/hook-protocol/src/types.ts:19`](../packages/hooks/hook-
 
 Source: [`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-protocol/src/types.ts)
 
+### `kennel/*`
+
+<a id="kenneldispatch-admitted--log-only"></a>
+
+#### `kennel/dispatch-admitted` — log-only
+
+```ts persistence-catalog
+/** Admission receipt linking the user message to its actual run. */
+'kennel/dispatch-admitted': { messageId: string; runId: string }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-collaboration--log-only"></a>
+
+#### `kennel/dispatch-collaboration` — log-only
+
+```ts persistence-catalog
+/** Collaboration candidate and command identity committed before the registered kind starts it. */
+'kennel/dispatch-collaboration': { messageId: string; candidate: KennelCollaborationCandidate; commandId: string }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-collaboration-admitted--log-only"></a>
+
+#### `kennel/dispatch-collaboration-admitted` — log-only
+
+```ts persistence-catalog
+/** Admission receipt linking the user message to its collaboration run and each member's assignment. */
+'kennel/dispatch-collaboration-admitted': {
+  messageId: string
+  collaboration: string
+  runId: string
+  assignments: readonly { gouziId: string; role: string }[]
+}
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-control--log-only"></a>
+
+#### `kennel/dispatch-control` — log-only
+
+```ts persistence-catalog
+/** Revision-bound control receipt; never a new task admission. */
+'kennel/dispatch-control': { messageId: string; candidate: KennelControlCandidate; result: OrchestrationRunSnapshot }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:83`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-decision--log-only"></a>
+
+#### `kennel/dispatch-decision` — log-only
+
+```ts persistence-catalog
+/** AI-selected fixed member; this record is not an execution receipt. */
+'kennel/dispatch-decision': { messageId: string; source: 'jev' | 'deepseek' | 'codex'; provider: string; model?: string; candidateId: string; fallbackReason?: string }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-model--log-only"></a>
+
+#### `kennel/dispatch-model` — log-only
+
+```ts persistence-catalog
+/** Complete auxiliary model request and terminal output or failure. */
+'kennel/dispatch-model': { messageId: string; record: DispatchModelRecord }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:66`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-request--log-only"></a>
+
+#### `kennel/dispatch-request` — log-only
+
+```ts persistence-catalog
+/** Immutable input and qualified choices retained before model invocation. */
+'kennel/dispatch-request': { messageId: string; message: UserMessage; candidates: readonly KennelDispatchCandidate[] }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:64`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
+<a id="kenneldispatch-submission--log-only"></a>
+
+#### `kennel/dispatch-submission` — log-only
+
+```ts persistence-catalog
+/** Compilation and stable submission identity committed before start. */
+'kennel/dispatch-submission': { messageId: string; compilationId: string; commandId: string }
+```
+
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+
 ### `llm/*`
 
 <a id="llmretry--log-only"></a>
@@ -725,6 +785,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
   route: 'taskgraph'
   runId: string
   maxParallel: number
+  gouziRecipient?: OrchestrationGouziRecipientV1
   rlm: RlmExecutionMode
   autonomous: RlmAutonomousMode
   continualHarness: ContinualHarnessMode
@@ -734,7 +795,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 }
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:44`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -745,7 +806,7 @@ Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../package
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:56`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:58`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 
@@ -786,7 +847,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:118`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:133`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -810,7 +871,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:118`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -824,7 +885,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:113`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:128`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -838,7 +899,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:113`](.
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:75`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -852,7 +913,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:75`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:77`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -870,7 +931,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:77`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:130`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -884,10 +945,12 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:130`](.
   requestedByMessageId: string
   reason: string
   operatorId?: string
+  /** Present when the allocator chose the model: the facts behind `reason`, for counting without parsing prose. */
+  allocation?: RoutingAllocationSummary
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:82`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:95`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -908,7 +971,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:82`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:146`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:161`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -925,7 +988,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:146`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:120`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -944,7 +1007,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:174`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:189`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -969,7 +1032,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:174`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:158`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:173`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -985,7 +1048,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:158`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:139`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:154`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

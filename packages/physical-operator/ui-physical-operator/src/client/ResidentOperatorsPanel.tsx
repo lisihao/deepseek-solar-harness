@@ -474,7 +474,7 @@ function activityLabel(activity: DesktopResidentActivity): string {
   return ({
     queued: '等待启动',
     running: '正在执行',
-    completed: '已完成',
+    completed: '执行结束（未验收）',
     interrupted: '已中断，可继续或重置',
     failed: '执行失败',
     indeterminate: '状态待人工确认，未自动重放',
@@ -491,7 +491,7 @@ function progressLabel(event: DesktopResidentEvent | undefined): string {
     'session.created': '会话已创建',
     'turn.accepted': '任务已接收',
     'turn.running': '任务已启动',
-    'turn.settled': '任务已完成',
+    'turn.settled': '执行结束（未验收）',
     'turn.failed': '任务失败',
     'turn.indeterminate': '结果待人工确认',
   } as Record<string, string>)[event.type] ?? '状态已更新'

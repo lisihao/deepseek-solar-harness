@@ -55,6 +55,7 @@ const CONTROL_ACTIONS = new Set<DesktopDebateControlAction>(['approve', 'reject'
  */
 export function remoteDebateControlAllowed(scope: RemoteDeviceScope, action: DesktopDebateControlAction): boolean {
   if (scope === 'admin' || scope === 'cockpit') return true
+  if (scope === 'gouzi') return false
   return action === 'approve' || action === 'reject' || action === 'pause' || action === 'resume'
 }
 

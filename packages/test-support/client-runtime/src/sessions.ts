@@ -185,7 +185,7 @@ export class TestSessions implements ISessions {
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
     method: 'open' | 'openSubagent' | 'setSubagentCatalogOpen' | 'refreshSubagents'
-      | 'clear' | 'search' | 'fork'
+      | 'clear' | 'search' | 'fork' | 'create'
     args: unknown[]
   }[] = []
 
@@ -476,6 +476,12 @@ export class TestSessions implements ISessions {
   search(query: string, signal: AbortSignal): ReturnType<ISessions['search']> {
     this.calls.push({ method: 'search', args: [query, signal] })
     return Promise.resolve({ ok: true, value: this.searchStub?.(query, signal) ?? { items: [], hasMore: false } })
+  }
+
+  /** @inheritdoc */
+  create(opts: Parameters<ISessions['create']>[0]): ReturnType<ISessions['create']> {
+    this.calls.push({ method: 'create', args: [opts] })
+    return Promise.reject(new Error('test runtime sessions.create requires the production SessionRuntime fixture'))
   }
 
   /**

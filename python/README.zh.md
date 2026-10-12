@@ -10,6 +10,7 @@
 |---|---|---|
 | [sdk](sdk/README.md) | `deepseek-harness-sdk` / `deepseek_harness` | 高层轮次 API 与低层 JSON-RPC 客户端 |
 | [sdk-runtime](sdk-runtime/README.md) | `deepseek-harness-runtime-bin` / `deepseek_harness_runtime` | 内置运行时二进制与默认 agent（智能体）配置 |
+| [scheduling-evidence](scheduling-evidence/README.md) | 不发布 / `codex_radar_provider`、`ai_frontier_provider` | 调度用的 Radar 与 AI Frontier 证据采集器 |
 
 ## 行为
 

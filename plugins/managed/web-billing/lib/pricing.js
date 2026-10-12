@@ -110,6 +110,29 @@ export function activePolicy(timeMs, policies = OFFICIAL_PRICING_POLICIES) {
   return active;
 }
 
+/**
+ * 峰谷政策中空闲价相对高峰价的比例，取所有模型与价格项中最大的比例，
+ * 因此提示的优惠力度不会高于任何一项实际价格。
+ * @param policy - 一条定价政策。
+ * @returns 0–1 之间的比例；非峰谷政策或没有可比的价格项时返回 null。
+ */
+export function offPeakPriceRatio(policy) {
+  if (policy?.peak === void 0 || policy.offPeak === void 0) return null;
+  let ratio = null;
+  for (const [model, peakPrices] of Object.entries(policy.peak)) {
+    const offPeakPrices = policy.offPeak[model];
+    if (offPeakPrices === void 0) continue;
+    for (const field of ["input", "cacheRead", "output"]) {
+      const peakUnit = peakPrices.cny?.[field];
+      const offPeakUnit = offPeakPrices.cny?.[field];
+      if (typeof peakUnit === "number" && peakUnit > 0 && typeof offPeakUnit === "number") {
+        ratio = Math.max(ratio ?? 0, offPeakUnit / peakUnit);
+      }
+    }
+  }
+  return ratio;
+}
+
 /** 该时刻是否处于高峰时段（按指定时区与窗口判定；窗口为 [start, end) 小时）。 */
 export function isPeak(timeMs, timezone = DEFAULT_TIMEZONE, windows = DEFAULT_PEAK_WINDOWS) {
   let hour;

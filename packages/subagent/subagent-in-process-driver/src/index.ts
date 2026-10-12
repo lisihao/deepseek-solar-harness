@@ -144,6 +144,7 @@ export async function startInProcessRun(
     childId,
     activationBoundary,
     structured,
+    request.descriptor,
   )
 }
 
@@ -158,6 +159,7 @@ function drivePublishedRun(
   childId: SessionId,
   boundary: number,
   structured: StructuredAttachment | undefined,
+  descriptor: SubagentDescriptorData,
 ): SubagentRun {
   const child = handle.agent
   const flags = { cancelled: false }
@@ -177,6 +179,7 @@ function drivePublishedRun(
         child.followup(createUserMessage({ content: prompt, source: { kind: 'user' } }))
         await child.whenIdle()
       }
+      recordMissingDescriptor(child, boundary, descriptor)
       return readResult(
         child,
         boundary,
@@ -202,6 +205,15 @@ function drivePublishedRun(
       if (disposal.status === 'rejected') throw disposal.reason
     },
   }
+}
+
+/**
+ * Record the descriptor of a child that failed before its first pre-step listener ran (prompt assembly runs
+ * first), because a child log without one is listed as a corrupt directory.
+ */
+function recordMissingDescriptor(child: Agent, boundary: number, descriptor: SubagentDescriptorData): void {
+  if (child.session.events.slice(boundary).some(event => event.type === 'subagent/descriptor')) return
+  child.session.append('subagent/descriptor', descriptor)
 }
 
 /** Read one settled child's result from events after its activation boundary. */

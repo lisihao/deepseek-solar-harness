@@ -10,7 +10,7 @@
 
 #### What the model sees
 
-模型看到 `orchestration` 工具 schema 和一个稳定策略段落，说明复杂任务准入、显式 Graph 权限、低风险自动启动、高风险人工审批、重启后安全检查，以及没有阶段级 barrier 的并行 fan-out。每次编译都会把当前 `auto | direct | codex | claude-code` 协作策略记录为 TaskGraph 准入元数据；常规并行上限为四个 worker。
+模型看到 `orchestration` 工具 schema 和一个稳定策略段落，说明复杂任务准入、显式 Graph 权限、低风险自动启动、高风险人工审批、重启后安全检查，以及没有阶段级 barrier 的并行 fan-out。`graph_json` 描述提供包含图和节点必填字段的完整只读示例；工作区和工作上限必须换成已观察且获授权的值。狗子 ID 填入节点的 `operator.preferredIds`，单个只读任务也使用这条路径。`GRAPH_INVALID` 表示需要修正指定字段并重新提交编译，不能据此判断成员离线或改用 `physical_operator`。每次编译都会把当前 `auto | direct | codex | claude-code` 协作策略记录为 TaskGraph 准入元数据；常规并行上限为四个 worker。
 
 #### Token effect
 

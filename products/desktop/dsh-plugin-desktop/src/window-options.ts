@@ -32,6 +32,8 @@ export function compatibilityWindowOptions(
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      // Remote Modules `direct` panes are <webview> guests; installEmbeddedWebviewGuard restricts them.
+      webviewTag: true,
     },
   }
   if (platform === 'win32') options.autoHideMenuBar = true
@@ -66,6 +68,8 @@ export function advancedWindowOptions(
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      // Remote Modules `direct` panes are <webview> guests; installEmbeddedWebviewGuard restricts them.
+      webviewTag: true,
     },
   }
   if (platform === 'darwin') {

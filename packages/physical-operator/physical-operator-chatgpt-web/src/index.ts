@@ -7,15 +7,16 @@
  */
 
 export type {} from './model-preferences.ts'
-export type {} from './web-session.ts'
+export type {} from './receipt-events.ts'
 
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { ChatGptWebCoordination } from './coordination.ts'
+import { ChatGptWebModelControls } from './model-controls.ts'
+import { chatGptWebCatalogSource } from './model-catalog-source.ts'
 import { ProgressLog, settleForDisposal, textPromptForRequest } from './run-support.ts'
-import { registerWebCoordinatorSetup } from './setup.ts'
-import { registerWebCoordinationTools } from './coordination-tools.ts'
+import { registerWebSetup } from './setup.ts'
 import { ChatGptWebModelWorker } from './model-worker.ts'
 import { buildWebModelCatalogEvaluatorSource, type WebModelPreferences } from './model-catalog.ts'
 import z from '@deepseek-ai/schemastery'
@@ -66,7 +67,7 @@ export const DEFAULT_OUTPUT_MAX_BYTES = 24 * 1024
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 const MIN_OUTPUT_MAX_BYTES = 1_024
-const MAX_MODEL_LENGTH = 160
+const MAX_MODEL_LENGTH = 256
 const REQUIRED_BROWSER_CAPABILITIES: readonly BrowserCapabilityV1[] = Object.freeze([
   'authenticated-profile-reuse',
   'named-workspace',
@@ -97,24 +98,8 @@ export interface Config {
   readonly progressIntervalMs?: number
   /** Maximum serialized output retained from the webpage. */
   readonly outputMaxBytes?: number
-  /** Private owner-local directory for connector identity and mode. */
+  /** Private owner-local directory for the cached model catalog. */
   readonly stateRoot?: string
-  /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
-  readonly connectorName?: string
-  /**
-   * Allow the Custom MCP tool-coordination mode. Off by default: the mode is
-   * frozen, a saved coordinator selection reads as direct, and no MCP
-   * endpoint starts.
-   */
-  readonly coordinatorEnabled?: boolean
-  /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
-  readonly coordinatorPort?: number
-  /** Maximum HTTP JSON body accepted by the MCP connector. */
-  readonly coordinatorRequestMaxBytes?: number
-  /** Maximum MCP request lifetime, including delegated tools. */
-  readonly coordinatorRequestTimeoutMs?: number
-  /** Maximum wait for matching native webpage request evidence. */
-  readonly identityTimeoutMs?: number
 }
 
 /** Loader schema for the deployment-owned ChatGPT web settings. */
@@ -131,22 +116,10 @@ export const Config: z<Config> = z.object({
   progressIntervalMs: z.number().default(DEFAULT_PROGRESS_INTERVAL_MS),
   outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
   stateRoot: z.string(),
-  connectorName: z.string().default('DSH'),
-  coordinatorEnabled: z.boolean().default(false),
-  coordinatorPort: z.number().default(61847),
-  coordinatorRequestMaxBytes: z.number().default(1024 * 1024),
-  coordinatorRequestTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
-  identityTimeoutMs: z.number().default(15_000),
 })
 
 interface ResolvedConfig {
   readonly stateRoot: string
-  readonly connectorName: string
-  readonly coordinatorEnabled: boolean
-  readonly coordinatorPort: number
-  readonly coordinatorRequestMaxBytes: number
-  readonly coordinatorRequestTimeoutMs: number
-  readonly identityTimeoutMs: number
   readonly id: string
   readonly displayName: string
   readonly description: string
@@ -198,8 +171,8 @@ type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'auth-required' }
   | { readonly status: 'input-unavailable' }
   | { readonly status: 'context-not-isolated' }
-  | { readonly status: 'model-selection-unavailable' }
-  | { readonly status: 'effort-selection-unavailable' }
+  | { readonly status: 'model-selection-unavailable'; readonly stage?: string }
+  | { readonly status: 'effort-selection-unavailable'; readonly stage?: string }
   | { readonly status: 'draft-present'; readonly diagnostic: DraftDiagnostic }
   | { readonly status: 'submission-failed'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
@@ -279,6 +252,7 @@ const COMPOSER_DOM_HELPERS = String.raw`
   const mathSource = (element) => element.getAttribute('data-math-source')
     ?? element.querySelector('annotation[encoding="application/x-tex"]')?.textContent
     ?? '';
+  const displayMath = (element) => '$$' + newline + mathSource(element).trim() + newline + '$$';
   const citationLink = (element) => {
     const href = element.getAttribute('href') ?? '';
     if (!/^https?:/.test(href)) return '';
@@ -291,11 +265,11 @@ const COMPOSER_DOM_HELPERS = String.raw`
     const element = node;
     if (skipped(element)) return '';
     if (element.tagName === 'BR') return newline;
-    if (element.classList.contains('katex-display')) return '$$' + mathSource(element) + '$$';
+    if (element.classList.contains('katex-display')) return newline + displayMath(element) + newline;
     if (element.classList.contains('katex') || element.hasAttribute('data-math-source')) {
       return element.querySelector('.katex-display') === null
         ? '$' + mathSource(element) + '$'
-        : '$$' + mathSource(element) + '$$';
+        : newline + displayMath(element) + newline;
     }
     if (element.tagName === 'A' && element.getAttribute('data-testid') === 'chatgpt-citation') return citationLink(element);
     const inner = [...element.childNodes].map(inlineMarkdown).join('');
@@ -363,7 +337,7 @@ const COMPOSER_DOM_HELPERS = String.raw`
     }
     if (element.classList.contains('katex-display')
       || element.hasAttribute('data-math-source') && element.querySelector('.katex-display') !== null) {
-      return ['$$' + mathSource(element) + '$$'];
+      return [displayMath(element)];
     }
     if (tag !== 'P' && [...element.children].some(isBlock)) return blocksOf(element);
     return [inlineLine(element)];
@@ -619,12 +593,14 @@ if (request.model !== undefined || request.effort !== undefined) {
     case 'auth-required': return { status: 'auth-required' };
     case 'effort-selection-unavailable':
     case 'reasoning-options-unavailable':
-      return { status: 'effort-selection-unavailable' };
+      return { status: 'effort-selection-unavailable', stage: selection.status };
     case 'model-picker-unavailable':
     case 'model-options-unavailable':
     case 'model-selection-unavailable':
     case 'menu-close-failed':
-      return { status: 'model-selection-unavailable' };
+    case 'catalog-restore-unavailable':
+    case 'latest-model-unavailable':
+      return { status: 'model-selection-unavailable', stage: selection.status };
     default: return { status: 'protocol-error' };
   }
 }
@@ -787,7 +763,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
   constructor(
     private readonly ctx: Context,
     private readonly config: ResolvedConfig,
-    private readonly coordination: ChatGptWebCoordination,
+    private readonly controls: ChatGptWebModelControls,
   ) {
     this.descriptor = Object.freeze({
       id: PhysicalOperatorId(config.id),
@@ -795,15 +771,13 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
       description: config.description,
       tags: config.tags,
       maxConcurrency: 1,
-      executionModes: coordination.mode === 'coordinator'
-        ? ['ephemeral', 'resident'] as const
-        : ['ephemeral'] as const,
+      executionModes: ['ephemeral'] as const,
     })
   }
 
   /** Return whether one available browser-js-v1 Provider has the required capabilities. */
   availability() {
-    if (this.coordination.transitioning) return { available: false as const, reason: 'ChatGPT Web configuration is changing' }
+    if (this.controls.transitioning) return { available: false as const, reason: 'ChatGPT Web model controls are changing' }
     try {
       const capabilities = this.ctx.browser.capabilities('browser-js-v1')
       const missing = REQUIRED_BROWSER_CAPABILITIES.filter(capability => !capabilities.includes(capability))
@@ -823,12 +797,6 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
    * @returns a bounded progress reader and the terminal ChatGPT result.
    */
   start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
-    if (request.mode === 'resident') {
-      if (modelForRequest(request) !== undefined) {
-        throw new PhysicalOperatorError('Select the coordinated ChatGPT model in its owned webpage before sending', 'MODEL_SELECTION_UNAVAILABLE')
-      }
-      return this.coordination.start(request)
-    }
     if (request.signal.aborted) {
       throw new PhysicalOperatorError('ChatGPT Web execution was aborted before startup', 'OPERATOR_ABORTED')
     }
@@ -836,7 +804,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
     const explicitModel = modelForRequest(request)
     const profile = resolveWebModelPreferences(
       explicitModel,
-      this.coordination.preferences(String(request.parent.id)),
+      this.controls.preferences(String(request.parent.id)),
     )
     const model = profile.model
     const effort = profile.effort
@@ -930,9 +898,15 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
             'CHATGPT_WEB_CONTEXT_NOT_ISOLATED',
           )
         case 'model-selection-unavailable':
-          throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested model selection', 'MODEL_SELECTION_UNAVAILABLE')
+          throw new PhysicalOperatorError(
+            `ChatGPT Web could not verify the explicitly requested model selection${stageSuffix(outcome.stage)}`,
+            'MODEL_SELECTION_UNAVAILABLE',
+          )
         case 'effort-selection-unavailable':
-          throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested reasoning effort', 'MODEL_SELECTION_UNAVAILABLE')
+          throw new PhysicalOperatorError(
+            `ChatGPT Web could not verify the explicitly requested reasoning effort${stageSuffix(outcome.stage)}`,
+            'MODEL_SELECTION_UNAVAILABLE',
+          )
         case 'submission-failed':
           throw new PhysicalOperatorError(
             `ChatGPT Web did not accept the filled prompt (${diagnosticText(outcome.diagnostic)})`,
@@ -960,34 +934,23 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
 /** Register the browser-backed ChatGPT physical operator. */
 export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
-  const coordination = new ChatGptWebCoordination(ctx, resolved)
-  let unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
-  const publish = async (): Promise<void> => {
-    await unregister()
-    unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
-  }
-  ctx.effect(() => async () => {
-    await unregister()
-    await coordination.dispose()
-  }, 'physical-operator-chatgpt-web: coordinator lifecycle')
-  ctx.inject(['tools', 'systemPrompt'], (toolCtx) => {
-    toolCtx.effect(() => registerWebCoordinationTools(toolCtx, {
-      isCoordinating: (owner, callId) => coordination.isCoordinating(owner, callId),
-      maxHandoffBytes: resolved.outputMaxBytes,
-    }), 'physical-operator-chatgpt-web: coordination tools')
+  const controls = new ChatGptWebModelControls(ctx, resolved)
+  ctx.effect(() => {
+    const unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, controls))
+    return async () => {
+      await unregister()
+      await controls.dispose()
+    }
+  }, 'physical-operator-chatgpt-web: operator lifecycle')
+  ctx.inject(['modelCatalogs'], (catalogCtx) => {
+    const dispose = catalogCtx.modelCatalogs.register(chatGptWebCatalogSource(resolved.id, controls))
+    catalogCtx.effect(() => dispose, 'physical-operator-chatgpt-web: model catalog source')
   })
   ctx.inject(['modelWorkers'], (workerCtx) => {
     workerCtx.modelWorkers.register(new ChatGptWebModelWorker(workerCtx, resolved.id))
   })
   ctx.inject(['webServer'], (webCtx) => {
-    webCtx.effect(() => registerWebCoordinatorSetup(webCtx, {
-      status: () => coordination.status(),
-      endpoint: () => coordination.endpoint(),
-      select: mode => coordination.select(mode, publish),
-      refreshCatalog: sessionId => coordination.refreshCatalog(sessionId),
-      preferences: sessionId => coordination.preferences(sessionId),
-      selectPreferences: (sessionId, profile) => coordination.selectPreferences(sessionId, profile),
-    }), 'physical-operator-chatgpt-web: local setup')
+    webCtx.effect(() => registerWebSetup(webCtx, controls), 'physical-operator-chatgpt-web: local setup')
   })
 }
 
@@ -1018,22 +981,8 @@ function resolveConfig(config: Config): ResolvedConfig {
   if (!Number.isSafeInteger(outputMaxBytes) || outputMaxBytes < MIN_OUTPUT_MAX_BYTES) {
     throw new Error(`physical-operator-chatgpt-web: outputMaxBytes must be an integer of at least ${MIN_OUTPUT_MAX_BYTES}`)
   }
-  const coordinatorPort = config.coordinatorPort ?? 61847
-  if (!Number.isSafeInteger(coordinatorPort) || coordinatorPort < 0 || coordinatorPort > 65535) {
-    throw new Error('physical-operator-chatgpt-web: coordinatorPort must be an integer between 0 and 65535')
-  }
-  const coordinatorRequestMaxBytes = config.coordinatorRequestMaxBytes ?? 1024 * 1024
-  if (!Number.isSafeInteger(coordinatorRequestMaxBytes) || coordinatorRequestMaxBytes <= 0) {
-    throw new Error('physical-operator-chatgpt-web: coordinatorRequestMaxBytes must be a positive integer')
-  }
   return Object.freeze({
     stateRoot: requiredTrimmed('stateRoot', config.stateRoot ?? join(resolveDshHome(), 'chatgpt-web')),
-    connectorName: requiredTrimmed('connectorName', config.connectorName ?? 'DSH'),
-    coordinatorEnabled: config.coordinatorEnabled ?? false,
-    coordinatorPort,
-    coordinatorRequestMaxBytes,
-    coordinatorRequestTimeoutMs: positiveTimer('coordinatorRequestTimeoutMs', config.coordinatorRequestTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS),
-    identityTimeoutMs: positiveTimer('identityTimeoutMs', config.identityTimeoutMs ?? 15_000),
     id,
     displayName,
     description,
@@ -1104,6 +1053,15 @@ export function resolveWebModelPreferences(
   }
 }
 
+/** The picker step that failed, kept only when it is a short lowercase token the page script produced. */
+function selectionStage(value: BrowserJsonValue | undefined): { readonly stage?: string } {
+  return typeof value === 'string' && /^[a-z]+(?:-[a-z]+){0,5}$/u.test(value) ? { stage: value } : {}
+}
+
+function stageSuffix(stage: string | undefined): string {
+  return stage === undefined ? '' : ` (${stage})`
+}
+
 function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
   if (!isRecord(value) || typeof value.status !== 'string') return { status: 'protocol-error' }
   switch (value.status) {
@@ -1114,8 +1072,8 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
     case 'auth-required': return { status: 'auth-required' }
     case 'input-unavailable': return { status: 'input-unavailable' }
     case 'context-not-isolated': return { status: 'context-not-isolated' }
-    case 'model-selection-unavailable': return { status: 'model-selection-unavailable' }
-    case 'effort-selection-unavailable': return { status: 'effort-selection-unavailable' }
+    case 'model-selection-unavailable': return { status: 'model-selection-unavailable', ...selectionStage(value.stage) }
+    case 'effort-selection-unavailable': return { status: 'effort-selection-unavailable', ...selectionStage(value.stage) }
     case 'draft-present': {
       const diagnostic = programDraftDiagnostic(value.diagnostic)
       return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'draft-present', diagnostic }

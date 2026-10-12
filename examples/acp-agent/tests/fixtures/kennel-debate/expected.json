@@ -1,0 +1,203 @@
+{
+  "modelCalls": 1,
+  "dispatchEvents": [
+    "kennel/dispatch-request",
+    "kennel/dispatch-model",
+    "kennel/dispatch-model",
+    "kennel/dispatch-decision",
+    "kennel/dispatch-collaboration",
+    "kennel/dispatch-collaboration-admitted"
+  ],
+  "offered": [
+    [
+      {
+        "gouziId": "gamma",
+        "generation": 1,
+        "name": "gamma",
+        "role": "research",
+        "operatorId": "gouzi.gamma.codex",
+        "model": "gpt-5.6-luna"
+      },
+      {
+        "gouziId": "alpha",
+        "generation": 1,
+        "name": "alpha",
+        "role": "research",
+        "operatorId": "gouzi.alpha.codex",
+        "model": "gpt-5.6-sol"
+      },
+      {
+        "gouziId": "beta",
+        "generation": 1,
+        "name": "beta",
+        "role": "research",
+        "operatorId": "gouzi.beta.codex",
+        "model": "gpt-5.6-sol"
+      }
+    ]
+  ],
+  "started": {
+    "members": [
+      {
+        "gouziId": "gamma",
+        "operatorId": "gouzi.gamma.codex",
+        "model": "gpt-5.6-luna"
+      },
+      {
+        "gouziId": "alpha",
+        "operatorId": "gouzi.alpha.codex",
+        "model": "gpt-5.6-sol"
+      },
+      {
+        "gouziId": "beta",
+        "operatorId": "gouzi.beta.codex",
+        "model": "gpt-5.6-sol"
+      }
+    ],
+    "assignments": [
+      {
+        "gouziId": "gamma",
+        "role": "constructive-proposer"
+      },
+      {
+        "gouziId": "alpha",
+        "role": "skeptical-falsifier"
+      },
+      {
+        "gouziId": "beta",
+        "role": "decision-judge"
+      }
+    ]
+  },
+  "debate": {
+    "state": "completed",
+    "mode": "enabled",
+    "rounds": 1,
+    "roster": [
+      [
+        "constructive-proposer",
+        "participant",
+        "gouzi.gamma.codex",
+        "gpt-5.6-luna"
+      ],
+      [
+        "skeptical-falsifier",
+        "participant",
+        "gouzi.alpha.codex",
+        "gpt-5.6-sol"
+      ],
+      [
+        "decision-judge",
+        "judge",
+        "gouzi.beta.codex",
+        "gpt-5.6-sol"
+      ]
+    ],
+    "settledTurns": 3,
+    "sourceSessionBound": true
+  },
+  "orchestrationRuns": [
+    {
+      "state": "completed",
+      "recipients": [
+        {
+          "gouziId": "gamma",
+          "generation": 1,
+          "operatorIds": [
+            "gouzi.gamma.codex"
+          ]
+        },
+        {
+          "gouziId": "alpha",
+          "generation": 1,
+          "operatorIds": [
+            "gouzi.alpha.codex"
+          ]
+        },
+        {
+          "gouziId": "beta",
+          "generation": 1,
+          "operatorIds": [
+            "gouzi.beta.codex"
+          ]
+        }
+      ],
+      "singular": null,
+      "rlm": "disabled",
+      "autonomous": "disabled"
+    }
+  ],
+  "executed": [
+    {
+      "member": "gamma",
+      "slotId": "constructive-proposer",
+      "model": "gpt-5.6-luna"
+    },
+    {
+      "member": "beta",
+      "slotId": "decision-judge",
+      "model": "gpt-5.6-sol"
+    },
+    {
+      "member": "alpha",
+      "slotId": "skeptical-falsifier",
+      "model": "gpt-5.6-sol"
+    }
+  ],
+  "externalMethods": [
+    "operator.events",
+    "operator.execute",
+    "operator.inspect",
+    "operator.providers"
+  ],
+  "hasSealedGrant": true,
+  "roomCollaborations": [
+    {
+      "label": "辩论",
+      "state": "completed",
+      "members": [
+        [
+          "gamma",
+          "建议者",
+          null
+        ],
+        [
+          "alpha",
+          "证伪者",
+          null
+        ],
+        [
+          "beta",
+          "裁判",
+          null
+        ]
+      ]
+    }
+  ],
+  "room": {
+    "status": 200,
+    "tasks": [
+      {
+        "state": "completed",
+        "nodes": [
+          {
+            "gouziId": "gamma",
+            "state": "passed",
+            "accepted": true
+          },
+          {
+            "gouziId": "alpha",
+            "state": "passed",
+            "accepted": true
+          },
+          {
+            "gouziId": "beta",
+            "state": "passed",
+            "accepted": true
+          }
+        ]
+      }
+    ]
+  },
+  "managerAssistantMessages": 0
+}

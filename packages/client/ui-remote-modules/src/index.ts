@@ -26,6 +26,7 @@ const WebpageInstanceSchema: z<WebpageInstanceConfig> = z.object({
   url: z.string().required(),
   relayPort: z.natural().max(65535).default(0),
   order: z.number().default(100),
+  direct: z.boolean().default(false),
 })
 
 /** Validated Host configuration. */
@@ -52,12 +53,12 @@ export function normalizeWebpageInstances(instances: WebpageInstanceConfig[]): W
     if (!Number.isSafeInteger(candidate.order)) {
       throw new Error(`ui-remote-modules: instances[${String(index)}].order must be an integer`)
     }
-    if (candidate.relayPort !== 0 && ports.has(candidate.relayPort)) {
+    if (candidate.direct !== true && candidate.relayPort !== 0 && ports.has(candidate.relayPort)) {
       throw new Error(`ui-remote-modules: duplicate relayPort ${String(candidate.relayPort)}`)
     }
     parseWebpageTarget(`instances[${String(index)}].url`, candidate.url)
     ids.add(id)
-    if (candidate.relayPort !== 0) ports.add(candidate.relayPort)
+    if (candidate.direct !== true && candidate.relayPort !== 0) ports.add(candidate.relayPort)
     return { ...candidate, id, label }
   }).sort((left, right) => left.order - right.order || left.label.localeCompare(right.label))
 }
@@ -72,7 +73,7 @@ function sendJson(res: ServerResponse, body: WebpageInstancesResponse, head: boo
   res.end(head ? undefined : serialized)
 }
 
-/** Start one loopback relay per configured instance and publish their browser roster. */
+/** Start one loopback relay per configured instance, except direct ones, and publish their browser roster. */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const scope = ctx.settings.register(
     settingsNamespace(REMOTE_MODULES_SETTINGS_NAMESPACE),
@@ -86,6 +87,18 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const configured = normalizeWebpageInstances(scope.get().instances)
   const roster: WebpageInstanceView[] = []
   for (const instance of configured) {
+    if (instance.direct === true) {
+      const target = parseWebpageTarget(`${instance.id}.url`, instance.url)
+      roster.push({
+        id: instance.id,
+        label: instance.label,
+        targetUrl: target.href,
+        embedUrl: target.href,
+        order: instance.order,
+        direct: true,
+      })
+      continue
+    }
     const relay = await startWebpageRelay({
       id: instance.id,
       targetUrl: instance.url,

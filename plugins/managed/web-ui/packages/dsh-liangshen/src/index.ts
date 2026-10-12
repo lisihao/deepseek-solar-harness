@@ -21,6 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import z from 'schemastery'
 import { dshHome } from './dsh-home.ts'
+import { unpackedAsarPath } from './asar.ts'
 import { syncPresetTrees } from './sync.ts'
 
 /** Stable cordis plugin name. */
@@ -57,9 +58,9 @@ export const LIANGSHEN_GUIDANCE = '本机已安装 dsh-liangshen 插件（梁神
 // (absolute), which is the shared contract.
 export { dshHome } from './dsh-home.ts'
 
-/** Absolute path of the bundled preset tree inside this package. */
+/** Absolute path of the bundled preset tree; inside an Electron archive, its unpacked twin, which is where the files live. */
 export function bundledPresetsRoot(): string {
-  return fileURLToPath(new URL('../presets/', import.meta.url))
+  return unpackedAsarPath(fileURLToPath(new URL('../presets/', import.meta.url)))
 }
 
 /**

@@ -40,6 +40,38 @@ test('apply registers exactly the eight documented tools', async () => {
   )
 })
 
+test('registered tools expose object JSON Schemas with required query arguments', async () => {
+  const tools = await applyOnce()
+  const expected = {
+    codegraph_callers: { required: ['symbol'], types: { root: 'string', symbol: 'string', limit: 'integer' } },
+    codegraph_callees: { required: ['symbol'], types: { root: 'string', symbol: 'string', limit: 'integer' } },
+    codegraph_deps: { required: ['module'], types: { root: 'string', module: 'string', limit: 'integer' } },
+    codegraph_dependents: { required: ['module'], types: { root: 'string', module: 'string', limit: 'integer' } },
+    codegraph_search: { required: ['query'], types: { root: 'string', query: 'string', limit: 'integer' } },
+    codegraph_impact: { required: ['symbol'], types: { root: 'string', symbol: 'string', limit: 'integer', depth: 'integer' } },
+    codegraph_overview: { required: [], types: { root: 'string' } },
+    codegraph_reindex: { required: [], types: { force: 'boolean', root: 'string' } },
+  }
+  assert.equal(tools.length, Object.keys(expected).length)
+  for (const tool of tools) {
+    const schema = tool.parameters
+    const spec = expected[tool.name]
+    assert.ok(spec, tool.name)
+    assert.equal(schema.type, 'object', `${tool.name} parameters.type`)
+    assert.ok(schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties), `${tool.name} parameters.properties`)
+    assert.ok(schema.required === undefined || Array.isArray(schema.required), `${tool.name} parameters.required is an array when present`)
+    assert.deepEqual(schema.required ?? [], spec.required, `${tool.name} parameters.required`)
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(schema.properties).map(([key, property]) => [key, property.type])),
+      spec.types,
+      `${tool.name} property types`,
+    )
+    for (const [key, property] of Object.entries(schema.properties)) {
+      assert.equal(Object.hasOwn(property, 'required'), false, `${tool.name}.${key} uses root required`)
+    }
+  }
+})
+
 test('read-only tools report a readable error before an index exists', async () => {
   const tools = await applyOnce({ root: join(PROJ, '..', 'no-such-dir') })
   const overview = tools.find((t) => t.name === 'codegraph_overview')

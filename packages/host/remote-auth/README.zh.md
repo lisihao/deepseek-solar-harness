@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-DSH 远程 Frontend 的 Server 权威认证插件。该插件提供 `ctx.remoteAuth`，并且是一次性配对挑战、持久设备凭据、短期访问会话、固定 `cockpit`／`pocket`／`admin` 范围、撤销状态和无正文命令回执的唯一写者。持久状态位于 `$DSH_HOME/remote-auth/v1`；设备凭据仅在首次返回给调用方后以密码学摘要表示，访问令牌则只存在于进程内并自动过期。
+DSH 远程 Frontend 的 Server 权威认证插件。该插件提供 `ctx.remoteAuth`，并且是一次性配对挑战、持久设备凭据、短期访问会话、固定 `cockpit`／`pocket`／`admin`／`gouzi` 范围、撤销状态和无正文命令回执的唯一写者。持久状态位于 `$DSH_HOME/remote-auth/v1`；设备凭据仅在首次返回给调用方后以密码学摘要表示，访问令牌则只存在于进程内并自动过期。
 
 该包刻意采用很小的产品词汇，而不是建设通用 RBAC 框架。connection 载体使用得到的 principal 对投影和命令流量进行认证；orchestration 使用同一个 principal 限制远程控制。远程命令以 `deviceId + commandId` 接受，只保存规范化请求哈希；重试时会返回已经结算的有界响应、报告冲突，或在已接受操作被中断后保持 indeterminate 隔离状态。
 

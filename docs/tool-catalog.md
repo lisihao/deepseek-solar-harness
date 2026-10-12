@@ -20,7 +20,6 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-physical-operator` | `physical_operator` | `ctx.tools`, `ctx.physicalOperators`, `a calling Agent for action=run` | `tool/call`, `tool/result`, `physical-operator lifecycle through the selected provider` | - | The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema. |
-| `@deepseek-ai/dsh-physical-operator-chatgpt-web` | `web_session` | `ctx.tools`, `ctx.systemPrompt`, `a coordinating ChatGPT Web Agent` | `tool/call`, `tool/result`, `Agent inbox handoff messages` | - | Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call. |
 | `@deepseek-ai/dsh-tool-debate` | `debate` | `ctx.tools`, `ctx.systemPrompt`, `ctx.debates` | `tool/call`, `tool/result`, `debate lifecycle through ctx.debates` | - | The model-facing Consumer depends only on the provider-neutral ctx.debates seam; the catalog substitute cannot execute and does not start the local Debate Provider. |
 | `@deepseek-ai/dsh-tool-orchestration` | `orchestration` | `ctx.tools`, `ctx.systemPrompt`, `ctx.orchestrations` | `tool/call`, `tool/result`, `durable orchestration runs through ctx.orchestrations` | - | The model-facing Consumer depends only on the provider-neutral ctx.orchestrations seam; the catalog substitute cannot execute and does not start the local daemon. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
@@ -676,41 +675,6 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts`](../pa
 
 The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.
 
-<a id="deepseek-aidsh-physical-operator-chatgpt-web"></a>
-
-## `@deepseek-ai/dsh-physical-operator-chatgpt-web`
-
-### `web_session`
-
-Coordinate one authenticated ChatGPT Web response with the DSH loop. Use checkpoint to observe queued DSH input and handoff to queue a bounded continuation summary.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "action": {
-      "type": "string",
-      "description": "Checkpoint the current Web response or queue a continuation handoff.",
-      "enum": [
-        "checkpoint",
-        "handoff"
-      ]
-    },
-    "summary": {
-      "type": "string",
-      "description": "Required for handoff: concise work state and next steps for a fresh Web lane."
-    }
-  },
-  "required": [
-    "action"
-  ]
-}
-```
-
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts`](../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts)
-
-Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call.
-
 <a id="deepseek-aidsh-tool-debate"></a>
 
 ## `@deepseek-ai/dsh-tool-debate`
@@ -801,7 +765,7 @@ Compile/start a durable Resident TaskGraph, list runs, or inspect one run. Compl
     },
     "graph_json": {
       "type": "string",
-      "description": "Complete LogicalTaskGraphV1 JSON; required for start."
+      "description": "Complete LogicalTaskGraphV1 JSON; required for start. Replace the example workspace with the observed absolute local repository checkout for the requested project, and set task, scopes, effects, capabilities, acceptance and risk to the actual authorized work. Use node.task, capabilityRequirements, capabilityBudget, contextPolicy, effectBudget, readScopes, writeScopes, approvedSecretRefs and retryPolicy; prompt, capabilities, scope, context and retry are not their field names. The Host pins a confirmed kennel recipient to actual execution entries. Use standard TaskGraph nodes, never replace the executor or infer IDs from names. Keep role, scopes, effects, budget and parallelism tied to the user task. Gouzi ids route through this tool only, including single-node read-only work. GRAPH_INVALID means repair the reported graph field and resubmit compilation; it does not establish an offline member and is not a reason to call physical_operator with a Gouzi id. Complete read-only example (placeholder workspace, no implicit authority for additional effects): {\"version\":1,\"title\":\"Read the repository README\",\"workspace\":\"/absolute/path/to/clean/repository\",\"maxParallel\":1,\"risk\":\"low\",\"nodes\":[{\"id\":\"read-readme\",\"dependsOn\":[],\"requiredForCompletion\":true,\"title\":\"Read README\",\"task\":\"Read README.md and summarize its contents. Do not modify files.\",\"role\":\"analysis\",\"capabilityRequirements\":[],\"capabilityBudget\":[],\"contextPolicy\":{\"maxTokens\":4096,\"allowedSourceKinds\":[\"intent\",\"artifact\",\"capsule\"],\"unavailableSource\":\"degrade\"},\"effectBudget\":{\"read\":[\"README.md\"],\"write\":[],\"execute\":[],\"network\":[],\"cost\":[],\"risk\":[]},\"readScopes\":[\"README.md\"],\"writeScopes\":[],\"approvedSecretRefs\":[],\"acceptance\":[{\"id\":\"summary\",\"description\":\"Return the README summary with file evidence.\",\"kind\":\"operator-completed\"}],\"retryPolicy\":{\"maxAttempts\":1,\"backoffMs\":0,\"retryableCodes\":[]}}]}"
     },
     "run_id": {
       "type": "string",

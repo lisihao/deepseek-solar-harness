@@ -31,6 +31,34 @@ const view = (expandedGroups: readonly string[] = [], ungroupedOrder?: readonly 
 const noArchive: readonly SessionId[] = []
 const archived = (...ids: string[]): readonly SessionId[] => ids.map(sid)
 
+describe('sessions a plugin hides', () => {
+  const secret = (id: string, updatedAt: number, cwd?: string) => ({ ...summary(id, updatedAt, cwd), agentPreset: 'special' })
+  const hide = (session: SessionSummary): boolean => session.agentPreset === 'special'
+  const sessions = { ...list(summary('plain', 1, '/projects/a'), secret('owned', 3, '/projects/a'), secret('loose', 4), summary('free', 2)), current: sid('owned') }
+  const workspaces = [workspace('a', ['plain', 'owned'])]
+
+  it('withholds them from every group, including the Ungrouped one, and from the counts', () => {
+    const groups = deriveGroups(sessions, workspaces, noArchive, view(['a', UNGROUPED_KEY]), hide)
+    expect(groups.find(group => group.key === 'a')).toMatchObject({ sessionCount: 1 })
+    expect(groups.find(group => group.key === 'a')!.sessions.map(node => node.id)).toEqual([sid('plain')])
+    expect(groups.find(group => group.key === UNGROUPED_KEY)!.sessions.map(node => node.id)).toEqual([sid('free')])
+    // The current session is hidden, yet its group still reports it as the one holding the selection.
+    expect(groups.find(group => group.key === 'a')!.containsCurrent).toBe(true)
+  })
+
+  it('withholds them from the flat list and from local and Host search results', () => {
+    expect(deriveFlat(sessions, noArchive, hide).map(node => node.id)).toEqual([sid('free'), sid('plain')])
+    const content = { items: [{ sessionId: sid('loose'), snippet: 'x' }, { sessionId: sid('plain'), snippet: 'x' }], hasMore: false } as never
+    const found = deriveSearchResults(sessions, workspaces, 'plain', noArchive, content, 10, hide)
+    expect(found.items.map(node => node.id)).toEqual([sid('plain')])
+  })
+
+  it('changes nothing when no rule is registered', () => {
+    expect(deriveFlat(sessions, noArchive).map(node => node.id)).toHaveLength(4)
+    expect(deriveGroups(sessions, workspaces, noArchive, view(['a']))[0]!.sessionCount).toBe(2)
+  })
+})
+
 describe('deriveGroups', () => {
   it('keeps Host Workspace and sessionIds order without Client recency sorting', () => {
     const sessions = list(summary('newer', 20), summary('older', 10))

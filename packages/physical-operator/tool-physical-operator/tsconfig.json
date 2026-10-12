@@ -15,10 +15,16 @@
       "path": "../../../vendor/cordis"
     },
     {
+      "path": "../../../vendor/schemastery"
+    },
+    {
       "path": "../../core/agent"
     },
     {
       "path": "../../llm/llm"
+    },
+    {
+      "path": "../../llm/model-catalog-local"
     },
     {
       "path": "../../util/home-paths"
@@ -52,6 +58,18 @@
     },
     {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../orchestration/model-allocation"
+    },
+    {
+      "path": "../../orchestration/scheduling-evidence"
+    },
+    {
+      "path": "../../preset/agent-presets"
+    },
+    {
+      "path": "../../orchestration/orchestration"
     }
   ]
 }

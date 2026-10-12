@@ -1,7 +1,7 @@
 import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { type Agent, type AgentOptions } from '@deepseek-ai/dsh-agent'
+import { assembleContextFor, installModelSelection, type Agent, type AgentOptions } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -79,6 +79,36 @@ describe('startInProcessRun', () => {
     expect(child.options).toMatchObject({ provider: 'mock', model: 'mock' })
     expect(child.session.header.cwd).toBe('/workspace')
     await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
+    await run.dispose()
+  })
+
+  it('runs a child on the parent\'s live model selection, not the route the parent was created with', async () => {
+    const { ctx, parent } = await setup([textResponse('driver answer')], { model: 'created-with' })
+    installModelSelection(parent.ctx, {
+      current: { provider: 'mock', model: 'selected-now' },
+      assembled: undefined,
+    })
+    await ctx.systemPrompt.assemble(assembleContextFor(parent, new AbortController().signal))
+
+    const run = await startInProcessRun(request(parent), {})
+
+    expect(ctx.agents.get(run.id)!.options).toMatchObject({ provider: 'mock', model: 'selected-now' })
+    await run.result
+    await run.dispose()
+  })
+
+  it('records the descriptor of a child whose first prompt assembly fails', async () => {
+    const { ctx, parent } = await setup([])
+    ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
+      if (context.agent === parent) return next()
+      throw new Error('assembly refused')
+    }, { prepend: true })
+
+    const run = await startInProcessRun(request(parent), {})
+    const child = ctx.agents.get(run.id)!
+    await run.result.catch(() => undefined)
+
+    expect(child.session.events.filter(event => event.type === 'subagent/descriptor')).toHaveLength(1)
     await run.dispose()
   })
 

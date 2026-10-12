@@ -107,6 +107,42 @@ export async function callModelToolBridge(
       'PROTOCOL_MISMATCH',
     )
   }
+  return await requestModelToolBridge(bridge, 'tool.call', {
+    session_id: bridge.sessionId,
+    command_id: commandId,
+    tool,
+    arguments: argumentsValue,
+  }, signal)
+}
+
+/**
+ * Verify that the owner still serves the exact sealed tools without executing a tool.
+ * @param bridge - owner-local descriptor for this turn.
+ * @param signal - bounded admission cancellation signal.
+ * @returns resolves only when the active binding has the same session and tool names.
+ */
+export async function verifyModelToolBridgeReady(
+  bridge: PhysicalOperatorModelToolBridgeV1,
+  signal: AbortSignal,
+): Promise<void> {
+  const result = await requestModelToolBridge(bridge, 'tool.describe', { session_id: bridge.sessionId }, signal)
+  const description = result as Record<string, unknown>
+  const tools = description.tools
+  if (description.version !== 1 || description.sessionId !== bridge.sessionId
+    || !Array.isArray(tools) || tools.length !== bridge.tools.length
+    || new Set(tools).size !== tools.length
+    || !bridge.tools.every(tool => tools.includes(tool.name))) {
+    throw new ResidentOperatorError('model tool bridge does not serve the sealed tool catalog', 'PROTOCOL_MISMATCH')
+  }
+}
+
+async function requestModelToolBridge(
+  bridge: PhysicalOperatorModelToolBridgeV1,
+  method: string,
+  params: Readonly<Record<string, unknown>>,
+  signal: AbortSignal,
+): Promise<unknown> {
+  if (signal.aborted) throw abortError(signal)
   const socket = createConnection(bridge.socketPath)
   const transport = new JsonRpcLineTransport(socket, socket)
   const connected = new Promise<void>((resolve, reject) => {
@@ -118,12 +154,7 @@ export async function callModelToolBridge(
   try {
     await connected
     transport.start()
-    const result = await transport.request('tool.call', {
-      session_id: bridge.sessionId,
-      command_id: commandId,
-      tool,
-      arguments: argumentsValue,
-    }, signal)
+    const result = await transport.request(method, params, signal)
     if (result === null || typeof result !== 'object' || Array.isArray(result)) {
       throw new ResidentOperatorError('model tool bridge returned an invalid result', 'INVALID_RESULT')
     }

@@ -24,7 +24,7 @@ export interface DebateTaskGraphAdapterOptions {
 /** Minimal orchestration surface consumed by this adapter and its fixtures. */
 export type DebateTaskGraphOrchestrations = Pick<
   OrchestrationService,
-  'compile' | 'start' | 'inspect' | 'control' | 'readEvents' | 'readArtifact'
+  'compile' | 'start' | 'inspect' | 'control' | 'readEvents' | 'readArtifact' | 'gouzi'
 >
 
 /** One bounded batch of Provider turns represented by one logical graph. */

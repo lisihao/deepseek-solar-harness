@@ -196,9 +196,17 @@ async refresh(session: Session, signal?: AbortSignal): Promise<SessionTitleSnaps
  * @returns exact Cordis effect disposer, which settles after active calls quiesce.
  */
 register(provider: SessionTitleProvider): () => Promise<void>
+
+/**
+ * Register a mapping from a user message's durable text to the text titles are derived from. It applies to the
+ * built-in fallback, to the eligibility of a message, and to the messages a provider receives.
+ * @param projection - the mapping; see {@link SessionTitleTextProjection}.
+ * @returns exact Cordis effect disposer; after it runs, titles are derived from the unmapped text again.
+ */
+registerTextProjection(projection: SessionTitleTextProjection): () => Promise<void>
 ```
 
 Types: [Session](session.md)
 
-Source: [`packages/session/session-title/src/index.ts:261`](../../packages/session/session-title/src/index.ts)
+Source: [`packages/session/session-title/src/index.ts:272`](../../packages/session/session-title/src/index.ts)
 <!-- END GENERATED cordis-surface -->

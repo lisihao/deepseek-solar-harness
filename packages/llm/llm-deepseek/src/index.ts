@@ -20,6 +20,12 @@ import { launchEnvironmentOf, type LaunchEnvironmentSnapshot } from '@deepseek-a
 import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { getOrCreateAnonymousUserId, type AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
+import type {
+  CatalogModel,
+  CatalogRefreshResult,
+  ModelCatalogSource,
+} from '@deepseek-ai/dsh-model-catalog-local'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
 import {
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_MAX_REQUEST_IMAGE_BYTES,
@@ -27,7 +33,11 @@ import {
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   DeepSeekAdapter,
 } from './adapter.ts'
-import type { DeepSeekCatalogModel, DeepSeekConnectionOptions } from './adapter.ts'
+import type {
+  DeepSeekCatalogModel,
+  DeepSeekCatalogSnapshot,
+  DeepSeekConnectionOptions,
+} from './adapter.ts'
 
 export {
   DEFAULT_CONTEXT_WINDOW,
@@ -84,6 +94,12 @@ export interface Config {
   defaultContextWindow?: number
   /** Advisory models shown by discovery consumers; defaults to V4 Flash, V4 Pro, and V4 Flash Vision Exp. */
   models?: DeepSeekCatalogModel[]
+  /**
+   * Whether an explicit refresh also lists the ids the endpoint's `GET /models`
+   * reports beyond `models` (default true). When false, a refresh makes no
+   * `/models` request and the catalog is exactly `models`.
+   */
+  discoverModels?: boolean
   /** Maximum provider idle time while one stream read is outstanding (default five minutes). */
   streamIdleTimeoutMs?: number
   /** Maximum accumulated base64 image payload per request (default 20 MiB). */
@@ -109,6 +125,7 @@ export const Config: z<Config> = z.object({
   maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_TOKENS),
   defaultContextWindow: z.number().step(1).min(1).default(DEFAULT_CONTEXT_WINDOW),
   models: z.array(catalogModel).default(DEFAULT_MODELS),
+  discoverModels: z.boolean().default(true),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
   retryPolicy: RetryPolicySchema,
@@ -119,6 +136,10 @@ export const PUBLIC_BASE_URL = 'https://api.deepseek.com'
 
 /** Environment variable naming this provider's endpoint, honored only from trusted layers. */
 const BASE_URL_ENV = 'DEEPSEEK_BASE_URL'
+
+const MODEL_CATALOG_SOURCE_ID = `deepseek:${PROVIDER}`
+const DISCOVERY_DISABLED_REASON = 'DeepSeek model discovery is disabled by configuration'
+const DISCOVERED_MODEL_DESCRIPTION = '服务商 /models 新列出的模型；服务商未提供名称或版本说明'
 
 /**
  * One resolution's complete request facts. Connection and credential facts
@@ -223,9 +244,66 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
     maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
     defaultContextWindow: config.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
     models: resolveModels(config.models),
+    discoverModels: config.discoverModels ?? true,
     streamIdleTimeoutMs,
     maxRequestImageBytes,
     retryPolicy: resolveRetryPolicy(config.retryPolicy, 'llm-deepseek: retryPolicy'),
+  }
+}
+
+/**
+ * Map one evidence-separated DeepSeek snapshot to persistent catalog model rows.
+ * @param snapshot - configured and endpoint-observed model evidence.
+ * @returns catalog rows retaining availability evidence for each model.
+ */
+export function catalogModels(snapshot: DeepSeekCatalogSnapshot): CatalogModel[] {
+  const configured = new Map(snapshot.configuredModels.map(model => [model.id, model]))
+  const observed = new Set(snapshot.discoveredModelIds)
+  const models: CatalogModel[] = snapshot.discoveredModelIds.map((id) => {
+    const config = configured.get(id)
+    return {
+      id,
+      name: config?.name ?? id,
+      ...config === undefined
+        ? { description: DISCOVERED_MODEL_DESCRIPTION }
+        : config.description === undefined ? {} : { description: config.description },
+      provider: PROVIDER,
+      model: id,
+      availability: 'available',
+      evidence: 'api-list',
+    }
+  })
+  for (const config of snapshot.configuredModels) {
+    if (observed.has(config.id)) continue
+    models.push({
+      id: config.id,
+      name: config.name ?? config.id,
+      ...config.description === undefined ? {} : { description: config.description },
+      provider: PROVIDER,
+      model: config.id,
+      availability: 'unknown',
+      evidence: 'configuration',
+    })
+  }
+  return models
+}
+
+/**
+ * Build the optional persistent-catalog source owned by this provider route.
+ * @param adapter - DeepSeek adapter used for live model discovery.
+ * @returns the provider's persistent-catalog source registration.
+ */
+export function deepSeekCatalogSource(adapter: DeepSeekAdapter): ModelCatalogSource {
+  return {
+    id: MODEL_CATALOG_SOURCE_ID,
+    name: 'DeepSeek',
+    provider: PROVIDER,
+    menuVisible: true,
+    refresh: async (signal): Promise<CatalogRefreshResult> => {
+      const snapshot = await adapter.refreshCatalog(signal)
+      if (!snapshot.discoveryEnabled) return { available: false, reason: DISCOVERY_DISABLED_REASON }
+      return { available: true, models: catalogModels(snapshot) }
+    },
   }
 }
 
@@ -284,6 +362,10 @@ export function apply(ctx: Context, config: Config): void {
     resolveApiKey,
     resolveUserId,
     resolveAttachments: () => ctx.get('attachments'),
+  })
+  ctx.inject(['modelCatalogs'], (catalogCtx) => {
+    const dispose = catalogCtx.modelCatalogs.register(deepSeekCatalogSource(adapter))
+    catalogCtx.effect(() => dispose, 'llm-deepseek: model catalog source')
   })
   ctx.llm.registerConfigurableProviders([
     { provider: PROVIDER, displayName: 'DeepSeek', settingsNs: NS, settingsPath: [] },

@@ -1,0 +1,98 @@
+{
+ "current": {
+  "schema_version": "2.0",
+  "checked_at": "2026-09-04T12:00:00Z",
+  "model_iq": {
+   "updated_at": "2026-09-04T12:00:00Z",
+   "latest": {
+    "model": "gpt-5.6-luna",
+    "reasoning_effort": "max",
+    "passed": 7,
+    "valid_tasks": 10,
+    "score": 95.5,
+    "average_cost_usd": 2.4,
+    "average_task_seconds": 300
+   },
+   "comparisons": {
+    "unknown": {
+     "model": "gpt-9.9-unknown",
+     "reasoning_effort": "high",
+     "latest": {
+      "passed": 4,
+      "tasks": 10,
+      "score": 81.2
+     }
+    }
+   }
+  }
+ },
+ "intelligence_efficiency": {
+  "schema": 2,
+  "source_updated_at": "2026-09-04T12:00:00Z",
+  "points": [
+   {
+    "model": "gpt-5.6-luna",
+    "effort": "max",
+    "iq": 101.25,
+    "passed": 600,
+    "valid_tasks": 1000,
+    "average_price_usd": 3.1,
+    "average_minutes": 7.0,
+    "latest_graded_at": "2026-09-04T12:00:00Z"
+   },
+   {
+    "model": "gpt-5.6-sol",
+    "effort": "max",
+    "iq": 110.0,
+    "passed": 800,
+    "valid_tasks": 1000,
+    "average_price_usd": 3.1,
+    "average_minutes": 7.0,
+    "latest_graded_at": "2026-09-04T12:00:00Z"
+   }
+  ]
+ },
+ "model_ratings": {
+  "ok": true,
+  "updated_at": "2026-09-04T12:00:00Z",
+  "models": [
+   {
+    "id": "gpt-5.6-luna-max",
+    "label": "gpt-5.6-luna max",
+    "average": 8.8,
+    "count": 9
+   }
+  ]
+ },
+ "radar_insights": {
+  "schema": 1,
+  "generated_at": "2026-09-04T12:00:00Z",
+  "source_updated_at": "2026-09-04T12:00:00Z",
+  "station_recs": [
+   {
+    "id": "daily-development",
+    "description": "综合成本",
+    "models": [
+     {
+      "model": "gpt-5.6-luna",
+      "effort": "max",
+      "current_iq": "101.25",
+      "average_price_usd": "3.1",
+      "average_minutes": "7"
+     }
+    ]
+   }
+  ],
+  "alerts": {
+   "rule": "only degradation",
+   "alerts": [
+    {
+     "model": "gpt-5.6-luna",
+     "effort": "max",
+     "iq": 101.25,
+     "drop_24h": 2.5
+    }
+   ]
+  }
+ }
+}

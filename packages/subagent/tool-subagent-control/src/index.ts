@@ -25,6 +25,7 @@ export const inject = ['tools', 'subagents']
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'send_message',
+    delegation: { family: 'subagent' },
     description:
       'Send a message to a background subagent by its subagent id, continuing the same conversation. It '
       + 'becomes the subagent\'s next turn: if it is still working, the message waits until its current turn '

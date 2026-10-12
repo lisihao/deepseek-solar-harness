@@ -120,6 +120,13 @@ export class PhysicalOperatorModelToolBridge {
 
   constructor(private readonly ctx: Context) {
     this.server = new LocalJsonRpcRequestServer(this.endpoint, (method, params) => {
+      if (method === 'tool.describe') {
+        const input = record(params, 'model tool bridge description request')
+        const sessionId = nonBlank(input.session_id, 'session_id')
+        const binding = this.bindings.get(sessionId)
+        if (binding === undefined || binding.signal.aborted) throw new Error(`model tool bridge session is not attached: ${sessionId}`)
+        return Promise.resolve({ version: 1, sessionId, tools: [...binding.tools] })
+      }
       if (method !== 'tool.call') throw new Error(`unsupported model tool bridge method: ${method}`)
       return this.call(params)
     })

@@ -36,6 +36,9 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../llm/model-catalog-local"
+    },
+    {
       "path": "../../core/agent"
     },
     {

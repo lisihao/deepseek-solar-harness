@@ -18,6 +18,12 @@ export interface WebpageInstanceConfig {
   relayPort: number
   /** Ascending order inside the vertical sidebar container. */
   order: number
+  /**
+   * When `true` no relay starts and `url` is loaded directly: in Desktop as an in-app `<webview>` pane
+   * with its own saved login, elsewhere in the system browser. For sites such as X whose login cannot
+   * work from the relay's origin. Absent means `false`.
+   */
+  direct?: boolean
 }
 
 /** Plugin configuration; every array member becomes an independent page instance. */
@@ -38,6 +44,8 @@ export interface WebpageInstanceView {
   embedUrl: string
   /** Ascending order inside the plugin's vertical sidebar container. */
   order: number
+  /** `true` when no relay exists and the entry loads `targetUrl` directly (Desktop pane or system browser). */
+  direct?: boolean
 }
 
 /** Versioned Host response containing every configured instance. */
@@ -79,16 +87,18 @@ export function parseRemoteModulesConfig(value: unknown): RemoteModulesConfig | 
       || ids.has(item.id) || typeof item.label !== 'string' || item.label.trim() === ''
       || !httpUrl(item.url) || typeof item.relayPort !== 'number'
       || !Number.isSafeInteger(item.relayPort) || item.relayPort < 0 || item.relayPort > 65535
-      || (item.relayPort !== 0 && ports.has(item.relayPort))
-      || typeof item.order !== 'number' || !Number.isSafeInteger(item.order)) return undefined
+      || (item.relayPort !== 0 && item.direct !== true && ports.has(item.relayPort))
+      || typeof item.order !== 'number' || !Number.isSafeInteger(item.order)
+      || (item.direct !== undefined && typeof item.direct !== 'boolean')) return undefined
     ids.add(item.id)
-    if (item.relayPort !== 0) ports.add(item.relayPort)
+    if (item.relayPort !== 0 && item.direct !== true) ports.add(item.relayPort)
     instances.push({
       id: item.id,
       label: item.label.trim(),
       url: item.url,
       relayPort: item.relayPort,
       order: item.order,
+      ...(item.direct === true ? { direct: true } : {}),
     })
   }
   return { instances }
@@ -108,7 +118,8 @@ export function parseWebpageInstances(value: unknown): WebpageInstanceView[] {
     if (item === null || typeof item.id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id)
       || typeof item.label !== 'string' || item.label.trim() === ''
       || !httpUrl(item.targetUrl) || !httpUrl(item.embedUrl)
-      || typeof item.order !== 'number' || !Number.isSafeInteger(item.order)) {
+      || typeof item.order !== 'number' || !Number.isSafeInteger(item.order)
+      || (item.direct !== undefined && typeof item.direct !== 'boolean')) {
       throw new Error(`ui-remote-modules: invalid instance at index ${String(index)}`)
     }
     if (ids.has(item.id)) throw new Error(`ui-remote-modules: duplicate instance id ${item.id}`)
@@ -119,6 +130,7 @@ export function parseWebpageInstances(value: unknown): WebpageInstanceView[] {
       targetUrl: item.targetUrl,
       embedUrl: item.embedUrl,
       order: item.order,
+      ...(item.direct === true ? { direct: true } : {}),
     }
   })
   return instances.sort((left, right) => left.order - right.order || left.label.localeCompare(right.label))

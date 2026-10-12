@@ -1,0 +1,65 @@
+{
+  "menuOnFirstRead": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "DeepSeek / DeepSeek-V4.1-Flash",
+    "物理算子 / Codex",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuAfterBackgroundRead": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "DeepSeek / DeepSeek-V4.1-Flash",
+    "物理算子 / Codex · GPT-6-Astra",
+    "物理算子 / Codex · GPT-6-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuRightAfterCodexUpgrade": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "DeepSeek / DeepSeek-V4.1-Flash",
+    "物理算子 / Codex · GPT-6-Astra",
+    "物理算子 / Codex · GPT-6-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuAfterCodexUpgradeReread": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "DeepSeek / DeepSeek-V4.1-Flash",
+    "物理算子 / Codex · GPT-7-Nova",
+    "物理算子 / Codex · GPT-7-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuAfterExplicitRefresh": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "DeepSeek / DeepSeek-V4.1-Flash",
+    "物理算子 / Codex · GPT-6-Astra",
+    "物理算子 / Codex · GPT-6-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuAfterRestart": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "DeepSeek / DeepSeek-V4.1-Flash",
+    "物理算子 / Codex · GPT-7-Nova",
+    "物理算子 / Codex · GPT-7-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "codexEntryRuns": {
+    "model": "gpt-7-nova"
+  },
+  "reply": "codex ran gpt-7-nova",
+  "smartAuto": {
+    "implementation": {
+      "operatorId": "codex",
+      "profile": {
+        "model": "gpt-7-nova",
+        "effort": "high"
+      },
+      "reason": "智能协作由调度器选择 Codex · GPT-7-Nova（强度 high）：native-subscription-first、worker-tier-throughput"
+    },
+    "analysis": {
+      "operatorId": "claude-code",
+      "profile": {
+        "model": "claude-opus-5",
+        "effort": "high"
+      },
+      "reason": "智能协作由调度器选择 Claude Code · Claude Opus 5（强度 high）：native-subscription-first、worker-tier-throughput"
+    }
+  }
+}

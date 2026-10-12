@@ -44,7 +44,7 @@ export type DesktopDeploymentState = DesktopServerDeploymentState | DesktopFront
 export interface DesktopAccessSession {
   readonly deviceId: string
   readonly deviceName: string
-  readonly scope: 'cockpit' | 'pocket' | 'admin'
+  readonly scope: 'cockpit' | 'pocket' | 'admin' | 'gouzi'
   readonly accessToken: string
   readonly expiresAt: string
 }
@@ -681,7 +681,7 @@ function parseCredential(value: unknown): { credential: string } {
 function parseAccessSession(value: unknown): DesktopAccessSession {
   const record = objectRecord(value, 'access session')
   const scope = record.scope
-  if (scope !== 'cockpit' && scope !== 'pocket' && scope !== 'admin') {
+  if (scope !== 'cockpit' && scope !== 'pocket' && scope !== 'admin' && scope !== 'gouzi') {
     throw new Error('dsh-plugin-desktop: invalid remote access scope')
   }
   const expiresAt = nonEmptyString(record.expiresAt, 'expiresAt')

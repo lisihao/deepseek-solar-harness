@@ -4,6 +4,8 @@
 
 用于持久化 TaskGraph 编译、调度、模型入口和 Web／Desktop 投影的可选组合包。本地提供方启动或重连 `dsh-orchestratord`；禁用该组合包只断开 DSH，不删除 Run、产物、Receipt 或 Resident 产品 Session。
 
+本 bundle 还挂载狗子名册（`ui-gouzi`），它列出本实例的长期执行成员，并在产品提供 `ctx.gouziHost` 时领养、唤醒、让其休息和退役它们。
+
 部署还必须挂载 Resident Physical Operators。编排 daemon 只选择使用原生订阅态的 Resident Claude Code 或 Codex 执行，绝不增加 API fallback。
 
 ## Model Experience

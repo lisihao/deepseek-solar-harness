@@ -80,6 +80,37 @@ async function close(socket: Socket, transport: JsonRpcLineTransport): Promise<v
 }
 
 describe('PhysicalOperatorModelToolBridge lifecycle', () => {
+  it('describes the active sealed catalog without running a tool and rejects released bindings', async () => {
+    let calls = 0
+    const { agent, bridge } = await setup(async (value) => { calls += 1; return value })
+    const bound = await bridge.bind('readiness', agent, [schema], new AbortController().signal)
+    if (bound.descriptor === undefined) throw new Error('expected a bridge descriptor')
+    const { socket, transport } = await connect(bound.descriptor)
+    try {
+      await expect(transport.request('tool.describe', { session_id: bound.descriptor.sessionId }))
+        .resolves.toEqual({ version: 1, sessionId: bound.descriptor.sessionId, tools: [schema.name] })
+      expect(calls).toBe(0)
+      await bound.release()
+      await expect(transport.request('tool.describe', { session_id: bound.descriptor.sessionId }))
+        .rejects.toThrow('not attached')
+      const controller = new AbortController()
+      const reattached = await bridge.bind('readiness', agent, [schema], controller.signal)
+      try {
+        await expect(transport.request('tool.describe', { session_id: bound.descriptor.sessionId }))
+          .resolves.toEqual({ version: 1, sessionId: bound.descriptor.sessionId, tools: [schema.name] })
+        controller.abort()
+        await expect(transport.request('tool.describe', { session_id: bound.descriptor.sessionId }))
+          .rejects.toThrow('not attached')
+        expect(calls).toBe(0)
+      } finally {
+        await reattached.release()
+      }
+    } finally {
+      await close(socket, transport)
+      await bridge.dispose()
+    }
+  })
+
   it('revokes a binding immediately while release waits for accepted tool work', async () => {
     const tool = Promise.withResolvers<string>()
     const started = Promise.withResolvers<true>()

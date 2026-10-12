@@ -78,6 +78,7 @@ export const REQUIRED_PACKAGED_RUNTIME_ENTRIES = [
   'node_modules/pnpm/bin/pnpm.mjs',
   'vendor/agent-presets/anchored-standard/agent.cordis.yml',
   'vendor/agent-presets/anchored-standard/tool-bootstrap.mjs',
+  'vendor/scheduling-evidence-python/codex_radar_provider/cli.py',
 ] as const
 
 /** Physical entries required because profile fallback symlinks cannot target ASAR paths. */
@@ -145,6 +146,7 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'vendor/agent-presets/anchored-standard/agent.cordis.yml',
   'vendor/agent-presets/anchored-standard/instruction-hint.mjs',
   'vendor/agent-presets/anchored-standard/tool-bootstrap.mjs',
+  'vendor/scheduling-evidence-python/codex_radar_provider/cli.py',
 ] as const
 
 /** Prebuilt Node-API modules required when the Windows package skips native source rebuilds. */

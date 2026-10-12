@@ -24,10 +24,14 @@ The preset ships with extra safeguards on top of the reference mechanism, all co
 - `promotedPresentation: code` — after promotion the wire is Code Mode (PTC): one `run_code` tool with the full registry available through the generated SDK; the switch waits for `turn/end`, so every model step in the first user turn keeps the same native two-tool contract;
 - `deferredSources` + `deferredGraceSteps` — workspace instructions and the skill catalog wait one extra step after promotion, so the tool-catalog switch and the injection shock do not land in the same step;
 - `bootstrapMaxTokens` — caps the phase-1 request output budget (community measurements put `max_tokens=1024` in the high-hit "We need" window, versus 0/5 at the 256k DSH default), and the cap is stripped again after promotion so `requestProposal` never solders 1024 into every later request.
+- `autoContinueOnMaxTokens` — when the capped first turn ends at the output ceiling (`max-tokens`) without an answer, promotes the session and sends this text once as the next user turn (the preset sets `继续`), so the user does not have to type it; off when absent and never applied to delegated children.
+- `keepTaskTemplate` — lets the user's matched task-template instruction pass the phase-1 message filter beside the user message. Without it the filter drops the instruction for the whole first turn, so a template never reaches the first task of a session or its operator dispatch; the preset enables it.
 
 Plan mode is supported: phase 1 filters the assembled prompt sections down to the one-line `deployment:persona`, and promotion restores all sections and appends the session's working directory to the persona, so the agent knows its workspace and the plan-mode `plan:policy` section takes effect for every step after promotion.
 
-## Install
+A delegated child (`origin: subagent`) keeps the tool surface its parent filtered for it. When that surface lacks the bootstrap shell or a common tool, as with a result-tool-only maintenance worker, the child is exempt from the phase-1 quarantine, the prompt-section strip, the message filter, the output-budget cap, and the Code Mode switch. A top-level session in the same state still fails loudly.
+
+The preset files are copied into `~/.dsh/.agent-presets/liangshen` when the plugin starts. Inside an Electron application the package sits in `app.asar`, whose archive path cannot be copied from, so the sync reads the `app.asar.unpacked` copy; reading the archive path made every start fail with `ENOENT` and left an old preset in place.
 
 ```sh
 # Option 1: family bundle (recommended)

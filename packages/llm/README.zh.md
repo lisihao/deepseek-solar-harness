@@ -7,6 +7,7 @@ LLM（大语言模型）seam 及其提供方适配器。`llm` 包同时承担 Se
 | 包 | 职责 | ctx key |
 |---|---|---|
 | [`llm/`](llm/README.md) | LLM 服务和共享流式词汇 | `ctx.llm` |
+| [`model-catalog-local/`](model-catalog-local/) | 基于 SQLite 的账号可见模型目录与显式刷新服务 | `ctx.modelCatalogs` |
 | [`token-meter/`](token-meter/README.md) | 可感知回放的 token 测量 | `ctx.tokenMeter` |
 | [`llm-retry/`](llm-retry/README.md) | 提供方作用域的重试策略 | 监听 `agent/request-error` |
 | [`llm-deepseek/`](llm-deepseek/README.md) | 直接 DeepSeek 适配器 | 注册到 `ctx.llm` |

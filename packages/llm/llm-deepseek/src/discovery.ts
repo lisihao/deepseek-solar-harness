@@ -65,8 +65,10 @@ export async function discoverDeepSeekModels(options: {
   readonly userId: string
   /** Maximum duration for the directory request and JSON body read. */
   readonly timeoutMs: number
+  /** Caller cancellation for this one directory observation. */
+  readonly signal?: AbortSignal
 }): Promise<readonly string[]> {
-  using d = deadline(undefined, options.timeoutMs, DISCOVERY_TIMEOUT_CODE)
+  using d = deadline(options.signal, options.timeoutMs, DISCOVERY_TIMEOUT_CODE)
   let response: Response
   try {
     response = await fetch(listingUrl(options.baseURL), {

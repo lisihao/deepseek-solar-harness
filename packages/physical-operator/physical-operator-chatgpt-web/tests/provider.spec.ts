@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Script } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { ModelCatalogSource } from '@deepseek-ai/dsh-model-catalog-local'
+import type {} from '@deepseek-ai/dsh-model-catalog-local'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime, {
   BrowserError,
@@ -22,7 +24,7 @@ import PhysicalOperatorRuntime, {
   PhysicalOperatorExecutionId,
 } from '@deepseek-ai/dsh-physical-operator'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { ChatGptWebCoordination } from '../src/coordination.ts'
+import type { ChatGptWebModelControls } from '../src/model-controls.ts'
 import {
   buildOperatorContextEnvelope,
 } from '@deepseek-ai/dsh-system-prompt'
@@ -100,7 +102,7 @@ async function setup(
   await ctx.plugin(PhysicalOperatorRuntime)
   ctx.browser.registerProvider(provider)
   const plugin = await ctx.plugin(adapter, {
-    // A private state root keeps the owner's saved coordination mode out of the fixture.
+    // A private state root keeps the owner's cached model catalog out of the fixture.
     stateRoot: mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-provider-')),
     workspaceName: 'fixture-chatgpt-web',
     generationTimeoutMs: 1_000,
@@ -302,12 +304,6 @@ describe('ChatGPT Web physical operator', () => {
     } as unknown as Context
     const operator = new adapter.ChatGptWebPhysicalOperator(context, {
       stateRoot: '/tmp/dsh-chatgpt-web-test',
-      connectorName: 'DSH',
-      coordinatorEnabled: false,
-      coordinatorPort: 0,
-      coordinatorRequestMaxBytes: 1_024,
-      coordinatorRequestTimeoutMs: 1_000,
-      identityTimeoutMs: 1_000,
       id: 'chatgpt-web',
       displayName: 'ChatGPT Web',
       description: 'fixture',
@@ -320,10 +316,9 @@ describe('ChatGPT Web physical operator', () => {
       progressIntervalMs: 20,
       outputMaxBytes: 2_048,
     }, {
-      mode: 'direct',
       transitioning: false,
       preferences,
-    } as unknown as ChatGptWebCoordination)
+    } as unknown as ChatGptWebModelControls)
 
     const savedRun = await operator.start({
       ...request(), executionId: PhysicalOperatorExecutionId('saved-web-preferences'), mode: 'ephemeral',
@@ -344,6 +339,41 @@ describe('ChatGPT Web physical operator', () => {
     await expect(explicitRun.result).resolves.toMatchObject({ stopReason: 'completed' })
     expect(serializedProgramRequest(provider.programs[1]!)).toMatchObject({ model: 'explicit-model' })
     expect(serializedProgramRequest(provider.programs[1]!)).not.toHaveProperty('effort')
+  })
+
+  it('registers the optional Web catalog source and disposes it with the plugin fiber', async () => {
+    const sources: ModelCatalogSource[] = []
+    let disposals = 0
+    const stateRoot = mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-catalog-source-'))
+    const ctx = new Context()
+    ctx.provide('modelCatalogs', {
+      register(source: ModelCatalogSource): () => void {
+        sources.push(source)
+        return () => { disposals += 1 }
+      },
+    } as never)
+    try {
+      await ctx.plugin(BrowserRuntime)
+      await ctx.plugin(PhysicalOperatorRuntime)
+      ctx.browser.registerProvider(new StubBrowserProvider())
+      await ctx.plugin(adapter, {
+        stateRoot,
+        workspaceName: 'fixture-chatgpt-web',
+        generationTimeoutMs: 1_000,
+        submissionTimeoutMs: 100,
+        pollIntervalMs: 10,
+        progressIntervalMs: 20,
+        outputMaxBytes: 2_048,
+      })
+
+      expect(sources).toEqual([expect.objectContaining({
+        id: 'web:chatgpt-web', name: 'ChatGPT Web', provider: 'dsh-physical-operator', menuVisible: true,
+      })])
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+    expect(disposals).toBe(1)
   })
 
   it('registers an ephemeral, single-flight browser operator and submits the merged text prompt', async () => {
@@ -438,7 +468,7 @@ describe('ChatGPT Web physical operator', () => {
     expect(responsePoll).toBeGreaterThan(send)
     expect(program.source).toContain("return { status: 'auth-required' }")
     expect(program.source).toContain("return { status: 'context-not-isolated' }")
-    expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
+    expect(program.source).toContain("return { status: 'model-selection-unavailable', stage: selection.status }")
     expect(program.source).toContain("return { status: 'draft-present'")
     expect(program.source).toContain("kind: 'click'")
     expect(program.source).toContain("selector: '[data-dsh-chatgpt-web-send=\"true\"]'")
@@ -895,6 +925,10 @@ describe('ChatGPT Web physical operator', () => {
         '<annotation encoding="application/x-tex">G_s</annotation></semantics></math></span>',
         '<span class="katex-html" aria-hidden="true">Gs</span></span> 定义</p>',
         '<span class="block" data-math-source="U = G_u / G_s"><span class="katex-display"><span class="katex">U</span></span></span>',
+        '<span class="katex-display"><span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>S</mi></mrow>',
+        '<annotation encoding="application/x-tex">\\text{S}\n\\approx\nI\\times T</annotation></semantics></math></span></span></span>',
+        '<p>于是<span class="katex-display"><span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>R</mi></mrow>',
+        '<annotation encoding="application/x-tex">R\\approx11\\%</annotation></semantics></math></span></span></span>成立</p>',
         '<table><thead><tr><th>指标</th><th>含义</th></tr></thead><tbody><tr><td>Power</td><td>电 | 力</td></tr></tbody></table>',
         '<hr><p>结尾</p>',
       ].join('')
@@ -920,7 +954,9 @@ describe('ChatGPT Web physical operator', () => {
         '> 引用',
         '```text\nA\n  ↓\nB\n```',
         '变量 $G_s$ 定义',
-        '$$U = G_u / G_s$$',
+        '$$\nU = G_u / G_s\n$$',
+        '$$\n\\text{S}\n\\approx\nI\\times T\n$$',
+        '于是\n$$\nR\\approx11\\%\n$$\n成立',
         '| 指标 | 含义 |\n| --- | --- |\n| Power | 电 \\| 力 |',
         '---',
         '结尾',
@@ -1287,6 +1323,24 @@ describe('ChatGPT Web physical operator', () => {
     expect(provider.programs).toHaveLength(1)
     expect(serializedProgramRequest(provider.programs[0]!)).toMatchObject({ model: 'GPT-5' })
 
+    await plugin.dispose()
+    await ctx.fiber.dispose()
+  })
+
+  it.each([
+    ['model-selection-unavailable', 'model-options-unavailable', 'requested model selection (model-options-unavailable)'],
+    ['effort-selection-unavailable', 'reasoning-options-unavailable', 'requested reasoning effort (reasoning-options-unavailable)'],
+    ['model-selection-unavailable', 'Not A Token!', 'requested model selection'],
+    ['effort-selection-unavailable', 42, 'requested reasoning effort'],
+  ] as const)('names the picker step that failed for a %s outcome (%s)', async (status, stage, message) => {
+    const provider = new StubBrowserProvider(async () => resultFor({ status, stage }))
+    const { ctx, plugin } = await setup(provider)
+    const run = await ctx.physicalOperators.start('chatgpt-web', { ...request(), residentProfile: { model: 'GPT-5' } })
+
+    const error = await run.result.then(() => undefined, (cause: unknown) => cause as Error)
+
+    expect(error?.message).toContain(message)
+    expect(error?.message.endsWith(')')).toBe(typeof stage === 'string' && /^[a-z-]+$/u.test(stage))
     await plugin.dispose()
     await ctx.fiber.dispose()
   })

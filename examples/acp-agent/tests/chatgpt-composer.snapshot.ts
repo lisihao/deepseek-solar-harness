@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 import { runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
 
-it('snapshot: chatgpt-composer waits for the initialized composer before submitting', async () => {
+it('snapshot: chatgpt-composer waits for the composer and delayed model controls before submitting', async () => {
   const driver = fileURLToPath(new URL('./fixtures/chatgpt-composer/driver.ts', import.meta.url))
   const expected = new URL('./fixtures/chatgpt-composer/expected.json', import.meta.url)
   const { stdout } = await runLoaderSmoke({

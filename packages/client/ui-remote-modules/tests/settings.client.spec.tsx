@@ -19,7 +19,7 @@ const configured: RemoteModulesConfig = {
 function draft(overrides: Partial<RemoteModuleDraft> = {}): RemoteModuleDraft {
   return {
     key: 'one', id: 'research-workspace', label: 'Research Workspace', url: 'http://127.0.0.1:19001/',
-    relayPort: '29001', order: '100', ...overrides,
+    relayPort: '29001', order: '100', direct: false, ...overrides,
   }
 }
 
@@ -76,6 +76,25 @@ describe('Remote Modules settings validation', () => {
   })
 })
 
+describe('Remote Modules direct drafts', () => {
+  it('saves a direct module with relay port 0 and omits the flag otherwise', () => {
+    expect(validateRemoteModuleDrafts([draft({ direct: true, relayPort: '29001' })]).config).toEqual({
+      instances: [{
+        id: 'research-workspace', label: 'Research Workspace', url: 'http://127.0.0.1:19001/', relayPort: 0, order: 100, direct: true,
+      }],
+    })
+  })
+
+  it('neither validates nor reserves the relay port of a direct module', () => {
+    const result = validateRemoteModuleDrafts([
+      draft({ direct: true, relayPort: 'not-a-port' }),
+      draft({ key: 'two', id: 'model-console', relayPort: '29001' }),
+    ])
+    expect(result.errors).toEqual({})
+    expect(result.config?.instances.map(instance => instance.relayPort)).toEqual([0, 29001])
+  })
+})
+
 describe('Remote Modules settings surface', () => {
   it('shows every required configuration field and can add or delete instances', async () => {
     renderEditor()
@@ -120,5 +139,28 @@ describe('Remote Modules settings surface', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复部署默认值' }))
     await waitFor(() => { expect(settings.unset).toHaveBeenCalledWith('instances') })
     expect(await screen.findByText('配置已保存；重启 Harness 后生效。')).toBeTruthy()
+  })
+
+  it('toggles direct mode, disables the relay port, and saves the flag', async () => {
+    const settings = renderEditor()
+    settings.set.mockImplementation((_field: string, value: unknown) => {
+      const instances = value as RemoteModulesConfig['instances']
+      settings.publish({ value: { instances }, user: { instances }, revision: 1 })
+    })
+    await screen.findByDisplayValue('Research Workspace')
+    const checkboxes = screen.getAllByRole('checkbox', { name: new RegExp(zh.direct) }) as HTMLInputElement[]
+    expect(checkboxes).toHaveLength(2)
+    expect(checkboxes[0]!.checked).toBe(false)
+    fireEvent.click(checkboxes[0]!)
+    expect(checkboxes[0]!.checked).toBe(true)
+    expect((screen.getAllByLabelText(zh.relayPort)[0] as HTMLInputElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: zh.save }))
+
+    await waitFor(() => {
+      expect(settings.set).toHaveBeenCalledWith('instances', [
+        { id: 'research-workspace', label: 'Research Workspace', url: 'http://127.0.0.1:19001/', relayPort: 0, order: 100, direct: true },
+        configured.instances[1],
+      ])
+    })
   })
 })

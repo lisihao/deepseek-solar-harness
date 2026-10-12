@@ -63,6 +63,7 @@ const RLM_CONTROL_ERROR_MESSAGES: Readonly<Record<string, string>> = {
  */
 export function remoteOrchestrationControlAllowed(scope: RemoteDeviceScope, action: string): boolean {
   if (scope === 'admin' || scope === 'cockpit') return true
+  if (scope === 'gouzi') return false
   return action === 'pause' || action === 'resume' || action === 'approve' || action === 'reject'
 }
 

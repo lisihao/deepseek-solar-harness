@@ -151,7 +151,8 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // The Resident package's index and standalone daemon share one product,
   // receipt, and SQLite implementation emitted as a content-hashed chunk.
   '@deepseek-ai/dsh-resident-operator-local': ['lib/daemon-*.js'],
-  '@deepseek-ai/dsh-orchestration-local': ['lib/daemon-*.js'],
+  // The index, daemon, and remote-host entries share the execution host code through generated chunks.
+  '@deepseek-ai/dsh-orchestration-local': ['lib/remote-host-*.js', 'lib/remote-execution-host-*.js', 'lib/daemon-*.js'],
   '@deepseek-ai/dsh-skill-badge': ['assets'],
   '@deepseek-ai/dsh-subprocess-local': ['scripts/ensure-spawn-helper.mjs'],
 }
@@ -181,6 +182,8 @@ function expectedDshPackageFiles(manifest: PackageManifest): readonly string[] {
     // A surface bundle's startup row is its own bundle: the Loader imports it
     // as a row module, so it cannot ride inside the package entry.
     ...exportDefault(manifest, './startup') === './lib/startup.js' ? ['lib/startup.js'] : [],
+    // orchestration-local's remote-host entry mounts only the execution host, without the TaskGraph daemon client.
+    ...exportDefault(manifest, './remote-host') === './lib/remote-host.js' ? ['lib/remote-host.js'] : [],
     ...extras,
     // Subpaths whose runtime default is the tsc-emitted tree (lib/types/*.js —
     // browser-safe source channels rehomed off src so plain Node can import

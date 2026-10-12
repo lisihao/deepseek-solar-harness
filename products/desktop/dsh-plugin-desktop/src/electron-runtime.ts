@@ -38,6 +38,7 @@ import type {
 import { prepareTrayIcon } from './tray-icons.ts'
 import { downloadDesktopUpdate } from './update-download.ts'
 import type { UpdateCheckResult } from './update-checker.ts'
+import { installEmbeddedWebviewGuard } from './embedded-webview.ts'
 import { desktopWindowOptions } from './window-options.ts'
 
 /** Return the presentation mode opposite the active generation. */
@@ -681,6 +682,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     window.on('page-title-updated', preserveBlankTitle)
     window.webContents.on('will-frame-navigate', navigate)
     window.webContents.on('will-redirect', navigate)
+    installEmbeddedWebviewGuard(window.webContents)
     window.webContents.on('did-finish-load', installFrontendOwnerSurface)
     window.webContents.setWindowOpenHandler(({ url }) => {
       try {

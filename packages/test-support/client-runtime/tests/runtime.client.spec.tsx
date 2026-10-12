@@ -239,6 +239,8 @@ describe('sessions', () => {
     await expect(runtime.sessions.fork({
       sessionId: 's1' as SessionId, atSeq: 7, increaseTitle: true,
     })).resolves.toBe('s1')
+    await expect(runtime.sessions.create({ workspaceId: 'workspace' as WorkspaceId }))
+      .rejects.toThrow('requires the production SessionRuntime fixture')
     expect(runtime.sessions.calls).toEqual([
       { method: 'openSubagent', args: [address] },
       { method: 'setSubagentCatalogOpen', args: ['s2', true] },
@@ -246,6 +248,7 @@ describe('sessions', () => {
       { method: 'open', args: ['s1'] },
       { method: 'clear', args: [] },
       { method: 'fork', args: [{ sessionId: 's1', atSeq: 7, increaseTitle: true }] },
+      { method: 'create', args: [{ workspaceId: 'workspace' }] },
     ])
     await runtime.dispose()
   })

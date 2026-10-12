@@ -42,6 +42,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * composer chrome.
      */
     'conversation.session': { kind: 'single'; scope: 'session' }
+    /** Optional conversation chrome above the scrollport, including blank sessions. */
+    'conversation.room.header': { kind: 'chain'; scope: 'session-maybe'; owner: ConversationRoomOwnerProps }
+    /** Optional conversation panel beside the transcript and composer; all-declined renders empty. */
+    'conversation.room.aside': { kind: 'chain'; scope: 'session-maybe'; owner: ConversationRoomOwnerProps }
+    /** Optional message/view content; the owner retains the composer and interaction takeover chain. */
+    'conversation.room.content': { kind: 'chain'; scope: 'session-maybe'; owner: ConversationRoomOwnerProps }
+    /** Optional composer body below the content, subject to the mandatory interaction takeover chain. */
+    'conversation.room.composer': { kind: 'chain'; scope: 'session-maybe'; owner: ConversationRoomComposerOwnerProps }
     /**
      * The strip above the session's scrollport: title, view tabs, and the
      * action row. Taking this seat means rendering all three yourself, and it
@@ -409,6 +417,22 @@ export type ConvViewProps = PropsRuntime<'conversation.view'>
 /** The shared chat store handle type declared by the Session header/body, details, and chat-view registrations. */
 export type ChatStore = ReturnType<typeof createChatStore>
 
+/** Current session summary facts used to select optional conversation chrome. */
+export interface ConversationRoomOwnerProps {
+  /** Current summary's preset; undefined when the summary has none or no session is selected. */
+  agentPreset: string | undefined
+  /** Current summary's blank flag; false when the summary is unavailable. */
+  blank: boolean
+}
+
+/** Current summary and input availability facts used to select a conversation composer. */
+export interface ConversationRoomComposerOwnerProps extends ConversationRoomOwnerProps {
+  /** Sending requires a selected Workspace; inert composers keep message actions unavailable. */
+  inert: boolean
+  /** Current composer block, including the reason supplied by its owner. */
+  blocked: { readonly reason: string } | undefined
+}
+
 /** Business callbacks injected into the conversation slot. */
 export interface ConversationInjected {
   /**
@@ -569,6 +593,8 @@ export interface ComposerChainProps {
 export type ConversationSlotProps =
   PropsRuntime<'conversation'> & PropsRenderSlots<
     | 'conversation.session' | 'conversation.session.header'
+    | 'conversation.room.header' | 'conversation.room.aside' | 'conversation.room.content'
+    | 'conversation.room.composer'
     | 'conversation.composer' | 'conversation.composer.bar'
     | 'conversation.input.overlay'
     | 'conversation.input.dock' | 'conversation.composer.dock'

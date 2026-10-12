@@ -1,0 +1,40 @@
+# The driver supplies an isolated real daemon with keyless external execution inputs.
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: !!js process.env.DSH_HOME + '/sessions'
+    compression: 'none'
+    packChunks: false
+- id: agents
+  name: '@deepseek-ai/dsh-agent'
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+- id: prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+- id: loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    agents: []
+- id: orchestration
+  name: '@deepseek-ai/dsh-orchestration-local'
+  config:
+    autoStart: false
+    dshHome: !!js process.env.DSH_HOME
+- id: web
+  name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: '127.0.0.1'
+    port: 0
+- id: kennel
+  name: '@deepseek-ai/dsh-ui-gouzi'
+- id: debate
+  name: '@deepseek-ai/dsh-debate-orchestration'
+  config:
+    dshHome: !!js process.env.DSH_HOME
+    pollIntervalMs: 10
+- id: physical-operators
+  name: '@deepseek-ai/dsh-physical-operator'

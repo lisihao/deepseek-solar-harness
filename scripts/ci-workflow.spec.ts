@@ -87,7 +87,8 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('windows-2025')
     expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe(pullRequestImpactIf)
+    expect(windowsNative.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+    expect(windowsNative.needs).toBeUndefined()
     const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (
       isRecord(step) && typeof step.run === 'string'
     ))
@@ -156,7 +157,7 @@ describe('CI workflow', () => {
     }
 
     // What bounds the cost of exempting push: a master push may only carry the
-    // cache seeder and the two drills. Any job reachable on push would start
+    // cache seeder, the observational native Windows run, and the two drills. Any job reachable on push would start
     // accumulating uncancelled runs, so the set is pinned here.
     //
     // Classification is an exact allowlist of the conditions in use, not a
@@ -181,7 +182,7 @@ describe('CI workflow', () => {
       })
       .map(([name]) => name)
       .sort()
-    expect(pushReachable).toEqual(['serial-linux-selfhosted', 'serial-windows', 'wine-apt-cache'])
+    expect(pushReachable).toEqual(['serial-linux-selfhosted', 'serial-windows', 'windows-native', 'wine-apt-cache'])
 
     // Why workflow_dispatch must keep cancelling: each benchmark fans out to a
     // dozen larger runners at once, in this same group on master. If it stopped
@@ -225,6 +226,22 @@ describe('CI workflow', () => {
     expect(aggregate.needs).toContain('python-runtime')
   })
 
+  it('runs the scheduling evidence collectors on Python 3.12 and requires them on every pull request', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    const job = workflowJob(workflow, 'python-scheduling')
+    const aggregate = workflowJob(workflow, 'all-checks-passed')
+    if (!Array.isArray(job.steps) || !Array.isArray(aggregate.needs) || !Array.isArray(aggregate.steps)) {
+      throw new TypeError('CI scheduling job and aggregate must define steps and dependencies')
+    }
+
+    expect(job.name).toBe('python 3.12 / scheduling evidence')
+    expect(JSON.stringify(job.steps)).toContain('"python-version":"3.12"')
+    expect(JSON.stringify(job.steps)).toContain('python -m unittest discover -s tests')
+    expect(JSON.stringify(job.steps)).toContain('python/scheduling-evidence')
+    expect(aggregate.needs).toContain('python-scheduling')
+    expect(JSON.stringify(aggregate.steps)).toContain("needs['python-scheduling'].result != 'success'")
+  })
+
   it('classifies pull-request impact before ordinary CI and keeps docs-only green explicit', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const impact = workflowJob(workflow, 'pr-impact')
@@ -252,7 +269,7 @@ describe('CI workflow', () => {
     expect(JSON.stringify(docsOnly.steps)).toContain('pnpm run doc-sync')
     expect(aggregate.needs).toContain('docs-only')
 
-    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-runtime', 'windows', 'windows-native']) {
+    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-scheduling', 'python-runtime', 'windows']) {
       const job = workflowJob(workflow, jobName)
       expect(job.needs, `${jobName} must depend on impact classification`).toEqual(['pr-impact'])
       expect(job.if, `${jobName} must fail open only after a classified full PR`).toBe(pullRequestImpactIf)
@@ -318,6 +335,7 @@ describe('fork branch CI workflow', () => {
     expect(JSON.stringify(linux.steps)).toContain('pnpm run check:ci:linux-primary')
     expect(JSON.stringify(compat.steps)).toContain('pnpm run check:node-compat')
     expect(JSON.stringify(pythonSdk.steps)).toContain('python/sdk pytest')
+    expect(JSON.stringify(workflowJob(workflow, 'python-scheduling').steps)).toContain('python -m unittest discover -s tests')
     expect(pythonRuntime).toMatchObject({
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: { targets: 'node24-linux-x64', ci: true },
@@ -332,6 +350,7 @@ describe('fork branch CI workflow', () => {
       'linux-primary',
       'node-compat',
       'python-sdk',
+      'python-scheduling',
       'python-runtime',
       'windows',
     ])

@@ -1,14 +1,22 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
-import type { DebatePolicyV1 } from '@deepseek-ai/dsh-debate'
+import {
+  DEFAULT_DEBATE_CONVERGENCE,
+  DEFAULT_DEBATE_PERSONAS,
+  DEFAULT_DEBATE_ROUNDS,
+  defaultDebateBudget,
+  type DebatePolicyV1,
+} from '@deepseek-ai/dsh-debate'
 import { LocalDebateProvider } from '@deepseek-ai/dsh-debate-local'
+import { GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId } from '@deepseek-ai/dsh-orchestration'
 import {
   OrchestrationDaemon,
   OrchestrationDaemonClient,
+  OrchestrationStore,
 } from '@deepseek-ai/dsh-orchestration-local'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DebateTaskGraphRoundExecutor } from '../src/index.ts'
 
 interface ScriptedResidentRequest {
@@ -222,6 +230,7 @@ function policy(): DebatePolicyV1 {
 describe('Debate real TaskGraph binding', () => {
   const cleanup: Array<() => Promise<void>> = []
   afterEach(async () => {
+    vi.unstubAllGlobals()
     for (const action of cleanup.splice(0).reverse()) await action()
   })
 
@@ -312,4 +321,151 @@ describe('Debate real TaskGraph binding', () => {
     expect(continuedEvents.events.filter(event => event.type === 'debate.round.started').map(event => event.round))
       .toEqual([1, 2, 3])
   }, process.platform === 'win32' ? 30_000 : 15_000)
+
+  it('runs a Debate whose roles are Gouzi members, one member per role, bound by a recipient set', async () => {
+    const temporaryRoot = process.platform === 'win32' ? tmpdir() : '/tmp'
+    const home = await mkdtemp(join(temporaryRoot, 'dsh-debate-gouzi-'))
+    const orchestrationRoot = join(home, 'orchestrations')
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const scopes = [workspace, await realpath(workspace)]
+    const ports: Record<string, number> = { alpha: 13311, beta: 13312, gamma: 13313 }
+    const registry = new OrchestrationStore(orchestrationRoot)
+    registry.gouzi.pairHost({ hostId: GouziHostId('host-1'), label: 'Host', authorityEpoch: GouziAuthorityEpoch('epoch-1'), credentialRef: 'HOST_TOKEN' })
+    for (const [id, port] of Object.entries(ports)) {
+      registry.gouzi.create({ gouziId: GouziId(id), ownerId: GouziOwnerId('owner'), hostId: GouziHostId('host-1'), name: id, avatarId: 'shiba', role: 'development', grantDeadlineMs: 60_000 })
+      registry.gouzi.setMembership(GouziId(id), 'enabled')
+      registry.gouzi.setEndpoint(GouziId(id), `http://127.0.0.1:${String(port)}`)
+    }
+    registry.close()
+
+    const executed: {
+      member: string
+      slotId: string
+      model: string | undefined
+      grantedTo: string | undefined
+      judgeSawEvidence: boolean
+    }[] = []
+    const results = new Map<string, unknown>()
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string; payload: Record<string, unknown> }
+      const member = Object.entries(ports).find(([, port]) => String(input).includes(`:${String(port)}/`))?.[0]
+      if (member === undefined) throw new Error(`unexpected endpoint ${String(input)}`)
+      let value: unknown
+      switch (call.method) {
+        case 'operator.providers':
+          value = [{
+            operatorId: 'codex', product: 'codex', displayName: 'Native', description: 'Native', tags: ['coding'], maxConcurrency: 4,
+            gouziWorkspace: { gouziId: member, generation: 1, projectId: 'a'.repeat(64), projectScopes: scopes },
+            injectionBoundaries: [], available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
+            supportsGenerationLimits: true,
+            models: [{ model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Worker', supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true }],
+          }]
+          break
+        case 'operator.execute': {
+          const payload = call.payload as {
+            commandId: string
+            profile?: { model: string }
+            prompt?: { text?: string }[]
+            gouziGrant?: { gouziId: string }
+            contextEnvelope: { digest: string }
+          }
+          const slotId = /:debate-r\d+-([^:]+):1$/u.exec(payload.commandId)?.[1]
+          if (slotId === undefined) throw new Error(`cannot identify Debate slot in ${payload.commandId}`)
+          const prompt = payload.prompt?.map(block => block.text ?? '').join('\n') ?? ''
+          executed.push({
+            member, slotId, model: payload.profile?.model, grantedTo: payload.gouziGrant?.gouziId,
+            judgeSawEvidence: prompt.includes('Upstream Evidence contents:'),
+          })
+          const turnId = `turn:${payload.commandId}`
+          results.set(turnId, {
+            commandId: payload.commandId, sessionId: `session:${member}`, turnId, state: 'settled', stateRevision: 2,
+            updatedAt: new Date().toISOString(),
+            result: {
+              output: [{ type: 'text', text: turnBody(slotId) }],
+              stopReason: 'completed',
+              usage: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 2, costUsd: 0.01 },
+            },
+          })
+          value = {
+            sessionId: `session:${member}`, turnId, stateRevision: 1,
+            contextReceipt: { version: 1, digest: payload.contextEnvelope.digest, receiver: 'remote-resident:codex', outcome: 'accepted', format: 'native', roleFidelity: 'native' },
+          }
+          break
+        }
+        case 'operator.inspect': value = results.get((call.payload as { turnId: string }).turnId); break
+        case 'operator.events': value = { events: [], nextSequence: 0 }; break
+        default: throw new Error(`unexpected remote method ${call.method}`)
+      }
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }))
+
+    const daemon = new OrchestrationDaemon({
+      root: orchestrationRoot, dshHome: home, residentClient: new ScriptedKeylessResident() as never,
+      modelWorkerProviders: [], schedulerIntervalMs: 10,
+    })
+    await daemon.start()
+    cleanup.push(async () => rm(home, { recursive: true, force: true }))
+    cleanup.push(async () => daemon.close())
+    const client = new OrchestrationDaemonClient({ root: orchestrationRoot, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    // The service a Host composes: the daemon client plus the member registry it manages.
+    const orchestrations = {
+      compile: (request: Parameters<typeof client.compile>[0]) => client.compile(request),
+      start: (request: Parameters<typeof client.start>[0]) => client.start(request),
+      inspect: (runId: Parameters<typeof client.inspect>[0]) => client.inspect(runId),
+      control: (request: Parameters<typeof client.control>[0]) => client.control(request),
+      readEvents: (request: Parameters<typeof client.readEvents>[0]) => client.readEvents(request),
+      readArtifact: (ref: Parameters<typeof client.readArtifact>[0]) => client.readArtifact(ref),
+      gouzi: { list: () => client.gouziList(), executionOperators: () => client.gouziExecutionOperators() },
+    }
+    const context = new Context()
+    cleanup.push(async () => context.root.fiber.dispose())
+    const debate = new LocalDebateProvider(context, {
+      root: join(home, 'debates'),
+      executor: new DebateTaskGraphRoundExecutor(orchestrations as never, { pollIntervalMs: 5, timeoutMs: 8_000 }),
+      idFactory: () => 'debate-gouzi',
+    })
+    const roster = ([
+      ['constructive-proposer', 'participant', 'alpha'],
+      ['skeptical-falsifier', 'participant', 'beta'],
+      ['decision-judge', 'judge', 'gamma'],
+    ] as const).map(([role, kind, member]) => ({
+      version: 1 as const, role, kind, operatorId: `gouzi.${member}.codex`, model: 'gpt-5.6-luna',
+      tier: 'medium' as const, source: 'native-subscription' as const, persona: DEFAULT_DEBATE_PERSONAS[role], required: true,
+    }))
+    const memberPolicy: DebatePolicyV1 = {
+      version: 1, mode: 'enabled', roster, budget: defaultDebateBudget(1, roster.length),
+      rounds: DEFAULT_DEBATE_ROUNDS, convergence: DEFAULT_DEBATE_CONVERGENCE, preserveDissent: true,
+    }
+
+    // A kennel request is the user's explicit choice: the run starts awaiting approval, then is approved.
+    const started = await debate.start({
+      version: 1, commandId: 'debate-gouzi:start', workspace, prompt: 'Choose the reversible option.',
+      objective: 'Reach a bounded decision.', policy: memberPolicy, sourceSessionId: 'session:debate-gouzi',
+    })
+    expect(started.state).toBe('awaiting_approval')
+    expect(executed).toEqual([])
+    const completed = await debate.control({
+      version: 1, commandId: 'debate-gouzi:approve', runId: started.runId, expectedRevision: started.revision,
+      action: 'approve', reason: 'The user asked for this Debate in the kennel.',
+    })
+
+    const diagnostics = JSON.stringify({ completed, runs: await client.list(), executed }, null, 2)
+    expect(completed.state, diagnostics).toBe('completed')
+    // Each role ran on its own member, with that member's grant and the roster's model.
+    const bySlot = [...executed].sort((left, right) => left.slotId.localeCompare(right.slotId))
+    expect(bySlot.map(({ member, slotId, model, grantedTo }) => [slotId, member, model, grantedTo])).toEqual([
+      ['constructive-proposer', 'alpha', 'gpt-5.6-luna', 'alpha'],
+      ['decision-judge', 'gamma', 'gpt-5.6-luna', 'gamma'],
+      ['skeptical-falsifier', 'beta', 'gpt-5.6-luna', 'beta'],
+    ])
+    expect(executed.find(value => value.slotId === 'decision-judge')?.judgeSawEvidence).toBe(true)
+    // The round graph was admitted for the whole set of members.
+    const [run] = await client.list()
+    expect(run?.admission?.gouziRecipients?.map(recipient => [recipient.gouziId, recipient.generation, recipient.operatorIds])).toEqual([
+      ['alpha', 1, ['gouzi.alpha.codex']], ['beta', 1, ['gouzi.beta.codex']], ['gamma', 1, ['gouzi.gamma.codex']],
+    ])
+    expect(run?.admission?.gouziRecipient).toBeUndefined()
+  }, process.platform === 'win32' ? 30_000 : 20_000)
 })

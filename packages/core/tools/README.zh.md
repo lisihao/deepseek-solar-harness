@@ -30,6 +30,10 @@ tools:
 
 `SystemPrompt`：注册表通过 `ctx.systemPrompt.tools()` 自动将工具 schema 送入系统提示词组装。审批 seam 则在可用时使用（`ctx.get('approval')`，无静态注入）：未部署该 seam 时仍会将询问退化为拒绝，而无论是否存在该 seam，注册表都会保持活动。
 
+### 执行生命周期
+
+`ToolDefinition.delegation` 是内部的分派元数据，面向模型的 `ToolSchema` 不包含它。`family` 为 `physical-operator` 或 `subagent`；可选的 `actions` 列表指定哪些 action 值会委派执行，省略该列表表示每次调用都会委派。执行进入流水线时，注册表捕获实际可见的定义及其 delegation 元数据。分派在调用主体前重新检查当前可见性和执行模式限制，并要求选中的定义仍是捕获的定义。如果异步策略、审批或 around-dispatch 准备期间该定义被卸载或替换，随后抵达主体分派的调用会以 `UNKNOWN_TOOL` 结算；旧主体和替代定义都不会执行。捕获定义不会在注册或可见性撤销后保留执行许可。
+
 ### 取消
 
 取消采用协作方式，并等待完全停稳。每次类型化调用都提供由调用方拥有的 `AbortSignal`；工具主体通过必填的只读 `exec.signal` 接收它，只有 `tools/execute` 包装层可以临时替换这个必填信号。注册表会在替换期间保留调用方取消，并且绝不会在已启动的同进程 Promise 尚未结算时提前返回。工具主体调用前发生的取消为 `ABORTED_BEFORE_DISPATCH`；工具主体被调用后发生的取消，只能将成功结果替换为 `ABORTED`。拒绝、包装层失败、工具失败、后置策略失败或由超时机制产生的 `TOOL_TIMEOUT` 仍保留更具体的结果。入口处已中止的调用会实体化并冻结参数，随后跳过所有策略和分发阶段，只发布一个结果。每个异步工具都必须观测或转发该信号，并且只能在其负责的工作停止后结算。[工具取消 Agent Note](../../../.agents/notes/implemented/architecture/2026-07-19-cooperative-tool-cancellation.md) 规定完整约定和强制终止边界。
@@ -43,7 +47,7 @@ tools:
 - `ToolDefinition`：`ToolSchema` + 必填的 `output { schema, render, presentationMeta? }` + `execute(args, exec)`，以及可选的最终内容回调、呈现回调、协作式 `timeoutMs` 和逐调用的 `isConcurrencySafe(args)` 分类器。主体只能返回输出 schema 声明的规范 JSON 值，并通过 `exec.signal` 协作停止。`finalizeContent(exec, result)` 对每个规范化结果都恰好运行一次，包括绕过后置策略的失败，并且只能替换 `content`；它必须是同步且对所有输入都有定义的函数。
 - `ToolExecutionInput`：调用方提供的调用描述：`{ callId, name, arguments, signal, agent?, parent? }`；`signal` 必填且只读，调用方可以将外层执行的不透明 token 作为 `parent` 传入，但绝不能选择新执行自身的 token。
 - `ToolExecutionToken`：注册表分配的全新带品牌 `Symbol`。它只支持通过相等性进行关联，绝不会跨越模型、日志或 worker 边界。
-- `ToolExecution`：只读流水线视图：不可变的 `{ token, callId, name, arguments, signal, agent?, parent? }`；注册表会另行保留并重新融合调用方的原始信号。`ToolDispatchExecution` 是仅供 `tools/execute` 使用的视图，其必填信号可变，因此包装层可以替换并还原它，但不能删除它。嵌套调用的 `parent` 是 `ToolExecutionToken`，而不是执行对象。
+- `ToolExecution`：只读流水线视图：不可变的 `{ token, callId, rootCallId, name, arguments, signal, agent?, parent?, delegation? }`；注册表会另行保留并重新融合调用方的原始信号。`ToolDispatchExecution` 是仅供 `tools/execute` 使用的视图，其必填信号可变，因此包装层可以替换并还原它，但不能删除它。嵌套调用的 `parent` 是 `ToolExecutionToken`，而不是执行对象。
 - `ToolRunContext`：传给工具主体的执行上下文，在 `ToolExecution` 基础上增加 `deferContext(context)`。它把一条上下文推迟到该工具的最终结果抵达循环时——通常是组合工具转运的嵌套分发上下文，也可以是叶子工具创建的全新插件来源指令（如 `tool-goal` 的收尾注入）——即使工具后来抛出或取消胜出也不例外；该方法绝不会立即注入上下文。
 - `ToolExecutionResult`：带判别标记的执行局部结果。成功形态为 `{ isError:false, value:JsonValue, content, meta?, additionalContexts? }`；失败形态为 `{ isError:true, error:{ message, info? }, content, meta?, additionalContexts? }`，且不含值。调用身份保留在不可变的 `ToolExecution` 上。注册表会在呈现前快照、验证并冻结规范值，随后在最终观测前实体化持久呈现字段。`ToolFailure.info` 携带内部的 `{ name, code }`，用于表示 `HarnessError`；`additionalContexts` 会保留每个通过延迟或 post-execute 加入且带标识的 `UserMessage`，供循环在结果后按 FIFO 顺序处理。
 - `PreToolDecision`：`{kind:'allow'}` | `{kind:'deny', reason}` | `{kind:'ask', reason?}`。该类型有意不提供输入改写；`ask` 在挂载 [`ctx.approval`](../../interaction/user-approval/README.md) 时由它处理，否则退化为拒绝。

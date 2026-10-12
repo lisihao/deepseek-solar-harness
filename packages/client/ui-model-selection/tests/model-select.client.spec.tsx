@@ -115,6 +115,39 @@ describe('ModelSelect reasoning effort', () => {
       .toEqual(['Default', 'Standard'])
   })
 
+  it('marks a managed model confirmed available and keeps legacy rows unbadged', () => {
+    const managed = {
+      id: 'gpt-6.1-sol',
+      name: 'GPT-6.1-Sol',
+      availability: 'available' as const,
+      checkedAt: '2026-09-30T12:00:00.000Z',
+      sourceName: 'Codex app-server',
+    }
+    const legacy = { id: 'legacy-model', name: 'Legacy model' }
+    const directory = createSnapshotStore<ModelDirectoryState>(state({
+      current: { provider: 'codex', model: managed.id },
+      groups: [{ id: 'codex', name: 'Codex', models: [managed, legacy] }],
+    }))
+    render(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      refresh={vi.fn()}
+      select={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '选择模型，当前 GPT-6.1-Sol' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
+
+    const managedRow = screen.getByRole('menuitemradio', { name: 'GPT-6.1-Sol' })
+    expect(managedRow.getAttribute('title')).toBe('GPT-6.1-Sol：可用；最近检查 2026-09-30T12:00:00.000Z（Codex app-server）')
+    expect(screen.getByText('可用')).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: 'Legacy model' }).getAttribute('title')).toBe('Legacy model')
+    expect(screen.getAllByText('可用')).toHaveLength(1)
+  })
+
   it('prompts for a selection when the current model is no longer advertised', () => {
     const directory = createSnapshotStore(state({
       current: { provider: 'deepseek-official', model: 'removed-model' },

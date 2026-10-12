@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Opt-in bundle for persistent TaskGraph compilation, scheduling, model entry, and Web/Desktop projection. The local Provider starts or reconnects to `dsh-orchestratord`; disabling the bundle disconnects DSH without deleting runs, artifacts, receipts, or Resident product sessions.
 
+The bundle also mounts the Gouzi roster (`ui-gouzi`), which lists the long-lived execution members of this instance and adopts, wakes, rests, and retires them through `ctx.gouziHost` when a product provides it.
+
 The deployment must also mount Resident Physical Operators. The orchestration daemon selects only native-subscription Resident Claude Code or Codex execution and never adds an API fallback.
 
 ## Model Experience
