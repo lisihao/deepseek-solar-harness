@@ -4,7 +4,6 @@
  * may work in against the conversation's directory.
  */
 import type { ISessions, IWorkspaces, SessionId, SessionListState, WorkspaceId, WorkspaceListState } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 
 /** Preset id of the kennel session composition. */
 export const KENNEL_PRESET = 'kennel'
@@ -14,9 +13,8 @@ export const KENNEL_OPEN_TIMEOUT_MS = 20_000
 
 /** What opening or creating a kennel thread needs from the browser runtime. */
 export interface KennelServices {
-  readonly sessions: Pick<ISessions, 'list' | 'create' | 'open' | 'noteAgentPreset'>
+  readonly sessions: Pick<ISessions, 'list' | 'create' | 'open'>
   readonly workspaces: Pick<IWorkspaces, 'list'>
-  readonly api: Pick<ConnectionHandle['api'], 'agentPresets'>
 }
 
 /** One kennel conversation as the thread list shows it. */
@@ -74,19 +72,17 @@ export type OpenKennelResult =
   | { readonly kind: 'created'; readonly threadId: SessionId }
 
 /**
- * Create a kennel thread in a project and make it current. The conversation stays hidden from the workspace lists, so
- * the current selection only changes once the Host has confirmed the kennel composition.
- * @param services - sessions, workspace membership, and the preset RPC.
+ * Create a kennel thread in a project and make it current. The Host builds the conversation from the kennel preset
+ * and stores the preset on the session header at creation, so the thread is still recognized after a restart. The
+ * current selection only changes once the Host has created it.
+ * @param services - sessions and workspace membership.
  * @param workspaceId - the project the thread works in.
  * @returns the new thread's id once it is current.
- * @throws Error - when the conversation cannot be created or the Host refuses the kennel composition.
+ * @throws Error - when the Host cannot create the conversation with the kennel composition.
  */
 export async function createKennelThread(services: KennelServices, workspaceId: WorkspaceId): Promise<SessionId> {
-  const { sessions, api } = services
-  const sessionId = await sessions.create({ workspaceId })
-  const response = await api.agentPresets.select({ sessionId, agentPreset: KENNEL_PRESET })
-  if (!response.result.ok) throw new Error(response.result.error.message)
-  sessions.noteAgentPreset(sessionId, response.result.value.agentPreset)
+  const { sessions } = services
+  const sessionId = await sessions.create({ workspaceId, agentPreset: KENNEL_PRESET })
   sessions.open(sessionId)
   return sessionId
 }
@@ -95,7 +91,7 @@ export async function createKennelThread(services: KennelServices, workspaceId: 
  * Enter the kennel. Inside a kennel thread nothing changes and the result says so; elsewhere the most recently updated
  * thread opens, whatever project it is in; with no thread yet, the first is created in the project of the current
  * conversation, then the recent project, then the newest one.
- * @param services - sessions, workspace membership, and the preset RPC.
+ * @param services - sessions and workspace membership.
  * @returns what happened, once the thread is current.
  * @throws Error - when there is no project to start in, or the thread cannot be created.
  */

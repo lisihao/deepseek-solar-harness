@@ -3,7 +3,6 @@
  * kind; a plugin that owns its own conversation space registers a rule and lists those sessions itself.
  */
 
-import { createContext } from 'react'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionHidden } from './tree.ts'
 
@@ -52,6 +51,3 @@ export class SessionListFilterRegistry implements SessionListFilters {
     for (const listener of [...this.listeners]) listener()
   }
 }
-
-/** The combined rule for the browser's descendants, so each list derives its rows from the same decision. */
-export const HiddenSessionsContext = createContext<SessionHidden | undefined>(undefined)
