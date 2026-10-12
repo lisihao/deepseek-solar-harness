@@ -36,8 +36,9 @@
 .task { border-top: 1px solid var(--dsw-alias-border-l2); margin-top: 8px; padding-top: 6px; }
 .threads { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .thread { display: flex; align-items: center; gap: 4px; }
-.threadOpen { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 8px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; color: inherit; cursor: pointer; }
-.threadOpen strong, .threadOpen span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread > * { min-width: 0; }
+.aside .threadOpen { flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 8px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; color: inherit; cursor: pointer; }
+.threadOpen strong, .threadOpen span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .threadOpen[aria-current='true'] { border-color: var(--dsw-alias-brand-primary); }
 .renameThread, .newThread { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
 .newThread { margin-top: 4px; }
