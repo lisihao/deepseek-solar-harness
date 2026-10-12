@@ -5,10 +5,11 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { encodeKennelMessage } from '../recipient-message.ts'
 import { GouziSettings, type GouziSettingsInjected } from './GouziPanel.tsx'
 import { KennelEntry } from './KennelEntry.tsx'
-import { KENNEL_PRESET, openKennel } from './kennel.ts'
+import { createKennelThread, KENNEL_PRESET, openKennel } from './kennel.ts'
 import { KennelRoomAside, KennelRoomComposer, KennelRoomContent, KennelRoomHeader, type KennelRoomInjected } from './KennelRoom.tsx'
 import { loadKennelRoom, readKennelEvidence } from './room-api.ts'
 import { KennelRoomSource } from './room-source.ts'
@@ -18,7 +19,8 @@ export { controlGouzi, GouziRequestError, loadGouzi, type BrowserRequest } from 
 export { GouziAvatarImage } from './avatars.tsx'
 export { GouziManager, GouziSettings, type GouziFolders, type GouziSettingsInjected } from './GouziPanel.tsx'
 export { KennelEntry, type KennelEntryProps } from './KennelEntry.tsx'
-export { KENNEL_PRESET, openKennel, type KennelServices } from './kennel.ts'
+export { createKennelThread, KENNEL_PRESET, kennelThreads, openKennel, type KennelServices, type KennelThread, type OpenKennelResult } from './kennel.ts'
+export { KennelThreads, type KennelThreadActions, type KennelThreadsProps } from './KennelThreads.tsx'
 
 /** Browser services required by management and the room's scoped conversation actions. */
 export const inject = ['slots', 'connection', 'workspaces', 'sessions', 'conversation']
@@ -89,6 +91,17 @@ export function apply(ctx: ClientContext): void {
     return {
       hooks: { room: source },
       reload: async () => { liveScope(id); await source.reload(); liveScope(id) },
+      threads: {
+        open: (threadId) => { sessions.open(threadId) },
+        create: async (workspaceId) => { await createKennelThread({ sessions, workspaces, api }, workspaceId) },
+        rename: async (threadId, title) => {
+          const session = sessions.binding(threadId)?.session
+          if (session === undefined) throw new Error('这个话题已不存在。')
+          const result = await session.rename(title)
+          if (!result.ok) throw new Error(result.error.message)
+        },
+        archive: async (threadId) => { await workspaces.archiveSession(threadId) },
+      },
       send: async ({ text, recipient }) => {
         sendScope(id)
         const target = recipient === null ? null : { ...recipient }
@@ -120,6 +133,12 @@ export function apply(ctx: ClientContext): void {
     await Promise.all([Promise.allSettled([...freshReads]), ...[...sources.values()].map(source => source.dispose())])
     sources.clear()
   }, 'kennel room sources')
+
+  // Kennel threads are listed by the kennel itself; the workspace lists leave them out. An older workspace browser
+  // without the filter service simply keeps listing them.
+  ctx.inject(['sessionListFilters'], (inner) => {
+    inner.effect(() => inner.sessionListFilters.hide(session => session.agentPreset === KENNEL_PRESET), 'kennel threads leave the workspace lists')
+  })
 
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action', id: 'kennel', order: 90, label: '狗窝',

@@ -33,7 +33,8 @@
 .badge { flex: none; margin-right: 8px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 .stack { display: flex; flex: none; }
 .stack > svg + svg { margin-left: -8px; }
-.error { margin: 4px 10px; color: var(--dsw-alias-state-error-primary); font-size: 11px; line-height: 16px; }
+.error { margin: 4px 10px; color: var(--dsw-alias-state-error-primary); font-size: 12px; line-height: 16px; }
+.note { margin: 4px 10px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 16px; }
 
 /* The welcome card on a blank kennel session. */
 .hero {

@@ -12,6 +12,5 @@
     "compose exact created session",
     "record confirmed composition",
     "open kennel session",
-    "open kennel session",
   ],
 }
