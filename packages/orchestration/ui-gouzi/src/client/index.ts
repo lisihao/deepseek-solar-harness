@@ -19,8 +19,7 @@ export { controlGouzi, GouziRequestError, loadGouzi, type BrowserRequest } from 
 export { GouziAvatarImage } from './avatars.tsx'
 export { GouziManager, GouziSettings, type GouziFolders, type GouziSettingsInjected } from './GouziPanel.tsx'
 export { KennelEntry, type KennelEntryProps } from './KennelEntry.tsx'
-export { createKennelThread, KENNEL_PRESET, kennelThreads, openKennel, type KennelServices, type KennelThread, type OpenKennelResult } from './kennel.ts'
-export { KennelThreads, type KennelThreadActions, type KennelThreadsProps } from './KennelThreads.tsx'
+export { KENNEL_PRESET, openKennel, type KennelServices } from './kennel.ts'
 
 /** Browser services required by management and the room's scoped conversation actions. */
 export const inject = ['slots', 'connection', 'workspaces', 'sessions', 'conversation']

@@ -5,7 +5,8 @@ import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-api-remotes/client
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionRuntime, SlotRegistry, WorkspaceRuntime } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply, createKennelThread, GouziAvatarImage, GouziManager, inject, KennelEntry, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
+import { apply, GouziAvatarImage, GouziManager, inject, KennelEntry, KENNEL_PRESET, loadGouzi, openKennel } from '../src/client/index.ts'
+import { createKennelThread } from '../src/client/kennel.ts'
 import type { GouziFolders } from '../src/client/index.ts'
 import { GOUZI_AVATARS, GOUZI_CONTROL_HEADER, type GouziDashboardV1, type GouziMemberProjection, type GouziRoomSnapshotV1 } from '../src/contracts.ts'
 
