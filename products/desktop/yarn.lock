@@ -2142,20 +2142,20 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-client-ui-workspace@npm:0.1.0-rc.6":
-  version: 0.1.0-rc.6
-  resolution: "@deepseek-ai/dsh-client-ui-workspace@npm:0.1.0-rc.6"
+"@deepseek-ai/dsh-client-ui-workspace@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-client-ui-workspace@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz::hash=90f79c&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     clsx: "npm:^2.0.0"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
-    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     react: ^18.2.0
-  checksum: 10c0/170b90c3b543e75ad88569b2b325b0ded6d76f353c61fb2b69fb036d5bd23517506ed2ffd48f23c8e4553f6166c510a32e044c686c68976f99517787522c8ae9
+  checksum: 10c0/fd5e974055a4d01a17e83584d065f6084e16fbb26346daf5ef4b74179bdabbd10d0f11bed06a1852cf96eb1a0bd7f5768200156bf718b38f95c7ccc6d13bdb48
   languageName: node
   linkType: hard
 
@@ -9408,7 +9408,7 @@ __metadata:
     "@deepseek-ai/dsh-client-ui-task-template": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-client-ui-theme": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-client-ui-tool": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-client-ui-workspace": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-client-ui-workspace": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-client-web-react": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-cmdline": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-code-runtime": "npm:0.1.0-rc.6"

@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.41.0",
+  "version": "3.42.0",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -177,7 +177,7 @@
     "@deepseek-ai/dsh-client-ui-task-template": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-task-template-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-theme": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-tool": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-workspace": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-workspace": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-workspace-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-web-react": "0.1.0-rc.6",
     "@deepseek-ai/dsh-cmdline": "0.1.0-rc.6",
     "@deepseek-ai/dsh-code-runtime": "0.1.0-rc.6",
