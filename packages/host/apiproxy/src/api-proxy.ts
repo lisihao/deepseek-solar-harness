@@ -649,9 +649,10 @@ function applySessionListMetadata(state: SessionListMetadata, event: SessionEven
   const lastPromptAt = event.type === 'user/message' && event.data.source.kind === 'user'
     ? event.time
     : state.lastPromptAt
-  return blank === state.blank && lastPromptAt === state.lastPromptAt
+  const agentPreset = event.type === 'agent-preset/selected' ? event.data.agentPreset : state.agentPreset
+  return blank === state.blank && lastPromptAt === state.lastPromptAt && agentPreset === state.agentPreset
     ? state
-    : { blank, lastPromptAt }
+    : { blank, lastPromptAt, ...agentPreset === undefined ? {} : { agentPreset } }
 }
 
 /** Fold exact list metadata for an attached Session. */
@@ -666,17 +667,18 @@ function sessionListUpdatedAt(header: SessionHeader, metadata: SessionListMetada
   return Math.max(header.createdAt, metadata?.lastPromptAt ?? 0)
 }
 
-/** Shared Session-header projection for list baselines and creation frames. */
-function sessionListFields(header: SessionHeader, events: readonly SessionEvent[] = []): {
+/**
+ * Shared Session-header projection for list baselines and creation frames.
+ * @param header - the session's creation header.
+ * @param agentPreset - the preset the session runs: the newest logged selection, else the header's.
+ * @returns the list fields the header and preset determine.
+ */
+function sessionListFields(header: SessionHeader, agentPreset: string | undefined): {
   parentSessionId?: SessionId
   origin?: 'subagent'
   cwd?: string
   agentPreset?: string
 } {
-  // The preset comes from the log, not the header: a session that switched
-  // while blank ran its turns under the newer composition, and a picker
-  // showing the creation-time value would contradict what the model saw.
-  const agentPreset = resolveSessionPreset({ header, events })
   return {
     ...header.parentSession === undefined ? {} : { parentSessionId: header.parentSession },
     ...header.origin === undefined ? {} : { origin: header.origin },
@@ -693,7 +695,10 @@ function summarize(session: Session, running: boolean): SessionSummary {
     updatedAt: sessionListUpdatedAt(session.header, metadata),
     running,
     blank: metadata.blank,
-    ...sessionListFields(session.header, session.events),
+    // The preset comes from the log, not the header: a session that switched
+    // while blank ran its turns under the newer composition, and a picker
+    // showing the creation-time value would contradict what the model saw.
+    ...sessionListFields(session.header, resolveSessionPreset(session)),
   }
 }
 
@@ -752,10 +757,10 @@ async function summarizeCold(
     updatedAt: sessionListUpdatedAt(meta, probed ?? metadata),
     running: false,
     blank: metadata?.blank === false ? false : probed?.blank ?? false,
-    // Header-only: reading the log for a blank-window preset switch would
-    // defeat the same index read, and attaching the session replaces this row
-    // with `summarize()`, which resolves the switch from the events.
-    ...sessionListFields(meta),
+    // The projection records the newest logged preset selection, so a switch
+    // made after creation is visible without reading the log here; the header
+    // answers when the cache holds no selection.
+    ...sessionListFields(meta, (probed ?? metadata)?.agentPreset ?? meta.agentPreset),
   }
 }
 
@@ -1498,7 +1503,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       init: () => ({ blank: true, lastPromptAt: null }),
       apply: applySessionListMetadata,
       view: state => state,
-      stateVersion: 1,
+      stateVersion: 2,
     })
   })
 
@@ -3772,7 +3777,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               // has run no turn yet, so this is constantly true in practice.
               blank: sessionBlank(session),
               // Including cwd lets the client group the new session without refreshing the list.
-              ...sessionListFields(session.header, session.events),
+              ...sessionListFields(session.header, resolveSessionPreset(session)),
             }))
           }),
           ctx.on('session/disposed', (session: Session) => {

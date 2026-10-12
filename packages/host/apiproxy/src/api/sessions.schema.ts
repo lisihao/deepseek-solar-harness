@@ -310,6 +310,7 @@ export const sessionProjectionsBlockSchema = z.object({
 export const sessionListMetadataProjectionSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
   lastPromptAt: z.number().nullable(),
+  agentPreset: z.string().optional(),
 })
 
 /**

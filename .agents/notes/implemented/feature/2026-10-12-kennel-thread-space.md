@@ -14,7 +14,7 @@ Every kennel conversation is a **thread**. The kennel lists its threads itself, 
 
 A thread still belongs to a Workspace. The room compares a dog's registered project scopes with the conversation's directory, so "新话题" asks for a project, and the thread list shows it. Hidden threads keep their workspace membership.
 
-A thread is created with the kennel preset in the `sessions.create` request, so the Host writes it on the session header at creation. The cold session list reads only that header, which is what keeps a thread recognized after a restart; a separate preset step after creation is recorded only in the session log, which the cold list does not read.
+A thread is created with the kennel preset in the `sessions.create` request, so the Host writes it on the session header at creation. The cold session list also reports the newest logged preset selection, taken from the `sessionListMetadata` projection (`stateVersion` 2), so a thread whose preset was selected in a second step, as every thread was before this change, is recognized after a restart as well; the first list after the upgrade refolds each cold session once.
 
 The sidebar entry answers every path: inside a kennel thread it changes nothing and says so; elsewhere it opens the most recently updated thread of any project; with no thread it creates the first in the current conversation's workspace, then a valid recent one, then the newest. Opening is bounded (20 seconds) and reports a timeout or failure beside the button, which is enabled again.
 

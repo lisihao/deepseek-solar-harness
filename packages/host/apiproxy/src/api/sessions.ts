@@ -21,7 +21,10 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
      * Session-list hints persisted by the projection cache. `blank: false`
      * is monotonic and may suppress a cold-log probe; `blank: true` is only a
      * checkpoint-prefix fact and must not hide a cold Session without direct
-     * verification. `lastPromptAt` is the latest human-authored prompt time.
+     * verification. `lastPromptAt` is the latest human-authored prompt time;
+     * `agentPreset` is the newest logged preset selection, which the cold
+     * session list needs because the session header keeps only the
+     * creation-time preset.
      */
     sessionListMetadata: SessionListMetadata
     /**
@@ -41,6 +44,8 @@ export interface SessionListMetadata {
   blank: boolean
   /** Latest source.kind=user message time in the checkpoint prefix. */
   lastPromptAt: number | null
+  /** Preset of the newest `agent-preset/selected` event in the checkpoint prefix; absent when none was logged. */
+  agentPreset?: string | undefined
 }
 
 declare module '@deepseek-ai/dsh-llm' {
