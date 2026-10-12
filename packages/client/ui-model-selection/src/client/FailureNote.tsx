@@ -15,14 +15,17 @@ export interface FailedSource {
 }
 
 /**
- * Render nothing without failures; otherwise a collapsed summary that expands to each source's reason and a retry.
- * @param props - the failed sources, the retry action, and the translator.
+ * Render nothing without failures; otherwise a summary that expands to each source's reason and a retry. It starts
+ * collapsed unless `initiallyOpen` is set, which the model pane does when no model is available at all, because the
+ * reasons are then the only thing to act on.
+ * @param props - the failed sources, whether to start expanded, the retry action, and the translator.
  * @returns the notice, or null when nothing failed.
  */
 export function FailureNote(
-  { items, onRetry, t }: { items: readonly FailedSource[]; onRetry: () => void; t: TranslateNS<'model'> },
+  { items, initiallyOpen = false, onRetry, t }:
+  { items: readonly FailedSource[]; initiallyOpen?: boolean; onRetry: () => void; t: TranslateNS<'model'> },
 ) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(initiallyOpen)
   if (items.length === 0) return null
   return (
     <div className={css.failureNote}>

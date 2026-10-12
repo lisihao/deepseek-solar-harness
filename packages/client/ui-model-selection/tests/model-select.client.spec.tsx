@@ -253,6 +253,15 @@ describe('ModelSelect source failures', () => {
     expect(screen.queryByText(/not authenticated/)).toBeNull()
   })
 
+  it('starts expanded when no model is available, since the reasons are then the only thing to act on', () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({ groups: [], failures }))
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} refresh={vi.fn()} select={vi.fn()} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^模型/ }))
+    expect(screen.getByRole('button', { name: /2 个模型来源暂时不可用/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('Claude Code：Claude Code is not authenticated with a claude.ai subscription')).toBeTruthy()
+  })
+
   it('shows nothing when every source loaded', () => {
     const directory = createSnapshotStore<ModelDirectoryState>(state())
     render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} refresh={vi.fn()} select={vi.fn()} t={t} />)
