@@ -1008,7 +1008,7 @@ function requestUrl(input: string | URL | Request): URL {
   return input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url, 'http://localhost')
 }
 
-async function roomRegistration(filters?: { hide: (rule: (session: { agentPreset?: string }) => boolean) => () => void }) {
+async function roomRegistration(filters?: { hide: (rule: (session: { agentPreset?: string }) => boolean) => () => void }, provideFiltersLater = false) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
@@ -1064,7 +1064,7 @@ async function roomRegistration(filters?: { hide: (rule: (session: { agentPreset
   const workspaces = kennelWorkspaces([{ workspaceId: 'w', sessionIds: ['a', 'b'], updatedAt: 'now' }])
   ctx.provide('connection', { request, api: fakeApi({ ok: true }).api } as never)
   ctx.provide('workspaces', workspaces)
-  if (filters !== undefined) ctx.provide('sessionListFilters', filters as never)
+  if (filters !== undefined && !provideFiltersLater) ctx.provide('sessionListFilters', filters as never)
   ctx.set('sessions', { ...fake.raw, scope, binding } as never)
   const blocks = new Map<string, { reason: string }>()
   class ScopedConversation extends Service {
@@ -1084,6 +1084,7 @@ async function roomRegistration(filters?: { hide: (rule: (session: { agentPreset
   await ctx.plugin(ScopedConversation).await()
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
+  if (filters !== undefined && provideFiltersLater) ctx.provide('sessionListFilters', filters as never)
   const content = slots.entries('conversation.room.content')[0]!
   const face = (id: string | undefined) => (content.inject as unknown as (id: SessionId | undefined) => import('../src/client/KennelRoom.tsx').KennelRoomInjected)(id as SessionId | undefined)
   return { ctx, slots, fiber, fake, views, missing, rooms, request, sends, older, content, face, blocks, runtime, noConversation }
@@ -1102,6 +1103,16 @@ describe('Gouzi client registration', () => {
     expect(release).not.toHaveBeenCalled()
     await h.fiber.dispose()
     expect(release).toHaveBeenCalledOnce()
+  })
+
+  it('registers the rule when the filter service appears after the kennel plugin has applied, as at boot', async () => {
+    const release = vi.fn()
+    const hide = vi.fn((_rule: (session: { agentPreset?: string }) => boolean) => release)
+    const h = await roomRegistration({ hide }, true)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(hide).toHaveBeenCalledOnce()
+    } finally { await h.fiber.dispose() }
   })
 
   it('still works with a workspace browser that has no filter service', async () => {
