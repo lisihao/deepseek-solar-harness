@@ -75,6 +75,8 @@ class DurableOperator implements PhysicalOperator {
   productStarts = 0
   /** When set, a freshly started run fails with this message after the product has started. */
   resultFailureMessage?: string | undefined
+  /** When set, the next start is refused with this message and code, as the Resident daemon refuses a profile. */
+  startRefusal?: { readonly message: string; readonly code: string } | undefined
 
   constructor(
     readonly id: 'codex' | 'claude-code' | 'chatgpt-web',
@@ -121,6 +123,7 @@ class DurableOperator implements PhysicalOperator {
 
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
     this.requests.push(request)
+    if (this.startRefusal !== undefined) throw new PhysicalOperatorError(this.startRefusal.message, this.startRefusal.code)
     if (this.startErrorCode !== undefined) {
       throw new PhysicalOperatorError(`${this.id} qualification failed`, this.startErrorCode)
     }
@@ -1667,11 +1670,38 @@ describe('host physical-operator routing', () => {
         expect(reason).not.toContain('成本感知')
       })
 
-      it('raises the difficulty of a retry by a step', async () => {
+      it('keeps the lane the allocator locked when a later turn is routed by the selected primary model instead', async () => {
+        const fixture = await allocationSetup()
+        try {
+          send(fixture.agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+          await fixture.agent.whenIdle()
+          const locked = fixture.codex.requests[0]?.residentProfile
+          expect(locked?.model).toBeDefined()
+          // The user's selection is the generic Codex entry, whose model would otherwise be the catalog's current
+          // flagship at some other effort; that is the path which contradicted the lane in the field.
+          const dispose = installModelSelection(fixture.agent.ctx, {
+            current: { provider: 'dsh-physical-operator', model: 'codex', reasoningEffort: ReasoningEffortId('xhigh') },
+            assembled: undefined,
+          })
+          try {
+            send(fixture.agent, '继续')
+            await fixture.agent.whenIdle()
+          } finally { dispose() }
+          expect(fixture.codex.requests).toHaveLength(2)
+          expect(fixture.codex.requests[1]?.residentProfile).toEqual(locked)
+        } finally {
+          fixture.disposeSelection()
+        }
+      })
+
+      it('raises the difficulty of a retry by a step, but dispatches the lane\'s accepted profile', async () => {
         const { profile, reason } = await run('还是不行，重试一下这个代码修改', 'apply', [EASY])
 
+        // The allocator still judges the retry harder and says so...
         expect(reason).toContain('难度一般')
-        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'medium' })
+        // ...yet the Resident daemon locked this session's lane to the first turn's low effort, so a changed
+        // profile would be refused with EXECUTION_PROFILE_CONFLICT; the dispatch carries the lane's own.
+        expect(profile).toEqual({ model: 'gpt-6-astra', effort: 'low' })
       })
     })
 
@@ -2128,6 +2158,57 @@ describe('host physical-operator routing', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  describe('a resident lane keeps the profile the daemon locked it to', () => {
+    const select = (agent: Awaited<ReturnType<typeof setup>>['agent'], model: string, effort: string) => installModelSelection(agent.ctx, {
+      current: { provider: 'dsh-physical-operator', model, reasoningEffort: ReasoningEffortId(effort) },
+      assembled: undefined,
+    })
+    const turn = async (agent: Awaited<ReturnType<typeof setup>>['agent'], model: string, effort: string, text: string) => {
+      const dispose = select(agent, model, effort)
+      try {
+        send(agent, text)
+        await agent.whenIdle()
+      } finally { dispose() }
+    }
+
+    it('lets a native model the user names override the lane, so the user gets the daemon\'s answer', async () => {
+      const { agent, codex } = await setup()
+      await turn(agent, 'codex:gpt-5.6-sol', 'low', '第一轮')
+      await turn(agent, 'codex:gpt-5.6-terra', 'xhigh', '第二轮')
+      expect(codex.requests[1]?.residentProfile).toEqual({ model: 'gpt-5.6-terra', effort: 'xhigh' })
+    })
+
+    it('says plainly what the session is locked to and how to change it, and does not adopt a refused profile', async () => {
+      const { agent, codex } = await setup()
+      await turn(agent, 'codex:gpt-5.6-sol', 'low', '第一轮')
+      codex.startRefusal = { message: 'resident session s1 is locked to gpt-5.6-sol/low', code: 'EXECUTION_PROFILE_CONFLICT' }
+      await turn(agent, 'codex:gpt-5.6-terra', 'xhigh', '第二轮')
+      const ended = agent.session.events.findLast(event => event.type === 'turn/end')
+      const message = ended?.type === 'turn/end' && ended.data.reason.kind === 'error' ? ended.data.reason.error.message : ''
+      expect(message).toContain('已锁定为 gpt-5.6-sol/low')
+      expect(message).toContain('新建一个会话')
+      expect(agent.session.events.some(event => event.type === 'physical-operator/dispatch-terminal' && event.data.code === 'EXECUTION_PROFILE_CONFLICT')).toBe(true)
+      // The refused profile never became the lane's: the next ordinary turn goes back to the accepted one.
+      codex.startRefusal = undefined
+      await turn(agent, 'codex', 'medium', '第三轮')
+      expect(codex.requests.at(-1)?.residentProfile).toEqual({ model: 'gpt-5.6-sol', effort: 'low' })
+      expect(codex.requests).toHaveLength(3)
+    })
+
+    it('residentLaneProfile skips refused and non-resident dispatches and follows the latest accepted one', () => {
+      const dispatch = (commandId: string, operatorId: string, mode: 'resident' | 'ephemeral', model: string) => ({
+        type: 'physical-operator/dispatch', data: { commandId, operatorId, executionMode: mode, residentProfile: { model, effort: 'low' } },
+      }) as never
+      const refused = (commandId: string, code: string) => ({ type: 'physical-operator/dispatch-terminal', data: { commandId, code } }) as never
+      const events = [dispatch('a', 'codex', 'resident', 'one'), dispatch('b', 'claude-code', 'resident', 'other-operator'), dispatch('c', 'codex', 'ephemeral', 'not-resident'),
+        dispatch('d', 'codex', 'resident', 'refused'), refused('d', 'EXECUTION_PROFILE_CONFLICT')]
+      expect(tool.residentLaneProfile(events, 'codex')).toEqual({ model: 'one', effort: 'low' })
+      expect(tool.residentLaneProfile([...events, dispatch('e', 'codex', 'resident', 'two')], 'codex')).toEqual({ model: 'two', effort: 'low' })
+      expect(tool.residentLaneProfile([...events, refused('e', 'EXECUTION_PROFILE_UNSUPPORTED')], 'codex')).toEqual({ model: 'one', effort: 'low' })
+      expect(tool.residentLaneProfile([], 'codex')).toBeUndefined()
+    })
   })
 
   it('runs a selected native model entry with its model and effort as the Resident profile', async () => {
