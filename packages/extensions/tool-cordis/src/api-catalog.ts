@@ -956,6 +956,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['Error - when the key changed since inspection, the login fails, or DSH Desktop is missing or too old.'],
       },
       {
+        signature: 'abstract rerouteHost(input: { readonly hostId: string readonly address: string readonly port: number readonly route?: GouziSshRoute }): Promise<GouziHostProjection>',
+        description: 'Change the address, port, or route through which an existing SSH host is reached. The machine reached must present the host key already pinned for the host, so a reroute cannot move a member onto another machine.',
+        parameters: [{ name: 'input', description: 'host id and its new address, port, and route (absent for a direct connection).' }],
+        returns: 'the updated host.',
+        throws: ['Error - when the host is unknown, unreachable, presents a different key, or lacks a usable DSH Desktop.'],
+      },
+      {
         signature: 'abstract removeHost(hostId: string): Promise<void>',
         description: 'Forget an SSH host and its dedicated key. The caller has checked that no live member uses it.',
         parameters: [{ name: 'hostId', description: 'host id.' }],
@@ -4835,7 +4842,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziHostProjection',
-    declaration: 'export interface GouziHostProjection {\n    readonly hostId: string;\n    readonly label: string;\n    readonly kind: \'local\' | \'ssh\';\n    readonly address?: string;\n    readonly appVersion?: string;\n}',
+    declaration: 'export interface GouziHostProjection {\n    readonly hostId: string;\n    readonly label: string;\n    readonly kind: \'local\' | \'ssh\';\n    readonly address?: string;\n    readonly route?: GouziSshRoute;\n    readonly appVersion?: string;\n}',
   },
   {
     name: 'GouziHostRecord',
@@ -4886,8 +4893,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type GouziRole = (typeof GOUZI_ROLES)[number];',
   },
   {
+    name: 'GouziSshRoute',
+    declaration: 'export interface GouziSshRoute {\n    readonly via: \'tailscale\';\n    readonly socket?: string;\n}',
+  },
+  {
     name: 'GouziSshTarget',
-    declaration: 'export interface GouziSshTarget {\n    readonly address: string;\n    readonly port: number;\n    readonly user: string;\n}',
+    declaration: 'export interface GouziSshTarget {\n    readonly address: string;\n    readonly port: number;\n    readonly user: string;\n    readonly route?: GouziSshRoute;\n}',
   },
   {
     name: 'ImageAttachmentLimits',

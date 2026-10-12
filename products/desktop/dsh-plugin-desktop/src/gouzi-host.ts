@@ -58,6 +58,7 @@ export const Config: z<Config> = z.object({
     ssh: z.string().default(SYSTEM_SSH.ssh),
     sshKeygen: z.string().default(SYSTEM_SSH.sshKeygen),
     sshKeyscan: z.string().default(SYSTEM_SSH.sshKeyscan),
+    tailscale: z.string().default(SYSTEM_SSH.tailscale),
   }),
   remoteApp: z.string(),
 })
@@ -92,6 +93,10 @@ export class LocalGouziHost extends GouziHostService {
 
   addHost(input: GouziSshTarget & { readonly password: string; readonly fingerprint: string; readonly label?: string }) {
     return this.remote.add(input)
+  }
+
+  rerouteHost(input: Parameters<RemoteGouziHosts['reroute']>[0]) {
+    return this.remote.reroute(input)
   }
 
   removeHost(hostId: string): Promise<void> {

@@ -94,6 +94,8 @@ class FakeHost extends GouziHostService {
   preparedProjects = new Map<string, GouziProjectSource>()
   sshHosts: GouziHostProjection[] = []
   added: Array<Parameters<GouziHostService['addHost']>[0]> = []
+  inspected: GouziSshTarget[] = []
+  rerouted: Array<Parameters<GouziHostService['rerouteHost']>[0]> = []
   removed: string[] = []
   failResolve: Error | undefined
   failPrepare: Error | undefined
@@ -104,6 +106,7 @@ class FakeHost extends GouziHostService {
 
   hosts() { return Promise.resolve(this.sshHosts) }
   inspectHost(target: GouziSshTarget) {
+    this.inspected.push(target)
     if (target.address === 'unreachable.example') return Promise.reject(new Error('连不上这台机器'))
     return Promise.resolve({ keyType: 'ssh-ed25519', fingerprint: 'SHA256:abc123' })
   }
@@ -117,6 +120,15 @@ class FakeHost extends GouziHostService {
       address: `${input.user}@${input.address}:${String(input.port)}`,
     }
     this.sshHosts = [...this.sshHosts, host]
+    return Promise.resolve(host)
+  }
+  rerouteHost(input: Parameters<GouziHostService['rerouteHost']>[0]) {
+    this.rerouted.push(input)
+    const current = this.sshHosts.find(host => host.hostId === input.hostId)
+    if (current === undefined) return Promise.reject(new Error(`unknown host ${input.hostId}`))
+    const { route: _route, ...rest } = current
+    const host: GouziHostProjection = { ...rest, address: `lisihao@${input.address}:${String(input.port)}`, ...input.route === undefined ? {} : { route: input.route } }
+    this.sshHosts = this.sshHosts.map(value => value.hostId === input.hostId ? host : value)
     return Promise.resolve(host)
   }
   removeHost(hostId: string) {
@@ -164,6 +176,7 @@ interface Body {
   gouziId: string
   members: Array<{ state: string; name: string; avatarId: string; role: string }>
   retired?: Array<{ gouziId: string; name: string }>
+  hosts?: Array<Record<string, unknown>>
 }
 interface Reply { status: number; body: Body }
 
@@ -570,11 +583,67 @@ describe('Gouzi Host route', () => {
     expect(host!.added).toEqual([])
   })
 
+  it('passes a Tailscale route to inspect, add, and reroute, and shows it to a manager but not to a reader', async () => {
+    const { host, send } = await mount()
+    const route = { via: 'tailscale', socket: '/Users/me/.local/share/tailscale-userspace/tailscaled.sock' }
+    const target = { address: '100.114.161.62', port: 10_022, user: 'lisihao', route }
+    await send('POST', { action: 'host-inspect', ...target }, CONTROL)
+    expect(host!.inspected.at(-1)).toEqual(target)
+    await send('POST', { action: 'host-add', ...target, password: 'pw', fingerprint: 'SHA256:abc123', label: 'Mac mini' }, CONTROL)
+    expect(host!.added.at(-1)).toMatchObject({ address: '100.114.161.62', port: 10_022, route })
+    // A direct request carries no route, and an empty socket means the CLI default.
+    await send('POST', { action: 'host-inspect', address: 'mini.local', port: 22, user: 'lisihao', route: { via: 'tailscale', socket: '' } }, CONTROL)
+    expect(host!.inspected.at(-1)).toEqual({ address: 'mini.local', port: 22, user: 'lisihao', route: { via: 'tailscale' } })
+    await send('POST', { action: 'host-inspect', address: 'mini.local', port: 22, user: 'lisihao', route: null }, CONTROL)
+    expect(host!.inspected.at(-1)).toEqual({ address: 'mini.local', port: 22, user: 'lisihao' })
+    const moved = await send('POST', { action: 'host-route', hostId: 'ssh-1', address: 'mini.tail1234.ts.net', port: 10_022, route }, CONTROL)
+    expect(moved).toMatchObject({ status: 200, body: { hostId: 'ssh-1', address: 'lisihao@mini.tail1234.ts.net:10022', route } })
+    expect(host!.rerouted).toEqual([{ hostId: 'ssh-1', address: 'mini.tail1234.ts.net', port: 10_022, route }])
+    const direct = await send('POST', { action: 'host-route', hostId: 'ssh-1', address: 'mini.local', port: 22 }, CONTROL)
+    expect(direct.body).not.toHaveProperty('route')
+    expect(host!.rerouted.at(-1)).toEqual({ hostId: 'ssh-1', address: 'mini.local', port: 22 })
+    host!.sshHosts = [{ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh', address: 'lisihao@100.114.161.62:10022', route: { via: 'tailscale' } }]
+    const reader = await send('GET', undefined, { authorization: 'Bearer pocket-token' }, true)
+    expect(reader.body.hosts?.[1]).toEqual({ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh' })
+    expect((await send('GET')).body.hosts?.[1]).toMatchObject({ route: { via: 'tailscale' } })
+  })
+
+  it.each([
+    ['a route that is not Tailscale', { via: 'ssh' }],
+    ['a route given as text', 'tailscale'],
+    ['a route given as a list', [{ via: 'tailscale' }]],
+    ['a relative socket', { via: 'tailscale', socket: 'tailscaled.sock' }],
+    ['a socket with a space', { via: 'tailscale', socket: '/tmp/a b.sock' }],
+    ['a socket with a quote', { via: 'tailscale', socket: "/tmp/a'b.sock" }],
+    ['a socket with a semicolon', { via: 'tailscale', socket: '/tmp/a;touch x' }],
+    ['a socket with a percent token', { via: 'tailscale', socket: '/tmp/%h.sock' }],
+    ['a socket that is not text', { via: 'tailscale', socket: 7 }],
+    ['a socket over 512 characters', { via: 'tailscale', socket: `/${'a'.repeat(512)}` }],
+  ])('refuses %s before touching the host service', async (_label, route) => {
+    const { host, send } = await mount()
+    host!.sshHosts = [{ hostId: 'ssh-1', label: 'Mac mini', kind: 'ssh', address: 'lisihao@mini.local:22' }]
+    for (const body of [
+      { action: 'host-inspect', address: 'mini.local', port: 22, user: 'lisihao', route },
+      { action: 'host-route', hostId: 'ssh-1', address: 'mini.local', port: 22, route },
+    ]) expect(await send('POST', body, CONTROL), body.action).toMatchObject({ status: 400, body: { error: 'GOUZI_INVALID' } })
+    expect(host!.inspected).toEqual([])
+    expect(host!.rerouted).toEqual([])
+  })
+
+  it('refuses to reroute with an address that looks like an option or a port out of range', async () => {
+    const { host, send } = await mount()
+    for (const patch of [{ address: '-oProxyCommand=evil' }, { address: 'a;b' }, { port: 0 }, { hostId: undefined }]) {
+      expect(await send('POST', { action: 'host-route', hostId: 'ssh-1', address: 'mini.local', port: 22, ...patch }, CONTROL)).toMatchObject({ status: 400 })
+    }
+    expect(host!.rerouted).toEqual([])
+  })
+
   it('lets only a manager add, inspect, browse, or remove hosts', async () => {
     const { send } = await mount()
     const headers = { ...CONTROL, authorization: 'Bearer pocket-token' }
     for (const body of [
       { action: 'host-inspect', address: 'mini.local', port: 22, user: 'lisihao' },
+      { action: 'host-route', hostId: 'ssh-1', address: 'mini.local', port: 22 },
       { action: 'host-remove', hostId: 'ssh-1' },
       { action: 'browse', hostId: 'ssh-1' },
       { action: 'check-projects', hostId: 'local', projects: ['/work/alpha'] },

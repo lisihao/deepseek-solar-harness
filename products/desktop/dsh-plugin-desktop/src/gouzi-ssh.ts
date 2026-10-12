@@ -4,7 +4,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -25,10 +25,26 @@ export interface SshBinaries {
   readonly ssh: string
   readonly sshKeygen: string
   readonly sshKeyscan: string
+  /** Tailscale CLI, relayed through for a host reached over Tailscale; empty looks for it in {@link TAILSCALE_CANDIDATES}. */
+  readonly tailscale: string
 }
 
 /** The default OpenSSH client binaries. */
-export const SYSTEM_SSH: SshBinaries = { ssh: 'ssh', sshKeygen: 'ssh-keygen', sshKeyscan: 'ssh-keyscan' }
+export const SYSTEM_SSH: SshBinaries = { ssh: 'ssh', sshKeygen: 'ssh-keygen', sshKeyscan: 'ssh-keyscan', tailscale: '' }
+
+/** Where the Tailscale CLI is installed on macOS: Homebrew (Apple silicon, Intel), then the Tailscale app. */
+export const TAILSCALE_CANDIDATES: readonly string[] = [
+  '/opt/homebrew/bin/tailscale',
+  '/usr/local/bin/tailscale',
+  '/Applications/Tailscale.app/Contents/MacOS/Tailscale',
+]
+
+/** How a host is reached other than directly: relayed by the Tailscale CLI's `nc`. */
+export interface SshRoute {
+  readonly via: 'tailscale'
+  /** Absolute path of the tailscaled socket; absent uses the CLI's default. */
+  readonly socket?: string
+}
 
 /** A pinned remote machine and the dedicated key used to log in to it. */
 export interface SshHostTarget {
@@ -39,6 +55,8 @@ export interface SshHostTarget {
   readonly keyPath: string
   /** File holding the confirmed host key line. */
   readonly knownHostsPath: string
+  /** Absent means a direct connection. */
+  readonly route?: SshRoute
 }
 
 /** The host key a machine presented. */
@@ -51,6 +69,9 @@ export interface ScannedHostKey {
 
 const KEY_PREFERENCE = ['ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'ssh-rsa']
 const EXEC_TIMEOUT_MS = 60_000
+/** A first connection over a Tailscale relay can take several seconds before the SSH banner arrives. */
+const DIRECT_CONNECT_TIMEOUT_S = 10
+const ROUTED_CONNECT_TIMEOUT_S = 25
 const TUNNEL_READY_TIMEOUT_MS = 15_000
 
 interface Finished {
@@ -102,26 +123,64 @@ function classify(stderr: string, fallback: string): SshError {
     return new SshError('HOST_KEY_CHANGED', '这台机器的主机密钥和你确认过的不一致，已拒绝连接')
   }
   if (/Permission denied|Authentication failed/iu.test(text)) return new SshError('AUTH_FAILED', '用户名或密码不对')
+  if (/failed to connect to local tailscaled|Failed to connect to local Tailscale|tailscaled\.sock/iu.test(text)) {
+    return new SshError('UNREACHABLE', 'Tailscale 没有运行，或者设置里的 socket 路径不对')
+  }
   if (/Connection refused|timed out|No route to host|Could not resolve|Network is unreachable|Connection closed/iu.test(text)) {
     return new SshError('UNREACHABLE', `连不上这台机器：${text.split('\n').at(-1) ?? text}`)
   }
   return new SshError('COMMAND_FAILED', text.length > 0 ? text : fallback)
 }
 
+/**
+ * Find the Tailscale CLI.
+ * @param configured - the configured path, or empty to look in {@link TAILSCALE_CANDIDATES}.
+ * @param exists - file test, replaced by tests.
+ * @returns the path to run.
+ * @throws SshError - when no CLI is found, naming every path that was tried.
+ */
+export function resolveTailscale(configured: string, exists: (path: string) => boolean = existsSync): string {
+  const tried = configured === '' ? TAILSCALE_CANDIDATES : [configured]
+  const found = tried.find(path => !path.includes('%') && exists(path))
+  if (found === undefined) {
+    throw new SshError('COMMAND_FAILED', `没有找到 Tailscale 命令行工具（试过：${tried.join('、')}）。请安装 Tailscale，或在 DSH 配置的 ssh.tailscale 里写明它的位置`)
+  }
+  return found
+}
+
+/**
+ * The relay command ssh runs to open the connection. It is interpreted by a shell and ssh expands `%` tokens in
+ * it, so the address and port are written in directly (never as `%h`/`%p`) and every part is quoted.
+ */
+function proxyCommand(binaries: SshBinaries, address: string, port: number, route: SshRoute): string {
+  const socket = route.socket === undefined ? '' : ` --socket=${shellQuote(route.socket)}`
+  return `${shellQuote(resolveTailscale(binaries.tailscale))}${socket} nc ${shellQuote(address)} ${String(port)}`
+}
+
+/**
+ * Options that decide how the connection is made. A routed connection ignores the user's own ssh configuration, so
+ * an alias there (for example a `HostKeyAlias` for the same address) cannot change which pinned key is looked up.
+ */
+function routeOptions(binaries: SshBinaries, address: string, port: number, route: SshRoute | undefined): string[] {
+  if (route === undefined) return []
+  return ['-F', '/dev/null', '-o', `ProxyCommand=${proxyCommand(binaries, address, port, route)}`]
+}
+
 /** Options shared by every connection to a pinned host. */
-function pinnedOptions(target: SshHostTarget): string[] {
+function pinnedOptions(binaries: SshBinaries, target: SshHostTarget): string[] {
   return [
     '-p', String(target.port),
+    ...routeOptions(binaries, target.address, target.port, target.route),
     '-o', `UserKnownHostsFile=${target.knownHostsPath}`,
     '-o', 'GlobalKnownHostsFile=/dev/null',
     '-o', 'StrictHostKeyChecking=yes',
-    '-o', 'ConnectTimeout=10',
+    '-o', `ConnectTimeout=${String(target.route === undefined ? DIRECT_CONNECT_TIMEOUT_S : ROUTED_CONNECT_TIMEOUT_S)}`,
     '-o', 'LogLevel=ERROR',
   ]
 }
 
-function keyOptions(target: SshHostTarget): string[] {
-  return ['-i', target.keyPath, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', ...pinnedOptions(target)]
+function keyOptions(binaries: SshBinaries, target: SshHostTarget): string[] {
+  return ['-i', target.keyPath, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', ...pinnedOptions(binaries, target)]
 }
 
 /**
@@ -132,18 +191,72 @@ function keyOptions(target: SshHostTarget): string[] {
  * @returns the preferred key with its fingerprint.
  * @throws SshError - when the machine is unreachable or presents no key.
  */
-export async function scanHostKey(binaries: SshBinaries, address: string, port: number): Promise<ScannedHostKey> {
-  const scan = await run(binaries.sshKeyscan, ['-T', '10', '-p', String(port), '--', address], { timeoutMs: 20_000 })
-  const lines = scan.stdout.split('\n').filter(line => line.length > 0 && !line.startsWith('#'))
+export async function scanHostKey(binaries: SshBinaries, address: string, port: number, route?: SshRoute): Promise<ScannedHostKey> {
+  const { lines, stderr } = route === undefined ? await keyscanLines(binaries, address, port) : await relayedScanLines(binaries, address, port, route)
   const keys = lines.map(line => ({ line, type: line.split(' ')[1] ?? '' }))
   const chosen = KEY_PREFERENCE.map(type => keys.find(key => key.type === type)).find(key => key !== undefined)
   if (chosen === undefined) {
-    throw new SshError('UNREACHABLE', `连不上 ${address}:${String(port)}，或者它没有开启 SSH（远程登录）`)
+    const failure = stderr.trim().length > 0 ? classify(stderr, '') : undefined
+    if (failure !== undefined && failure.code === 'UNREACHABLE') throw failure
+    throw new SshError('UNREACHABLE', `连不上 ${address}:${String(port)}${route === undefined ? '' : '（经 Tailscale）'}，或者它没有开启 SSH（远程登录）`)
   }
-  const printed = await run(binaries.sshKeygen, ['-lf', '-'], { stdin: `${chosen.line}\n`, timeoutMs: 10_000 })
+  return { keyType: chosen.type, fingerprint: await fingerprintOf(binaries, chosen.line), line: chosen.line }
+}
+
+async function keyscanLines(binaries: SshBinaries, address: string, port: number): Promise<{ lines: string[]; stderr: string }> {
+  const scan = await run(binaries.sshKeyscan, ['-T', '10', '-p', String(port), '--', address], { timeoutMs: 20_000 })
+  return { lines: scan.stdout.split('\n').filter(line => line.length > 0 && !line.startsWith('#')), stderr: scan.stderr }
+}
+
+/**
+ * `ssh-keyscan` cannot use a relay, so the key is read by letting ssh itself reach the key exchange and record the
+ * key it was shown in a scratch file; the login then fails, which is expected. The recorded line is named the way
+ * later connections with the same address, port, and options look it up.
+ */
+async function relayedScanLines(binaries: SshBinaries, address: string, port: number, route: SshRoute): Promise<{ lines: string[]; stderr: string }> {
+  const directory = mkdtempSync(join(tmpdir(), 'dsh-gouzi-scan-'))
+  const file = join(directory, 'known_hosts')
+  try {
+    const scan = await run(binaries.ssh, [
+      '-p', String(port),
+      ...routeOptions(binaries, address, port, route),
+      '-o', `UserKnownHostsFile=${file}`,
+      '-o', 'GlobalKnownHostsFile=/dev/null',
+      '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', 'HashKnownHosts=no',
+      '-o', 'BatchMode=yes',
+      '-o', 'PreferredAuthentications=none',
+      '-o', `ConnectTimeout=${String(ROUTED_CONNECT_TIMEOUT_S)}`,
+      '-o', 'LogLevel=ERROR',
+      `dsh-gouzi-scan@${address}`,
+      'true',
+    ], { timeoutMs: 40_000 })
+    // The file exists only when ssh got as far as the key exchange.
+    const recorded = existsSync(file) ? readFileSync(file, 'utf8') : ''
+    return { lines: recorded.split('\n').filter(line => line.length > 0 && !line.startsWith('#')), stderr: scan.stderr }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
+
+async function fingerprintOf(binaries: SshBinaries, line: string): Promise<string> {
+  const printed = await run(binaries.sshKeygen, ['-lf', '-'], { stdin: `${line}\n`, timeoutMs: 10_000 })
   const fingerprint = /\b(SHA256:[A-Za-z0-9+/]+={0,2})/u.exec(printed.stdout)?.[1]
   if (fingerprint === undefined) throw new SshError('COMMAND_FAILED', 'could not compute the host key fingerprint')
-  return { keyType: chosen.type, fingerprint, line: chosen.line }
+  return fingerprint
+}
+
+/**
+ * The fingerprint of the key pinned for a host.
+ * @param binaries - OpenSSH binaries.
+ * @param knownHostsPath - file holding the pinned line.
+ * @returns the `SHA256:` fingerprint.
+ * @throws SshError - when the file holds no key.
+ */
+export async function pinnedFingerprint(binaries: SshBinaries, knownHostsPath: string): Promise<string> {
+  const line = readFileSync(knownHostsPath, 'utf8').split('\n').find(value => value.length > 0 && !value.startsWith('#'))
+  if (line === undefined) throw new SshError('COMMAND_FAILED', 'no host key is pinned for this host')
+  return fingerprintOf(binaries, line)
 }
 
 /**
@@ -186,7 +299,7 @@ export async function installKey(binaries: SshBinaries, target: SshHostTarget, p
       'grep -qxF -- "$key" "$HOME/.ssh/authorized_keys" || printf \'%s\\n\' "$key" >> "$HOME/.ssh/authorized_keys"',
     ].join(' && ')
     const finished = await run(binaries.ssh, [
-      ...pinnedOptions(target),
+      ...pinnedOptions(binaries, target),
       '-o', 'PubkeyAuthentication=no',
       '-o', 'PreferredAuthentications=password,keyboard-interactive',
       '-o', 'NumberOfPasswordPrompts=1',
@@ -244,7 +357,7 @@ export async function sshExec(
   command: string,
   options: { readonly stdin?: string; readonly timeoutMs?: number } = {},
 ): Promise<string> {
-  const finished = await run(binaries.ssh, [...keyOptions(target), `${target.user}@${target.address}`, command], {
+  const finished = await run(binaries.ssh, [...keyOptions(binaries, target), `${target.user}@${target.address}`, command], {
     stdin: options.stdin ?? '',
     timeoutMs: options.timeoutMs ?? EXEC_TIMEOUT_MS,
   })
@@ -309,7 +422,7 @@ export async function openTunnel(binaries: SshBinaries, target: SshHostTarget, l
   // Without this check a listener that is already there would pass for the forward coming up.
   if (!await loopbackPortFree(localPort)) throw new SshError('COMMAND_FAILED', `本地端口 ${String(localPort)} 已被占用`)
   const child: ChildProcess = spawn(binaries.ssh, [
-    ...keyOptions(target),
+    ...keyOptions(binaries, target),
     '-N',
     '-o', 'ExitOnForwardFailure=yes',
     '-o', 'ServerAliveInterval=15',

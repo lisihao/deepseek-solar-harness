@@ -22,6 +22,7 @@ import {
   installKey,
   loopbackPortFree,
   openTunnel,
+  pinnedFingerprint,
   revokeKey,
   scanHostKey,
   shellQuote,
@@ -29,6 +30,7 @@ import {
   sshExec,
   type SshBinaries,
   type SshHostTarget,
+  type SshRoute,
   type SshTunnel,
 } from './gouzi-ssh.ts'
 
@@ -50,6 +52,8 @@ interface StoredHost {
   readonly address: string
   readonly port: number
   readonly user: string
+  /** Absent means a direct connection. */
+  readonly route?: SshRoute
   readonly appVersion: string
   readonly addedAt: string
 }
@@ -136,6 +140,7 @@ export class RemoteGouziHosts {
       user: host.user,
       keyPath: join(directory, 'id_ed25519'),
       knownHostsPath: join(directory, 'known_hosts'),
+      ...host.route === undefined ? {} : { route: host.route },
     }
   }
 
@@ -165,6 +170,7 @@ export class RemoteGouziHosts {
       label: host.label,
       kind: 'ssh',
       address: `${host.user}@${host.address}:${String(host.port)}`,
+      ...host.route === undefined ? {} : { route: host.route },
       appVersion: host.appVersion,
     }))
   }
@@ -175,7 +181,7 @@ export class RemoteGouziHosts {
    * @returns key type and fingerprint.
    */
   async inspect(target: GouziSshTarget): Promise<GouziHostInspection> {
-    const key = await scanHostKey(this.options.binaries, target.address, target.port)
+    const key = await scanHostKey(this.options.binaries, target.address, target.port, target.route)
     return { keyType: key.keyType, fingerprint: key.fingerprint }
   }
 
@@ -185,7 +191,7 @@ export class RemoteGouziHosts {
    * @returns the stored host.
    */
   async add(input: GouziSshTarget & { readonly password: string; readonly fingerprint: string; readonly label?: string }): Promise<GouziHostProjection> {
-    const key = await scanHostKey(this.options.binaries, input.address, input.port)
+    const key = await scanHostKey(this.options.binaries, input.address, input.port, input.route)
     if (key.fingerprint !== input.fingerprint) {
       throw new SshError('HOST_KEY_CHANGED', '这台机器的主机密钥和你确认过的不一致，已拒绝连接')
     }
@@ -198,6 +204,7 @@ export class RemoteGouziHosts {
       address: input.address,
       port: input.port,
       user: input.user,
+      ...input.route === undefined ? {} : { route: input.route },
       appVersion: '',
       addedAt: new Date().toISOString(),
     }
@@ -218,6 +225,46 @@ export class RemoteGouziHosts {
       rmSync(directory, { recursive: true, force: true })
       throw error
     }
+  }
+
+  /**
+   * Change how a host is reached. The machine at the new address must present the key already pinned, so the host
+   * keeps its identity; the new connection is proven with the remote agent before anything is kept, and the
+   * forwards of its members are reopened through it.
+   * @param input - host id and the new address, port, and route (absent for a direct connection).
+   * @returns the updated host.
+   * @throws SshError - when the machine presents a different key or cannot be reached.
+   */
+  async reroute(input: { readonly hostId: string; readonly address: string; readonly port: number; readonly route?: SshRoute }): Promise<GouziHostProjection> {
+    const host = this.host(input.hostId)
+    const { route: _previousRoute, ...unrouted } = host
+    const next: StoredHost = { ...unrouted, address: input.address, port: input.port, ...input.route === undefined ? {} : { route: input.route } }
+    const knownHostsPath = this.target(host).knownHostsPath
+    const key = await scanHostKey(this.options.binaries, input.address, input.port, input.route)
+    if (key.fingerprint !== await pinnedFingerprint(this.options.binaries, knownHostsPath)) {
+      throw new SshError('HOST_KEY_CHANGED', '这个地址上的机器和登记的不是同一台（主机密钥不一致），已拒绝改动')
+    }
+    // The pin is named after the address it was scanned at, so it is replaced before the new connection is tried.
+    const previous = readFileSync(knownHostsPath, 'utf8')
+    writeFileSync(knownHostsPath, `${key.line}\n`, { mode: 0o600 })
+    try {
+      const probe = await this.probe(next)
+      this.save({ ...this.catalog, hosts: this.catalog.hosts.map(value => value.hostId === host.hostId ? { ...next, appVersion: probe.appVersion } : value) })
+    } catch (error) {
+      writeFileSync(knownHostsPath, previous, { mode: 0o600 })
+      throw error
+    }
+    await this.reopenForwards(host.hostId)
+    return this.list().find(value => value.hostId === host.hostId)!
+  }
+
+  /** Close the forwards of a host's members, wait until they have ended, and reopen them with the host's current settings. */
+  private async reopenForwards(hostId: string): Promise<void> {
+    const ids = Object.entries(this.catalog.forwards).filter(([, forward]) => forward.hostId === hostId).map(([gouziId]) => gouziId)
+    const ending = ids.map(gouziId => this.tunnels.get(gouziId)?.tunnel?.closed)
+    for (const gouziId of ids) this.closeForward(gouziId, { keepRecord: true })
+    await Promise.all(ending)
+    for (const gouziId of ids) void this.openForward(gouziId).catch(() => undefined)
   }
 
   private async probe(host: StoredHost): Promise<GouziAgentProbe> {

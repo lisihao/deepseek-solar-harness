@@ -544,6 +544,96 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
     await waitFor(() => { expect(screen.queryByLabelText(/登录密码/)).toBeNull() })
   })
 
+  function openHostStep(harness: ReturnType<typeof fakeRequest>) {
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
+    return async () => {
+      fireEvent.click(await screen.findByRole('button', { name: '领养狗子' }))
+      fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Pixel' } })
+      fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+    }
+  }
+
+  it('adds a machine over Tailscale: the route goes with the inspection and the add, and the socket is optional', async () => {
+    const harness = fakeRequest({ roster: dashboard([]), reply: remoteReply() })
+    await openHostStep(harness)()
+    fireEvent.click(screen.getByRole('button', { name: /添加另一台机器/ }))
+    expect(screen.queryByLabelText(/Tailscale 的 socket/)).toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: /通过 Tailscale 连接/ }))
+    fireEvent.change(screen.getByLabelText(/Tailscale 的 socket/), { target: { value: ' /Users/me/tailscaled.sock ' } })
+    fireEvent.change(screen.getByPlaceholderText(/mini.local/), { target: { value: '100.114.161.62' } })
+    fireEvent.change(screen.getByLabelText(/用户名/), { target: { value: 'lisihao' } })
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '10022' } })
+    fireEvent.change(screen.getByLabelText(/登录密码/), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByRole('button', { name: '检查这台机器' }))
+    await screen.findByRole('status')
+    expect(harness.posts[0]!.body).toEqual({
+      action: 'host-inspect', address: '100.114.161.62', port: 10_022, user: 'lisihao', route: { via: 'tailscale', socket: '/Users/me/tailscaled.sock' },
+    })
+    // Changing the route invalidates the fingerprint that was shown, so it must be checked again.
+    fireEvent.change(screen.getByLabelText(/Tailscale 的 socket/), { target: { value: '' } })
+    expect(screen.queryByRole('status')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '检查这台机器' }))
+    await waitFor(() => { expect(harness.posts).toHaveLength(2) })
+    expect(harness.posts[1]!.body).toMatchObject({ route: { via: 'tailscale' } })
+    expect(harness.posts[1]!.body.route).not.toHaveProperty('socket')
+    fireEvent.click(await screen.findByRole('button', { name: '指纹对，连接并安装' }))
+    await waitFor(() => { expect(harness.posts).toHaveLength(3) })
+    expect(harness.posts[2]!.body).toMatchObject({ action: 'host-add', route: { via: 'tailscale' }, fingerprint: FINGERPRINT })
+  })
+
+  it('changes how an existing machine is reached, from what it shows now, and says why when that is refused', async () => {
+    const refused = { current: true }
+    const harness = fakeRequest({
+      roster: dashboard([], { hosts: [LOCAL_HOST, { ...MINI_HOST, address: 'lisihao@192.168.2.200:22' }] }),
+      reply: body => body.action === 'host-route' && refused.current
+        ? Response.json({ error: 'GOUZI_FAILED', message: '这个地址上的机器和登记的不是同一台' }, { status: 502 })
+        : Response.json({ ...MINI_HOST, route: { via: 'tailscale' } }),
+    })
+    await openHostStep(harness)()
+    fireEvent.click(screen.getByRole('button', { name: /修改 Mac mini 的连接方式/ }))
+    expect(screen.getByLabelText(/地址（IP/)).toHaveProperty('value', '192.168.2.200')
+    expect(screen.getByLabelText('端口')).toHaveProperty('value', '22')
+    fireEvent.change(screen.getByLabelText(/地址（IP/), { target: { value: '100.114.161.62' } })
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '10022' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /通过 Tailscale 连接/ }))
+    fireEvent.click(screen.getByRole('button', { name: '检查并切换' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('不是同一台')
+    expect(screen.getByLabelText(/地址（IP/)).toHaveProperty('value', '100.114.161.62')
+    refused.current = false
+    fireEvent.click(screen.getByRole('button', { name: '检查并切换' }))
+    await waitFor(() => { expect(screen.queryByRole('button', { name: '检查并切换' })).toBeNull() })
+    expect(harness.posts.filter(post => post.body.action === 'host-route').map(post => post.body)).toEqual([
+      { action: 'host-route', hostId: 'ssh-1', address: '100.114.161.62', port: 10_022, route: { via: 'tailscale' } },
+      { action: 'host-route', hostId: 'ssh-1', address: '100.114.161.62', port: 10_022, route: { via: 'tailscale' } },
+    ])
+  })
+
+  it('shows that a machine is reached over Tailscale, and offers a direct reroute back', async () => {
+    const harness = fakeRequest({
+      roster: dashboard([], { hosts: [LOCAL_HOST, { ...MINI_HOST, address: 'lisihao@100.114.161.62:10022', route: { via: 'tailscale', socket: '/x/ts.sock' } }] }),
+      reply: () => Response.json(MINI_HOST),
+    })
+    await openHostStep(harness)()
+    expect(screen.getByRole('radio', { name: /经 Tailscale/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /修改 Mac mini 的连接方式/ }))
+    expect(screen.getByRole('checkbox', { name: /通过 Tailscale 连接/ })).toHaveProperty('checked', true)
+    expect(screen.getByLabelText(/Tailscale 的 socket/)).toHaveProperty('value', '/x/ts.sock')
+    fireEvent.click(screen.getByRole('checkbox', { name: /通过 Tailscale 连接/ }))
+    fireEvent.change(screen.getByLabelText(/地址（IP/), { target: { value: '192.168.2.200' } })
+    fireEvent.click(screen.getByRole('button', { name: '检查并切换' }))
+    await waitFor(() => { expect(harness.posts.at(-1)!.body).toEqual({ action: 'host-route', hostId: 'ssh-1', address: '192.168.2.200', port: 10_022 }) })
+  })
+
+  it('opens the reroute form with an empty address and the default port when a host shows no readable address', async () => {
+    const harness = fakeRequest({ roster: dashboard([], { hosts: [LOCAL_HOST, { hostId: 'ssh-9', label: '旧主机', kind: 'ssh' }] }), reply: () => Response.json(MINI_HOST) })
+    await openHostStep(harness)()
+    fireEvent.click(screen.getByRole('button', { name: /修改 旧主机 的连接方式/ }))
+    expect(screen.getByLabelText(/地址（IP/)).toHaveProperty('value', '')
+    expect(screen.getByLabelText('端口')).toHaveProperty('value', '22')
+    expect(screen.getByRole('button', { name: '检查并切换' })).toHaveProperty('disabled', true)
+  })
+
   it('shows why a machine could not be reached and keeps the form', async () => {
     const harness = fakeRequest({
       roster: dashboard([]),

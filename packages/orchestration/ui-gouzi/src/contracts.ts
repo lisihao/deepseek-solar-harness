@@ -116,8 +116,21 @@ export interface GouziHostProjection {
   readonly kind: 'local' | 'ssh'
   /** `user@address:port` of an SSH host; absent for the local one. */
   readonly address?: string
+  /** How an SSH host is reached when not directly; absent for a direct connection and for the local host. */
+  readonly route?: GouziSshRoute
   /** Version of DSH Desktop installed on an SSH host when it was last checked. */
   readonly appVersion?: string
+}
+
+/**
+ * Reach an SSH host through Tailscale instead of directly: the connection is relayed by the Tailscale CLI's `nc`,
+ * so the host's Tailscale name or `100.x` address works from any network. The CLI binary is chosen by the Desktop
+ * configuration, never by a request.
+ */
+export interface GouziSshRoute {
+  readonly via: 'tailscale'
+  /** Absolute path of the tailscaled socket to use; absent uses the CLI's default socket. */
+  readonly socket?: string
 }
 
 /** The key a remote machine presented, for the user to compare before trusting it. */
@@ -175,18 +188,21 @@ export type GouziControlRequest =
     readonly projects: readonly string[]
   }
   | { readonly action: 'check-projects'; readonly hostId: string; readonly projects: readonly string[] }
-  | { readonly action: 'host-inspect'; readonly address: string; readonly port: number; readonly user: string }
+  | { readonly action: 'host-inspect'; readonly address: string; readonly port: number; readonly user: string; readonly route?: GouziSshRoute }
   | {
     readonly action: 'host-add'
     readonly address: string
     readonly port: number
     readonly user: string
+    readonly route?: GouziSshRoute
     /** Login password; used once to install a dedicated key and never stored. */
     readonly password: string
     /** Fingerprint the user confirmed after `host-inspect`. */
     readonly fingerprint: string
     readonly label?: string
   }
+  /** Change how an existing host is reached; accepted only when it presents the host key already pinned. */
+  | { readonly action: 'host-route'; readonly hostId: string; readonly address: string; readonly port: number; readonly route?: GouziSshRoute }
   | { readonly action: 'host-remove'; readonly hostId: string }
   | { readonly action: 'browse'; readonly hostId: string; readonly path?: string }
   | {

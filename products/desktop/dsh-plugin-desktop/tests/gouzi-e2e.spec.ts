@@ -475,6 +475,7 @@ describe.sequential('Gouzi members as real processes', () => {
       hosts() { return inner.hosts() }
       inspectHost(target: GouziSshTarget) { return inner.inspectHost(target) }
       addHost(input: Parameters<GouziHostService['addHost']>[0]) { return inner.addHost(input) }
+      rerouteHost(input: Parameters<GouziHostService['rerouteHost']>[0]) { return inner.rerouteHost(input) }
       removeHost(hostId: string) { return inner.removeHost(hostId) }
       browse(hostId: string, path?: string) { return inner.browse(hostId, path) }
       resolveRepository(hostId: string, path: string) { return inner.resolveRepository(hostId, path) }

@@ -366,6 +366,15 @@ abstract inspectHost(target: GouziSshTarget): Promise<GouziHostInspection>
 abstract addHost(input: GouziSshTarget & { readonly password: string readonly fingerprint: string readonly label?: string }): Promise<GouziHostProjection>
 
 /**
+ * Change the address, port, or route through which an existing SSH host is reached. The machine reached must
+ * present the host key already pinned for the host, so a reroute cannot move a member onto another machine.
+ * @param input - host id and its new address, port, and route (absent for a direct connection).
+ * @returns the updated host.
+ * @throws Error - when the host is unknown, unreachable, presents a different key, or lacks a usable DSH Desktop.
+ */
+abstract rerouteHost(input: { readonly hostId: string readonly address: string readonly port: number readonly route?: GouziSshRoute }): Promise<GouziHostProjection>
+
+/**
  * Forget an SSH host and its dedicated key. The caller has checked that no live member uses it.
  * @param hostId - host id.
  */
@@ -423,7 +432,7 @@ abstract start(hostId: string, gouziId: string): Promise<GouziProcessInfo>
 abstract stop( hostId: string, gouziId: string, options?: { readonly reclaimResident?: boolean }, ): Promise<{ readonly processTreeStopped: boolean }>
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/host-service.ts:50`](../../packages/orchestration/ui-gouzi/src/host-service.ts)
+Source: [`packages/orchestration/ui-gouzi/src/host-service.ts:52`](../../packages/orchestration/ui-gouzi/src/host-service.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 

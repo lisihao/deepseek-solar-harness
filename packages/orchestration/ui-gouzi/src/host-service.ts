@@ -1,13 +1,15 @@
 /** Service Definition of the process lifecycle of Gouzi members on this host. */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { GouziFolderListing, GouziHostInspection, GouziHostProjection } from './contracts.ts'
+import type { GouziFolderListing, GouziHostInspection, GouziHostProjection, GouziSshRoute } from './contracts.ts'
 
 /** An SSH machine to add as a host. */
 export interface GouziSshTarget {
   readonly address: string
   readonly port: number
   readonly user: string
+  /** Absent means a direct connection. */
+  readonly route?: GouziSshRoute
 }
 
 /** A selected directory and its stable host-local identity; Git origin is optional metadata. */
@@ -80,6 +82,20 @@ export abstract class GouziHostService extends Service {
     readonly password: string
     readonly fingerprint: string
     readonly label?: string
+  }): Promise<GouziHostProjection>
+
+  /**
+   * Change the address, port, or route through which an existing SSH host is reached. The machine reached must
+   * present the host key already pinned for the host, so a reroute cannot move a member onto another machine.
+   * @param input - host id and its new address, port, and route (absent for a direct connection).
+   * @returns the updated host.
+   * @throws Error - when the host is unknown, unreachable, presents a different key, or lacks a usable DSH Desktop.
+   */
+  abstract rerouteHost(input: {
+    readonly hostId: string
+    readonly address: string
+    readonly port: number
+    readonly route?: GouziSshRoute
   }): Promise<GouziHostProjection>
 
   /**
