@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-12-kennel-thread-space.md
-2026-10-12-kennel-thread-space.md: c2881ad1c2a25f0654ff1f6428fc552cb6b7332d
-2026-10-12-kennel-thread-space.zh.md: 7ac38fbe548aea81c9bcda70efe6b8b1b00275b3
+2026-10-12-kennel-thread-space.md: 88bbbb43ecf346c7fa4687c04f3fd521a8bd09a3
+2026-10-12-kennel-thread-space.zh.md: b2c7cab1489f28efa7c68c6ccbe930c3b993d0b6
