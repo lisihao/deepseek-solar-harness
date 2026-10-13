@@ -38,6 +38,29 @@ export interface ResidentLane {
 
 type DispatchData = Extract<SessionEvent, { type: 'physical-operator/dispatch' }>['data']
 
+/**
+ * The model and effort the daemon resolved for a command, recorded on its `turn.accepted` progress. Smart Auto picks
+ * them when the dispatch names none, so this, not the dispatch, is what the lane is locked to.
+ * @param events - one session's ordered durable log.
+ * @param commandId - the dispatch's command.
+ * @returns the resolved profile, or `undefined` when no accepted turn was projected for the command.
+ */
+export function resolvedProfile(
+  events: readonly SessionEvent[],
+  commandId: string,
+): PhysicalOperatorExecutionPreference | undefined {
+  for (const event of events) {
+    if (event.type !== 'physical-operator/progress' || event.data.commandId !== commandId || event.data.type !== 'turn.accepted') continue
+    const profile = (event.data.data as { profile?: { model?: unknown; effort?: unknown } }).profile
+    if (profile === undefined) continue
+    return {
+      ...typeof profile.model === 'string' ? { model: profile.model } : {},
+      ...typeof profile.effort === 'string' ? { effort: profile.effort as NonNullable<PhysicalOperatorExecutionPreference['effort']> } : {},
+    }
+  }
+  return undefined
+}
+
 function sameProfile(a: PhysicalOperatorExecutionPreference, b: PhysicalOperatorExecutionPreference): boolean {
   return a.model === b.model && (a.effort ?? undefined) === (b.effort ?? undefined)
 }
@@ -68,9 +91,11 @@ export function residentLanes(
 ): ResidentLane[] {
   const lanes = new Map<string, ResidentLane>()
   for (const event of events) {
-    if (!acceptedResidentDispatch(event, operatorId, refused) || event.data.residentProfile === undefined) continue
+    if (!acceptedResidentDispatch(event, operatorId, refused)) continue
+    const profile = resolvedProfile(events, event.data.commandId) ?? event.data.residentProfile
+    if (profile === undefined) continue
     const laneId = event.data.residentLaneId
-    lanes.set(laneId ?? '', { laneId, profile: event.data.residentProfile, lastSeq: event.seq })
+    lanes.set(laneId ?? '', { laneId, profile, lastSeq: event.seq })
   }
   return [...lanes.values()].sort((a, b) => b.lastSeq - a.lastSeq)
 }

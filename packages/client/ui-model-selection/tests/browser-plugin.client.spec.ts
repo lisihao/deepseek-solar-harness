@@ -59,6 +59,8 @@ async function bench() {
   const ctx = new Context()
   let current: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   const calls = { models: 0, select: 0 }
+  /** When set, `selectModel` waits for it, which keeps a selection in flight. */
+  let selectGate: PromiseWithResolvers<undefined> | undefined
   let groups: typeof GROUPS = GROUPS
   let failures: { id: string; name: string; message: string }[] = []
   let modelsError: string | undefined
@@ -70,8 +72,9 @@ async function bench() {
         result: { ok: true as const, value: { current, routable, groups, failures } },
       })
     },
-    selectModel: (payload: { provider: string; model: string; reasoningEffort?: string }) => {
+    selectModel: async (payload: { provider: string; model: string; reasoningEffort?: string }) => {
       calls.select += 1
+      await selectGate?.promise
       current = {
         provider: payload.provider,
         model: payload.model,
@@ -112,8 +115,18 @@ async function bench() {
   ctx.provide('locale', new LocaleRuntime(ctx))
   const scopes = new Map<SessionId, Context>()
   const addressed = new Set<SessionId>()
+  const faces = new Map<SessionId, { running: boolean; listeners: Set<() => void> }>()
   ctx.provide('sessions', {
     scope: (id: SessionId) => scopes.get(id),
+    binding: (id: SessionId) => {
+      const face = faces.get(id)
+      return face === undefined ? undefined : {
+        session: {
+          getSnapshot: () => ({ running: face.running }),
+          subscribe: (listener: () => void) => { face.listeners.add(listener); return () => { face.listeners.delete(listener) } },
+        },
+      }
+    },
     subagentAddress: (id: SessionId) => addressed.has(id)
       ? { parentSessionId: sid('parent'), childSessionId: id, mode: 'continuable' as const }
       : undefined,
@@ -123,12 +136,20 @@ async function bench() {
   await fiber.await()
   await ctx.plugin(function probe() {}).await()
   const mint = (key: string) => {
+    faces.set(sid(key), { running: false, listeners: new Set() })
     const handle = createScope(ctx, sid(key))
     scopes.set(sid(key), handle.ctx)
     return handle
   }
+  /** Flip a session's running flag and notify its subscribers, as the session notifier does on every flush. */
+  const setRunning = (key: string, running: boolean) => {
+    const face = faces.get(sid(key))!
+    face.running = running
+    for (const listener of [...face.listeners]) listener()
+  }
   return {
-    ctx, fiber, mint, calls,
+    ctx, fiber, mint, calls, setRunning,
+    holdSelect: () => { selectGate = Promise.withResolvers<undefined>(); return selectGate },
     contribution: () => contribution!,
     seat: () => seats.get('conversation.input.model')!,
     hostCurrent: () => current,
@@ -147,6 +168,33 @@ async function bench() {
 const projection = (id: string) => ({ sessionId: sid(id) })
 
 describe('ui-model-selection dual entry', () => {
+  it('reloads the directory when a turn ends, not when it starts or while it streams, and never over a selection in flight', async () => {
+    const b = await bench()
+    b.mint('s1')
+    const face = b.seat().inject!(sid('s1'))
+    const settled = async () => { await new Promise(resolve => setTimeout(resolve, 0)) }
+    const before = b.calls.models
+    b.setRunning('s1', true)
+    b.setRunning('s1', true)
+    await settled()
+    expect(b.calls.models).toBe(before)
+    b.setRunning('s1', false)
+    await settled()
+    expect(b.calls.models).toBe(before + 1)
+    b.setRunning('s1', false)
+    await settled()
+    expect(b.calls.models).toBe(before + 1)
+
+    const gate = b.holdSelect()
+    const selecting = face.select({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    b.setRunning('s1', true)
+    b.setRunning('s1', false)
+    await settled()
+    expect(b.calls.models).toBe(before + 1)
+    gate.resolve(undefined)
+    expect(await selecting).toBe(true)
+  })
+
   it('registers the /model contribution and the composer model seat', async () => {
     const b = await bench()
     expect(b.contribution().name).toBe('model')

@@ -507,6 +507,19 @@ describe('Web session model selection', () => {
       await ctx.fiber.dispose()
     })
 
+    it('prefers the profile the daemon resolved for the dispatch over what the dispatch named', async () => {
+      const { ctx, agent, sessionId } = await harness({ provider: 'dsh-physical-operator', model: 'codex' })
+      agent.session.append('physical-operator/dispatch', dispatch({ commandId: 'smart', operatorId: 'codex' }))
+      agent.session.append('physical-operator/progress', { commandId: 'other', operatorId: 'codex', sequence: 1, type: 'turn.accepted', time: 't', data: { commandId: 'other', profile: { model: 'not-this' } } })
+      agent.session.append('physical-operator/progress', { commandId: 'smart', operatorId: 'codex', sequence: 2, type: 'turn.settled', time: 't', data: { commandId: 'smart' } })
+      const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+      expect(expectValue(await api.sessions.models(request({ sessionId }))).effective).toEqual({ provider: 'dsh-physical-operator', model: 'codex' })
+      agent.session.append('physical-operator/progress', { commandId: 'smart', operatorId: 'codex', sequence: 3, type: 'turn.accepted', time: 't', data: { commandId: 'smart', profile: { model: 'gpt-5.6-luna', effort: 'low' } } })
+      expect(expectValue(await api.sessions.models(request({ sessionId }))).effective)
+        .toEqual({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-luna', reasoningEffort: 'low' })
+      await ctx.fiber.dispose()
+    })
+
     it('reads an effort-less native profile without inventing an effort', async () => {
       const { ctx, agent, sessionId } = await harness({ provider: 'dsh-physical-operator', model: 'codex' })
       agent.session.append('physical-operator/dispatch', dispatch({ operatorId: 'codex', residentProfile: { model: 'gpt-5.6-sol' } }))
