@@ -18,6 +18,7 @@
 - paragraph: I will read both files before answering.
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":
@@ -45,6 +46,7 @@
 - paragraph: DONE
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":

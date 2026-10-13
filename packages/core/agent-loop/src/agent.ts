@@ -375,6 +375,7 @@ export class ReactLoopAgent implements Agent {
         source: {
           provider: request.provider,
           model: request.model,
+          ...request.reasoningEffort === undefined ? {} : { reasoningEffort: request.reasoningEffort },
           ...assembler.replayState !== undefined ? { replayState: assembler.replayState } : {},
         },
       })

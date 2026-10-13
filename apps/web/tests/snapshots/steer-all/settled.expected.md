@@ -33,6 +33,7 @@
 - paragraph: "Got it: BANANA and ORANGE."
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":
