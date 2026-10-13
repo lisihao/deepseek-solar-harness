@@ -247,6 +247,8 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
   const [projectsValid, setProjectsValid] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
+  const [adopted, setAdopted] = useState<GouziMemberProjection>()
+  const [adoptedModel, setAdoptedModel] = useState('')
   const trimmed = name.trim()
   const valid = [
     true, trimmed.length > 0 && trimmed.length <= 40, hosts.some(host => host.hostId === hostId),
@@ -258,12 +260,39 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
     setPending(true)
     setError(undefined)
     try {
-      await controlGouzi(request, { action: 'adopt', name: trimmed, avatarId, role, hostId, projects: [...paths] })
+      setAdopted(await controlGouzi(request, { action: 'adopt', name: trimmed, avatarId, role, hostId, projects: [...paths] }))
+    } catch (cause) {
+      setError(messageOf(cause))
+    } finally {
+      setPending(false)
+    }
+  }
+  const pinAdopted = async (): Promise<void> => {
+    if (adopted === undefined || adoptedModel === '') { onDone(); return }
+    setPending(true)
+    setError(undefined)
+    try {
+      await controlGouzi(request, { action: 'edit', gouziId: adopted.gouziId, model: adoptedModel })
       onDone()
     } catch (cause) {
       setError(messageOf(cause))
       setPending(false)
     }
+  }
+  if (adopted !== undefined) {
+    return (
+      <section className={css.wizard} aria-label={`${adopted.name} 已加入狗窝`}>
+        <p className={css.hint}>{adopted.name} 已加入狗窝。可以现在给它固定一个模型，也可以以后在“修改”里设置。</p>
+        <ModelField request={request} gouziId={adopted.gouziId} pinned={undefined} value={adoptedModel} onChange={setAdoptedModel} />
+        {error !== undefined && <p className={css.error} role="alert">{error}</p>}
+        <footer className={css.wizardActions}>
+          <button type="button" className={css.secondary} onClick={onDone} disabled={pending}>以后再说</button>
+          <button type="button" className={css.primary} disabled={pending || adoptedModel === ''} onClick={() => { void pinAdopted() }}>
+            {pending ? '正在保存…' : '固定这个模型'}
+          </button>
+        </footer>
+      </section>
+    )
   }
   return (
     <section className={css.wizard} aria-label="领养一只狗子">
@@ -332,6 +361,43 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
   )
 }
 
+/** The model a member is pinned to, chosen from what its runtimes currently offer. */
+function ModelField({ request, gouziId, pinned, value, onChange }: {
+  request: BrowserRequest
+  gouziId: GouziMemberProjection['gouziId']
+  pinned: string | undefined
+  value: string
+  onChange: (model: string) => void
+}) {
+  const [offered, setOffered] = useState<readonly string[]>()
+  const [reloads, setReloads] = useState(0)
+  useEffect(() => {
+    let current = true
+    setOffered(undefined)
+    callGouzi<GouziModelOptions>(request, { action: 'models', gouziId })
+      .then((reply) => { if (current) setOffered(reply.models) })
+      .catch(() => { if (current) setOffered([]) })
+    return () => { current = false }
+  }, [request, gouziId, reloads])
+  // A pinned model the runtimes no longer offer stays selectable so the user sees it and can change it.
+  const options = offered === undefined ? [] : [...new Set([...offered, ...pinned === undefined ? [] : [pinned]])]
+  return (
+    <label className={css.field}>
+      <span>模型</span>
+      <select value={value} disabled={offered === undefined} onChange={(event) => { onChange(event.target.value) }}>
+        <option value="">自动选择</option>
+        {options.map(id => (
+          <option key={id} value={id}>{offered?.includes(id) === false ? `${id}（当前不可用）` : id}</option>
+        ))}
+      </select>
+      <p className={css.hint}>
+        固定后，这只狗子的任务只会派给提供该模型的运行环境。狗子不在线时没有可选项，保持“自动选择”即可。
+        {offered?.length === 0 && <button type="button" className={css.link} onClick={() => { setReloads(count => count + 1) }}>重新读取</button>}
+      </p>
+    </label>
+  )
+}
+
 function EditForm({ member, request, onDone, onCancel }: {
   member: GouziMemberProjection
   request: BrowserRequest
@@ -342,17 +408,7 @@ function EditForm({ member, request, onDone, onCancel }: {
   const [avatarId, setAvatarId] = useState<GouziAvatar>(member.avatarId)
   const [role, setRole] = useState<GouziRoleId>(member.role)
   const [model, setModel] = useState(member.model ?? '')
-  const [offered, setOffered] = useState<readonly string[]>()
   const [error, setError] = useState<string>()
-  useEffect(() => {
-    let current = true
-    callGouzi<GouziModelOptions>(request, { action: 'models', gouziId: member.gouziId })
-      .then((reply) => { if (current) setOffered(reply.models) })
-      .catch(() => { if (current) setOffered([]) })
-    return () => { current = false }
-  }, [request, member.gouziId])
-  // A pinned model the runtimes no longer offer stays selectable so the user sees it and can change it.
-  const options = offered === undefined ? [] : [...new Set([...offered, ...member.model === undefined ? [] : [member.model]])]
   const save = async (): Promise<void> => {
     try {
       await controlGouzi(request, {
@@ -371,18 +427,7 @@ function EditForm({ member, request, onDone, onCancel }: {
         <input value={name} maxLength={40} onChange={(event) => { setName(event.target.value) }} />
       </label>
       <RolePicker value={role} onChange={setRole} />
-      <label className={css.field}>
-        <span>模型</span>
-        <select value={model} disabled={offered === undefined} onChange={(event) => { setModel(event.target.value) }}>
-          <option value="">自动选择</option>
-          {options.map(id => (
-            <option key={id} value={id}>{offered?.includes(id) === false ? `${id}（当前不可用）` : id}</option>
-          ))}
-        </select>
-        <p className={css.hint}>
-          固定后，这只狗子的任务只会派给提供该模型的运行环境。狗子不在线时没有可选项，保持“自动选择”即可。
-        </p>
-      </label>
+      <ModelField request={request} gouziId={member.gouziId} pinned={member.model} value={model} onChange={setModel} />
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
       <footer className={css.wizardActions}>
         <button type="button" className={css.secondary} onClick={onCancel}>取消</button>
