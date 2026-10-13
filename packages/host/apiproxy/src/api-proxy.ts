@@ -1310,6 +1310,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return undefined
   }
 
+  /** The model and effort the Resident daemon resolved for a command, from its `turn.accepted` progress. */
+  function resolvedNativeProfile(agent: Agent, commandId: string | undefined): { model?: string; effort?: string } | undefined {
+    if (commandId === undefined) return undefined
+    for (const event of agent.session.events) {
+      if ((event.type as string) !== 'physical-operator/progress') continue
+      const data = event.data as { commandId?: string; type?: string; data?: { profile?: { model?: string; effort?: string } } }
+      if (data.commandId === commandId && data.type === 'turn.accepted') return data.data?.profile
+    }
+    return undefined
+  }
+
   /**
    * The configuration the most recent step was actually sent with, or `undefined` before any step ran. A native
    * physical-operator step logs only the operator id as its model, so the native model and effort come from the
@@ -1322,9 +1333,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
       const event = agent.session.events[index]
       if (event === undefined || (event.type as string) !== 'physical-operator/dispatch') continue
-      const data = event.data as { operatorId?: string; residentProfile?: { model?: string; effort?: string } }
+      const data = event.data as { commandId?: string; operatorId?: string; residentProfile?: { model?: string; effort?: string } }
       if (data.operatorId !== logged.model) continue
-      const profile = data.residentProfile
+      // The daemon's resolved profile (Smart Auto) wins over the dispatch's, which may name no model.
+      const profile = resolvedNativeProfile(agent, data.commandId) ?? data.residentProfile
       if (profile?.model === undefined) return logged
       return {
         provider: logged.provider,

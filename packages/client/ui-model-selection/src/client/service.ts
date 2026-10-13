@@ -177,6 +177,20 @@ export class ModelDirectoryResolver extends Service {
         }
       }, 'ui-model-selection: composer block')
     }
+    // The browser learns of a step only through the session's running flag, so the directory is re-read when a turn
+    // ends: the menu then shows the configuration the turn really ran with. The flag also flips at the start of a turn,
+    // before the first step logs its configuration, so only the falling edge reloads; a selection in flight is left
+    // alone because a reload would supersede it.
+    const session = sessions.binding(sessionId)?.session
+    if (session !== undefined) {
+      let wasRunning = session.getSnapshot().running
+      actx.effect(() => session.subscribe(() => {
+        const running = session.getSnapshot().running
+        const turnEnded = wasRunning && !running
+        wasRunning = running
+        if (turnEnded && directory.store.getSnapshot().status !== 'selecting') directory.load().catch(() => undefined)
+      }), 'ui-model-selection: reload after a turn')
+    }
     actx.effect(() => () => {
       directory.dispose()
       live.directories.delete(sessionId)
