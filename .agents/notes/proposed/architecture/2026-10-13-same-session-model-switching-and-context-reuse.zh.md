@@ -9,7 +9,7 @@ Status: proposed
 用户希望留在同一个 DSH 会话里，工作内容变了就换模型或推理强度，并且每个模型都知道别的模型活跃期间发生了什么，同时不要每次请求都重复付同样的提示词成本。对已安装的 3.41.0 做的审计，加上对 3.42.1 源码的设计核对，找到三个缺口。
 
 - **原生 lane 锁死首个 profile。** Resident 的 Codex 或 Claude 会话被锁在首个被接受命令的模型和强度上。明确选择另一个配置会被 `EXECUTION_PROFILE_CONFLICT` 拒绝（`packages/physical-operator/resident-operator-local/src/store.ts:628-647`）。`session.reset` 能解除锁，但同时清掉原生线程关联，所以它不是切换。自动路由现在会沿用已锁定的 profile，不再失败（[profile 沿用](../../implemented/feature/2026-08-16-resident-execution-profiles.md)），但明确选择另一个原生模型仍会冲突。
-- **切回原生线程时不补中间的对话。** 被恢复的原生线程只收到当前任务、运行时上下文和任务模板。operator context envelope 明确规定，此前的用户、助手和工具历史不进入它（`packages/core/system-prompt/src/envelope.ts:84-93`）。如果需求在 DeepSeek 轮次里变了，原生线程并不知道。
+- **切回原生线程时不补中间的对话。** 被恢复的原生线程只收到当前任务、运行时上下文和任务模板。operator context envelope 明确规定，此前的用户、助手和工具历史不进入它（`packages/core/system-prompt/src/envelope.ts:80-93`）。如果需求在 DeepSeek 轮次里变了，原生线程并不知道。
 - **初始请求很大。** 被审计的会话里系统提示约 19.7 万字符，其中约 16.35 万是生成的工具 SDK；技能目录约 39.5 万字符。这些是字符数，不是 token 数。技能目录是 `source.kind = 'skill-catalog'` 的追加 `user/message`，目录变化时会再追加一条，旧的留在历史里直到压缩（`packages/skill/tool-skill/src/index.ts`）。
 
 已经能用、必须保持不变的部分：
@@ -23,9 +23,11 @@ Status: proposed
 
 ### 1. 普通 API 模型：不加新状态
 
-保持现状。用户的选择在下一个 step 生效，提交点就是现有的 `request/header`。只增加展示：模型菜单区分**已选择**和**当前生效**（下一个 step 开始前两者不同），每条回复显示实际服务它的配置。消息的 `source` 已经记录 provider 和 model；强度只存在于它之前的 `request/header`，所以 UI 从那里推导，日志不变。
+保持现状。用户的选择在下一个 step 生效，提交点就是现有的 `request/header`。只增加展示：模型菜单区分**已选择**和**当前生效**（下一个 step 开始前两者不同），每条回复显示实际服务它的配置。消息的 `source` 已经记录 provider 和 model；对 API 回复，强度只存在于它之前的 `request/header`，所以 UI 从那里推导，日志不变。原生回复的 source 是 router，那个 header 里也是 router 的配置；它实际使用的模型和强度在对应 `physical-operator/dispatch` 的 `residentProfile` 里，UI 从那里读取。
 
-此前提出的"持久化 requested、waiting、preparing、committed 状态"不用于这条路径。选择本来就推迟到 step 边界，再加一个持久化的待生效事件只会增加没有读者的日志词汇，也会重复 `llm-fallbacks` 插件撤掉切换事件时纠正过的错误。
+已知限制：`picked` 在 Host 内存里（`selectionFor` 先读 `picked`，再读最近的 `request/header`，最后读默认值）。最后一个 step 之后、下一个 step 之前做出的选择，如果 Host 在此期间重启就会丢失，菜单随后显示之前的值。这个窗口在下一个 step 开始时结束。
+
+此前提出的"持久化 requested、waiting、preparing、committed 状态"不用于这条路径。选择本来就推迟到 step 边界，这些状态只能覆盖上面的重启窗口，而持久化的待生效事件要为它增加一套日志词汇。`llm-fallbacks` 插件出于同样的理由撤掉了它记录的切换事件。不记录的代价就是那个窗口。
 
 ### 2. 原生模型：每个配置一条 lane
 
@@ -34,6 +36,7 @@ Resident store 以 `(operator, workspace, lane)` 为键（`store.ts:352`），�
 - 现有会话的第一条 lane 保持 `laneId = parent.id`，已存储的会话不迁移、不重置。不同 profile 使用 `<parent.id>~<profileKey>`，其中 `profileKey` 是模型和强度规范化后的短键。显式工具路径保持 `explicit-tool:<id>` 并加同样的后缀。
 - `physical-operator/dispatch`（`packages/physical-operator/tool-physical-operator/src/index.ts:105-118`）增加可选的 `laneId`。它是持久化的 Host 决定，所以 lane 在命令发送前就确定，恢复时沿用它。`residentLaneProfile`（`:1569`）改成一张从 lane 到其最近被接受 profile 的表，从这些事件读取。
 - 选择规则：明确点名的原生模型使用 profile 相同的 lane，没有就新建一条。没有明确选择时使用最近一条 lane，这保持了已发布的 profile 沿用行为。
+- 没有 `laneId` 的 `dispatch`（这次改动之前写入的所有日志）表示 lane `parent.id`。显式工具路径记录的是 `physical-operator/tool-dispatch` 而不是 `dispatch`，而且现在不传 profile；第一阶段不覆盖它，它的 lane 仍是 `explicit-tool:<id>`，沿用它第一次使用的 profile。
 - `commandId` 是 `resident-` 加 agent id 与 message id 的哈希（`:1644`），不依赖 lane，而 daemon 把 lane 计入它的请求哈希。所以重试一次未被接受的 dispatch 必须沿用记录下来的 lane，不能在同一个 command id 下换另一条 lane。
 - 互斥：一个 DSH 会话至多有一条 lane 存在未完成的 dispatch（`recoverableDispatch`，`:1796`）。daemon 的忙碌检查只在单条 lane 内，所以这个跨 lane 守卫是新增的。结果未知就保持未知：沿用现有 indeterminate 规则，不在另一条 lane 上重放。
 
@@ -73,7 +76,7 @@ Resident store 不变：state schema 6 与 protocol 14 保持，因此没有单�
 
 ## Alternatives considered
 
-**持久化 requested 与 committed 的选择事件。** 选择本来就在 step 边界生效，并由 `request/header` 记录。新增事件类型要加目录条目并做兼容性决定，却没有需要它的读者。
+**持久化 requested 与 committed 的选择事件。** 选择本来就在 step 边界生效，并由 `request/header` 记录。新增事件类型要加目录条目并做兼容性决定，它唯一的读者是第 1 节描述的重启窗口。不记录就是接受这个损失。
 
 **放开 Resident 的 profile 锁，在线程内切换。** 它需要改锁、做 store 迁移，并依赖没有验证过的原生行为，而且没有办法回到前一个 profile 的线程。
 
@@ -90,7 +93,7 @@ Resident store 不变：state schema 6 与 protocol 14 保持，因此没有单�
 第一阶段，切换：
 
 - 一个会话先用 Codex Sol 低强度，再用 DeepSeek，再用 Codex Astra 中强度，不出现 `EXECUTION_PROFILE_CONFLICT`。第二个 Codex 配置在自己的 lane 上运行，第一条 lane 保留。
-- Codex A，然后 DeepSeek 把要求改成 B，再回到 Codex "继续"：原生轮次从交接里得到 B，已经完成的动作不重复。
+- Codex A，然后 DeepSeek 把要求改成 B，再回到 Codex "继续"：原生轮次按 B 执行并有产物可验收，已经完成的动作不重复。
 - 切回某条 lane 时使用该 lane 的已确认位置，只发送之后的内容。
 - 结果未知的 dispatch 用原 command id 和记录的 lane 对账。不发第二个业务命令，也不用别的 lane。
 - 同一会话的两条 lane 不会同时运行。
@@ -106,6 +109,8 @@ Resident store 不变：state schema 6 与 protocol 14 保持，因此没有单�
 
 ## Risks
 
+- 回滚到 3.42.x 时数据不会损坏，但功能退回原状：旧程序忽略 `laneId`，读到最新一次 dispatch（新 lane 的）的 profile，却把它发到 `parent.id` 那条 lane，`EXECUTION_PROFILE_CONFLICT` 又会出现。
+- 交接内容是作为运行时上下文的文本块送到原生线程的，用户修正的分量可能低于普通的用户消息。收到文本不等于遵从了它，验收用例检查的是结果。
 - 信封 digest 或请求哈希在恢复时可能变化，导致重放冲突。第一个测试回答这个问题。
 - 每个配置都要付出一个冷启动的原生线程的成本，所以来回切换不是免费的。成本会展示出来，而且用户的明确选择不会为了省成本被降级。
 - 每个配置一条 lane，可能留下许多空闲的原生线程。有了用量数据之后需要一条保留规则。

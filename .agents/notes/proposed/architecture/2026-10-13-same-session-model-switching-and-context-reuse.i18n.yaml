@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-10-13-same-session-model-switching-and-context-reuse.md
-2026-10-13-same-session-model-switching-and-context-reuse.md: 0d5ad5d1d6a384bde74c18cf8055419b86eacc9f
-2026-10-13-same-session-model-switching-and-context-reuse.zh.md: c63a29f79d70d258f7e4ac8d4680612ceccfe54c
+2026-10-13-same-session-model-switching-and-context-reuse.md: c4d4bccc5a245d3a6b4c81d5b510b63240331b27
+2026-10-13-same-session-model-switching-and-context-reuse.zh.md: 57753446d5c7b0b8b26252dd15a322227d0aa0cf

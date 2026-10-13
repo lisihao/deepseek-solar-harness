@@ -9,7 +9,7 @@ English | [中文](2026-10-13-same-session-model-switching-and-context-reuse.zh.
 A user wants to stay in one DSH session, change the model or reasoning effort when the work changes, and have every model understand what happened while another one was active, without paying for the same prompt text again on every request. An audit of installed 3.41.0 and a design review of the 3.42.1 source found three gaps.
 
 - **A native lane locks its first profile.** A Resident Codex or Claude session is locked to the model and effort of its first accepted command. A different explicit choice is refused with `EXECUTION_PROFILE_CONFLICT` (`packages/physical-operator/resident-operator-local/src/store.ts:628-647`). `session.reset` clears the lock but also clears the native thread link, so it is not a switch. The routed path now reuses a locked profile instead of failing ([profile reuse](../../implemented/feature/2026-08-16-resident-execution-profiles.md)), but an explicit choice of another native model still conflicts.
-- **Returning to a native thread skips the conversation in between.** A resumed native thread receives the current task, the runtime context and the task templates. The operator context envelope states that prior user, assistant and tool history never enters it (`packages/core/system-prompt/src/envelope.ts:84-93`). If the requirement changed in a DeepSeek turn, the native thread does not hear about it.
+- **Returning to a native thread skips the conversation in between.** A resumed native thread receives the current task, the runtime context and the task templates. The operator context envelope states that prior user, assistant and tool history never enters it (`packages/core/system-prompt/src/envelope.ts:80-93`). If the requirement changed in a DeepSeek turn, the native thread does not hear about it.
 - **The initial request is large.** The audited session carried about 197,000 characters of system prompt, about 163,500 of them generated tool SDK, and a skill catalog of about 395,000 characters. These are characters, not tokens. The skill catalog is an appended `user/message` with `source.kind = 'skill-catalog'`, and a changed catalog is appended again, so older ones stay in the history until compaction (`packages/skill/tool-skill/src/index.ts`).
 
 What already works, and must stay unchanged:
@@ -23,9 +23,11 @@ Guarantee scope: what DSH has recorded (user messages, applicable instructions, 
 
 ### 1. Ordinary API models: no new state
 
-Keep the current behavior. The user's choice applies at the next step and the commit point is the existing `request/header`. Add only presentation: the model menu distinguishes **selected** from **in effect** (they differ until the next step starts), and each reply shows the configuration that actually served it. A message already records provider and model in its `source`; the effort exists only in the `request/header` before it, so the UI derives it from there and the log does not change.
+Keep the current behavior. The user's choice applies at the next step and the commit point is the existing `request/header`. Add only presentation: the model menu distinguishes **selected** from **in effect** (they differ until the next step starts), and each reply shows the configuration that actually served it. A message already records provider and model in its `source`; for an API reply the effort exists only in the `request/header` before it, so the UI derives it from there and the log does not change. A native reply carries the router as its source and the router's configuration in that header; the model and effort it actually ran with are in the `residentProfile` of its `physical-operator/dispatch`, and the UI reads them there.
 
-The earlier proposal of persisted requested, waiting, preparing and committed states is not adopted for this path. The selection is already deferred to a step boundary, and a durable pending-selection event would add a log vocabulary with no consumer. It would also repeat the mistake the `llm-fallbacks` plugin removed when it stopped logging switch events.
+Known limit: `picked` lives in Host memory (`selectionFor` reads `picked`, else the last `request/header`, else the default). A selection made after the last step and before the next one is lost if the Host restarts in between, and the menu then shows the previous value. The window ends when the next step starts.
+
+The earlier proposal of persisted requested, waiting, preparing and committed states is not adopted for this path. The selection is already deferred to a step boundary, so the states would only cover the restart window above, and a durable pending-selection event would add a log vocabulary for it. The `llm-fallbacks` plugin dropped its logged switch events for the same reason. The cost of not logging is that window.
 
 ### 2. Native models: one lane per configuration
 
@@ -34,6 +36,7 @@ The Resident store keys a session by `(operator, workspace, lane)` (`store.ts:35
 - The first lane of an existing session keeps `laneId = parent.id`, so no stored session is migrated or reset. A different profile uses `<parent.id>~<profileKey>`, where `profileKey` is a normalized short key of model and effort. The explicit tool path keeps `explicit-tool:<id>` with the same suffix.
 - `physical-operator/dispatch` (`packages/physical-operator/tool-physical-operator/src/index.ts:105-118`) gains an optional `laneId`. It is a durable host decision, so the lane is fixed before the command is sent and a recovery reuses it. `residentLaneProfile` (`:1569`) becomes a table from lane to its last accepted profile, read from these events.
 - Selection rule: an explicitly named native model uses the lane whose profile matches, or creates one. With no explicit choice the most recent lane is used, which keeps the profile reuse that already shipped.
+- A `dispatch` without `laneId` (every log written before this change) means lane `parent.id`. The explicit tool path records `physical-operator/tool-dispatch`, not `dispatch`, and passes no profile today; phase 1 does not cover it, so its lane stays `explicit-tool:<id>` with the profile it first used.
 - `commandId` is `resident-` plus a hash of agent id and message id (`:1644`). It does not depend on the lane, and the daemon hashes the lane into its request hash. A retry of an unaccepted dispatch therefore must reuse the recorded lane, never pick another one under the same command id.
 - Mutual exclusion: at most one lane of a DSH session has an unfinished dispatch (`recoverableDispatch`, `:1796`). The daemon's busy check is per lane, so this cross-lane guard is new. An unknown result stays unknown: the existing indeterminate rule applies and nothing is replayed on another lane.
 
@@ -73,7 +76,7 @@ Show per-message input, cache read, output and whether the metering is complete.
 
 ## Alternatives considered
 
-**Persist requested and committed selection events.** The selection is already applied at a step boundary and logged by `request/header`. A new event type would need a catalog entry and a compatibility decision with no reader that needs it.
+**Persist requested and committed selection events.** The selection is already applied at a step boundary and logged by `request/header`. A new event type needs a catalog entry and a compatibility decision, and its only reader would be the restart window described in section 1. Not logging accepts that loss.
 
 **Relax the Resident profile lock and switch inside the thread.** It needs a changed lock, a store migration, and an unverified native behavior. It also gives no way back to the previous profile's thread.
 
@@ -90,7 +93,7 @@ Show per-message input, cache read, output and whether the metering is complete.
 Phase 1, switching:
 
 - A session that ran Codex Sol with low effort, then DeepSeek, then Codex Astra with medium effort, returns no `EXECUTION_PROFILE_CONFLICT`. The second Codex configuration runs on its own lane and the first lane is kept.
-- Codex A, then DeepSeek changing the requirement to B, then Codex "continue": the native turn receives B from the handoff, and an action that was already completed is not repeated.
+- Codex A, then DeepSeek changing the requirement to B, then Codex "continue": the native turn works to B and the artifact confirms it, and an action that was already completed is not repeated.
 - A switch back to a lane uses that lane's confirmed position and sends only what came after it.
 - A dispatch with an unknown result is reconciled with its original command id and the recorded lane. No second business command is sent and no other lane is used.
 - Two lanes of one session never run at once.
@@ -106,6 +109,8 @@ Documentation: README, JSDoc and an implemented Agent Note accompany each phase.
 
 ## Risks
 
+- Rolling back to 3.42.x keeps the data intact but loses the feature: the older program ignores `laneId`, reads the profile of the newest dispatch (a new lane's) and sends it to the `parent.id` lane, which brings `EXECUTION_PROFILE_CONFLICT` back.
+- The handoff reaches the native thread as a text block of runtime context, so the weight of a user correction can be lower than in a normal user message. Receipt of the text does not prove it was followed; the acceptance cases check the result.
 - The envelope digest or request hash may change on resume, which would make a replay conflict. The first test answers it.
 - Each configuration costs a cold native thread, so switching back and forth is not free. The cost is shown, and the user's explicit choice is never downgraded to save it.
 - A lane per configuration can leave many idle native threads. A retention rule is needed once usage data exists.
