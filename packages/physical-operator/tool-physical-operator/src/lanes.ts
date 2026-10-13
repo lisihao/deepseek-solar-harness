@@ -167,6 +167,9 @@ interface HandoffItem {
   readonly text: string
 }
 
+/** Room kept for the line that says how many messages were left out. */
+const OMISSION_NOTE_RESERVE = 100
+
 const HANDOFF_HEADER = [
   'This DSH session holds conversation your native thread has not seen, oldest first.',
   'Lines marked [user] are the user\'s own words and keep their authority.',
@@ -182,8 +185,8 @@ function renderItem(item: HandoffItem): string {
  * inside the interval, so recomputing it after a compaction or a restart gives the same text.
  * @param events - one session's ordered durable log.
  * @param interval - the frozen interval.
- * @returns the text, or `undefined` when the lane has nothing to catch up on.
- * @throws Error - when a lane that has run before would need more than `maxChars` to be caught up whole.
+ * @returns the text, or `undefined` when the lane has nothing to catch up on. A gap above `maxChars` keeps the newest
+ *   messages and says how many earlier ones were left out, so a lane is never locked out by a long gap.
  */
 export function buildSessionHandoff(events: readonly SessionEvent[], interval: HandoffInterval): string | undefined {
   const known = interval.afterSeq !== undefined
@@ -216,13 +219,7 @@ export function buildSessionHandoff(events: readonly SessionEvent[], interval: H
   }
   if (items.length === 0 && summary === undefined) return undefined
 
-  const fixed = HANDOFF_HEADER.length + (summary === undefined ? 0 : renderItem(summary).length + 2)
-  const total = fixed + items.reduce((sum, item) => sum + renderItem(item).length + 2, 0)
-  if (known && total > interval.maxChars) {
-    throw new Error(
-      `physical-operator handoff needs ${String(total)} characters to catch this native thread up, above handoffMaxChars (${String(interval.maxChars)}); raise it or compact the session`,
-    )
-  }
+  const fixed = HANDOFF_HEADER.length + OMISSION_NOTE_RESERVE + (summary === undefined ? 0 : renderItem(summary).length + 2)
   const kept: HandoffItem[] = []
   let used = fixed
   for (let index = items.length - 1; index >= 0; index -= 1) {

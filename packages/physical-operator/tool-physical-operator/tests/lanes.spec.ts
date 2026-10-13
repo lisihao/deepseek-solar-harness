@@ -91,8 +91,13 @@ describe('session handoff text', () => {
     expect(buildSessionHandoff([], { beforeSeq: 0, maxChars: 10_000 })).toBeUndefined()
   })
 
-  it('refuses to catch up a lane that has run before when the gap does not fit, and says what to change', () => {
-    expect(() => buildSessionHandoff(events, { afterSeq: 0, beforeSeq: 5, maxChars: 300 })).toThrow('handoffMaxChars (300)')
+  it('keeps the newest part of a gap that does not fit, also for a lane that has run before, and says how much it left out', () => {
+    const gap = Array.from({ length: 12 }, (_, index) => user(index + 2, `g${String(index)}`, `gap message ${String(index)} ${'z'.repeat(60)}`))
+    const text = buildSessionHandoff([...gap, user(20, 'p', 'go')], { afterSeq: 1, beforeSeq: 20, maxChars: 700 }) ?? ''
+    expect(text).toMatch(/\[\d+ earlier messages omitted/u)
+    expect(text).toContain('gap message 11')
+    expect(text).not.toContain('gap message 0 ')
+    expect(text.length).toBeLessThanOrEqual(700)
   })
 
   it('gives a lane that never ran the newest part, notes what was left out, and truncates one oversized message', () => {

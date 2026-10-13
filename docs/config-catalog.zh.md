@@ -3284,9 +3284,9 @@ export interface Config {
    */
   readonly catalogMaxAgeMs?: number
   /**
-   * Most characters of earlier conversation a native dispatch's handoff may carry. A native thread that has run
-   * before must be caught up whole, so a longer gap fails the dispatch and names this limit; a thread that has not
-   * run before gets the newest part. Defaults to 48,000.
+   * Most characters of earlier conversation a native dispatch's handoff may carry. A longer gap keeps the newest
+   * messages and says how many earlier ones were left out, so a long conversation never locks a lane out.
+   * Defaults to 48,000.
    */
   readonly handoffMaxChars?: number
 }

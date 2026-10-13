@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-13-native-lane-per-profile-and-session-handoff.md
-2026-10-13-native-lane-per-profile-and-session-handoff.md: 1f4270df1621523f4c982ef2de5dcc59928671af
-2026-10-13-native-lane-per-profile-and-session-handoff.zh.md: 183e3e284f5668a11cdaae5531a371d3ea6f61f8
+2026-10-13-native-lane-per-profile-and-session-handoff.md: 3e0304d8a36ee007f6c3239bd1faa14ced98e5a7
+2026-10-13-native-lane-per-profile-and-session-handoff.zh.md: af2fb4bc9ad8c843c0473f0bd653fa3f8c35cdb8
