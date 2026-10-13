@@ -222,6 +222,108 @@ describe('ModelSelect reasoning effort', () => {
   })
 })
 
+describe('ModelSelect selected versus in effect', () => {
+  const two = (overrides: Partial<ModelDirectoryState>) => state({
+    groups: [{
+      id: 'deepseek-official',
+      name: 'DeepSeek',
+      models: [
+        { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash', reasoning },
+        { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', reasoning },
+      ],
+    }],
+    ...overrides,
+  })
+  const lines = () => [...document.querySelectorAll('[data-effective-note] > div')].map(line => line.textContent)
+  const open = (directory: ReturnType<typeof createSnapshotStore<ModelDirectoryState>>) => {
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} refresh={vi.fn()} select={vi.fn()} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }))
+  }
+
+  it('says nothing when the last step ran with what is selected, or when no step has run', () => {
+    const same = createSnapshotStore<ModelDirectoryState>(two({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      effective: { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'high' },
+    }))
+    open(same)
+    expect(document.querySelector('[data-effective-note]')).toBeNull()
+    cleanup()
+    open(createSnapshotStore<ModelDirectoryState>(two({ current: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } })))
+    expect(document.querySelector('[data-effective-note]')).toBeNull()
+  })
+
+  it('names both models when the selection has not reached a step yet', () => {
+    open(createSnapshotStore<ModelDirectoryState>(two({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'max' },
+      effective: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'high' },
+    })))
+    expect(lines()).toEqual(['已选择 DeepSeek-V4-Pro · Max', '当前生效 DeepSeek-V4-Flash · High'])
+    expect(screen.getByRole('button', { name: /选择模型/ }).getAttribute('title')).toBe('DeepSeek-V4-Pro · Max')
+  })
+
+  it('notices a different effort on the same model', () => {
+    open(createSnapshotStore<ModelDirectoryState>(two({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max' },
+      effective: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'high' },
+    })))
+    expect(lines()).toEqual(['已选择 DeepSeek-V4-Flash · Max', '当前生效 DeepSeek-V4-Flash · High'])
+  })
+
+  const operator = (overrides: Partial<ModelDirectoryState>) => state({
+    groups: [{
+      id: 'dsh-physical-operator',
+      name: 'Native',
+      models: [{ id: 'codex', name: 'Codex' }, { id: 'claude-code', name: 'Claude Code' }],
+    }],
+    ...overrides,
+  })
+
+  it('treats a bare operator entry as the native model the host reports for it, and does not notice a missing effort', () => {
+    open(createSnapshotStore<ModelDirectoryState>(operator({
+      current: { provider: 'dsh-physical-operator', model: 'codex' },
+      effective: { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' },
+    })))
+    expect(document.querySelector('[data-effective-note]')).toBeNull()
+    cleanup()
+    open(createSnapshotStore<ModelDirectoryState>(state({
+      current: { provider: 'dsh-physical-operator', model: 'codex', reasoningEffort: 'high' },
+      effective: { provider: 'dsh-physical-operator', model: 'codex' },
+      groups: [{ id: 'dsh-physical-operator', name: 'Native', models: [{ id: 'codex', name: 'Codex', reasoning }] }],
+    })))
+    expect(document.querySelector('[data-effective-note]')).toBeNull()
+  })
+
+  it('names a native model by its operator entry and never shows the internal id', () => {
+    open(createSnapshotStore<ModelDirectoryState>(operator({
+      current: { provider: 'dsh-physical-operator', model: 'claude-code' },
+      effective: { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' },
+    })))
+    expect(lines()[1]).toBe('当前生效 Codex · gpt-5.6-sol · low')
+    cleanup()
+    open(createSnapshotStore<ModelDirectoryState>(state({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      effective: { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol' },
+    })))
+    expect(lines()[1]).toBe('当前生效 gpt-5.6-sol')
+  })
+
+  it('does not call an effort-less selection different from a model that ran at its default effort', () => {
+    open(createSnapshotStore<ModelDirectoryState>(two({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      effective: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'high' },
+    })))
+    expect(document.querySelector('[data-effective-note]')).toBeNull()
+  })
+
+  it('names a model that ran without any effort by its name alone', () => {
+    open(createSnapshotStore<ModelDirectoryState>(two({
+      current: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      effective: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    })))
+    expect(lines()).toEqual(['已选择 DeepSeek-V4-Pro · High', '当前生效 DeepSeek-V4-Flash'])
+  })
+})
+
 describe('ModelSelect source failures', () => {
   const failures = [
     { id: 'claude', name: 'Claude Code', message: 'Claude Code is not authenticated with a claude.ai subscription' },

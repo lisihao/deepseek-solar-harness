@@ -165,6 +165,12 @@ export interface SessionModels {
   /** Model selection for the session's next assembled step. */
   current: ModelSelection
   /**
+   * The configuration the most recent step was actually sent with; absent before any step ran. It differs from
+   * `current` between a selection and the next step, and for a native route whose lane keeps another profile.
+   * A native route reports `<operator>:<model>`, or only the operator when the product chose the model.
+   */
+  effective?: ModelSelection
+  /**
    * Whether an adapter currently serves `current.provider`, and therefore
    * whether this session can start a turn at all. Deliberately NOT derivable
    * from `groups`: catalog membership is advisory, so a route serving a model

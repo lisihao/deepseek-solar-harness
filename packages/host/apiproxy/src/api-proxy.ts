@@ -667,6 +667,9 @@ function sessionListUpdatedAt(header: SessionHeader, metadata: SessionListMetada
   return Math.max(header.createdAt, metadata?.lastPromptAt ?? 0)
 }
 
+/** The model route of native physical operators (`NATIVE_CATALOG_PROVIDER` in the physical-operator package). */
+const NATIVE_ROUTE_PROVIDER = 'dsh-physical-operator'
+
 /**
  * Shared Session-header projection for list baselines and creation frames.
  * @param header - the session's creation header.
@@ -1305,6 +1308,31 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
     }
     return undefined
+  }
+
+  /**
+   * The configuration the most recent step was actually sent with, or `undefined` before any step ran. A native
+   * physical-operator step logs only the operator id as its model, so the native model and effort come from the
+   * newest dispatch to that operator. The route provider and the dispatch event are matched by name: this package
+   * does not depend on the physical-operator package.
+   */
+  function effectiveSelection(agent: Agent): ModelSelection | undefined {
+    const logged = lastUserSelection(agent)
+    if (logged === undefined || logged.provider !== NATIVE_ROUTE_PROVIDER) return logged
+    for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
+      const event = agent.session.events[index]
+      if (event === undefined || (event.type as string) !== 'physical-operator/dispatch') continue
+      const data = event.data as { operatorId?: string; residentProfile?: { model?: string; effort?: string } }
+      if (data.operatorId !== logged.model) continue
+      const profile = data.residentProfile
+      if (profile?.model === undefined) return logged
+      return {
+        provider: logged.provider,
+        model: `${logged.model}:${profile.model}`,
+        ...profile.effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(profile.effort) },
+      }
+    }
+    return logged
   }
 
   /**
@@ -2493,7 +2521,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           refresh === true ? { refresh: true } : undefined,
         )
         const routable = routeServed(current.provider)
-        return ok(request, { current: { ...current }, routable, groups, failures })
+        const effective = effectiveSelection(found.agent)
+        return ok(request, {
+          current: { ...current },
+          ...effective === undefined ? {} : { effective },
+          routable,
+          groups,
+          failures,
+        })
       },
 
       async selectModel(request) {
