@@ -20,7 +20,7 @@ The `/client` exports are the plugin body (`apply`/`inject`), `ModelDirectoryRes
 
 ## Model Experience
 
-Indirectly, through the `session.selectModel` RPC available to ordinary sessions, both entries submit the complete `ModelSelection` that the Host snapshots at the next prompt-assembly boundary, so the following request uses the selected provider, model, and effort while a running step keeps its assembled selection; the selection becomes durable only when the existing request header records a request that consumes it, and menu interaction adds no prompt content.
+Indirectly, through the `session.selectModel` RPC available to ordinary sessions, both entries submit the complete `ModelSelection` that the Host snapshots at the next prompt-assembly boundary, so the following request uses the selected provider, model, and effort while a running step keeps its assembled selection; the selection becomes durable only when the existing request header records a request that consumes it, and menu interaction adds no prompt content. When the Host reports an `effective` configuration (the last step's) that differs from the selection, the menu's root pane names both on two lines ("Selected X", "In effect Y"). The two differ between a selection and the next step, and for a native route whose lane keeps another profile. A bare operator entry counts as the native model the host reports for it, an effort is compared only when both sides have one, and a native model the menu does not list is named by its operator entry and model name, never by an internal id. The menu is re-read each time it opens, so the trigger itself shows only the selection.
 
 #### KV Cache effect
 

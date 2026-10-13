@@ -227,6 +227,11 @@ describe('sessions domain schemas', () => {
       }],
       failures: [{ id: 'broken', name: 'Broken', message: 'offline' }],
     }).groups[0]?.models[0]?.id).toBe('deepseek-v4-flash')
+    const models = { current: { provider: 'deepseek-official', model: 'a' }, routable: true, groups: [], failures: [] }
+    expect(sessionModelsValueSchema.parse({ ...models, effective: { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' } }).effective)
+      .toEqual({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' })
+    expect('effective' in sessionModelsValueSchema.parse(models)).toBe(false)
+    expect(() => sessionModelsValueSchema.parse({ ...models, effective: { provider: '', model: 'a' } })).toThrow()
     expect(sessionSelectModelRequestSchema.parse({
       sessionId: 's1',
       provider: 'deepseek-official',

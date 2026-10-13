@@ -18,6 +18,11 @@ export interface ModelDirectoryState {
   /** Model selection the host reports for the next assembled step; null before the first load. */
   current: ModelSelection | null
   /**
+   * The configuration the host's most recent step was sent with. Absent before the first step; it differs from
+   * `current` between a selection and the next step, and for a native route whose lane keeps another profile.
+   */
+  effective?: ModelSelection | undefined
+  /**
    * Whether an adapter serves the current selection's provider, as the host reports
    * it — null before the first load, which is NOT the same as blocked. Read
    * this rather than "current matches no group": catalog membership is
@@ -127,9 +132,10 @@ export class ModelDirectory {
       this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
       throw new Error(`session.models failed: ${result.error.code}: ${result.error.message}`)
     }
-    const { current, routable, groups, failures } = result.value
+    const { current, effective, routable, groups, failures } = result.value
     this.store.update((s) => {
       s.current = current
+      s.effective = effective
       s.routable = routable
       s.groups = refresh
         ? mergeRefreshGroups(s.groups, groups, failures)
@@ -188,6 +194,7 @@ export class ModelDirectory {
     this.refreshing = undefined
     this.store.update((s) => {
       s.current = null
+      s.effective = undefined
       s.routable = null
       s.groups = []
       s.failures = []

@@ -53,6 +53,21 @@ describe('ModelDirectory catalog refresh', () => {
     ])
   })
 
+  it('keeps what the host reports as in effect, separate from the selection, and clears it on reset', async () => {
+    const effective = { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' }
+    const sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel'> = {
+      models: () => Promise.resolve(response({ ok: true, value: value({ effective }) })),
+      selectModel: () => Promise.resolve(response({ ok: true, value: { selected: selection } })),
+    }
+    const directory = new ModelDirectory(sessions, 's1' as SessionId, () => true)
+    await directory.load()
+    expect(directory.store.getSnapshot().effective).toEqual(effective)
+    await directory.select(selection)
+    expect(directory.store.getSnapshot().effective).toEqual(effective)
+    directory.resetConnected()
+    expect(directory.store.getSnapshot().effective).toBeUndefined()
+  })
+
   it('preserves the last good selection and catalog when a refresh fails, including a stale race', async () => {
     const initial = value()
     const stale = deferred<RpcResponse<SessionModels>>()

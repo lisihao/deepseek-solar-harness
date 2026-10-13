@@ -465,6 +465,57 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  describe('effective selection', () => {
+    const dispatch = (data: Record<string, unknown>) => ({ commandId: 'c', promptMessageId: 'm', requestedByMessageId: 'm',
+      turn: 1, step: 1, recovered: false, executionMode: 'resident', ...data }) as never
+
+    it('reports the configuration of the last step, which differs from the selection until the next step runs', async () => {
+      const { ctx, sessionId } = await harness({ provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: ReasoningEffortId('high') })
+      const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+      expect(expectValue(await api.sessions.models(request({ sessionId }))).effective)
+        .toEqual({ provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: 'high' })
+      expectValue(await api.sessions.selectModel(request({ sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner' })))
+      const after = expectValue(await api.sessions.models(request({ sessionId })))
+      expect(after.current).toMatchObject({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+      expect(after.effective).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: 'high' })
+      await ctx.fiber.dispose()
+    })
+
+    it('leaves it out before any step has run', async () => {
+      const { ctx, sessionId } = await harness()
+      const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+      expect('effective' in expectValue(await api.sessions.models(request({ sessionId })))).toBe(false)
+      await ctx.fiber.dispose()
+    })
+
+    it('names the native model and effort of the newest dispatch to the operator, in the menu entry form', async () => {
+      const { ctx, agent, sessionId } = await harness({ provider: 'dsh-physical-operator', model: 'codex' })
+      agent.session.append('physical-operator/dispatch', dispatch({ operatorId: 'claude-code', residentProfile: { model: 'other', effort: 'low' } }))
+      agent.session.append('physical-operator/dispatch', dispatch({ operatorId: 'codex', residentProfile: { model: 'gpt-5.6-sol', effort: 'low' } }))
+      const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+      expect(expectValue(await api.sessions.models(request({ sessionId }))).effective)
+        .toEqual({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' })
+      await ctx.fiber.dispose()
+    })
+
+    it('keeps the operator id when the dispatch names no model, and when no dispatch matches', async () => {
+      const { ctx, agent, sessionId } = await harness({ provider: 'dsh-physical-operator', model: 'codex' })
+      const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+      expect(expectValue(await api.sessions.models(request({ sessionId }))).effective).toEqual({ provider: 'dsh-physical-operator', model: 'codex' })
+      agent.session.append('physical-operator/dispatch', dispatch({ operatorId: 'codex' }))
+      expect(expectValue(await api.sessions.models(request({ sessionId }))).effective).toEqual({ provider: 'dsh-physical-operator', model: 'codex' })
+      await ctx.fiber.dispose()
+    })
+
+    it('reads an effort-less native profile without inventing an effort', async () => {
+      const { ctx, agent, sessionId } = await harness({ provider: 'dsh-physical-operator', model: 'codex' })
+      agent.session.append('physical-operator/dispatch', dispatch({ operatorId: 'codex', residentProfile: { model: 'gpt-5.6-sol' } }))
+      const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+      expect(expectValue(await api.sessions.models(request({ sessionId }))).effective).toEqual({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol' })
+      await ctx.fiber.dispose()
+    })
+  })
+
   it('keeps the user model selected when a legacy Session logged the retired Debate host route', async () => {
     const { ctx, agent, sessionId } = await harness({
       provider: 'deepseek-official',
