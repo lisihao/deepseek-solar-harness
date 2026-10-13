@@ -32,7 +32,7 @@ The block interfaces (full fields in source): `TextBlock` (`text`), `ReasoningBl
 
 Source: [`packages/llm/llm/src/message.ts`](../../packages/llm/llm/src/message.ts)
 
-A `Message` is one identified, immutable role/source/content value. Model-produced assistant messages name the provider and model that produced them and carry optional adapter-private replay data in their source:
+A `Message` is one identified, immutable role/source/content value. Model-produced assistant messages name the provider and model that produced them and carry optional adapter-private replay data and the reasoning effort the step ran with in their source:
 
 ```ts type-equiv
 /** Provider/model identity and adapter-private replay data for an assistant message. */
@@ -41,6 +41,11 @@ interface AssistantProvenance {
   provider: string
   /** Provider model id that produced the message. */
   model: string
+  /**
+   * Reasoning effort the step ran with, as resolved when the request was built (an explicit choice, else the model's
+   * default). Absent when the route has no effort control, and on messages written before this field existed.
+   */
+  reasoningEffort?: string
   /**
    * Lossless-JSON adapter state needed to replay the provider response.
    * `LlmRuntime` exposes it to a target adapter only when that adapter instance

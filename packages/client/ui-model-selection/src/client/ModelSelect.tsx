@@ -23,6 +23,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { FailureNote, type FailedSource } from './FailureNote.tsx'
+import { describeSelection, joinLabel } from './labels.ts'
 import type { ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
 
@@ -256,25 +257,12 @@ export function ModelSelect(
     && (!sameModel
       || (state.current.reasoningEffort !== undefined && inEffect.reasoningEffort !== undefined
         && state.current.reasoningEffort !== inEffect.reasoningEffort))
-  let effectiveNote: { selected: string; inEffect: string } | undefined
-  if (differs) {
-    const served = choices.find(c => c.selection.provider === inEffect.provider && c.selection.model === inEffect.model)
-    const colon = inEffect.model.indexOf(':')
-    const operatorId = colon < 0 ? undefined : inEffect.model.slice(0, colon)
-    const operatorEntry = operatorId === undefined
-      ? undefined
-      : choices.find(c => c.selection.provider === inEffect.provider && c.selection.model === operatorId)
-    const nativeName = colon < 0 ? inEffect.model : inEffect.model.slice(colon + 1)
-    const servedName = served?.model.name
-      ?? (operatorEntry === undefined ? nativeName : `${operatorEntry.model.name} · ${nativeName}`)
-    const servedEffort = inEffect.reasoningEffort === undefined
-      ? undefined
-      : served?.model.reasoning?.efforts.find(level => level.id === inEffect.reasoningEffort)?.name ?? inEffect.reasoningEffort
-    effectiveNote = {
+  const effectiveNote = differs
+    ? {
       selected: t('effective.selected', { name: triggerLabel }),
-      inEffect: t('effective.inEffect', { name: servedEffort === undefined ? servedName : `${servedName} · ${servedEffort}` }),
+      inEffect: t('effective.inEffect', { name: joinLabel(describeSelection(state.groups, inEffect)) }),
     }
-  }
+    : undefined
   const triggerAria = currentChoice === undefined
     ? t('trigger.selectAria')
     : effortLabel === undefined

@@ -575,3 +575,12 @@ describe('agent-preset schemas', () => {
     expect(() => agentPresetOpenDocumentValueSchema.parse({ opened: false })).toThrow()
   })
 })
+
+describe('session.history wire', () => {
+  it('carries the reasoning effort recorded on a reply source through the response schema', () => {
+    const source = { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'max' }
+    const event = { type: 'assistant/message', seq: 3, time: 1, data: { turn: 1, step: 1, message: { id: 'm', role: 'assistant', content: [], source } } }
+    const parsed = sessionHistoryValueSchema.parse({ events: [{ event }], hasMore: false })
+    expect(parsed).toMatchObject({ events: [{ event: { data: event.data } }] })
+  })
+})

@@ -25,6 +25,7 @@
 - paragraph: Event sourcing is a pattern where all changes to an application's state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":

@@ -55,6 +55,7 @@
 - paragraph: CORDIS_UI_READY
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":
@@ -69,6 +70,7 @@
 - paragraph: The Cordis Plugin is running.
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":
@@ -85,6 +87,7 @@
 - paragraph: CORDIS_UI_DONE
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":

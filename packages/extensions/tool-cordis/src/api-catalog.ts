@@ -3842,7 +3842,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AssistantProvenance',
-    declaration: 'export interface AssistantProvenance {\n    provider: string;\n    model: string;\n    replayState?: unknown;\n}',
+    declaration: 'export interface AssistantProvenance {\n    provider: string;\n    model: string;\n    reasoningEffort?: string;\n    replayState?: unknown;\n}',
   },
   {
     name: 'AttachmentId',
