@@ -23,6 +23,7 @@
 - paragraph: USER_INVOKE_REPLY acknowledged; following the injected skill.
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":

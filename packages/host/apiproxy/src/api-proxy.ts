@@ -62,7 +62,9 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves `ctx.get('tasks')` to the background job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
-import { projectPublicSessionEvent } from './physical-operator-trace.ts'
+import {
+  NATIVE_ROUTE_PROVIDER, projectPublicSessionEvent, resolvedNativeProfile, withServedNativeConfig,
+} from './physical-operator-trace.ts'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -667,9 +669,6 @@ function sessionListUpdatedAt(header: SessionHeader, metadata: SessionListMetada
   return Math.max(header.createdAt, metadata?.lastPromptAt ?? 0)
 }
 
-/** The model route of native physical operators (`NATIVE_CATALOG_PROVIDER` in the physical-operator package). */
-const NATIVE_ROUTE_PROVIDER = 'dsh-physical-operator'
-
 /**
  * Shared Session-header projection for list baselines and creation frames.
  * @param header - the session's creation header.
@@ -956,7 +955,7 @@ function historyPage(
   return {
     events: page.events.map((event) => {
       const view = viewFor(ctx, event, callId => backscanArgs(page.events, callId), scope)
-      return { ...projectPublicSessionEvent(event), ...view === undefined ? {} : { view } }
+      return { ...withServedNativeConfig(projectPublicSessionEvent(event), events), ...view === undefined ? {} : { view } }
     }),
     hasMore: page.hasMore,
   }
@@ -1310,17 +1309,6 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return undefined
   }
 
-  /** The model and effort the Resident daemon resolved for a command, from its `turn.accepted` progress. */
-  function resolvedNativeProfile(agent: Agent, commandId: string | undefined): { model?: string; effort?: string } | undefined {
-    if (commandId === undefined) return undefined
-    for (const event of agent.session.events) {
-      if ((event.type as string) !== 'physical-operator/progress') continue
-      const data = event.data as { commandId?: string; type?: string; data?: { profile?: { model?: string; effort?: string } } }
-      if (data.commandId === commandId && data.type === 'turn.accepted') return data.data?.profile
-    }
-    return undefined
-  }
-
   /**
    * The configuration the most recent step was actually sent with, or `undefined` before any step ran. A native
    * physical-operator step logs only the operator id as its model, so the native model and effort come from the
@@ -1336,7 +1324,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       const data = event.data as { commandId?: string; operatorId?: string; residentProfile?: { model?: string; effort?: string } }
       if (data.operatorId !== logged.model) continue
       // The daemon's resolved profile (Smart Auto) wins over the dispatch's, which may name no model.
-      const profile = resolvedNativeProfile(agent, data.commandId) ?? data.residentProfile
+      const profile = resolvedNativeProfile(agent.session.events, data.commandId) ?? data.residentProfile
       if (profile?.model === undefined) return logged
       return {
         provider: logged.provider,
@@ -3761,7 +3749,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             queue.push(frame({
               type: 'session/event',
               sessionId: session.id,
-              ...projectPublicSessionEvent(event),
+              ...withServedNativeConfig(projectPublicSessionEvent(event), session.events),
               ...view === undefined ? {} : { view },
             }))
           }),

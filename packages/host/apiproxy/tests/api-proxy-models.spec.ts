@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import LlmRuntime, { LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createAssistantMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions, LlmCallConfig, LlmModelInfo, LlmModelReasoningInfo, LlmProviderInfo,
   LlmResolvedModelInfo, StreamChunk,
@@ -517,6 +517,21 @@ describe('Web session model selection', () => {
       agent.session.append('physical-operator/progress', { commandId: 'smart', operatorId: 'codex', sequence: 3, type: 'turn.accepted', time: 't', data: { commandId: 'smart', profile: { model: 'gpt-5.6-luna', effort: 'low' } } })
       expect(expectValue(await api.sessions.models(request({ sessionId }))).effective)
         .toEqual({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-luna', reasoningEffort: 'low' })
+      await ctx.fiber.dispose()
+    })
+
+    it('serves a native reply to clients under its served model and effort, in history, while the log keeps the operator id', async () => {
+      const { ctx, agent, sessionId } = await harness({ provider: 'dsh-physical-operator', model: 'codex' })
+      agent.session.append('physical-operator/dispatch', dispatch({ operatorId: 'codex', turn: 1, step: 1, residentProfile: { model: 'gpt-5.6-sol', effort: 'low' } }))
+      const message = createAssistantMessage({ content: [{ type: 'text', text: 'hi' }], source: { provider: 'dsh-physical-operator', model: 'codex' } })
+      agent.session.append('assistant/message', { turn: 1, step: 1, message }, { surfaceOp: 'append', sourceEventSeqs: [] })
+      const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+      const history = expectValue(await api.sessions.history(request({ sessionId })))
+      const served = history.events.find(entry => entry.event.type === 'assistant/message')?.event
+      expect(served?.type === 'assistant/message' && served.data.message.source)
+        .toMatchObject({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' })
+      const stored = agent.session.events.find(event => event.type === 'assistant/message')
+      expect(stored?.type === 'assistant/message' && stored.data.message.source.model).toBe('codex')
       await ctx.fiber.dispose()
     })
 

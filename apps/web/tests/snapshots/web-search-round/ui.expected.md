@@ -23,6 +23,7 @@
 - paragraph: SEARCH_DONE
 - button "Copy":
   - img
+- text: DeepSeek-V4-Flash
 - button "Good response":
   - img
 - button "Bad response":

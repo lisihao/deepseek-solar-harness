@@ -6,7 +6,7 @@ import type {
   SlotHookFactory, SnapshotSelectorHook,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
-  CommandNode, CompactionSummaryNode, ConversationSnapshot, ConversationTurnDataMap,
+  AssistantProvenanceView, CommandNode, CompactionSummaryNode, ConversationSnapshot, ConversationTurnDataMap,
   ObservableSnapshot, PendingInteraction, PendingWait, SessionId, ToolCallBlock,
   TurnLocation, WorkspaceId,
 } from '@deepseek-ai/dsh-client-runtime/client'
@@ -346,6 +346,8 @@ export interface TurnTailOwnerProps {
 export interface AssistantActionOwnerProps {
   /** Stable identity carried from the `assistant/message` event. */
   messageId: MessageId
+  /** The route, model and effort that served the message, when the event recorded them. */
+  served?: AssistantProvenanceView
 }
 
 /** Hook constrained to business data published on the current Chat Node's Turn. */

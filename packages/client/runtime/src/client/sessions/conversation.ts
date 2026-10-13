@@ -37,6 +37,8 @@ export interface AssistantRequestConfig {
 export interface AssistantProvenanceView {
   provider: string
   model: string
+  /** Reasoning effort the step ran with, when the route has an effort control. */
+  reasoningEffort?: string
 }
 
 /** Assistant content blocks sorted by what the UI cares about

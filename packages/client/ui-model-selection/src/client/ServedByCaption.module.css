@@ -1,0 +1,11 @@
+.caption {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 0 4px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
