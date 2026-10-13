@@ -11,7 +11,11 @@ import { describeSelection, joinLabel } from '../src/client/labels.ts'
 import { ServedByCaption } from '../src/client/ServedByCaption.tsx'
 import type { ModelDirectoryState } from '../src/client/directory.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  failures = []
+  shown = groups
+})
 
 const reasoning = { efforts: [{ id: 'high', name: '高' }, { id: 'max', name: '极高' }], defaultEffort: 'high' }
 const groups: ModelDirectoryState['groups'] = [
@@ -19,13 +23,16 @@ const groups: ModelDirectoryState['groups'] = [
   { id: 'dsh-physical-operator', name: 'Native', models: [{ id: 'codex', name: 'Codex' }] },
 ]
 
+let failures: ModelDirectoryState['failures'] = []
+let shown: ModelDirectoryState['groups'] = groups
+
 const t = ((key: string, params?: Record<string, string>) => {
   const template = (zh as Record<string, string>)[key] ?? key
   return params === undefined ? template : template.replace(/\{(\w+)\}/g, (_m, name: string) => params[name] ?? '')
 }) as ComponentProps<typeof ServedByCaption>['t']
 
 const caption = (served: ComponentProps<typeof ServedByCaption>['served']) =>
-  render(<ServedByCaption {...{ messageId: 'm', served, useDirectory: (select: (state: ModelDirectoryState) => unknown) => select({ groups } as ModelDirectoryState), t } as unknown as ComponentProps<typeof ServedByCaption>} />)
+  render(<ServedByCaption {...{ messageId: 'm', served, useDirectory: (select: (state: ModelDirectoryState) => unknown) => select({ groups: shown, failures } as ModelDirectoryState), t } as unknown as ComponentProps<typeof ServedByCaption>} />)
 
 describe('ServedByCaption', () => {
   it('shows the display name and the effort name, with the same text as its tooltip', () => {
@@ -47,6 +54,19 @@ describe('ServedByCaption', () => {
     expect(screen.getByText('Codex · gpt-5.6-sol · low')).toBeTruthy()
   })
 
+  it('names a native operator that is only a not-yet-refreshed failure row', () => {
+    shown = groups.slice(0, 1)
+    failures = [{ id: 'native:codex', name: 'Codex', message: 'not refreshed' }]
+    caption({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' })
+    expect(screen.getByText('Codex · gpt-5.6-sol · low')).toBeTruthy()
+  })
+
+  it('names a native operator that a refreshed catalog lists only through its model rows', () => {
+    shown = [{ id: 'dsh-physical-operator', name: 'Native', models: [{ id: 'codex:fake-main', name: 'Codex · Fake Main', sourceName: 'Codex' }] }]
+    caption({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' })
+    expect(screen.getByText('Codex · gpt-5.6-sol · low')).toBeTruthy()
+  })
+
   it('renders nothing when the reply recorded no configuration, or the directory cannot name the model', () => {
     expect(caption(undefined).container.textContent).toBe('')
     cleanup()
@@ -60,8 +80,8 @@ describe('ServedByCaption', () => {
 
 describe('describeSelection', () => {
   it('reports whether the directory names the model', () => {
-    expect(describeSelection(groups, { provider: 'deepseek-official', model: 'plain' })).toEqual({ model: 'Plain', named: true })
-    expect(describeSelection(groups, { provider: 'x', model: 'a:b' })).toEqual({ model: 'b', named: false })
+    expect(describeSelection({ groups, failures: [] }, { provider: 'deepseek-official', model: 'plain' })).toEqual({ model: 'Plain', named: true })
+    expect(describeSelection({ groups, failures: [] }, { provider: 'x', model: 'a:b' })).toEqual({ model: 'b', named: false })
     expect(joinLabel({ model: 'M', effort: 'E', named: true })).toBe('M · E')
     expect(joinLabel({ model: 'M', named: true })).toBe('M')
   })
