@@ -48,10 +48,10 @@ In-thread switching (changing model or effort on the same native thread) is not 
 
 The handoff reuses `OperatorContextEnvelopeV1`: exact `systemText`, `task`, named `contexts`, a `source` with durable provenance, a `digest`, and accepted or rejected receipts (`envelope.ts:84-130`). The complete envelope is already appended to the session as `physical-operator/context-envelope` (`index.ts:868`, `:1030`). The handoff is one more named context in `contexts`. It is a derived view with source references, not raw history, so the envelope's rule that prior history never enters it still holds, and the envelope version stays 1 because a new context name is not a structural change.
 
-- **Computed once.** The handoff is built when the dispatch is created and stored with its `context-envelope` event. A resume or recovery reads the stored version. Recomputing it on replay would change the digest.
+- **Rebuilt from a frozen interval.** The dispatch records the interval of raw session events (`handoff`: `afterSeq`, `beforeSeq`, `maxChars`) before the command is sent. The text is a function of the raw events inside that interval only, not of the current surface or of the configuration, so a recovery after a crash or a compaction rebuilds the same text and the same envelope digest.
 - **Confirmed position, no new store.** A lane's confirmed position is derived from the log: the last dispatch of that lane whose result was delivered to the session (the delivery check in `recoverableDispatch`). `dispatch-terminal` is a failure marker, not a success marker, and must not be used as one. The handoff carries what happened after that position.
-- **Content, in priority order.** The latest checkpoint (a compaction summary, when one exists). The user's own words and corrections after the confirmed position, verbatim. Results that other models completed, as evidence references. Pending commands. Recent messages. Permissions, hard user constraints and unresolved actions are never dropped for budget: when the required content does not fit, the switch stops and names what is missing.
-- **Trust levels are kept.** Tool and file content is quoted material, never promoted to an instruction. Current permissions always come from the live runtime configuration, not from a summary.
+- **Content, in priority order.** The latest checkpoint (a compaction summary) for a lane that has never run. The user's own words, then the replies of other models, since the lane's confirmed position. Tool results, skill catalogs, runtime context and plugin messages are not part of it. A gap above `handoffMaxChars` keeps the newest messages and says how many earlier ones were left out; failing the dispatch instead would lock the lane out for good, because its confirmed position only moves after a delivered reply.
+- **Trust levels are kept.** The user's own words keep their authority and are marked as such; assistant replies, summaries and tool or file content are quoted material, never promoted to an instruction.
 - **A lane used for the first time** gets the checkpoint, a recent window and the required constraints.
 - **Acknowledgement** comes from the envelope receipt of the adapter, never from the model saying it has read the text. When acknowledgement is unclear the lane is reconciled before anything is sent.
 
@@ -97,7 +97,7 @@ Phase 1, switching:
 - A switch back to a lane uses that lane's confirmed position and sends only what came after it.
 - A dispatch with an unknown result is reconciled with its original command id and the recorded lane. No second business command is sent and no other lane is used.
 - Two lanes of one session never run at once.
-- A handoff that does not fit names the missing items and stops. A tool result that contains instructions stays quoted material after summarization.
+- A handoff that does not fit keeps the newest messages and says how many it left out; it never fails the dispatch. A tool result that contains instructions stays quoted material after summarization.
 - A test first proves whether the envelope digest is stable on resume. If it is not, the request hash conflicts on replay and the design changes before any code is written.
 - A real Loader composition with keyless snapshots covers the paths above, plus one small real-provider qualification of the native parameter.
 

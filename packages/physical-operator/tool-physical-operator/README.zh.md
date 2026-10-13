@@ -31,7 +31,7 @@ Resident 原生进度页会在运行结束（或运行报告错误）后复制�
 
 prompt 必须包含本轮所需的完整工作。Ephemeral Provider 会在全新的产品上下文中接收它；Resident Provider 只会继续规范化 workspace 内由调用方拥有的 lane。大型 Resident 结果可以返回内容寻址的产物引用，而不内联原始字节。
 
-Resident daemon 会把 lane 锁定在它接受的第一个 profile 上，所以宿主聊天派发会沿用本会话里最近一次被接受、发往同一算子的 Resident 派发的 profile，不论这一轮是分配器还是所选主模型选的路径。用户点名的原生模型是唯一的例外：它按所选原样发送，lane 若已锁定为别的 profile，守护进程会返回 `EXECUTION_PROFILE_CONFLICT`，用户看到的是一句指明锁定 profile、并说明新建会话才能更换的话。被守护进程因 profile 拒绝的派发不会成为该 lane 的 profile。`residentLaneProfile(events, operatorId)` 把这一选择开放给测试和诊断。
+Resident daemon 会把 lane 锁定在它接受的第一个 profile 上，所以会话里每个原生配置都在自己的 lane 上运行。第一个配置沿用会话的默认 lane，之后每个配置得到 `<agent id>~<模型>~<强度>`；所选 lane 记录在 `physical-operator/dispatch` 事件上（`residentLaneId`，默认 lane 和 lane 出现之前写入的所有日志都没有这个字段），恢复的 dispatch 沿用它。用户点名的原生模型使用 profile 相同的 lane，没有就新开一条；裸的 operator 入口或分配器的选择沿用最新一条 lane 的 profile。自上次回复以来没有见过这段对话的 lane，会通过它的 operator context envelope 里名为 `session-handoff` 的 context 收到：用户自己的话和其他模型的回复，由 dispatch 上冻结的区间（`handoff`）内的原始事件重建，所以压缩之后的恢复得到同样的文本和 digest。`Config.handoffMaxChars`（默认 48,000 个字符）限定它的大小：更长的差距只保留最新的消息，并说明省略了多少条更早的，所以很长的对话不会把某条 lane 锁死；从未运行过的 lane 还会从最新的压缩摘要开始。daemon 因 profile 拒绝的 dispatch（例如旧程序锁定的 lane 触发的 `EXECUTION_PROFILE_CONFLICT`）会以一句指出已锁定 profile 的话呈现给用户，并且不会成为 lane 的 profile。`residentLaneProfile(events, operatorId)` 暴露最新被接受的 profile，供测试和诊断使用。
 
 每次获准的 `run` 都会从当前运行时快照和为委派提示词自身选出的模板构建密封算子上下文信封，绝不会复用附着在更早父任务上的模板。Session 会把精确的信封和委派模板回执与 Provider 回执一并记录，以便回放时重建子任务输入。
 
