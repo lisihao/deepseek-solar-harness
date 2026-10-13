@@ -12,6 +12,8 @@ import { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 const MIN_OUTPUT_MAX_BYTES = 1_024
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 const MAX_OPTION_LENGTH = 256
+/** Visible model rows named in a Latest-row failure, so the message shows what the picker exposed. */
+const MAX_DIAGNOSTIC_ROWS = 12
 const MAX_OPTIONS = 64
 
 /** Browser capabilities required to inspect the authenticated ChatGPT page. */
@@ -680,7 +682,7 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
                       }
                     }
                   } else if (multipleFamilies(verified.choices)) {
-                    outcome = { status: 'latest-model-unavailable' };
+                    outcome = { status: 'latest-model-unavailable', rows: modelRead.choices.slice(0, ${MAX_DIAGNOSTIC_ROWS}).map((choice) => choice.label) };
                   } else if (requestedProjection.kind === 'projected') {
                     outcome = { status: 'model-selection-unavailable' };
                   }
@@ -909,7 +911,10 @@ function catalogFromOutput(value: BrowserJsonValue): WebModelCatalog {
     case 'model-selection-unavailable':
       throw new Error('ChatGPT Web could not verify the explicitly requested model; refresh and choose an exact advertised model')
     case 'latest-model-unavailable':
-      throw new Error('ChatGPT Web could not identify one visible Latest model row for the observed multiple model families')
+      throw new Error(
+        'ChatGPT Web could not identify one visible Latest model row for the observed multiple model families'
+        + visibleRowsNote(record.rows),
+      )
     case 'catalog-restore-unavailable':
       throw new Error('ChatGPT Web could not restore the selected model and reasoning control after reading the latest choices')
     case 'reasoning-options-unavailable':
@@ -1004,6 +1009,19 @@ function selectedFrom(name: string, value: BrowserJsonValue | undefined, choices
 /** Narrow the typed browser value to its JSON-array variant. */
 function isJsonArray(value: BrowserJsonValue | undefined): value is readonly BrowserJsonValue[] {
   return Array.isArray(value)
+}
+
+/**
+ * Format the model rows the picker showed, for a diagnostic message. Rows that are not bounded strings are dropped,
+ * so a malformed value cannot widen the message.
+ * @param rows - the page's reported row labels.
+ * @returns a bracketed suffix, or an empty string when no usable row was reported.
+ */
+function visibleRowsNote(rows: BrowserJsonValue | undefined): string {
+  if (!isJsonArray(rows)) return ''
+  const labels = rows.filter((row): row is string => typeof row === 'string' && row.length > 0 && row.length <= MAX_OPTION_LENGTH)
+    .slice(0, MAX_DIAGNOSTIC_ROWS)
+  return labels.length === 0 ? '' : ` (visible model rows: ${labels.join(', ')})`
 }
 
 /** Read a plain JSON object without allowing arrays or prototype-derived values. */

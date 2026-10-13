@@ -702,11 +702,37 @@ describe('ChatGPT Web model catalog', () => {
     const { ctx } = await browserFixture(true)
 
     await expect(discoverWebModels(ctx, discoveryOptions()))
-      .rejects.toThrow('could not identify one visible Latest model row')
+      .rejects.toThrow('could not identify one visible Latest model row for the observed multiple model families (visible model rows: Current model, GPT-5.6 Sol, GPT-5.5)')
 
     expect(page.draft.textContent).toBe('keep this exact private draft')
     expect(page.sent()).toBe(0)
     expect(page.menu.style.display).toBe('none')
+  })
+
+  it.each([
+    ['names the rows the picker showed', ['Current model', 'GPT-5.5'], ' (visible model rows: Current model, GPT-5.5)'],
+    ['keeps at most twelve rows', Array.from({ length: 14 }, (_, index) => `row ${String(index)}`),
+      ` (visible model rows: ${Array.from({ length: 12 }, (_, index) => `row ${String(index)}`).join(', ')})`],
+    ['drops rows that are not bounded text', ['', 7, 'x'.repeat(300), 'Kept'], ' (visible model rows: Kept)'],
+    ['adds nothing when no usable row is reported', ['', 7], ''],
+    ['adds nothing when the page reports no rows', undefined, ''],
+  ])('Latest-row failure %s', async (_name, rows, suffix) => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(BrowserRuntime)
+    ctx.browser.registerProvider({
+      descriptor: { id: BrowserProviderId('model-catalog-latest-rows'), layers: ['browser-js-v1'], capabilities: CAPABILITIES },
+      available: () => true,
+      runProgram: async () => ({
+        version: 1,
+        workspace: { id: BrowserWorkspaceId('model-catalog-latest-rows'), name: 'fixture-chatgpt-web', lifecycle: 'active', control: 'agent' },
+        output: { kind: 'json', value: { status: 'latest-model-unavailable', ...rows === undefined ? {} : { rows } } },
+      }),
+    })
+
+    await expect(discoverWebModels(ctx, discoveryOptions())).rejects.toThrow(
+      `ChatGPT Web could not identify one visible Latest model row for the observed multiple model families${suffix}`,
+    )
   })
 
   it('waits for a delayed model trigger before applying an explicit latest and Pro selection', async () => {
