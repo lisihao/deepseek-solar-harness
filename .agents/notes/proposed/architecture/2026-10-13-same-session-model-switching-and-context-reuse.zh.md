@@ -48,10 +48,10 @@ Resident store 不变：state schema 6 与 protocol 14 保持，因此没有单�
 
 交接复用 `OperatorContextEnvelopeV1`：精确的 `systemText`、`task`、具名 `contexts`、带持久来源的 `source`、`digest`，以及 accepted 或 rejected 回执（`envelope.ts:84-130`）。完整信封已经作为 `physical-operator/context-envelope` 追加进会话（`index.ts:868`、`:1030`）。交接就是 `contexts` 里多出来的一个具名 context。它是带来源引用的派生视图，不是原始历史，所以"信封不含此前历史"的规则依然成立；信封版本保持 1，因为新增一个 context 名称不是结构变化。
 
-- **只计算一次。** 交接在创建 dispatch 时构造，并和它的 `context-envelope` 事件一起存储。恢复或重放读取存储的版本。重放时重新计算会改变 digest。
+- **按冻结的区间重建。** dispatch 在命令发送之前记录原始会话事件的区间（`handoff`：`afterSeq`、`beforeSeq`、`maxChars`）。文本只是这个区间内原始事件的函数，与当前 surface 和配置无关，所以崩溃或压缩之后的恢复会重建出同样的文本和同样的信封 digest。
 - **已确认位置，不加新存储。** 某条 lane 的已确认位置从日志推导：该 lane 最近一次结果已送达会话的 dispatch（`recoverableDispatch` 里的送达判断）。`dispatch-terminal` 是失败标记，不是成功标记，不能当成功用。交接携带的是这个位置之后发生的内容。
 - **内容，按优先级。** 最近的 checkpoint（有压缩摘要时）。已确认位置之后用户自己的话和修正，原文保留。其他模型完成的结果，以证据引用形式给出。未决命令。近期消息。权限、用户的硬约束和未解决的动作不会为了预算被丢掉：必需内容放不下时，切换停止并说明缺什么。
-- **保持信任级别。** 工具和文件内容是被引用的资料，不会被提升为指令。当前权限始终来自运行时的实时配置，不从摘要恢复。
+- **保持信任级别。** 用户自己的话保留它的权限并如实标注；助手回复、摘要以及工具和文件内容是被引用的资料，不会被提升为指令。
 - **第一次使用的 lane** 得到 checkpoint、近期窗口和必需约束。
 - **确认**来自适配器的信封回执，不接受模型自己说"已读取"。确认不明时，先对账再发送。
 

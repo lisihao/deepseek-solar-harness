@@ -58,6 +58,10 @@ import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai
 import type {} from '@deepseek-ai/dsh-commands'
 import { LiveCatalogs, latestNativeModels, ModelEntries, NativeCatalogCache, type LatestModelEntries } from './model-entries.ts'
 import {
+  buildSessionHandoff, chooseResidentLane, DEFAULT_HANDOFF_MAX_CHARS, handoffInterval, SESSION_HANDOFF_CONTEXT,
+  type HandoffInterval,
+} from './lanes.ts'
+import {
   NATIVE_CATALOG_PROVIDER,
   NativeCatalogSources,
   nativeReasoningEffortName,
@@ -114,6 +118,13 @@ declare module '@deepseek-ai/dsh-session/types' {
       /** Omitted by pre-ChatGPT-Web logs; those legacy host routes were Resident. */
       executionMode?: PhysicalOperatorExecutionMode
       residentProfile?: PhysicalOperatorExecutionPreference
+      /**
+       * Resident lane the dispatch runs on. Absent means the session's default lane, which is every dispatch
+       * written before lanes were recorded. A lane is fixed before the command is sent, so a recovery reuses it.
+       */
+      residentLaneId?: string
+      /** Conversation interval frozen for the lane's handoff context; see `lanes.ts`. */
+      handoff?: HandoffInterval
       fallbackConfig?: LlmCallConfig
     }
     /** Explicit physical_operator tool admission, distinct from a routed main-model turn. */
@@ -233,6 +244,12 @@ export interface Config {
    * minutes.
    */
   readonly catalogMaxAgeMs?: number
+  /**
+   * Most characters of earlier conversation a native dispatch's handoff may carry. A native thread that has run
+   * before must be caught up whole, so a longer gap fails the dispatch and names this limit; a thread that has not
+   * run before gets the newest part. Defaults to 48,000.
+   */
+  readonly handoffMaxChars?: number
 }
 
 /** Loader schema for the model-menu entry settings. */
@@ -248,6 +265,7 @@ export const Config: z<Config> = z.object({
   ]),
   stateRoot: z.string(),
   catalogMaxAgeMs: z.natural().default(DEFAULT_CATALOG_MAX_AGE_MS),
+  handoffMaxChars: z.natural().min(1_000).default(DEFAULT_HANDOFF_MAX_CHARS),
 })
 
 /** The resolved menu entries and catalogs of one mounted router, keyed by its plugin context. */
@@ -256,6 +274,8 @@ interface RouterCatalogs {
   readonly live: LiveCatalogs
 }
 const routerCatalogs = new WeakMap<Context, RouterCatalogs>()
+/** The configured handoff limit of each mounted router. */
+const handoffLimits = new WeakMap<Context, number>()
 
 const ROUTER_PROVIDER = NATIVE_CATALOG_PROVIDER
 const RESUME_SOURCE = 'physical-operator-resume'
@@ -291,6 +311,8 @@ interface PendingHostRoute {
   /** Capability-selected lifetime frozen with the host dispatch. */
   readonly executionMode: PhysicalOperatorExecutionMode
   readonly residentProfile?: PhysicalOperatorExecutionPreference
+  readonly residentLaneId?: string
+  readonly handoff?: HandoffInterval
   readonly fallbackConfig?: LlmCallConfig
 }
 
@@ -464,8 +486,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   }, 'tool-physical-operator: model tool bridge')
   ctx.effect(() => {
     routerCatalogs.set(ctx, { entries, live })
+    handoffLimits.set(ctx, config.handoffMaxChars ?? DEFAULT_HANDOFF_MAX_CHARS)
     return () => {
       routerCatalogs.delete(ctx)
+      handoffLimits.delete(ctx)
       nativeCatalogSources.close()
       live.close()
     }
@@ -989,8 +1013,11 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     // Direct ChatGPT Web has no DSH tools, so the tool-using agent's system
     // instruction and runtime context would only mislead the website model.
     const browserDirect = dispatch.operatorId === CHATGPT_WEB_OPERATOR_ID && dispatch.executionMode !== 'resident'
+    const handoffText = dispatch.executionMode === 'resident' && dispatch.handoff !== undefined && !browserDirect
+      ? buildSessionHandoff(agent.session.events, dispatch.handoff)
+      : undefined
     const contextEnvelope = operatorContextEnvelope(
-      agent, options, dispatch.promptMessageId, prompt, browserDirect,
+      agent, options, dispatch.promptMessageId, prompt, browserDirect, handoffText,
     )
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
@@ -1024,6 +1051,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         ...(bound?.descriptor === undefined ? {} : { modelToolBridge: bound.descriptor }),
         ...(dispatch.executionMode === 'resident' && dispatch.residentProfile !== undefined
           ? { residentProfile: dispatch.residentProfile }
+          : {}),
+        ...(dispatch.executionMode === 'resident' && dispatch.residentLaneId !== undefined
+          ? { residentLaneId: dispatch.residentLaneId }
           : {}),
       })
       if (run.contextReceipt !== undefined) {
@@ -1570,10 +1600,7 @@ export function residentLaneProfile(
   events: readonly SessionEvent[],
   operatorId: string,
 ): PhysicalOperatorExecutionPreference | undefined {
-  const refused = new Set<string>()
-  for (const event of events) {
-    if (event.type === 'physical-operator/dispatch-terminal' && PROFILE_REFUSAL_CODES.has(event.data.code)) refused.add(event.data.commandId)
-  }
+  const refused = profileRefusedCommands(events)
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type === 'physical-operator/dispatch' && event.data.operatorId === operatorId
@@ -1581,6 +1608,35 @@ export function residentLaneProfile(
       && !refused.has(event.data.commandId)) return event.data.residentProfile
   }
   return undefined
+}
+
+/** Command ids the Resident daemon refused for their profile, so they never became a lane's profile. */
+function profileRefusedCommands(events: readonly SessionEvent[]): Set<string> {
+  const refused = new Set<string>()
+  for (const event of events) {
+    if (event.type === 'physical-operator/dispatch-terminal' && PROFILE_REFUSAL_CODES.has(event.data.code)) refused.add(event.data.commandId)
+  }
+  return refused
+}
+
+/**
+ * The lane and the frozen handoff interval of a new resident dispatch. The lane keeps the profile the daemon locked;
+ * the interval is the conversation that lane has not seen.
+ */
+function residentLaneRoute(
+  ctx: Context,
+  agent: Agent,
+  operatorId: string,
+  messageId: string,
+  profile: PhysicalOperatorExecutionPreference | undefined,
+): { readonly residentLaneId?: string; readonly handoff: HandoffInterval } {
+  const events = agent.session.events
+  const residentLaneId = chooseResidentLane(events, String(agent.id), operatorId, profile, profileRefusedCommands(events))
+  const handoff = handoffInterval(
+    events, operatorId, residentLaneId, messageId, agent.session.seq,
+    handoffLimits.get(ctx) ?? DEFAULT_HANDOFF_MAX_CHARS, ROUTER_PROVIDER,
+  )
+  return { ...residentLaneId === undefined ? {} : { residentLaneId }, handoff }
 }
 
 /** Render one captured model selection in its durable routing explanation. */
@@ -1649,6 +1705,7 @@ function newHostRoute(
     recovered: false,
     executionMode,
     ...residentProfile === undefined ? {} : { residentProfile },
+    ...executionMode === 'resident' ? residentLaneRoute(ctx, agent, operatorId, messageId, residentProfile) : {},
   }
 }
 
@@ -1681,6 +1738,8 @@ function recoveredHostRoute(recoverable: DispatchRecord, requestedByMessageId: s
     executionMode: recoverable.executionMode,
     ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
     ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
+    ...recoverable.residentLaneId === undefined ? {} : { residentLaneId: recoverable.residentLaneId },
+    ...recoverable.handoff === undefined ? {} : { handoff: recoverable.handoff },
     ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
   }
 }
@@ -1698,6 +1757,9 @@ function fallbackHostRoute(ctx: Context, agent: Agent, failed: PendingHostRoute,
     recovered: false,
     executionMode,
     ...residentProfile === undefined ? {} : { residentProfile },
+    ...executionMode === 'resident'
+      ? residentLaneRoute(ctx, agent, operatorId, failed.promptMessageId, residentProfile)
+      : {},
     ...failed.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(failed.fallbackConfig) },
   }
 }
@@ -1814,7 +1876,7 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
   if (found?.type !== 'physical-operator/dispatch') return undefined
   const {
     commandId, operatorId, fallbackOperatorId, promptMessageId, requestedByMessageId, recovered,
-    executionMode, residentProfile, fallbackConfig,
+    executionMode, residentProfile, residentLaneId, handoff, fallbackConfig,
   } = found.data
   return {
     commandId,
@@ -1825,6 +1887,8 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
     recovered,
     executionMode: executionMode ?? 'resident',
     ...residentProfile === undefined ? {} : { residentProfile },
+    ...residentLaneId === undefined ? {} : { residentLaneId },
+    ...handoff === undefined ? {} : { handoff },
     ...fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(fallbackConfig) },
   }
 }
@@ -1873,6 +1937,7 @@ function operatorContextEnvelope(
   taskMessageId: string,
   task: ContentBlock[],
   taskOnly: boolean,
+  handoffText?: string,
 ): OperatorContextEnvelopeV1 {
   const header = [...agent.session.events].reverse().find(event => event.type === 'request/header')
   if (header?.type !== 'request/header') {
@@ -1895,7 +1960,11 @@ function operatorContextEnvelope(
   return buildOperatorContextEnvelope({
     systemText: taskOnly ? '' : options.system ?? '',
     task,
-    contexts: [...snapshotContexts, ...instructionContexts],
+    contexts: [
+      ...snapshotContexts,
+      ...instructionContexts,
+      ...handoffText === undefined ? [] : [{ name: SESSION_HANDOFF_CONTEXT, text: handoffText }],
+    ],
     source: {
       kind: 'session',
       requestHeaderEventSeq: header.seq,

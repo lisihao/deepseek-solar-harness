@@ -2197,6 +2197,76 @@ describe('host physical-operator routing', () => {
       expect(codex.requests).toHaveLength(3)
     })
 
+    it('gives another native configuration its own lane, returns to the first lane, and reuses the newest lane for a bare entry', async () => {
+      const { agent, codex } = await setup()
+      await turn(agent, 'codex:gpt-5.6-sol', 'low', '第一轮')
+      await turn(agent, 'codex:gpt-5.6-terra', 'xhigh', '第二轮')
+      await turn(agent, 'codex:gpt-5.6-sol', 'low', '第三轮')
+      await turn(agent, 'codex', 'medium', '第四轮')
+      expect(codex.requests.map(request => request.residentLaneId)).toEqual([
+        undefined, `${String(agent.id)}~gpt-5.6-terra~xhigh`, undefined, undefined,
+      ])
+      expect(codex.requests.map(request => request.residentProfile)).toEqual([
+        { model: 'gpt-5.6-sol', effort: 'low' }, { model: 'gpt-5.6-terra', effort: 'xhigh' },
+        { model: 'gpt-5.6-sol', effort: 'low' }, { model: 'gpt-5.6-sol', effort: 'low' },
+      ])
+      const lanes = agent.session.events.flatMap(event => event.type === 'physical-operator/dispatch' ? [event.data.residentLaneId] : [])
+      expect(lanes).toEqual(codex.requests.map(request => request.residentLaneId))
+    })
+
+    it('catches a native lane up on what other models did, and only on that', async () => {
+      const { ctx, agent, codex, deepseek } = await setup()
+      await ctx.commands.execute(agent, '/operator direct', new AbortController().signal)
+      await turn(agent, 'codex:gpt-5.6-sol', 'low', '第一轮：按方案 A 开发')
+      const direct = installModelSelection(agent.ctx, { current: { provider: 'deepseek', model: 'deepseek' }, assembled: undefined })
+      try {
+        send(agent, '改成方案 B')
+        await agent.whenIdle()
+      } finally { direct() }
+      expect(deepseek.requests).toHaveLength(1)
+      await turn(agent, 'codex:gpt-5.6-terra', 'xhigh', '继续')
+
+      const handoff = (index: number) => codex.requests[index]?.contextEnvelope?.contexts.find(context => context.name === 'session-handoff')
+      expect(handoff(0)).toBeUndefined()
+      const second = handoff(1)?.text ?? ''
+      // The new lane has never run, so it gets the whole earlier conversation, with the user's words kept apart from quoted replies.
+      expect(second).toContain('[user] 第一轮：按方案 A 开发')
+      expect(second).toContain('[user] 改成方案 B')
+      expect(second).toContain('[assistant deepseek/deepseek] deepseek should not own this request')
+
+      // Back on the first lane: only what happened after its last reply is handed over.
+      await turn(agent, 'codex:gpt-5.6-sol', 'low', '回到第一条 lane')
+      const third = handoff(2)?.text ?? ''
+      expect(third).not.toContain('第一轮：按方案 A 开发')
+      expect(third).toContain('[user] 改成方案 B')
+    })
+
+    it('rebuilds the same handoff and envelope digest for a recovered dispatch after later events', async () => {
+      const { ctx, agent, codex } = await setup({ codexImmediate: false })
+      await ctx.commands.execute(agent, '/operator direct', new AbortController().signal)
+      const dispose = select(agent, 'codex:gpt-5.6-sol', 'low')
+      try {
+        send(agent, '第一轮')
+        while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+        const first = codex.requests[0]
+        const receipt = codex.receipts.get(String(first?.executionId))
+        agent.cancel({ kind: 'user' })
+        await agent.whenIdle()
+        // A recovered dispatch keeps its frozen lane and interval even when the user now names another model.
+        dispose()
+        const other = select(agent, 'codex:gpt-5.6-terra', 'xhigh')
+        try {
+          send(agent, '继续')
+          while (codex.requests.length < 2) await new Promise(resolve => setTimeout(resolve, 1))
+        } finally { other() }
+        expect(codex.requests[1]?.residentLaneId).toBe(codex.requests[0]?.residentLaneId)
+        expect(codex.requests[1]?.residentProfile).toEqual(codex.requests[0]?.residentProfile)
+        expect(codex.requests[1]?.contextEnvelope?.digest).toBe(codex.requests[0]?.contextEnvelope?.digest)
+        receipt?.result.resolve({ output: [{ type: 'text', text: 'done' }], stopReason: 'completed' })
+        await agent.whenIdle()
+      } finally { dispose() }
+    })
+
     it('residentLaneProfile skips refused and non-resident dispatches and follows the latest accepted one', () => {
       const dispatch = (commandId: string, operatorId: string, mode: 'resident' | 'ephemeral', model: string) => ({
         type: 'physical-operator/dispatch', data: { commandId, operatorId, executionMode: mode, residentProfile: { model, effort: 'low' } },

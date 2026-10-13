@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-13-native-lane-per-profile-and-session-handoff.md
+2026-10-13-native-lane-per-profile-and-session-handoff.md: 1f4270df1621523f4c982ef2de5dcc59928671af
+2026-10-13-native-lane-per-profile-and-session-handoff.zh.md: 183e3e284f5668a11cdaae5531a371d3ea6f61f8
