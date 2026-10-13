@@ -32,7 +32,7 @@ interface ContentBlockMap {
 
 源码：[`packages/llm/llm/src/message.ts`](../../packages/llm/llm/src/message.ts)
 
-`Message` 是一个带标识且不可变的角色／来源／内容值。模型生成的 assistant 消息会在来源中记录生成它的提供方和模型，以及可选的适配器私有回放数据：
+`Message` 是一个带标识且不可变的角色／来源／内容值。模型生成的 assistant 消息会在来源中记录生成它的提供方和模型，以及可选的适配器私有回放数据和该步使用的推理强度：
 
 ```ts type-equiv
 /** Provider/model identity and adapter-private replay data for an assistant message. */
@@ -41,6 +41,11 @@ interface AssistantProvenance {
   provider: string
   /** Provider model id that produced the message. */
   model: string
+  /**
+   * Reasoning effort the step ran with, as resolved when the request was built (an explicit choice, else the model's
+   * default). Absent when the route has no effort control, and on messages written before this field existed.
+   */
+  reasoningEffort?: string
   /**
    * Lossless-JSON adapter state needed to replay the provider response.
    * `LlmRuntime` exposes it to a target adapter only when that adapter instance

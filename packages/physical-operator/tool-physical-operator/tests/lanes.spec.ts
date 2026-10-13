@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildSessionHandoff, chooseResidentLane, handoffInterval, residentLanes, type HandoffInterval,
+  buildSessionHandoff, chooseResidentLane, handoffInterval, residentLanes, resolvedProfile, type HandoffInterval,
 } from '../src/lanes.ts'
 
 const ev = (seq: number, type: string, data: Record<string, unknown>): never => ({ seq, type, data }) as never
@@ -44,6 +44,34 @@ describe('resident lanes', () => {
     expect(residentLanes(events, 'codex', new Set(['d'])).map(lane => [lane.laneId, lane.profile.model])).toEqual([
       [undefined, 'sol'], ['agent~terra~high', 'terra'],
     ])
+  })
+})
+
+describe('resolved profile', () => {
+  const accepted = (seq: number, commandId: string, profile: Record<string, unknown>) =>
+    ev(seq, 'physical-operator/progress', { commandId, operatorId: 'codex', sequence: 1, type: 'turn.accepted', time: 't', data: { commandId, profile } })
+
+  it('reads what the daemon resolved for a command, and nothing for another command or a different event', () => {
+    const events = [
+      accepted(2, 'a', { model: 'luna', effort: 'low' }), accepted(3, 'b', { model: 'terra' }),
+      ev(4, 'physical-operator/progress', { commandId: 'c', operatorId: 'codex', sequence: 1, type: 'turn.settled', time: 't', data: { commandId: 'c' } }),
+      accepted(5, 'd', {}),
+    ]
+    expect(resolvedProfile(events, 'a')).toEqual({ model: 'luna', effort: 'low' })
+    expect(resolvedProfile(events, 'b')).toEqual({ model: 'terra' })
+    expect(resolvedProfile(events, 'c')).toBeUndefined()
+    expect(resolvedProfile(events, 'd')).toEqual({})
+    expect(resolvedProfile(events, 'zzz')).toBeUndefined()
+  })
+
+  it('puts a Smart Auto lane in the lane table with the resolved profile, which wins over the dispatch\'s', () => {
+    const smartAuto = ev(1, 'physical-operator/dispatch', { commandId: 'a', operatorId: 'codex', executionMode: 'resident' })
+    const events = [smartAuto, accepted(2, 'a', { model: 'luna', effort: 'low' })]
+    expect(residentLanes(events, 'codex', none).map(lane => [lane.laneId, lane.profile])).toEqual([[undefined, { model: 'luna', effort: 'low' }]])
+    expect(chooseResidentLane(events, 'agent', 'codex', { model: 'sol', effort: 'high' }, none)).toBe('agent~sol~high')
+    expect(chooseResidentLane(events, 'agent', 'codex', { model: 'luna', effort: 'low' }, none)).toBeUndefined()
+    const named = [dispatch(1, 'a', undefined, 'sol'), accepted(2, 'a', { model: 'luna', effort: 'low' })]
+    expect(residentLanes(named, 'codex', none)[0]?.profile).toEqual({ model: 'luna', effort: 'low' })
   })
 })
 

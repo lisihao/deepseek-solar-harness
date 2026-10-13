@@ -31,7 +31,10 @@ export const TurnTailNodeView = memo(function TurnTailNodeView({
   const messageId = closing.finalNode.messageId
   const assistantActions = messageId === undefined
     ? null
-    : renderSlot('conversation.chat.assistant-actions', { messageId })
+    : renderSlot('conversation.chat.assistant-actions', {
+      messageId,
+      ...closing.finalNode.provenance === undefined ? {} : { served: closing.finalNode.provenance },
+    })
   return (
     <div className={css.root} data-turn-tail={data.turn} data-time-hover-root>
       {tail}

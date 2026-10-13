@@ -2179,6 +2179,16 @@ function safeResidentProgressData(type: string, payload: unknown, commandId: str
     const stopReason = boundedResidentText(data.stopReason, MAX_RESIDENT_OBSERVATION_NAME)
     return stopReason === undefined ? undefined : { commandId, stopReason }
   }
+  if (type === 'turn.accepted') {
+    // The daemon's resolved model and effort: Smart Auto picks them when the dispatch names none, and the run result
+    // does not return them.
+    if (!isJsonValue(data.profile) || data.profile === null || Array.isArray(data.profile)) return undefined
+    const profile = data.profile as Record<string, JsonValue>
+    const model = boundedResidentText(profile.model, MAX_RESIDENT_OBSERVATION_NAME) || undefined
+    const effort = boundedResidentText(profile.effort, MAX_RESIDENT_OBSERVATION_NAME) || undefined
+    if (model === undefined && effort === undefined) return undefined
+    return { commandId, profile: { ...model === undefined ? {} : { model }, ...effort === undefined ? {} : { effort } } }
+  }
   if (type.startsWith('chatgpt-web.')) {
     const phase = boundedResidentText(data.phase, MAX_RESIDENT_OBSERVATION_NAME)
     if (phase === undefined) return undefined

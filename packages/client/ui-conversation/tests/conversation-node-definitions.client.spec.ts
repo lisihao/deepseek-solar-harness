@@ -94,12 +94,12 @@ function textMessage(id: string, text: string) {
   }
 }
 
-function assistantMessage(id: string, text: string) {
+function assistantMessage(id: string, text: string, effort?: string) {
   return {
     id,
     role: 'assistant',
     content: [{ type: 'text', text }],
-    source: { kind: 'model', provider: 'fake', model: 'fake' },
+    source: { kind: 'model', provider: 'fake', model: 'fake', ...effort === undefined ? {} : { reasoningEffort: effort } },
   }
 }
 
@@ -145,6 +145,15 @@ describe('built-in conversation node Definitions', () => {
     expect(settled?.key).toBe(running?.key)
     expect(settledSnapshot.order).toBe(order)
     expect(settled?.data).toMatchObject({ status: 'settled', blocks: [{ kind: 'text', text: 'settled' }] })
+    expect((settled?.data as AssistantChatData).finalNode?.provenance).toEqual({ provider: 'fake', model: 'fake' })
+
+    const effortValue = assembler([
+      at(30, 'turn/start', { turn: 4 }),
+      at(31, 'step/start', { turn: 4, step: 1 }),
+      at(32, 'assistant/message', { turn: 4, step: 1, message: assistantMessage('assistant-effort', 'answer', 'max') }, { surfaceOp: 'append' }),
+    ])
+    const withEffort = node(snapshot(effortValue), 'assistant-step')
+    expect((withEffort?.data as AssistantChatData).finalNode?.provenance).toEqual({ provider: 'fake', model: 'fake', reasoningEffort: 'max' })
 
     const interruptedValue = assembler([
       at(10, 'turn/start', { turn: 2 }),

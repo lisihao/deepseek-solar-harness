@@ -77,6 +77,8 @@ class DurableOperator implements PhysicalOperator {
   resultFailureMessage?: string | undefined
   /** When set, the next start is refused with this message and code, as the Resident daemon refuses a profile. */
   startRefusal?: { readonly message: string; readonly code: string } | undefined
+  /** When set, a started run reports this as the profile the daemon resolved, on its first progress event. */
+  resolvedProfile?: { readonly model: string; readonly effort?: string } | undefined
 
   constructor(
     readonly id: 'codex' | 'claude-code' | 'chatgpt-web',
@@ -160,11 +162,18 @@ class DurableOperator implements PhysicalOperator {
         },
       )
     })
+    const accepted: readonly PhysicalOperatorProgressEvent[] = this.resolvedProfile === undefined ? [] : [{
+      sequence: 1,
+      type: 'turn.accepted',
+      time: new Date(1).toISOString(),
+      data: { commandId: id, turnId: `turn-${id}`, profile: this.resolvedProfile },
+    }]
     const initialEvents: readonly PhysicalOperatorProgressEvent[] = [
+      ...accepted,
       ...this.progressPhases.map((phase, index): PhysicalOperatorProgressEvent => ({
-        sequence: index + 1,
+        sequence: accepted.length + index + 1,
         type: 'turn.progress',
-        time: new Date(index + 1).toISOString(),
+        time: new Date(accepted.length + index + 1).toISOString(),
         data: { commandId: id, phase },
       })),
     ]
@@ -2265,6 +2274,32 @@ describe('host physical-operator routing', () => {
         receipt?.result.resolve({ output: [{ type: 'text', text: 'done' }], stopReason: 'completed' })
         await agent.whenIdle()
       } finally { dispose() }
+    })
+
+    it('uses the profile the daemon resolved when the dispatch named none, so a later explicit model gets its own lane', async () => {
+      const { agent, codex } = await setup({ primary: 'codex' })
+      codex.resolvedProfile = { model: 'gpt-5.6-luna', effort: 'low' }
+      send(agent, '第一轮')
+      await agent.whenIdle()
+      expect(codex.requests[0]?.residentProfile).toBeUndefined()
+      expect(codex.requests[0]?.residentLaneId).toBeUndefined()
+      // The daemon locked the default lane to what Smart Auto resolved, which only the progress event reports.
+      const accepted = agent.session.events.find(event => event.type === 'physical-operator/progress' && event.data.type === 'turn.accepted')
+      expect(accepted?.type === 'physical-operator/progress' ? accepted.data.data : undefined)
+        .toMatchObject({ profile: { model: 'gpt-5.6-luna', effort: 'low' } })
+      codex.resolvedProfile = undefined
+      await turn(agent, 'codex:gpt-5.6-terra', 'xhigh', '第二轮')
+      expect(codex.requests[1]?.residentLaneId).toBe(`${String(agent.id)}~gpt-5.6-terra~xhigh`)
+      await turn(agent, 'codex:gpt-5.6-luna', 'low', '第三轮')
+      expect(codex.requests[2]?.residentLaneId).toBeUndefined()
+    })
+
+    it.each([['an empty model', { model: '' }], ['not an object', 'oops'], ['an array', ['sol']]])('projects no resolved profile when the daemon reports %s', async (_name, profile) => {
+      const { agent, codex } = await setup({ primary: 'codex' })
+      codex.resolvedProfile = profile as never
+      send(agent, '第一轮')
+      await agent.whenIdle()
+      expect(agent.session.events.some(event => event.type === 'physical-operator/progress' && event.data.type === 'turn.accepted')).toBe(false)
     })
 
     it('residentLaneProfile skips refused and non-resident dispatches and follows the latest accepted one', () => {

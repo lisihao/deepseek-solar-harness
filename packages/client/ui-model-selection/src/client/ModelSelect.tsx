@@ -23,6 +23,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { FailureNote, type FailedSource } from './FailureNote.tsx'
+import { describeSelection, joinLabel } from './labels.ts'
 import type { ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
 
@@ -244,6 +245,24 @@ export function ModelSelect(
 
   const modelLabel = currentChoice?.model.name ?? t('trigger.fallback')
   const triggerLabel = effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
+  // The selected model and the one the last step actually ran with differ until the next step starts, and for a
+  // native route whose lane keeps another profile.
+  const inEffect = state.effective
+  // A bare operator entry runs that operator's current native model, which the host reports as `<operator>:<model>`.
+  const sameModel = inEffect !== undefined && state.current !== null
+    && inEffect.provider === state.current.provider
+    && (inEffect.model === state.current.model
+      || (!state.current.model.includes(':') && inEffect.model.startsWith(`${state.current.model}:`)))
+  const differs = inEffect !== undefined && state.current !== null
+    && (!sameModel
+      || (state.current.reasoningEffort !== undefined && inEffect.reasoningEffort !== undefined
+        && state.current.reasoningEffort !== inEffect.reasoningEffort))
+  const effectiveNote = differs
+    ? {
+      selected: t('effective.selected', { name: triggerLabel }),
+      inEffect: t('effective.inEffect', { name: joinLabel(describeSelection(state.groups, inEffect)) }),
+    }
+    : undefined
   const triggerAria = currentChoice === undefined
     ? t('trigger.selectAria')
     : effortLabel === undefined
@@ -316,6 +335,12 @@ export function ModelSelect(
               </button>
               {refreshState.running && <div className={css.status}>{t('refresh.running')}</div>}
               {refreshState.lines.map(line => <div className={css.status} key={line}>{line}</div>)}
+              {effectiveNote !== undefined && (
+                <div className={css.status} data-effective-note>
+                  <div>{effectiveNote.selected}</div>
+                  <div>{effectiveNote.inEffect}</div>
+                </div>
+              )}
               <FailureNote items={refreshState.failures} onRetry={refreshCatalogs} t={t} />
             </>
           )}

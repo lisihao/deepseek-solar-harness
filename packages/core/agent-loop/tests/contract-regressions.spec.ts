@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { createUserMessage, CallId, LlmError, MessageSource, ProviderRequestId, StreamChunk  } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, CallId, LlmError, MessageSource, ProviderRequestId, ReasoningEffortId, StreamChunk  } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionEvent, SessionId, TurnEndReason, type UserMessage } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineContentToolFixture, type PostToolDecision } from '@deepseek-ai/dsh-tools'
@@ -78,6 +78,31 @@ describe('assistant replay provider and model fields', () => {
     expect(agent.session.deriveMessages().at(-1)?.source).toEqual({
       kind: 'model', provider: 'mock', model: 'next-model', replayState,
     })
+  })
+})
+
+describe('assistant message records the effort the step ran with', () => {
+  it('writes the resolved effort on the source, and leaves it out when the route has none', async () => {
+    const ctx = await harness(new MockAdapter([textResponse('one'), textResponse('two')], {
+      efforts: [{ id: ReasoningEffortId('high'), name: 'High' }],
+    }))
+    // The effort of a step arrives through the request waterfall, as the model selection supplies it.
+    const dispose = ctx.on('agent/request', async ({ agent }, next) => {
+      const config = await next()
+      return String(agent.id) === 'effort-on' ? { ...config, reasoningEffort: ReasoningEffortId('high') } : config
+    })
+    const withEffort = ctx.agentLoop.create(SessionId('effort-on'), { provider: 'mock', model: 'next-model' })
+    send(withEffort, 'go')
+    await waitForIdle(ctx, withEffort)
+    const recorded = withEffort.session.events.find(event => event.type === 'assistant/message')
+    expect(recorded?.type === 'assistant/message' && recorded.data.message.source).toMatchObject({ kind: 'model', provider: 'mock', model: 'next-model', reasoningEffort: 'high' })
+
+    const without = ctx.agentLoop.create(SessionId('effort-off'), { provider: 'mock', model: 'next-model' })
+    send(without, 'go')
+    await waitForIdle(ctx, without)
+    const plain = without.session.events.find(event => event.type === 'assistant/message')
+    expect(plain?.type === 'assistant/message' && 'reasoningEffort' in plain.data.message.source).toBe(false)
+    dispose()
   })
 })
 

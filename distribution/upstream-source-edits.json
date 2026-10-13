@@ -102,6 +102,10 @@
       "kind": "migration-debt",
       "note": "fix(trajectory): enforce host-safe physical traces"
     },
+    "packages/client/runtime/src/client/sessions/conversation.ts": {
+      "kind": "seam",
+      "note": "Record the resolved reasoning effort on an assistant reply and carry the reply source to its action strip, so each reply names the configuration that served it; see .agents/notes/implemented/feature/2026-10-13-per-reply-served-configuration.md."
+    },
     "packages/client/runtime/src/client/sessions/manager.ts": {
       "kind": "migration-debt",
       "note": "refactor(remote): share durable transport primitives; feat: ship dual-mode workbench orchestration"
@@ -126,9 +130,17 @@
       "kind": "seam",
       "note": "Expose optional room slots while preserving the existing composer priority and ordinary conversation behavior."
     },
+    "packages/client/ui-conversation/src/client/chat/TurnTailNodeView.tsx": {
+      "kind": "seam",
+      "note": "Record the resolved reasoning effort on an assistant reply and carry the reply source to its action strip, so each reply names the configuration that served it; see .agents/notes/implemented/feature/2026-10-13-per-reply-served-configuration.md."
+    },
     "packages/client/ui-conversation/src/client/contract/slots.ts": {
       "kind": "seam",
       "note": "Define optional header, content, aside, and composer slots for plugin-owned conversation rooms."
+    },
+    "packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts": {
+      "kind": "seam",
+      "note": "Record the resolved reasoning effort on an assistant reply and carry the reply source to its action strip, so each reply names the configuration that served it; see .agents/notes/implemented/feature/2026-10-13-per-reply-served-configuration.md."
     },
     "packages/client/ui-conversation/src/client/index.ts": {
       "kind": "seam",
@@ -294,6 +306,10 @@
       "kind": "migration-debt",
       "note": "feat(desktop): add multi-server frontend continuity"
     },
+    "packages/core/agent-loop/src/agent.ts": {
+      "kind": "seam",
+      "note": "Record the resolved reasoning effort on an assistant reply and carry the reply source to its action strip, so each reply names the configuration that served it; see .agents/notes/implemented/feature/2026-10-13-per-reply-served-configuration.md."
+    },
     "packages/core/agent/src/model-selection.ts": {
       "kind": "migration-debt",
       "note": "fix: honor live model selection for ChatGPT Web routing"
@@ -437,6 +453,10 @@
     "packages/llm/llm/src/index.ts": {
       "kind": "migration-debt",
       "note": "feat: add Web coordination and live catalog refresh"
+    },
+    "packages/llm/llm/src/message.ts": {
+      "kind": "seam",
+      "note": "Record the resolved reasoning effort on an assistant reply and carry the reply source to its action strip, so each reply names the configuration that served it; see .agents/notes/implemented/feature/2026-10-13-per-reply-served-configuration.md."
     },
     "packages/sdk/protocol/src/index.ts": {
       "kind": "migration-debt",

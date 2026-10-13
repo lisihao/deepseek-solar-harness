@@ -6,6 +6,9 @@
  */
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import type { HostObservable, InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls the ui-conversation SlotMap merge (the per-message action strip).
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { ModelDirectoryState } from './directory.ts'
 import type { ModelRefreshReport } from './service.ts'
 
@@ -29,3 +32,21 @@ export interface ModelSelectInjected {
    */
   select: (selection: ModelSelection) => Promise<boolean>
 }
+
+/**
+ * Injected face of the served-by caption. The caption sits in ui-conversation's per-message action strip
+ * (`conversation.chat.assistant-actions`), which declares and types the slot; this package contributes one entry and
+ * reads the session's directory through a hook to turn model ids into display names.
+ */
+export interface ServedByInjected {
+  hooks: {
+    /** The session's shared directory (the same instance the menu reads). */
+    directory: HostObservable<ModelDirectoryState>
+  }
+}
+
+/** Full props of the served-by caption entry. */
+export type ServedByProps =
+  PropsRuntime<'conversation.chat.assistant-actions'>
+  & InjectFace<ServedByInjected>
+  & PropsLocale<'model'>

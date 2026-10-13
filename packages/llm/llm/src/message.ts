@@ -11,6 +11,11 @@ export interface AssistantProvenance {
   /** Provider model id that produced the message. */
   model: string
   /**
+   * Reasoning effort the step ran with, as resolved when the request was built (an explicit choice, else the model's
+   * default). Absent when the route has no effort control, and on messages written before this field existed.
+   */
+  reasoningEffort?: string
+  /**
    * Lossless-JSON adapter state needed to replay the provider response.
    * `LlmRuntime` exposes it to a target adapter only when that adapter instance
    * currently owns both this historical provider and the target provider.

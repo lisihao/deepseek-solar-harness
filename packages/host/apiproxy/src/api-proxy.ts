@@ -62,7 +62,9 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves `ctx.get('tasks')` to the background job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
-import { projectPublicSessionEvent } from './physical-operator-trace.ts'
+import {
+  NATIVE_ROUTE_PROVIDER, projectPublicSessionEvent, resolvedNativeProfile, withServedNativeConfig,
+} from './physical-operator-trace.ts'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -953,7 +955,7 @@ function historyPage(
   return {
     events: page.events.map((event) => {
       const view = viewFor(ctx, event, callId => backscanArgs(page.events, callId), scope)
-      return { ...projectPublicSessionEvent(event), ...view === undefined ? {} : { view } }
+      return { ...withServedNativeConfig(projectPublicSessionEvent(event), events), ...view === undefined ? {} : { view } }
     }),
     hasMore: page.hasMore,
   }
@@ -1305,6 +1307,32 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
     }
     return undefined
+  }
+
+  /**
+   * The configuration the most recent step was actually sent with, or `undefined` before any step ran. A native
+   * physical-operator step logs only the operator id as its model, so the native model and effort come from the
+   * newest dispatch to that operator. The route provider and the dispatch event are matched by name: this package
+   * does not depend on the physical-operator package.
+   */
+  function effectiveSelection(agent: Agent): ModelSelection | undefined {
+    const logged = lastUserSelection(agent)
+    if (logged === undefined || logged.provider !== NATIVE_ROUTE_PROVIDER) return logged
+    for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
+      const event = agent.session.events[index]
+      if (event === undefined || (event.type as string) !== 'physical-operator/dispatch') continue
+      const data = event.data as { commandId?: string; operatorId?: string; residentProfile?: { model?: string; effort?: string } }
+      if (data.operatorId !== logged.model) continue
+      // The daemon's resolved profile (Smart Auto) wins over the dispatch's, which may name no model.
+      const profile = resolvedNativeProfile(agent.session.events, data.commandId) ?? data.residentProfile
+      if (profile?.model === undefined) return logged
+      return {
+        provider: logged.provider,
+        model: `${logged.model}:${profile.model}`,
+        ...profile.effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(profile.effort) },
+      }
+    }
+    return logged
   }
 
   /**
@@ -2493,7 +2521,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           refresh === true ? { refresh: true } : undefined,
         )
         const routable = routeServed(current.provider)
-        return ok(request, { current: { ...current }, routable, groups, failures })
+        const effective = effectiveSelection(found.agent)
+        return ok(request, {
+          current: { ...current },
+          ...effective === undefined ? {} : { effective },
+          routable,
+          groups,
+          failures,
+        })
       },
 
       async selectModel(request) {
@@ -3714,7 +3749,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             queue.push(frame({
               type: 'session/event',
               sessionId: session.id,
-              ...projectPublicSessionEvent(event),
+              ...withServedNativeConfig(projectPublicSessionEvent(event), session.events),
               ...view === undefined ? {} : { view },
             }))
           }),

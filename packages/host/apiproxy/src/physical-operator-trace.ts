@@ -275,3 +275,74 @@ export function projectPublicSessionEvent(event: SessionEvent): PublicSessionEve
     ...(physicalOperatorTrace === undefined ? {} : { physicalOperatorTrace }),
   }
 }
+
+/** The model route of native physical operators (`NATIVE_CATALOG_PROVIDER` in the physical-operator package). */
+export const NATIVE_ROUTE_PROVIDER = 'dsh-physical-operator'
+
+/** A native model and effort as the Resident daemon or a dispatch named them. */
+export interface NativeProfile {
+  readonly model?: string
+  readonly effort?: string
+}
+
+/**
+ * The model and effort the Resident daemon resolved for a command, from its `turn.accepted` progress. Smart Auto picks
+ * them when the dispatch names none.
+ * @param events - one session's ordered durable log.
+ * @param commandId - the dispatch's command.
+ * @returns the resolved profile, or `undefined` when none was projected.
+ */
+export function resolvedNativeProfile(events: readonly SessionEvent[], commandId: string | undefined): NativeProfile | undefined {
+  if (commandId === undefined) return undefined
+  for (const event of events) {
+    if ((event.type as string) !== 'physical-operator/progress') continue
+    const data = event.data as { commandId?: string; type?: string; data?: { profile?: NativeProfile } }
+    if (data.commandId === commandId && data.type === 'turn.accepted') return data.data?.profile
+  }
+  return undefined
+}
+
+/**
+ * The native profile a router reply was served with: the newest dispatch of the same turn and step to that operator,
+ * with the daemon's resolved profile preferred over the one the dispatch named.
+ * @param events - one session's ordered durable log.
+ * @param reply - an `assistant/message` event from the native route.
+ * @returns the profile, or `undefined` when no dispatch names a model.
+ */
+function servedNativeProfile(events: readonly SessionEvent[], reply: SessionEvent): NativeProfile | undefined {
+  const { turn, step, message } = reply.data as { turn?: number; step?: number; message?: { source?: { model?: string } } }
+  const source = message?.source
+  for (const event of events.toReversed()) {
+    if (event.seq >= reply.seq || (event.type as string) !== 'physical-operator/dispatch') continue
+    const data = event.data as { commandId?: string; operatorId?: string; turn?: number; step?: number; residentProfile?: NativeProfile }
+    if (data.operatorId !== source?.model || data.turn !== turn || data.step !== step) continue
+    const profile = resolvedNativeProfile(events, data.commandId) ?? data.residentProfile
+    return profile?.model === undefined ? undefined : profile
+  }
+  return undefined
+}
+
+/**
+ * Tell the client which native model and effort served a router reply. The reply is logged under the operator id alone,
+ * so the public view names `<operator>:<model>` and the effort; the stored event is untouched.
+ * @param projection - the public projection of one event.
+ * @param events - one session's ordered durable log.
+ * @returns the projection, with the served configuration on a native reply whose dispatch names a model.
+ */
+export function withServedNativeConfig(
+  projection: PublicSessionEventProjection,
+  events: readonly SessionEvent[],
+): PublicSessionEventProjection {
+  const { event } = projection
+  if (event.type !== 'assistant/message') return projection
+  const message = event.data.message
+  if (message.source.provider !== NATIVE_ROUTE_PROVIDER) return projection
+  const profile = servedNativeProfile(events, event)
+  if (profile?.model === undefined) return projection
+  const source = {
+    ...message.source,
+    model: `${message.source.model}:${profile.model}`,
+    ...profile.effort === undefined ? {} : { reasoningEffort: profile.effort },
+  }
+  return { ...projection, event: { ...event, data: { ...event.data, message: { ...message, source } } } }
+}

@@ -227,6 +227,11 @@ describe('sessions domain schemas', () => {
       }],
       failures: [{ id: 'broken', name: 'Broken', message: 'offline' }],
     }).groups[0]?.models[0]?.id).toBe('deepseek-v4-flash')
+    const models = { current: { provider: 'deepseek-official', model: 'a' }, routable: true, groups: [], failures: [] }
+    expect(sessionModelsValueSchema.parse({ ...models, effective: { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' } }).effective)
+      .toEqual({ provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' })
+    expect('effective' in sessionModelsValueSchema.parse(models)).toBe(false)
+    expect(() => sessionModelsValueSchema.parse({ ...models, effective: { provider: '', model: 'a' } })).toThrow()
     expect(sessionSelectModelRequestSchema.parse({
       sessionId: 's1',
       provider: 'deepseek-official',
@@ -568,5 +573,14 @@ describe('agent-preset schemas', () => {
       .toEqual({ opened: false, path: '/presets/mine' })
     // A closed reply must carry the path the surface shows instead.
     expect(() => agentPresetOpenDocumentValueSchema.parse({ opened: false })).toThrow()
+  })
+})
+
+describe('session.history wire', () => {
+  it('carries the reasoning effort recorded on a reply source through the response schema', () => {
+    const source = { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'max' }
+    const event = { type: 'assistant/message', seq: 3, time: 1, data: { turn: 1, step: 1, message: { id: 'm', role: 'assistant', content: [], source } } }
+    const parsed = sessionHistoryValueSchema.parse({ events: [{ event }], hasMore: false })
+    expect(parsed).toMatchObject({ events: [{ event: { data: event.data } }] })
   })
 })

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { PhysicalOperatorValueShape } from '../src/api/events.ts'
 
-import { projectPublicSessionEvent } from '../src/physical-operator-trace.ts'
+import { projectPublicSessionEvent, resolvedNativeProfile, withServedNativeConfig } from '../src/physical-operator-trace.ts'
 
 function event(type: string, data: unknown): SessionEvent {
   return { type, seq: 1, time: 1, data } as unknown as SessionEvent
@@ -503,4 +503,59 @@ describe('projectPublicSessionEvent', () => {
     expect(JSON.stringify(shapeOnlyTrace)).not.toContain('image bytes')
   })
 
+})
+
+describe('withServedNativeConfig', () => {
+  const at = (seq: number, type: string, data: unknown): SessionEvent => ({ type, seq, time: seq, data }) as unknown as SessionEvent
+  const dispatch = (seq: number, data: Record<string, unknown>) => at(seq, 'physical-operator/dispatch', { commandId: 'c1', operatorId: 'codex', turn: 1, step: 1, ...data })
+  const reply = (seq: number, source: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    at(seq, 'assistant/message', { turn: 1, step: 1, message: { id: 'm', content: [], source: { kind: 'model', ...source } }, ...extra })
+  const accepted = (seq: number, commandId: string, profile: unknown) =>
+    at(seq, 'physical-operator/progress', { commandId, operatorId: 'codex', sequence: 1, type: 'turn.accepted', time: 't', data: { commandId, profile } })
+  const served = (events: SessionEvent[]) => {
+    const message = events.at(-1)!
+    const out = withServedNativeConfig({ event: message }, events)
+    return { out, source: (out.event.data as { message: { source: Record<string, unknown> } }).message.source }
+  }
+
+  it('names the native model and effort of the dispatch on a router reply, leaving the stored event untouched', () => {
+    const events = [dispatch(1, { residentProfile: { model: 'gpt-5.6-sol', effort: 'low' } }), reply(2, { provider: 'dsh-physical-operator', model: 'codex' })]
+    const { out, source } = served(events)
+    expect(source).toEqual({ kind: 'model', provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: 'low' })
+    expect(out.event).not.toBe(events[1])
+    expect((events[1]!.data as { message: { source: { model: string } } }).message.source.model).toBe('codex')
+  })
+
+  it('prefers the profile the daemon resolved, and names a model without an effort', () => {
+    const events = [dispatch(1, { residentProfile: { model: 'named' } }), accepted(2, 'c1', { model: 'resolved' }), reply(3, { provider: 'dsh-physical-operator', model: 'codex' })]
+    expect(served(events).source).toEqual({ kind: 'model', provider: 'dsh-physical-operator', model: 'codex:resolved' })
+    const smart = [dispatch(1, {}), accepted(2, 'c1', { model: 'luna', effort: 'high' }), reply(3, { provider: 'dsh-physical-operator', model: 'codex' })]
+    expect(served(smart).source).toMatchObject({ model: 'codex:luna', reasoningEffort: 'high' })
+  })
+
+  it('changes nothing for another provider, another operator, another step, a profile without a model, or no dispatch', () => {
+    const native = { provider: 'dsh-physical-operator', model: 'codex' }
+    const base = dispatch(1, { residentProfile: { model: 'sol' } })
+    for (const events of [
+      [base, reply(2, { provider: 'deepseek', model: 'codex' })],
+      [base, reply(2, { provider: 'dsh-physical-operator', model: 'claude-code' })],
+      [dispatch(1, { step: 2, residentProfile: { model: 'sol' } }), reply(2, native)],
+      [dispatch(1, {}), reply(2, native)],
+      [reply(1, native)],
+      [reply(0, native), dispatch(1, { residentProfile: { model: 'sol' } })],
+    ]) {
+      const message = events.find(candidate => candidate.type === 'assistant/message')!
+      const out = withServedNativeConfig({ event: message }, events)
+      expect(out.event).toBe(message)
+    }
+    const user = at(2, 'user/message', { id: 'u' })
+    expect(withServedNativeConfig({ event: user }, [user]).event).toBe(user)
+  })
+
+  it('reads a resolved profile only for its own command and only from a turn.accepted progress', () => {
+    const events = [accepted(1, 'a', { model: 'm1', effort: 'low' }), at(2, 'physical-operator/progress', { commandId: 'b', type: 'turn.settled', data: {} })]
+    expect(resolvedNativeProfile(events, 'a')).toEqual({ model: 'm1', effort: 'low' })
+    expect(resolvedNativeProfile(events, 'b')).toBeUndefined()
+    expect(resolvedNativeProfile(events, undefined)).toBeUndefined()
+  })
 })

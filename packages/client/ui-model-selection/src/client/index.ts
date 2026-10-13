@@ -22,8 +22,9 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelDirectoryState } from './directory.ts'
 import { ModelDirectoryResolver } from './service.ts'
-import type { ModelSelectInjected } from './slots.ts'
+import type { ModelSelectInjected, ServedByInjected } from './slots.ts'
 import { ModelSelect } from './ModelSelect.tsx'
+import { ServedByCaption } from './ServedByCaption.tsx'
 import { en, zh, type ModelKey } from './locales.ts'
 
 export { ModelDirectory } from './directory.ts'
@@ -174,5 +175,18 @@ export function apply(ctx: ClientContext): void {
         }
       },
     }, ModelSelect))
+  })
+
+  // Entry 3: the caption of the model that served each reply, in the per-message action strip. It reads the same
+  // per-session directory, so its names are the menu's.
+  ctx.inject(['slots', 'modelDirectories'], (scope: ClientContext) => {
+    const models = scope.modelDirectories
+    scope.slots.inject('conversation.chat.assistant-actions', () => scope.slots.register({
+      name: 'conversation.chat.assistant-actions',
+      id: 'served-by',
+      order: 0,
+      locale: NS,
+      inject: (sessionId): ServedByInjected => ({ hooks: { directory: models.directoryFor(sessionId).store } }),
+    }, ServedByCaption))
   })
 }
