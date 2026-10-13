@@ -847,7 +847,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:133`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:144`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -867,11 +867,18 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:133`](.
   /** Omitted by pre-ChatGPT-Web logs; those legacy host routes were Resident. */
   executionMode?: PhysicalOperatorExecutionMode
   residentProfile?: PhysicalOperatorExecutionPreference
+  /**
+   * Resident lane the dispatch runs on. Absent means the session's default lane, which is every dispatch
+   * written before lanes were recorded. A lane is fixed before the command is sent, so a recovery reuses it.
+   */
+  residentLaneId?: string
+  /** Conversation interval frozen for the lane's handoff context; see `lanes.ts`. */
+  handoff?: HandoffInterval
   fallbackConfig?: LlmCallConfig
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:109`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -885,7 +892,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:128`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:139`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -899,7 +906,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:128`](.
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:92`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -913,7 +920,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:94`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -931,7 +938,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:156`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -950,7 +957,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:95`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:99`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -971,7 +978,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:95`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:161`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:172`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -988,7 +995,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:161`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:120`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:131`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -1007,7 +1014,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:120`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:189`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:200`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -1032,7 +1039,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:189`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:173`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:184`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -1048,7 +1055,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:173`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:154`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:165`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

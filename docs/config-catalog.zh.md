@@ -3283,6 +3283,12 @@ export interface Config {
    * minutes.
    */
   readonly catalogMaxAgeMs?: number
+  /**
+   * Most characters of earlier conversation a native dispatch's handoff may carry. A longer gap keeps the newest
+   * messages and says how many earlier ones were left out, so a long conversation never locks a lane out.
+   * Defaults to 48,000.
+   */
+  readonly handoffMaxChars?: number
 }
 
 /** One operator whose newest native models the model menu offers as entries. */
@@ -3294,7 +3300,7 @@ export interface LatestModelEntries {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:208`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:219`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
