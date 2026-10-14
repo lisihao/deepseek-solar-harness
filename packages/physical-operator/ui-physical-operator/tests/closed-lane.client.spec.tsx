@@ -69,8 +69,9 @@ describe('closed lane notice', () => {
   })
 
   it('names a task without a recorded turn generically and shows no time', () => {
+    const { latestTurn: _turn, ...withoutTurn } = closedLane()
     render(<ClosedLaneNotice
-      session={closedLane({ latestTurn: undefined })} localOwner generatedAt={TIME} timeZone="UTC"
+      session={withoutTurn} localOwner generatedAt={TIME} timeZone="UTC"
       request={vi.fn()} onChanged={vi.fn()}
     />)
     expect(screen.getByText(/上一条任务「历史任务」在 Codex 里/)).toBeTruthy()
