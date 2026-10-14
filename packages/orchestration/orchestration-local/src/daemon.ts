@@ -139,6 +139,7 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
+import { rlmContinuationResult } from './rlm-continuation.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
@@ -808,26 +809,6 @@ function asRlmExecutionResult(result: PhysicalOperatorResult): RlmChildExecution
     outputPreview: operatorOutputPreview(result.output).outputPreview,
     ...status === 'failed' ? { error: `native execution stopped with ${result.stopReason}` } : {},
   }
-}
-
-/**
- * The operator result an RLM execution ends in after its last continuation. A continuation that did not settle keeps
- * its own stop reason, and its partial output when it has one, so a failed or indeterminate continuation can no longer
- * be reported as a completed run.
- * @param continuation - the last continuation the runtime drained, when there was one.
- * @param previous - the result before that continuation.
- * @returns `previous` when there was no continuation; otherwise the continuation's stop reason with its output, or
- *   with `previous`'s output when the continuation returned none.
- */
-function rlmContinuationResult(
-  continuation: RlmChildExecutionResult | undefined,
-  previous: PhysicalOperatorResult,
-): PhysicalOperatorResult {
-  if (continuation === undefined) return previous
-  const stopReason = continuation.stopReason
-    ?? (continuation.status === 'settled' ? 'completed' : continuation.status === 'failed' ? 'error' : 'aborted')
-  if (continuation.output === undefined && stopReason === 'completed') return previous
-  return { output: [...continuation.output ?? previous.output], stopReason }
 }
 
 function primeRlmRootPrompt(
