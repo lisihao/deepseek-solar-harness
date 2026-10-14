@@ -145,6 +145,67 @@ const residentSession = {
   updatedAt: RESIDENT_TIME,
 }
 
+// A lane closed by a native turn whose end is unknown exists while the test has written this state file; releasing it
+// rewrites the file, so the assembled Host route and panel see the same lane the test sees.
+const CLOSED_LANE_FILE = 'physical-routing-closed-lane.json'
+const CLOSED_LANE_ID = 'resident-closed-lane-session'
+const CLOSED_COMMAND_ID = 'resident-closed-lane-command'
+
+function closedLanePath() {
+  const home = process.env.DSH_HOME
+  return home === undefined ? undefined : join(home, CLOSED_LANE_FILE)
+}
+
+async function readClosedLane() {
+  const path = closedLanePath()
+  if (path === undefined) return undefined
+  const raw = await readFile(path, 'utf8').catch(() => undefined)
+  return raw === undefined ? undefined : JSON.parse(raw)
+}
+
+async function writeClosedLane(state) {
+  await writeFile(closedLanePath(), `${JSON.stringify(state)}\n`)
+}
+
+function closedLaneSession(state) {
+  return {
+    sessionId: CLOSED_LANE_ID,
+    operatorId: 'codex',
+    workspace: '/workspace/physical-routing-closed',
+    laneId: 'web-e2e-closed',
+    lifecycle: 'idle',
+    health: state.released ? 'ok' : 'degraded',
+    ...state.released ? {} : { healthReason: 'native_outcome_unconfirmed' },
+    control: 'automation',
+    stateRevision: state.revision,
+    executionProfile: { model: 'fake-codex-main', effort: 'medium' },
+    executionProfileSource: 'manual',
+    latestEvent: {
+      sequence: 9,
+      type: 'turn.indeterminate',
+      time: '2026-09-29T19:00:00.000Z',
+      data: { commandId: CLOSED_COMMAND_ID, turnId: 'resident-closed-lane-turn', reason: 'native_outcome_unconfirmed' },
+    },
+    latestTurn: {
+      commandId: CLOSED_COMMAND_ID,
+      turnId: 'resident-closed-lane-turn',
+      state: 'indeterminate',
+      taskLabel: 'Refactor the parser',
+      updatedAt: '2026-09-29T19:00:00.000Z',
+    },
+    updatedAt: '2026-09-29T19:00:00.000Z',
+  }
+}
+
+async function release(action, expectedStateRevision, commandId) {
+  const state = await readClosedLane()
+  if (state === undefined) throw new Error('no closed lane in this fixture')
+  if (state.revision !== expectedStateRevision) throw Object.assign(new Error('revision moved'), { code: 'REVISION_CONFLICT' })
+  await writeClosedLane({
+    ...state, released: true, action, revision: state.revision + 1, calls: [...state.calls, { action, expectedStateRevision, ...commandId === undefined ? {} : { commandId } }],
+  })
+}
+
 function residentOperators() {
   const runtimes = [
     { product: 'claude-code', currentVersion: '2.1.239', latestVersion: '2.1.281', updateAvailable: true, managed: false },
@@ -167,15 +228,26 @@ function residentOperators() {
     async authenticate() {
       throw Object.assign(new Error('fake Claude subscription is not authenticated'), { code: 'AUTH_MODE_MISMATCH' })
     },
-    async list() { return [residentSession] },
-    async inspect() { return residentSession },
+    async list() {
+      const closed = await readClosedLane()
+      return closed === undefined ? [residentSession] : [residentSession, closedLaneSession(closed)]
+    },
+    async inspect(sessionId) {
+      const closed = await readClosedLane()
+      return closed !== undefined && sessionId === CLOSED_LANE_ID ? closedLaneSession(closed) : residentSession
+    },
     async inspectTurn() { return residentTurn },
     async readEvents() { return { events: residentEvents, nextSequence: residentEvents.length + 1 } },
     async execute() { throw new Error('fake Resident execute is not used by this test') },
     async interrupt() {},
     async compact() { throw new Error('fake Resident compact is not used by this test') },
-    async reset() { throw new Error('fake Resident reset is not used by this test') },
-    async resolveIndeterminate() {},
+    async reset(request) {
+      await release('reset', request.expectedStateRevision)
+      return closedLaneSession(await readClosedLane())
+    },
+    async resolveIndeterminate(request) {
+      await release('resolve', request.expectedStateRevision, String(request.commandId))
+    },
   }
 }
 

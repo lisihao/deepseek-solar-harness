@@ -14,6 +14,29 @@ export const RESIDENT_DASHBOARD_PATH = '/api/resident-operators'
 /** Same-origin HTTP path for native CLI version checks and verified updates. */
 export const RESIDENT_CLI_PATH = '/api/resident-operators/cli'
 
+/** Same-origin HTTP path for releasing a lane that is closed because a native turn may still be running. */
+export const RESIDENT_SESSION_RECOVERY_PATH = '/api/resident-operators/session-recovery'
+
+/** Health reason of a lane whose last native turn is not known to have stopped. */
+export const RESIDENT_NATIVE_OUTCOME_UNCONFIRMED = 'native_outcome_unconfirmed'
+
+/** What the owner decides for a closed lane: keep its native session or start a new one. */
+export type DesktopResidentRecoveryAction = 'resolve' | 'reset'
+
+/** Failure answer of the recovery route. */
+export interface DesktopResidentRecoveryFailure {
+  error:
+    | 'LOCAL_OWNER_REQUIRED'
+    | 'SESSION_REQUIRED'
+    | 'ACTION_REQUIRED'
+    | 'REVISION_REQUIRED'
+    | 'LANE_NOT_CLOSED'
+    | 'STATE_CHANGED'
+    | 'LANE_STILL_CLOSED'
+    | 'RESIDENT_RECOVERY_FAILED'
+  message?: string
+}
+
 /** Native product whose CLI the Resident Provider can check and update. */
 export type DesktopResidentCliProduct = 'claude-code' | 'codex'
 
