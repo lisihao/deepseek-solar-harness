@@ -16,7 +16,7 @@ The [registry](../../../../packages/orchestration/orchestration-local/README.md)
 
 The [dispatcher](../../../../packages/orchestration/ui-gouzi/README.md) offers a pinned member only through the available operators whose catalog carries the model, and a member left with none is not a candidate. The candidate carries the model, the task node gets `operator.profile.model`, and the pre-start recheck refuses to run when the member's model changed or an operator stopped offering it after the decision.
 
-The edit form lists the models of the member's available runtimes through the `models` action, requested when the form opens because the roster poll must not query runtime catalogs. A pinned model that no runtime offers stays selectable and is marked unavailable. Adoption does not set a model, because a new member has no runtime catalog to choose from until it has started.
+The edit form lists the models of the member's available runtimes through the `models` action, requested when the form opens because the roster poll must not query runtime catalogs. A pinned model that no runtime offers stays selectable and is marked unavailable. The adoption wizard cannot offer a model, because a new member has no runtime catalog to choose from until it has started; once adoption succeeds the wizard shows the same choice as an optional step that pins the model with one `edit` request.
 
 ## Alternatives considered
 

@@ -34,6 +34,9 @@ for (const [id, port] of Object.entries(ports)) {
   registry.gouzi.setEndpoint(GouziId(id), `http://127.0.0.1:${String(port)}`)
 }
 registry.gouzi.edit(GouziId('gamma'), { model: 'gpt-5.6-luna' })
+// Two members carry notes, beta none: the notes reach exactly the tasks of the members that have them.
+registry.gouzi.edit(GouziId('alpha'), { profile: '先写测试，再改代码' })
+registry.gouzi.edit(GouziId('gamma'), { profile: '评审时先看边界条件' })
 registry.close()
 
 const WORK_RESULT = 'The parser lives in src/parse.ts and handles empty input.'
@@ -218,6 +221,14 @@ try {
       const { scopes } = value.request.gouziGrant as GouziExecutionGrant
       return { read: scopes.read, write: scopes.write, effects: scopes.effects }
     }),
+    // The lines every task opens with: who the member is, what its role asks, and its own notes when it has any.
+    taskOpenings: executed
+      .map((value) => {
+        const blocks = (value.request.prompt ?? []) as { type: string; text?: string }[]
+        const task = blocks.flatMap(block => block.type === 'text' ? [block.text ?? ''] : []).join('\n')
+        return { member: value.member, nodeId: value.nodeId, opening: task.split('\n').slice(0, 6) }
+      })
+      .sort((left, right) => left.nodeId.localeCompare(right.nodeId) || left.member.localeCompare(right.member)),
     reviewersReadTheResult: reviewTasks.length === 2 && reviewTasks.every(value => JSON.stringify(value.request).includes(WORK_RESULT)),
     reviewersReceivedTheirComment: reviewTasks.slice(2).length === 2
       && reviewTasks.slice(2).every(value => JSON.stringify(value.request).includes(BETA_COMMENT)),

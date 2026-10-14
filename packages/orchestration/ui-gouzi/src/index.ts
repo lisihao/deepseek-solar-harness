@@ -23,6 +23,7 @@ import {
   GOUZI_CONTROL_HEADER,
   GOUZI_DASHBOARD_PATH,
   GOUZI_LOCAL_HOST_ID,
+  GOUZI_PROFILE_MAX_LENGTH,
   GOUZI_ROLE_IDS,
   GOUZI_ROOM_POLL_INTERVAL_SCHEMA,
   gouziPrimaryState,
@@ -162,6 +163,15 @@ function memberName(value: string): string {
   return trimmed
 }
 
+/** The notes of an adopt request: blank means none. */
+function profile(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') throw new GouziInputError('profile must be text')
+  const trimmed = value.trim()
+  if (trimmed.length > GOUZI_PROFILE_MAX_LENGTH) throw new GouziInputError(`profile must be at most ${String(GOUZI_PROFILE_MAX_LENGTH)} characters`)
+  return trimmed.length === 0 ? undefined : trimmed
+}
+
 function avatar(value: string): GouziAvatar {
   if (!(GOUZI_AVATARS as readonly string[]).includes(value)) throw new GouziInputError(`unknown avatar ${value}`)
   return value as GouziAvatar
@@ -215,11 +225,13 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
         throw new GouziInputError('projects must list at least one absolute path')
       }
       if (action === 'check-projects') return { action, hostId: text(body, 'hostId'), projects: projects as string[] }
+      const notes = profile(body.profile)
       return {
         action,
         name: memberName(text(body, 'name')),
         avatarId: avatar(text(body, 'avatarId')),
         role: role(text(body, 'role')),
+        ...notes === undefined ? {} : { profile: notes },
         ...optionalText(body, 'hostId') === undefined ? {} : { hostId: text(body, 'hostId') },
         projects: projects as string[],
       }
@@ -251,8 +263,9 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
       const avatarId = optionalText(body, 'avatarId')
       const requestedRole = optionalText(body, 'role')
       const model = body.model === null ? null : optionalText(body, 'model')
-      if (name === undefined && avatarId === undefined && requestedRole === undefined && model === undefined) {
-        throw new GouziInputError('edit needs a name, avatarId, role, or model')
+      const notes = body.profile === undefined ? undefined : profile(body.profile) ?? null
+      if (name === undefined && avatarId === undefined && requestedRole === undefined && model === undefined && notes === undefined) {
+        throw new GouziInputError('edit needs a name, avatarId, role, model, or profile')
       }
       return {
         action,
@@ -261,6 +274,7 @@ function parseControl(body: Record<string, unknown>): GouziControlRequest {
         ...avatarId === undefined ? {} : { avatarId: avatar(avatarId) },
         ...requestedRole === undefined ? {} : { role: role(requestedRole) },
         ...model === undefined ? {} : { model },
+        ...notes === undefined ? {} : { profile: notes },
       }
     }
     case 'models': return { action, gouziId: text(body, 'gouziId') }
@@ -280,6 +294,7 @@ function project(member: GouziMemberView, hostLabel: string): GouziMemberProject
     avatarId: member.avatarId,
     role: member.role,
     ...member.model === undefined ? {} : { model: member.model },
+    ...member.profile === undefined ? {} : { profile: member.profile },
     hostId: String(member.hostId),
     hostLabel,
     membership: member.membership,
@@ -416,6 +431,7 @@ async function adopt(ctx: Context, control: GouziControl, request: Extract<Gouzi
     name: request.name,
     avatarId: request.avatarId,
     role: request.role,
+    ...request.profile === undefined ? {} : { profile: request.profile },
     grantDeadlineMs,
   })
   try {
@@ -541,6 +557,7 @@ async function execute(ctx: Context, control: GouziControl, request: GouziContro
         ...request.avatarId === undefined ? {} : { avatarId: request.avatarId },
         ...request.role === undefined ? {} : { role: request.role },
         ...request.model === undefined ? {} : { model: request.model },
+        ...request.profile === undefined ? {} : { profile: request.profile },
       }))
     case 'models': return memberModels(control, request.gouziId)
     case 'wake': return wake(ctx, control, request.gouziId)

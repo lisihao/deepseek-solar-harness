@@ -666,7 +666,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-admitted': { messageId: string; runId: string }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:78`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-collaboration--log-only"></a>
 
@@ -677,7 +677,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-collaboration': { messageId: string; candidate: KennelCollaborationCandidate; commandId: string }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:80`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-collaboration-admitted--log-only"></a>
 
@@ -693,7 +693,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:82`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-control--log-only"></a>
 
@@ -704,7 +704,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-control': { messageId: string; candidate: KennelControlCandidate; result: OrchestrationRunSnapshot }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:83`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:89`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-decision--log-only"></a>
 
@@ -715,7 +715,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-decision': { messageId: string; source: 'jev' | 'deepseek' | 'codex'; provider: string; model?: string; candidateId: string; fallbackReason?: string }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-model--log-only"></a>
 
@@ -726,7 +726,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-model': { messageId: string; record: DispatchModelRecord }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:66`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-request--log-only"></a>
 
@@ -734,7 +734,13 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ```ts persistence-catalog
 /** Immutable input and qualified choices retained before model invocation. */
-'kennel/dispatch-request': { messageId: string; message: UserMessage; candidates: readonly KennelDispatchCandidate[] }
+'kennel/dispatch-request': {
+  messageId: string
+  message: UserMessage
+  candidates: readonly KennelDispatchCandidate[]
+  /** Notes of the offered members at this moment, by member id: the text a selected member's task carries. */
+  profiles?: Readonly<Record<string, string>>
+}
 ```
 
 来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:64`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
@@ -748,7 +754,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'kennel/dispatch-submission': { messageId: string; compilationId: string; commandId: string }
 ```
 
-来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+来源： [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 ### `llm/*`
 

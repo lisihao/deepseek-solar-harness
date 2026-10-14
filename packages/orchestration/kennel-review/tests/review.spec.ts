@@ -206,6 +206,18 @@ describe('review kind start', () => {
     expect(start).toHaveBeenCalledWith({ commandId: 'kennel:review:s:m', compilationId: 'compiled' })
   })
 
+  it('tells each reviewer what its role asks and only its own notes', async () => {
+    const { ctx, compile } = service([[accepted('the parser is in src/parse.ts')], []])
+    const request = chosen(['x', 'y'])
+    const members = request.candidate.members.map(member => member.gouziId === 'x' ? { ...member, profile: '评审时先看边界条件' } : member)
+    await kennelReviewKind(ctx, defaults).start({ ...request, candidate: { ...request.candidate, members } })
+    const { graph } = compile.mock.calls[0]![0] as { graph: { nodes: { task: string }[] } }
+    expect(graph.nodes[0]!.task).toContain('你的角色目标：查资料、读代码、写调研结论。')
+    expect(graph.nodes[0]!.task).toContain('评审时先看边界条件')
+    expect(graph.nodes[1]!.task).toContain('你的角色目标：查资料、读代码、写调研结论。')
+    expect(graph.nodes[1]!.task).not.toContain('评审时先看边界条件')
+  })
+
   it('binds one reviewer as the single recipient and omits an absent runtime context', async () => {
     const { ctx, compile } = service([[accepted('done')], []])
     const request = chosen(['x'])

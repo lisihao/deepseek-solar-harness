@@ -9,9 +9,11 @@ import {
   defaultDebateBudget,
   type DebatePolicyV1,
   type DebateRoleId,
+  type DebateRolePersonaV1,
   type DebateRoleSpecV1,
 } from '@deepseek-ai/dsh-debate'
 import {
+  kennelMemberBriefLines,
   kennelRoster,
   qualifiedKennelMembers,
   type KennelCollaborationCandidate,
@@ -44,6 +46,18 @@ function rolesFor(count: number): readonly DebateRoleId[] {
   return [...PARTICIPANT_ROLES.slice(0, count - 1), JUDGE_ROLE]
 }
 
+/**
+ * The persona of one roster slot: the role's default, with the member's name, role goal, and notes as further
+ * instructions, so a debating member keeps working the way its user asked.
+ * @param role - the slot's role.
+ * @param member - the kennel member that fills it.
+ * @returns the default persona with the member's instructions appended.
+ */
+function personaFor(role: DebateRoleId, member: KennelCollaborationMember): DebateRolePersonaV1 {
+  const base = DEFAULT_DEBATE_PERSONAS[role]
+  return { ...base, instructions: [...base.instructions, ...kennelMemberBriefLines(member)] }
+}
+
 function slot(role: DebateRoleId, member: KennelCollaborationMember): DebateRoleSpecV1 {
   return {
     version: 1,
@@ -53,7 +67,7 @@ function slot(role: DebateRoleId, member: KennelCollaborationMember): DebateRole
     model: member.model,
     tier: 'medium',
     source: 'native-subscription',
-    persona: DEFAULT_DEBATE_PERSONAS[role],
+    persona: personaFor(role, member),
     required: true,
   }
 }

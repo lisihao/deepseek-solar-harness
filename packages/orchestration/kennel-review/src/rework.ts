@@ -61,6 +61,10 @@ function depth(facts: KennelCollaborationFacts, runId: string): number {
   return count
 }
 
+function profileOf(facts: KennelCollaborationFacts, gouziId: string): string | undefined {
+  return facts.members.find(member => String(member.gouziId) === gouziId)?.profile
+}
+
 function offer(facts: KennelCollaborationFacts, config: Required<Config>): KennelCollaborationCandidate[] {
   const reworked = new Set(facts.earlier.filter(value => value.collaboration === KENNEL_REWORK_KIND)
     .map(value => reworkDetails(value.candidate).review))
@@ -74,6 +78,7 @@ function offer(facts: KennelCollaborationFacts, config: Required<Config>): Kenne
       && value.generation === taken.generation && value.workspace === taken.workspace && value.mode === taken.mode)
     const target = facts.runs.find(run => String(run.runId) === record.outcome?.subjectRunId)
     if (current === undefined || target === undefined) return []
+    const notes = profileOf(facts, current.gouziId)
     const verdicts = (record.outcome.details.verdicts ?? []) as readonly ReviewVerdict[]
     const details: ReworkDetails = {
       review: record.runId, target: { runId: String(target.runId), title: target.title }, offer: current,
@@ -87,6 +92,7 @@ function offer(facts: KennelCollaborationFacts, config: Required<Config>): Kenne
       members: [{
         gouziId: current.gouziId, generation: current.generation, name: current.name, role: current.role,
         operatorId: current.operatorIds[0] ?? '', model: current.model ?? 'auto',
+        ...notes === undefined ? {} : { profile: notes },
       }],
       details: { ...details },
     }]
@@ -96,7 +102,7 @@ function offer(facts: KennelCollaborationFacts, config: Required<Config>): Kenne
 function task(details: ReworkDetails, prompt: string): string {
   const comments = details.comments.map(value => `- ${value.name}：\n${value.comment}`).join('\n')
   return [
-    `你是狗窝成员「${details.offer.name}」。你之前完成的任务：${details.target.title}`,
+    `你之前完成的任务：${details.target.title}`,
     `评审人要求修改，意见如下：\n${comments}`,
     '请按这些意见修改，并说明你改了什么、没有改什么以及原因。',
     `用户的要求：${prompt}`,
@@ -108,7 +114,10 @@ async function start(ctx: Context, request: KennelCollaborationRequest): Promise
   const { offer: taken } = details
   const compilation = await ctx.orchestrations.compile({
     intent: { request: request.prompt },
-    graph: request.workGraph({ offer: taken, text: task(details, request.prompt), title: `返工：${details.target.title.replace(/^(返工：)+/u, '')}` }),
+    graph: request.workGraph({
+      offer: taken, text: task(details, request.prompt), title: `返工：${details.target.title.replace(/^(返工：)+/u, '')}`,
+      ...request.candidate.members[0]?.profile === undefined ? {} : { profile: request.candidate.members[0].profile },
+    }),
     admission: {
       policy: 'auto', route: 'taskgraph', sourceSessionId: request.sessionId, sourceMessageId: request.messageId,
       ...request.runtimeContext === undefined ? {} : { runtimeContext: request.runtimeContext },
