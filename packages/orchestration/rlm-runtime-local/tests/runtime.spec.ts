@@ -923,6 +923,33 @@ describe('LocalRlmRuntime', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('does not delete a child whose subtree could not be interrupted, and lets the same command retry', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-delete-interrupt-failure-'))
+    const interrupted: string[] = []
+    let grandchildInterruptFails = true
+    const dispatchChild: RlmRuntimeHostBindings['dispatchChild'] = async request => ({
+      nativeSessionId: `child:${request.childSessionId}`,
+      nativeTurnId: `child-turn:${request.childId}`,
+      result: new Promise<RlmChildExecutionResult>(() => undefined),
+      interrupt: () => {
+        interrupted.push(request.name)
+        return request.name === 'a1' && grandchildInterruptFails ? Promise.reject(new Error('a1 cannot be interrupted')) : Promise.resolve()
+      },
+    })
+    const { ctx, service, sessionId } = await runtime(root, { dispatchChild })
+    const a = await service.spawn({ commandId: RlmCommandId('failure-a'), parentSessionId: sessionId, name: 'a', task: 'child a' })
+    await service.spawn({ commandId: RlmCommandId('failure-a1'), parentSessionId: a.sessionId, name: 'a1', task: 'grandchild' })
+    const commandId = RlmCommandId('failure-delete')
+    await expect(service.deleteChild(sessionId, a.rlmChildId, commandId)).rejects.toThrow('a1 cannot be interrupted')
+    // Both executions were asked to stop even though one refused, and the child is still there.
+    expect([...interrupted].sort()).toEqual(['a', 'a1'])
+    await expect(service.listChildren(sessionId)).resolves.toMatchObject([{ name: 'a', lifecycle: expect.not.stringMatching(/^deleted$/) }])
+    grandchildInterruptFails = false
+    await service.deleteChild(sessionId, a.rlmChildId, commandId)
+    await expect(service.listChildren(sessionId)).resolves.toMatchObject([{ name: 'a', lifecycle: 'deleted' }])
+    await ctx.root.fiber.dispose()
+  })
+
   it('admits one continuation when concurrent pumps observe the same queued message', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-message-pump-'))
     const continuationRequests: string[] = []

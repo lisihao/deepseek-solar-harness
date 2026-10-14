@@ -18,6 +18,8 @@ State is written atomically below the configured owner-local root. Restart recov
 
 The Provider stores version 5 state in `state.json`. Construction migrates versions 1 through 4 and atomically rewrites the file before registering the runtime owner. Migrated children carry `modelOrigin: legacy`; a settled child receipt without a result becomes `indeterminate` and is never dispatched again automatically. Keep a private pre-upgrade state copy when replacing an older Provider: rolling back its binary also requires restoring its compatible state file.
 
+`interrupt(sessionId)` and `deleteChild` stop the active executions of that session and of every session it spawned, and no others; `deleteChild` attempts every interrupt, then rejects with the first failure while leaving the child undeleted and its receipt open, so the same command can be retried. A result that arrives after the delete is ignored. `drain` returns the last continuation result with its own `status`, `stopReason`, and partial `output`; it does not rewrite a failed or indeterminate continuation into a success.
+
 ## Model Experience
 
 Indirectly, through a Consumer that exposes the Provider as the `typescript_repl` model tool.

@@ -1129,7 +1129,10 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const active = this.subtreeSessions(child.sessionId)
       .map(value => this.activeExecutions.get(String(value.snapshot.sessionId)))
       .filter((value): value is RlmChildExecution => value !== undefined)
-    await Promise.allSettled(active.map(value => value.interrupt()))
+    // Every interrupt is attempted; a failed one leaves the child undeleted and its receipt open so the same command can retry.
+    const interrupts = await Promise.allSettled(active.map(value => value.interrupt()))
+    const failed = interrupts.find((value): value is PromiseRejectedResult => value.status === 'rejected')
+    if (failed !== undefined) throw failed.reason
     this.replaceChild(parentSessionId, childId, { lifecycle: 'deleted', updatedAt: now() })
     const childSession = this.requireSession(child.sessionId)
     this.updateSession(childSession, { lifecycle: 'stopped' })

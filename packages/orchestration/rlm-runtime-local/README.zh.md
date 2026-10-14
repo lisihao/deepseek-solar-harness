@@ -18,6 +18,8 @@
 
 Provider 在 `state.json` 中保存版本 5 状态。构造时会迁移版本 1 至 4，并在注册 runtime owner 前原子重写该文件。迁移后的 Child 标记为 `modelOrigin: legacy`；缺少结果的已结算 Child Receipt 会变为 `indeterminate`，绝不会自动再次派发。替换旧 Provider 时保留私有的升级前状态副本：回退旧二进制时也必须恢复兼容的状态文件。
 
+`interrupt(sessionId)` 和 `deleteChild` 会停止该会话及其派生的每个会话当前活动的执行，不会停止其他会话；`deleteChild` 会尝试每一个中断，然后以第一个失败拒绝，同时保持该 child 未删除、回执仍未结算，因此同一个命令可以重试。删除之后到达的结果会被忽略。`drain` 返回最后一个 continuation 结果，带有它自己的 `status`、`stopReason` 和部分 `output`，不会把失败或不确定的 continuation 改写成成功。
+
 ## Model Experience
 
 Indirectly, through a Consumer that exposes the Provider as the `typescript_repl` model tool.
