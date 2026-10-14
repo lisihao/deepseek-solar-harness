@@ -499,7 +499,7 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "1a97645e1972e0b0e0071da6aafd02d3207d378139c391d64bee47f39ed50b97",
     "dsh-packages/deepseek-ai-dsh-physical-operator-subagent-0.1.0-rc.5.tgz": "bb8130a81df4e3ae56bc239e8fde88ee61e2f1ec3e127ea90cd275ce1c20ab36",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "472b7ae7e614f77d4c62b4831e02e95833d1943748714f6d6c1d8ea268d94dbb",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "a821d44222882aba2dc34796e029112bece25b444de02c9ada51433baf78ace0",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "7aca059d135f510da9fc290486b40cb565964593f51e852c837d4159d2746525",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "d474b00f2333f9397a37b22e14163ffbc60aa4e91626f82d222d66037ffa7236",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "79597afe17fe1c162da4f45dd0727c7bbe7143612ebd58ce6d5c0cfff578df2f",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "bb963af6972c50c774c6822d6e8be1c55fec233eeb7ea571c39ad7f760f7c3bf",
@@ -511,7 +511,7 @@
     "dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz": "12aaddd353eeee53df8119d0ccf04531c60e5fdd8b22abe998fb8be7d56609a1",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "c709a3d9f4b96adf0763151bf7277252ae874534fa46074a14c26a386e107a1d",
     "dsh-packages/deepseek-ai-dsh-session-title-0.1.0-rc.5.tgz": "dbfd441e4d240a237faafbdbefb5858f24f15901313bff702d63ada7c1a7bd75",
-    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "ee70fd611079f1dbcd8347508fe825444c59f7a4e28f43b0af1aa25b1100c690",
+    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "ca0fe4c97d74c9df3092919d895bc5d2576382010bc3a8ec1b18ac450ec17eb3",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "02a8710891620f7eaba2e4c8ede65e339cbf21c48d0e23b28adbb70353556de2",
     "dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz": "81e5a20ed5af79c804c648cb3e436a4113eda93e71230e9d2522baa6714d5309",
     "dsh-packages/deepseek-ai-dsh-task-template-context-0.1.0-rc.5.tgz": "8dc5b18e51a284b84e898e4e3cb472cf7d9953531e46929b856f564cf85a9704",
@@ -527,7 +527,7 @@
     "dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz": "074f755f4aeee4dc135c68889414ae996bc0be6ed2a4d04d62049e39b37a4b7f",
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "531cde167a6d9fd6963491551779945a3fae7cf287858b169980ff7f525d2c20",
     "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "5c6d138cd8147da3ece6d7142c4171d777fd28e95660f4986e19e70f7719dbdd",
-    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "5b13c95250b2141c4e90bbeeeab73dd5f065db7c864016377a66ffc554e94961",
+    "dsh-packages/deepseek-ai-dsh-ui-gouzi-0.1.0-rc.5.tgz": "c889e02e5a8bc829aaa97b670ac2961547bedc536c3042b9f8378705cbbd16cc",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "f9ecb9781bd709faa4b3c905b5695917af78436bd5007afc79ddfa5311b1cee6",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "6c105fb5fbee7043f0075bba956fca8e0e8d37b214e5b01355dc0de6a16573d1",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "33cc4399e8543eb20d1fbb99a6a83984f18fb3701688c812e80ae6b73d1178aa",
@@ -546,7 +546,7 @@
     "dsh-packages/omdsh-dev-dsh-genui-0.9.1-solar.2.tgz": "abd88cb6c749ffecc3748406392bb86c8194aac379c99cc5c8475f06b2eb634e",
     "dsh-packages/omdsh-dev-dsh-plugin-check-0.1.0.tgz": "420df51c216c2ebba42384ad65228e45f4d0961876759790355cfad5624a06e9",
     "dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz": "52ae8e97702669c96fbd6335ef510c45b23e1706223d9f320ddaeee19313b657",
-    "dsh-packages/deepseek-ai-dsh-client-ui-model-selection-0.1.0-rc.5.tgz": "a01d4d85f8e0adc78ae70d62abf18d4cc56628678d9bd4979f1a11c8903ebb5a",
+    "dsh-packages/deepseek-ai-dsh-client-ui-model-selection-0.1.0-rc.5.tgz": "8e270eabfce2b060372ee14a31ebaf02a8118bf53409648b350e43266fafa6ec",
     "dsh-packages/deepseek-ai-dsh-model-catalog-local-0.1.0-rc.5.tgz": "06a298095a1b1259c306503798bbe8782d8a1b49e04a5fb32d8cd757a5f0bf8d"
   }
 }
