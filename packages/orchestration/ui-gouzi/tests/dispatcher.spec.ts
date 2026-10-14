@@ -512,7 +512,8 @@ it('starts the selected collaboration through its kind after durably recording t
 it('does not start a collaboration whose candidate is no longer offered or whose kind was removed', async () => {
   const f = await collaborationFixture()
   f.generate.mockImplementation(() => { f.members[1]!.generation = 9; return JSON.stringify({ candidateId: f.pairId }) })
-  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  // A changed member is not an edit of its notes, so the refusal keeps the general wording.
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT', message: '参加协作的狗子、执行实例、项目或对象已变化；未改派给其他成员。' })
   expect(f.startMock).not.toHaveBeenCalled()
 
   const removed = await collaborationFixture()
@@ -531,17 +532,17 @@ it('starts a collaboration whose members\' notes are unchanged, with the notes i
     data: { candidate: { members: [{ gouziId: 'dog', profile: '先写测试' }, { gouziId: 'cat' }] } } })
 })
 it.each([
-  ['changed', { dog: '旧备忘' }, { dog: '新备忘' }],
-  ['cleared', { dog: '旧备忘' }, { dog: undefined }],
-  ['added to a member that had none', {}, { cat: '新备忘' }],
-])('does not start a collaboration when a member\'s notes were %s after selection', async (_name, before, after) => {
+  ['changed', { dog: '旧备忘' }, { dog: '新备忘' }, 'Dog'],
+  ['cleared', { dog: '旧备忘' }, { dog: undefined }, 'Dog'],
+  ['added to a member that had none', {}, { cat: '新备忘' }, 'cat'],
+])('does not start a collaboration when a member\'s notes were %s after selection, and names the member', async (_name, before, after, who) => {
   const f = await collaborationFixture()
   for (const [id, notes] of Object.entries(before)) Object.assign(f.members[id === 'dog' ? 0 : 1]!, { profile: notes })
   f.generate.mockImplementation(() => {
     for (const [id, notes] of Object.entries(after)) Object.assign(f.members[id === 'dog' ? 0 : 1]!, { profile: notes })
     return JSON.stringify({ candidateId: f.pairId })
   })
-  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT', message: `${who}的备忘在你发出消息之后被修改；没有按旧备忘开始协作，请重新发送。` })
   expect(f.startMock).not.toHaveBeenCalled()
   expect(f.agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration')).toBe(false)
 })
@@ -556,7 +557,7 @@ it('does not start a collaboration whose member notes changed after the candidat
     return pairKind().offer(facts)
   })
   f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
-  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT', message: 'Dog的备忘在你发出消息之后被修改；没有按旧备忘开始协作，请重新发送。' })
   expect(f.agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration')).toBe(true)
   expect(f.startMock).not.toHaveBeenCalled()
 })
