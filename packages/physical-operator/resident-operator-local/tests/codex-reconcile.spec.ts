@@ -79,6 +79,14 @@ describe('a start whose response named the turn', () => {
     expect(turns.interruptTurn).not.toHaveBeenCalled()
   })
 
+  it('says no new native turn was seen when the Resident turn is interrupted before one appeared', async () => {
+    const controller = new AbortController()
+    controller.abort(new Error('resident turn interrupted'))
+    const error = await outcome(reconcileUncertainStart(probe([undefined]), { baselineTurnId: 'turn-old' }, 'd', controller.signal, timing))
+    expect(error.nativeOutcomeUnconfirmed).toBe(true)
+    expect(error.message).toContain('no new native turn was seen')
+  })
+
   it('reports an unnamed turn when the longest wait ends before the settle time and nothing was pinned', async () => {
     const error = await outcome(reconcileUncertainStart(probe([undefined]), {}, 'd', live(), { ...timing, settleMs: 20_000, maxMs: 2_000 }))
     expect(error.nativeOutcomeUnconfirmed).toBe(true)
