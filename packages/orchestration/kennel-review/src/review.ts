@@ -6,6 +6,7 @@ import {
   GouziId,
   KENNEL_WORK_NODE_ID,
   OrchestrationRunId,
+  kennelMemberBrief,
   kennelRoster,
   qualifiedKennelMembers,
   type KennelCollaborationCandidate,
@@ -88,7 +89,8 @@ function reviewNode(
   return {
     id: reviewNodeId(index), dependsOn: [], requiredForCompletion: true, title,
     task: [
-      `你是狗窝成员「${member.name}」，现在${again ? '复审' : '评审'}「${target.authors.join('、')}」已完成的任务。只读检查，不修改文件，不执行命令。`,
+      kennelMemberBrief(member),
+      `现在${again ? '复审' : '评审'}「${target.authors.join('、')}」已完成的任务。只读检查，不修改文件，不执行命令。`,
       `任务：${target.title}`,
       ...previous.length === 0 ? [] : [`上一轮评审要求修改的意见，作者已按它们返工：\n${previous.map(value => `- ${value.name}：\n${value.comment}`).join('\n')}`],
       `对方的结果（可能被截断）：\n${result}`,

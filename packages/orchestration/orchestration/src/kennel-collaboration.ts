@@ -1,5 +1,5 @@
 /** Extension point for work that kennel members do together: Debate, review, and later kinds. */
-import type { GouziControl, GouziMemberView } from './gouzi.ts'
+import { GOUZI_ROLE_GOALS, type GouziControl, type GouziMemberView } from './gouzi.ts'
 import type {
   LogicalTaskGraphV1, OrchestrationNodeSpecV1, OrchestrationRunSnapshot, OrchestrationRuntimeContextV1,
 } from './index.ts'
@@ -20,6 +20,30 @@ export interface KennelCollaborationMember {
   readonly operatorId: string
   /** Native model the entry runs for this collaboration: the member's pinned model or the entry's default. */
   readonly model: string
+  /** The member's notes at the time the collaboration was offered, kept so the task text is reproducible from the log. */
+  readonly profile?: string
+}
+
+/** What the member's task text says about the member itself. */
+export interface KennelMemberBriefInput {
+  readonly name: string
+  readonly role: string
+  readonly profile?: string | undefined
+}
+
+/**
+ * The opening of every task a kennel member receives: who it is, what its role asks of it, and the notes its user wrote.
+ * The notes are quoted as preferences, so they cannot widen what the task allows.
+ * @param member - the member's name, role, and notes.
+ * @returns the lines to put before the task, ending without a blank line.
+ */
+export function kennelMemberBrief(member: KennelMemberBriefInput): string {
+  const goal = (GOUZI_ROLE_GOALS as Readonly<Record<string, string | undefined>>)[member.role]
+  return [
+    `你是狗窝成员「${member.name}」。`,
+    ...goal === undefined || member.role === 'custom' ? [] : [`你的角色目标：${goal}。`],
+    ...member.profile === undefined ? [] : [`用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：\n${member.profile}`],
+  ].join('\n')
 }
 
 /**
@@ -155,6 +179,8 @@ export interface KennelWorkGraphInput {
   readonly text: string
   /** Title of the task in the room, bounded by the Host; the task text when absent. */
   readonly title?: string
+  /** The member's notes to put in the task text, as the collaboration's logged candidate carries them. */
+  readonly profile?: string
 }
 
 /** A request to start the collaboration the user chose. */
@@ -295,6 +321,7 @@ export function qualifiedKennelMembers(
       : bindKennelMember(member, entry, requirements)
     return chosen === undefined ? [] : [{
       gouziId: String(member.gouziId), generation: member.generation, name: member.name, role: member.role, ...chosen,
+      ...member.profile === undefined ? {} : { profile: member.profile },
     }]
   })
 }

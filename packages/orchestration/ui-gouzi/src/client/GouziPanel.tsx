@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import {
   GOUZI_AVATARS,
   GOUZI_AVATAR_NAMES,
+  GOUZI_PROFILE_MAX_LENGTH,
   GOUZI_ROLE_COPY,
   GOUZI_ROLE_IDS,
   GOUZI_STATE_COPY,
@@ -238,6 +239,7 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
   const [avatarId, setAvatarId] = useState<GouziAvatar>('shiba')
   const [name, setName] = useState('')
   const [role, setRole] = useState<GouziRoleId>('development')
+  const [profile, setProfile] = useState('')
   const [hostId, setHostId] = useState(GOUZI_LOCAL_HOST_ID)
   const [paths, setPaths] = useState<readonly string[]>([])
   const [picked, setPicked] = useState<readonly FolderChoice[]>([])
@@ -260,7 +262,9 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
     setPending(true)
     setError(undefined)
     try {
-      setAdopted(await controlGouzi(request, { action: 'adopt', name: trimmed, avatarId, role, hostId, projects: [...paths] }))
+      setAdopted(await controlGouzi(request, {
+        action: 'adopt', name: trimmed, avatarId, role, hostId, projects: [...paths], ...profile.trim() === '' ? {} : { profile: profile.trim() },
+      }))
     } catch (cause) {
       setError(messageOf(cause))
     } finally {
@@ -326,6 +330,7 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
       {step === 3 && (
         <>
           <RolePicker value={role} onChange={setRole} />
+          <ProfileField value={profile} onChange={setProfile} />
           {hostId === GOUZI_LOCAL_HOST_ID
             ? <ProjectPicker
               request={request} folders={folders} picked={picked} onPick={pickProject}
@@ -341,6 +346,7 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
             <div><dt>名字</dt><dd>{trimmed}</dd></div>
             <div><dt>住处</dt><dd>{hostLabel}</dd></div>
             <div><dt>角色</dt><dd>{GOUZI_ROLE_COPY[role].label}</dd></div>
+            <div><dt>个性与备忘</dt><dd>{profile.trim() === '' ? '无' : `${String(profile.trim().length)} 字`}</dd></div>
             <div><dt>默认项目</dt><dd>{defaultProject === undefined ? '尚未选择' : basename(defaultProject)}</dd></div>
             <div><dt>其它项目</dt><dd>{paths.slice(1).map(basename).join('、') || '无'}</dd></div>
             <div><dt>名额</dt><dd>领养后 {used + 1} / {limit}</dd></div>
@@ -358,6 +364,25 @@ function AdoptWizard({ request, folders, hosts, onHostsChanged, used, limit, onD
           : <button type="button" className={css.primary} disabled={pending} onClick={() => { void adopt() }}>{pending ? '正在领养…' : '领养'}</button>}
       </footer>
     </section>
+  )
+}
+
+/** The notes a member keeps: personality, preferences, standing instructions. */
+function ProfileField({ value, onChange }: { value: string; onChange: (profile: string) => void }) {
+  return (
+    <label className={css.field}>
+      <span>个性与备忘（可选）</span>
+      <textarea
+        value={value}
+        rows={4}
+        maxLength={GOUZI_PROFILE_MAX_LENGTH}
+        placeholder="比如：回答先给结论再给依据；改代码前先补测试"
+        onChange={(event) => { onChange(event.target.value) }}
+      />
+      <p className={css.hint}>
+        这段话会写进它收到的每个任务，只作为工作风格和偏好的参考，不会放宽任务的范围和限制。{value.length}/{GOUZI_PROFILE_MAX_LENGTH}
+      </p>
+    </label>
   )
 }
 
@@ -408,11 +433,13 @@ function EditForm({ member, request, onDone, onCancel }: {
   const [avatarId, setAvatarId] = useState<GouziAvatar>(member.avatarId)
   const [role, setRole] = useState<GouziRoleId>(member.role)
   const [model, setModel] = useState(member.model ?? '')
+  const [profile, setProfile] = useState(member.profile ?? '')
   const [error, setError] = useState<string>()
   const save = async (): Promise<void> => {
     try {
       await controlGouzi(request, {
         action: 'edit', gouziId: member.gouziId, name: name.trim(), avatarId, role, model: model === '' ? null : model,
+        profile: profile.trim() === '' ? null : profile.trim(),
       })
       onDone()
     } catch (cause) {
@@ -428,6 +455,7 @@ function EditForm({ member, request, onDone, onCancel }: {
       </label>
       <RolePicker value={role} onChange={setRole} />
       <ModelField request={request} gouziId={member.gouziId} pinned={member.model} value={model} onChange={setModel} />
+      <ProfileField value={profile} onChange={setProfile} />
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
       <footer className={css.wizardActions}>
         <button type="button" className={css.secondary} onClick={onCancel}>取消</button>

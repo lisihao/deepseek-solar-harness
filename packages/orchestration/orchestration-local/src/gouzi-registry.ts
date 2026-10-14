@@ -5,6 +5,7 @@ import {
   countsTowardGouziLimit,
   GOUZI_AVATAR_IDS,
   GOUZI_MEMBER_LIMIT,
+  GOUZI_PROFILE_LIMIT,
   GOUZI_ROLES,
   GouziAuthorityEpoch,
   GouziHostId,
@@ -47,6 +48,7 @@ interface MemberRow {
   role_version: number
   policy_version: number
   model: string | null
+  profile: string | null
   membership: string
   connection: string
   activity: string
@@ -104,6 +106,14 @@ function checkModel(model: string): string {
   return trimmed
 }
 
+function checkProfile(profile: string): string {
+  const trimmed = profile.trim()
+  if (trimmed.length === 0 || trimmed.length > GOUZI_PROFILE_LIMIT || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(trimmed)) {
+    throw new OrchestrationError(`gouzi profile must be 1 to ${String(GOUZI_PROFILE_LIMIT)} characters without control characters`, 'GOUZI_STATE_CONFLICT')
+  }
+  return trimmed
+}
+
 function memberView(row: MemberRow): GouziMemberView {
   return {
     gouziId: GouziId(row.gouzi_id),
@@ -116,6 +126,7 @@ function memberView(row: MemberRow): GouziMemberView {
     roleVersion: row.role_version,
     policyVersion: row.policy_version,
     ...row.model === null ? {} : { model: row.model },
+    ...row.profile === null ? {} : { profile: row.profile },
     membership: row.membership as GouziMembership,
     connection: row.connection as GouziConnection,
     activity: row.activity as GouziActivity,
@@ -193,6 +204,7 @@ export class GouziRegistry {
     avatarId: GouziAvatarId
     role: GouziRole
     model?: string
+    profile?: string
     grantDeadlineMs: number
   }): GouziMemberView {
     const name = checkName(input.name)
@@ -200,6 +212,7 @@ export class GouziRegistry {
     const avatarId = checkAvatar(input.avatarId)
     const role = checkRole(input.role)
     const model = input.model === undefined ? null : checkModel(input.model)
+    const profile = input.profile === undefined ? null : checkProfile(input.profile)
     return this.transaction(() => {
       if (this.getHost(input.hostId) === undefined) {
         throw new OrchestrationError(`gouzi host ${String(input.hostId)} is not paired`, 'GOUZI_STATE_CONFLICT')
@@ -217,11 +230,11 @@ export class GouziRegistry {
       const now = new Date().toISOString()
       this.db.prepare(`
         INSERT INTO gouzi_members
-          (gouzi_id, owner_id, host_id, generation, name, avatar_id, role, role_version, policy_version, model,
+          (gouzi_id, owner_id, host_id, generation, name, avatar_id, role, role_version, policy_version, model, profile,
            membership, connection, activity, grant_deadline_ms, created_at, updated_at)
-        VALUES (?, ?, ?, 1, ?, ?, ?, 1, 1, ?, 'provisioning', 'unreachable', 'resting', ?, ?, ?)
+        VALUES (?, ?, ?, 1, ?, ?, ?, 1, 1, ?, ?, 'provisioning', 'unreachable', 'resting', ?, ?, ?)
       `).run(
-        String(input.gouziId), String(input.ownerId), String(input.hostId), name, avatarId, role, model, grantDeadlineMs, now, now,
+        String(input.gouziId), String(input.ownerId), String(input.hostId), name, avatarId, role, model, profile, grantDeadlineMs, now, now,
       )
       return this.require(input.gouziId)
     })
@@ -246,8 +259,8 @@ export class GouziRegistry {
   }
 
   /**
-   * Change name, avatar, role, or pinned model. The identity and generation never change; a role change bumps
-   * `roleVersion`, and a `null` model returns the member to Smart Auto.
+   * Change name, avatar, role, pinned model, or notes. The identity and generation never change; a role change bumps
+   * `roleVersion`, a `null` model returns the member to Smart Auto, and a `null` profile clears the notes.
    * @param gouziId - member identity.
    * @param edit - fields to change.
    * @returns the updated member.
@@ -263,9 +276,10 @@ export class GouziRegistry {
       const avatarId = edit.avatarId === undefined ? current.avatarId : checkAvatar(edit.avatarId)
       const role = edit.role === undefined ? current.role : checkRole(edit.role)
       const model = edit.model === undefined ? current.model ?? null : edit.model === null ? null : checkModel(edit.model)
+      const profile = edit.profile === undefined ? current.profile ?? null : edit.profile === null ? null : checkProfile(edit.profile)
       this.db.prepare(`
-        UPDATE gouzi_members SET name = ?, avatar_id = ?, role = ?, role_version = ?, model = ?, updated_at = ? WHERE gouzi_id = ?
-      `).run(name, avatarId, role, role === current.role ? current.roleVersion : current.roleVersion + 1, model, new Date().toISOString(), String(gouziId))
+        UPDATE gouzi_members SET name = ?, avatar_id = ?, role = ?, role_version = ?, model = ?, profile = ?, updated_at = ? WHERE gouzi_id = ?
+      `).run(name, avatarId, role, role === current.role ? current.roleVersion : current.roleVersion + 1, model, profile, new Date().toISOString(), String(gouziId))
       return this.require(gouziId)
     })
   }

@@ -4826,7 +4826,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziCreateInput',
-    declaration: 'export interface GouziCreateInput {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly model?: string;\n    readonly grantDeadlineMs: number;\n}',
+    declaration: 'export interface GouziCreateInput {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly model?: string;\n    readonly profile?: string;\n    readonly grantDeadlineMs: number;\n}',
   },
   {
     name: 'GouziFolderListing',
@@ -4854,7 +4854,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziMemberEdit',
-    declaration: 'export interface GouziMemberEdit {\n    readonly name?: string;\n    readonly avatarId?: GouziAvatarId;\n    readonly role?: GouziRole;\n    readonly model?: string | null;\n}',
+    declaration: 'export interface GouziMemberEdit {\n    readonly name?: string;\n    readonly avatarId?: GouziAvatarId;\n    readonly role?: GouziRole;\n    readonly model?: string | null;\n    readonly profile?: string | null;\n}',
   },
   {
     name: 'GouziMembership',
@@ -4886,7 +4886,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GouziRecord',
-    declaration: 'export interface GouziRecord {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly generation: number;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly roleVersion: number;\n    readonly policyVersion: number;\n    readonly model?: string;\n    readonly membership: GouziMembership;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface GouziRecord {\n    readonly gouziId: GouziId;\n    readonly ownerId: GouziOwnerId;\n    readonly hostId: GouziHostId;\n    readonly generation: number;\n    readonly name: string;\n    readonly avatarId: GouziAvatarId;\n    readonly role: GouziRole;\n    readonly roleVersion: number;\n    readonly policyVersion: number;\n    readonly model?: string;\n    readonly profile?: string;\n    readonly membership: GouziMembership;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'GouziRole',
@@ -5042,7 +5042,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'KennelCollaborationMember',
-    declaration: 'export interface KennelCollaborationMember {\n    readonly gouziId: string;\n    readonly generation: number;\n    readonly name: string;\n    readonly role: string;\n    readonly operatorId: string;\n    readonly model: string;\n}',
+    declaration: 'export interface KennelCollaborationMember {\n    readonly gouziId: string;\n    readonly generation: number;\n    readonly name: string;\n    readonly role: string;\n    readonly operatorId: string;\n    readonly model: string;\n    readonly profile?: string;\n}',
   },
   {
     name: 'KennelCollaborationOutcome',
@@ -5078,7 +5078,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'KennelWorkGraphInput',
-    declaration: 'export interface KennelWorkGraphInput {\n    readonly offer: KennelWorkOffer;\n    readonly text: string;\n    readonly title?: string;\n}',
+    declaration: 'export interface KennelWorkGraphInput {\n    readonly offer: KennelWorkOffer;\n    readonly text: string;\n    readonly title?: string;\n    readonly profile?: string;\n}',
   },
   {
     name: 'KennelWorkOffer',

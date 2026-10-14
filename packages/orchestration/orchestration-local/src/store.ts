@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import {
   chmodSync,
   closeSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -35,7 +36,7 @@ import type {
 } from './cluster.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 6
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 7
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
@@ -148,6 +149,13 @@ const GOUZI_TABLES = `
  */
 const GOUZI_MODEL_COLUMN = 'ALTER TABLE gouzi_members ADD COLUMN model TEXT;'
 
+/**
+ * Schema 7: the notes a user wrote for a member. NULL means none. The column is nullable, so older rows stay valid; an
+ * older program refuses the newer schema, which is why {@link SqliteOrchestrationStore} keeps a copy of the file
+ * made just before the first migration to this schema.
+ */
+const GOUZI_PROFILE_COLUMN = 'ALTER TABLE gouzi_members ADD COLUMN profile TEXT;'
+
 function makePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
   chmodSync(path, 0o700)
@@ -206,6 +214,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         'ORCHESTRATION_UNAVAILABLE',
       )
     }
+    if (version > 0 && version < 7) this.backUpBeforeSchema7(path)
     if (version === 0) this.createSchema()
     else if (version === 1) {
       this.migrateSchema1To2()
@@ -213,19 +222,26 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       this.migrateSchema3To4()
       this.migrateSchema4To5()
       this.migrateSchema5To6()
+      this.migrateSchema6To7()
     } else if (version === 2) {
       this.migrateSchema2To3()
       this.migrateSchema3To4()
       this.migrateSchema4To5()
       this.migrateSchema5To6()
+      this.migrateSchema6To7()
     } else if (version === 3) {
       this.migrateSchema3To4()
       this.migrateSchema4To5()
       this.migrateSchema5To6()
+      this.migrateSchema6To7()
     } else if (version === 4) {
       this.migrateSchema4To5()
       this.migrateSchema5To6()
-    } else if (version === 5) this.migrateSchema5To6()
+      this.migrateSchema6To7()
+    } else if (version === 5) {
+      this.migrateSchema5To6()
+      this.migrateSchema6To7()
+    } else if (version === 6) this.migrateSchema6To7()
     this.gouzi = new GouziRegistry(this.db)
     this.clusterTracking = true
   }
@@ -884,6 +900,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       VALUES (1, 0, 'follower', 0, 0);
       ${GOUZI_TABLES}
       ${GOUZI_MODEL_COLUMN}
+      ${GOUZI_PROFILE_COLUMN}
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
   }
@@ -960,5 +977,27 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         PRAGMA user_version = 6;
       `)
     })
+  }
+
+  private migrateSchema6To7(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        ${GOUZI_PROFILE_COLUMN}
+        PRAGMA user_version = 7;
+      `)
+    })
+  }
+
+  /**
+   * Keep one copy of the state file from before the first migration to schema 7. A program that only knows an older
+   * schema refuses the migrated file, so this copy is what a manual rollback restores. An existing copy is kept: it
+   * holds the state from before the migration, which a later start must not overwrite.
+   */
+  private backUpBeforeSchema7(path: string): void {
+    const backup = `${path}.before-schema-7`
+    if (existsSync(backup)) return
+    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    copyFileSync(path, backup)
+    chmodSync(backup, 0o600)
   }
 }
