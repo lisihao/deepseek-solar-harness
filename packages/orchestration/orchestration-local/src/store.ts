@@ -185,6 +185,23 @@ function attemptFromRow(row: Record<string, unknown>): AttemptRecord {
   }
 }
 
+/**
+ * Check a copy of the state file before it is put in place as a backup.
+ * @param path - the copy.
+ * @param version - the schema version the original had.
+ * @throws Error - when the copy is not a database, fails SQLite's integrity check, or has another schema version.
+ */
+export function verifyBackupCopy(path: string, version: number): void {
+  const copy = new DatabaseSync(path, { readOnly: true })
+  try {
+    const integrity = copy.prepare('PRAGMA integrity_check').get()?.integrity_check
+    const copied = Number(copy.prepare('PRAGMA user_version').get()?.user_version)
+    if (integrity !== 'ok' || copied !== version) throw new Error(`the copy failed its check (integrity ${String(integrity)}, schema ${String(copied)})`)
+  } finally {
+    copy.close()
+  }
+}
+
 /** Local orchestration state and artifacts, written only by the daemon. */
 export class OrchestrationStore implements OrchestrationClusterElectionStore {
   /** Sole-writer SQLite connection. */
@@ -1010,14 +1027,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       rmSync(partial, { force: true })
       this.db.prepare('VACUUM INTO ?').run(partial)
       chmodSync(partial, 0o600)
-      const copy = new DatabaseSync(partial, { readOnly: true })
-      try {
-        const intact = copy.prepare('PRAGMA integrity_check').get()?.integrity_check === 'ok'
-        const copied = Number(copy.prepare('PRAGMA user_version').get()?.user_version)
-        if (!intact || copied !== version) throw new Error(`the copy failed its check (integrity ${String(intact)}, schema ${String(copied)})`)
-      } finally {
-        copy.close()
-      }
+      verifyBackupCopy(partial, version)
       // VACUUM INTO does not sync its output; without this a crash after the migration could leave a truncated copy
       // under the final name, and the next start would keep it.
       const descriptor = openSync(partial, 'r+')
@@ -1032,7 +1042,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       // The constructor fails, so no caller holds a handle to close.
       this.db.close()
       throw new OrchestrationError(
-        `orchestration state could not be backed up before migrating to schema 7: ${error instanceof Error ? error.message : String(error)}`,
+        `orchestration state could not be backed up before migrating to schema 7: ${String(error)}`,
         'ORCHESTRATION_UNAVAILABLE',
       )
     }

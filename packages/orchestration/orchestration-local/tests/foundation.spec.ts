@@ -15,7 +15,7 @@ import { canonicalSha256 } from '../src/canonical.ts'
 import { graphCertificate, nodesConflict, validateGraph } from '../src/graph.ts'
 import { GitWorktreeManager } from '../src/git-worktrees.ts'
 import { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from '../src/providers.ts'
-import { OrchestrationStore } from '../src/store.ts'
+import { OrchestrationStore, verifyBackupCopy } from '../src/store.ts'
 
 const roots: string[] = []
 const run = promisify(execFile)
@@ -372,6 +372,19 @@ describe('immutable compilation foundations', () => {
     expect(Number(retried.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(7)
     retried.close()
     expect(existsSync(join(root, 'state.sqlite.before-schema-7'))).toBe(true)
+  })
+
+  it('rejects a backup copy that is not a database or has another schema version', async () => {
+    const root = await temporary()
+    const good = join(root, 'good.sqlite')
+    const database = new DatabaseSync(good)
+    database.exec('CREATE TABLE t (a); PRAGMA user_version = 6;')
+    database.close()
+    expect(() => { verifyBackupCopy(good, 6) }).not.toThrow()
+    expect(() => { verifyBackupCopy(good, 5) }).toThrow('schema 6')
+    const garbage = join(root, 'garbage.sqlite')
+    writeFileSync(garbage, 'x'.repeat(4096))
+    expect(() => { verifyBackupCopy(garbage, 6) }).toThrow()
   })
 
   it('makes no backup for a new store', async () => {
