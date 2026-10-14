@@ -17,6 +17,7 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 const ROUTE_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-options.json', import.meta.url))
 const CLI_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-cli-runtimes.json', import.meta.url))
 const RESIDENT_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-resident-panel.json', import.meta.url))
+const CLOSED_LANE_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-closed-lane.json', import.meta.url))
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/physical-routing-fixtures.mjs', import.meta.url))
 
@@ -383,4 +384,63 @@ describe('web e2e: physical operator qualification and routing', () => {
     await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
+
+  it('lets the owner release a lane closed by an unconfirmed native turn through the assembled Host route', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-closed-lane'))
+    const home = process.env.DSH_HOME
+    if (home === undefined) throw new Error('the scaffold must isolate DSH_HOME')
+    const stateFile = join(home, 'physical-routing-closed-lane.json')
+    await writeFile(stateFile, `${JSON.stringify({ revision: 7, released: false, calls: [] })}\n`)
+
+    const action = page.getByRole('button', { name: /^物理算子：/ })
+    await action.click()
+    const panel = page.getByRole('dialog', { name: 'Resident 物理算子' })
+    const notice = panel.locator('.dshDesktopResidentRecovery')
+    await notice.waitFor({ timeout: 15_000 })
+    // The fixture's Claude Code provider is unavailable, so the header is already in the warning state; the label names the lane.
+    await expect.poll(() => action.getAttribute('aria-label'), { timeout: 15_000 }).toContain('1 条 lane 已暂停')
+    const closedLabel = await action.getAttribute('aria-label')
+    // The time follows the browser's zone, so the transcript keeps its shape and not its digits.
+    const shownTime = /（(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[^）]*)）/u
+    const noticeText = (await notice.innerText()).split('\n').filter(line => line.trim().length > 0)
+    expect(noticeText.some(line => shownTime.test(line))).toBe(true)
+    const stableNotice = noticeText.map(line => line.replace(shownTime, '（<本机时间>）'))
+    const rawShown = await notice.innerHTML()
+    expect(rawShown).not.toMatch(/resident-closed-lane|native_outcome_unconfirmed|web-e2e-closed/u)
+
+    // The choice needs a confirmation, and cancelling sends nothing.
+    await notice.getByRole('button', { name: '重置这条 lane' }).click()
+    await notice.getByText('下一条任务会开启新的 Codex 对话并重新选择模型，原来的对话内容不会再被接续。').waitFor()
+    await notice.getByRole('button', { name: '取消' }).click()
+    expect(JSON.parse(await readFile(stateFile, 'utf8')).calls).toEqual([])
+
+    // At phone width the notice and its buttons stay inside the panel.
+    await page.setViewportSize({ width: 375, height: 812 })
+    const narrow = await notice.boundingBox()
+    const narrowPanel = await panel.boundingBox()
+    await page.setViewportSize({ width: 1280, height: 800 })
+    expect(narrow !== null && narrowPanel !== null).toBe(true)
+    expect(narrow!.x).toBeGreaterThanOrEqual(narrowPanel!.x)
+    expect(narrow!.x + narrow!.width).toBeLessThanOrEqual(narrowPanel!.x + narrowPanel!.width + 1)
+
+    await notice.getByRole('button', { name: '我已确认它结束了，恢复这条 lane' }).click()
+    await notice.getByText('这条 lane 会继续使用原来的 Codex 对话。如果那条任务其实还在运行，下一条任务可能与它互相冲突。').waitFor()
+    await notice.getByRole('button', { name: '确认恢复' }).click()
+    await notice.waitFor({ state: 'detached', timeout: 15_000 })
+    await expect.poll(() => action.getAttribute('aria-label'), { timeout: 15_000 }).not.toContain('lane 已暂停')
+
+    const calls = (JSON.parse(await readFile(stateFile, 'utf8')) as { calls: unknown[] }).calls
+    const transcript = `${JSON.stringify({
+      closedHeader: closedLabel,
+      notice: stableNotice,
+      calls,
+      releasedHeaderLabel: await action.getAttribute('aria-label'),
+      noticeAfterRelease: await panel.locator('.dshDesktopResidentRecovery').count(),
+    }, null, 2)}\n`
+    if (scaffold.mode === 'refresh') await writeFile(CLOSED_LANE_SNAPSHOT, transcript)
+    expect(transcript).toBe(await readFile(CLOSED_LANE_SNAPSHOT, 'utf8'))
+
+    await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
+    expect(tripwire.pageErrors).toEqual([])
+  }, 90_000)
 })

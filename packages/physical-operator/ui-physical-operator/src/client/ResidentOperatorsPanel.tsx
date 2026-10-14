@@ -9,9 +9,10 @@ import type {
   DesktopResidentEvent,
   DesktopResidentSession,
 } from '../contracts.ts'
-import { RESIDENT_DASHBOARD_PATH } from '../contracts.ts'
+import { RESIDENT_DASHBOARD_PATH, RESIDENT_NATIVE_OUTCOME_UNCONFIRMED } from '../contracts.ts'
 import { formatResidentTimestamp } from '../presentation.ts'
 import { CliRuntimesSection } from './CliRuntimes.tsx'
+import { ClosedLaneNotice } from './ClosedLaneNotice.tsx'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 
 export type BrowserRequest = ConnectionHandle['request']
@@ -152,8 +153,9 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
   const running = dashboard?.activeWorkers ?? 0
   const residentHosts = new Set(dashboard?.providers.filter(provider => provider.available).map(provider => provider.product) ?? []).size
   const unavailable = dashboard?.providers.filter(provider => !provider.available).length ?? 0
-  const status = error !== undefined ? 'error' : unavailable > 0 ? 'warn' : running > 0 ? 'running' : 'idle'
-  const label = `物理算子：${String(residentHosts)} 个常驻宿主，${String(running)} 个 worker 运行中${error === undefined ? '' : '，状态不可用'}`
+  const closedLanes = dashboard?.sessions.filter(session => session.healthReason === RESIDENT_NATIVE_OUTCOME_UNCONFIRMED).length ?? 0
+  const status = error !== undefined ? 'error' : unavailable > 0 || closedLanes > 0 ? 'warn' : running > 0 ? 'running' : 'idle'
+  const label = `物理算子：${String(residentHosts)} 个常驻宿主，${String(running)} 个 worker 运行中${closedLanes === 0 ? '' : `，${String(closedLanes)} 条 lane 已暂停`}${error === undefined ? '' : '，状态不可用'}`
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const generatedTime = dashboard === undefined
     ? undefined
@@ -273,12 +275,26 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
                 <h3>持久任务</h3>
                 {(dashboard?.sessions.length ?? 0) === 0 && <p className="dshDesktopResidentEmpty">还没有 Resident 执行。</p>}
                 {dashboard?.sessions.map(session => (
-                  <SessionRow
-                    key={session.sessionId}
-                    session={session}
-                    selected={session.sessionId === selectedSessionId}
-                    onSelect={() => { setSelectedSessionId(session.sessionId) }}
-                  />
+                  <div key={session.sessionId}>
+                    <SessionRow
+                      session={session}
+                      selected={session.sessionId === selectedSessionId}
+                      onSelect={() => { setSelectedSessionId(session.sessionId) }}
+                    />
+                    {session.healthReason === RESIDENT_NATIVE_OUTCOME_UNCONFIRMED && (
+                      <ClosedLaneNotice
+                        session={session}
+                        localOwner={!remoteFrontend}
+                        generatedAt={dashboard.generatedAt}
+                        timeZone={timeZone}
+                        request={request}
+                        onChanged={() => {
+                          void loadResidentDashboard(selectedSessionId, undefined, request)
+                            .then(setDashboard, (cause: unknown) => { setError(cause instanceof Error ? cause.message : String(cause)) })
+                        }}
+                      />
+                    )}
+                  </div>
                 ))}
               </div>
               <div className="dshDesktopResidentColumn dshDesktopResidentEvents">
@@ -340,7 +356,7 @@ function SessionRow(props: { session: DesktopResidentSession; selected: boolean;
         <small>执行 lane · {shortLane(props.session.laneId)}</small>
         <small>{profileLabel(props.session)}</small>
       </span>
-      <span><em>{lifecycleLabel(props.session.lifecycle)}</em><small>{phase}</small></span>
+      <span><em>{props.session.healthReason === RESIDENT_NATIVE_OUTCOME_UNCONFIRMED ? '已暂停' : lifecycleLabel(props.session.lifecycle)}</em><small>{phase}</small></span>
     </button>
   )
 }

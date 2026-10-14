@@ -2,9 +2,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-resident-operator'
-import { registerResidentCliRuntimes, registerResidentDashboard } from './dashboard.ts'
+import { registerResidentCliRuntimes, registerResidentDashboard, registerResidentSessionRecovery } from './dashboard.ts'
 
-export { readResidentDashboard, registerResidentCliRuntimes, registerResidentDashboard } from './dashboard.ts'
+export {
+  readResidentDashboard,
+  registerResidentCliRuntimes,
+  registerResidentDashboard,
+  registerResidentSessionRecovery,
+} from './dashboard.ts'
 export * from './contracts.ts'
 export * from './presentation.ts'
 
@@ -15,4 +20,5 @@ export const inject = ['residentOperators', 'webServer']
 export function apply(ctx: Context): void {
   ctx.effect(() => registerResidentDashboard(ctx), 'ui-physical-operator: Resident dashboard route')
   ctx.effect(() => registerResidentCliRuntimes(ctx), 'ui-physical-operator: native CLI route')
+  ctx.effect(() => registerResidentSessionRecovery(ctx), 'ui-physical-operator: closed-lane recovery route')
 }

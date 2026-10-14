@@ -6,7 +6,12 @@ import {
   ResidentOperatorTurnId,
 } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it, vi } from 'vitest'
-import { readResidentDashboard, registerResidentCliRuntimes, registerResidentDashboard } from '../src/dashboard.ts'
+import {
+  readResidentDashboard,
+  registerResidentCliRuntimes,
+  registerResidentDashboard,
+  registerResidentSessionRecovery,
+} from '../src/dashboard.ts'
 
 function responseRecorder(): {
   response: { writeHead: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
@@ -534,5 +539,142 @@ describe('native CLI route', () => {
     const noAuth = responseRecorder()
     await unauthenticated.handler(localGet('/api/resident-operators/cli'), noAuth.response)
     expect(noAuth.status()).toBe(503)
+  })
+})
+
+describe('closed-lane recovery route', () => {
+  const lane = (patch: Record<string, unknown> = {}) => ({
+    sessionId: 'session-1', operatorId: 'codex', workspace: '/project', laneId: 'lane-1', lifecycle: 'idle', health: 'degraded',
+    healthReason: 'native_outcome_unconfirmed', stateRevision: 7, updatedAt: '2026-10-14T00:00:00.000Z',
+    latestTurn: { commandId: 'command-9', turnId: 'turn-9', state: 'indeterminate', taskLabel: 'Fix parser', updatedAt: '2026-10-14T00:00:00.000Z' },
+    ...patch,
+  })
+
+  function register(residentOperators: Record<string, unknown>) {
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    const remoteAuth = {
+      authenticate: (token: string) => token === 'valid' ? { deviceId: 'remote', deviceName: 'Remote', scope: 'admin' as const } : undefined,
+    }
+    registerResidentSessionRecovery({
+      residentOperators,
+      webServer: { register: vi.fn((route: { handler: typeof handler }) => { handler = route.handler; return () => {} }) },
+      get: (key: string) => key === 'remoteAuth' ? remoteAuth : undefined,
+      logger: { warn: vi.fn() },
+    } as unknown as Context)
+    if (handler === undefined) throw new Error('recovery route was not registered')
+    const call = async (query: string, options: { remote?: boolean; method?: string } = {}) => {
+      const recorded = responseRecorder()
+      await handler?.(options.remote === true
+        ? { method: options.method ?? 'POST', url: `/api/resident-operators/session-recovery?${query}`, headers: { host: 'server.test', authorization: 'Bearer valid' }, socket: { remoteAddress: '100.64.0.2' } }
+        : { method: options.method ?? 'POST', url: `/api/resident-operators/session-recovery?${query}`, headers: { host: '127.0.0.1:13080', origin: 'http://127.0.0.1:13080' }, socket: { remoteAddress: '127.0.0.1' } },
+      recorded.response)
+      return recorded
+    }
+    return { call }
+  }
+
+  it('answers only the local owner, and only with a session, an action and a revision', async () => {
+    const service = { inspect: vi.fn(), resolveIndeterminate: vi.fn(), reset: vi.fn() }
+    const { call } = register(service)
+    const remote = await call('session_id=session-1&action=reset&revision=7', { remote: true })
+    expect(remote.status()).toBe(403)
+    expect(remote.json()).toEqual({ error: 'LOCAL_OWNER_REQUIRED' })
+    expect((await call('session_id=session-1&action=reset&revision=7', { method: 'GET' })).status()).toBe(405)
+    expect((await call('action=reset&revision=7')).json()).toEqual({ error: 'SESSION_REQUIRED' })
+    expect((await call('session_id=session-1&revision=7')).json()).toEqual({ error: 'ACTION_REQUIRED' })
+    expect((await call('session_id=session-1&action=drop&revision=7')).json()).toEqual({ error: 'ACTION_REQUIRED' })
+    expect((await call('session_id=session-1&action=reset&revision=-1')).json()).toEqual({ error: 'REVISION_REQUIRED' })
+    expect((await call('session_id=session-1&action=reset&revision=x')).json()).toEqual({ error: 'REVISION_REQUIRED' })
+    expect(service.inspect).not.toHaveBeenCalled()
+    expect(service.reset).not.toHaveBeenCalled()
+    expect(service.resolveIndeterminate).not.toHaveBeenCalled()
+  })
+
+  it('refuses a lane that is not closed by an unconfirmed native turn, without calling the service', async () => {
+    for (const healthy of [lane({ health: 'ok', healthReason: undefined }), lane({ healthReason: 'process_crashed' })]) {
+      const service = { inspect: vi.fn(async () => healthy), resolveIndeterminate: vi.fn(), reset: vi.fn() }
+      const { call } = register(service)
+      for (const action of ['resolve', 'reset']) {
+        const result = await call(`session_id=session-1&action=${action}&revision=7`)
+        expect(result.status()).toBe(409)
+        expect(result.json()).toMatchObject({ error: 'LANE_NOT_CLOSED' })
+      }
+      expect(service.reset).not.toHaveBeenCalled()
+      expect(service.resolveIndeterminate).not.toHaveBeenCalled()
+    }
+  })
+
+  it('resolves the lane\'s own latest command, never one named by the caller, at the revision the owner saw', async () => {
+    const inspect = vi.fn()
+      .mockResolvedValueOnce(lane())
+      .mockResolvedValueOnce(lane({ health: 'ok', healthReason: undefined, stateRevision: 8 }))
+    const service = { inspect, resolveIndeterminate: vi.fn(async () => {}), reset: vi.fn() }
+    const { call } = register(service)
+    const result = await call('session_id=session-1&action=resolve&revision=7&command_id=attacker-command')
+    expect(result.status()).toBe(200)
+    expect(result.json()).toMatchObject({ session: { sessionId: 'session-1', health: 'ok', stateRevision: 8 } })
+    expect(service.resolveIndeterminate).toHaveBeenCalledWith({ commandId: 'command-9', decision: 'abandon', expectedStateRevision: 7 })
+    expect(service.reset).not.toHaveBeenCalled()
+  })
+
+  it('refuses to resolve when the latest turn is not the indeterminate one', async () => {
+    const service = {
+      inspect: vi.fn(async () => lane({ latestTurn: { commandId: 'command-9', turnId: 'turn-9', state: 'settled', updatedAt: '2026-10-14T00:00:00.000Z' } })),
+      resolveIndeterminate: vi.fn(), reset: vi.fn(),
+    }
+    const result = await register(service).call('session_id=session-1&action=resolve&revision=7')
+    expect(result.status()).toBe(409)
+    expect(result.json()).toMatchObject({ error: 'STATE_CHANGED' })
+    expect(service.resolveIndeterminate).not.toHaveBeenCalled()
+  })
+
+  it('resets with a fixed reason at the revision the owner saw', async () => {
+    const inspect = vi.fn()
+      .mockResolvedValueOnce(lane())
+      .mockResolvedValueOnce(lane({ health: 'ok', healthReason: undefined, stateRevision: 8 }))
+    const service = { inspect, resolveIndeterminate: vi.fn(), reset: vi.fn(async () => lane()) }
+    const result = await register(service).call('session_id=session-1&action=reset&revision=7&reason=anything')
+    expect(result.status()).toBe(200)
+    expect(service.reset).toHaveBeenCalledWith({
+      sessionId: 'session-1', expectedStateRevision: 7, reason: 'owner reset of a lane closed by an unconfirmed native turn',
+    })
+  })
+
+  it('answers a state change as 409, other failures as 503, and a lane that stays closed as not released', async () => {
+    const conflicting = {
+      inspect: vi.fn(async () => lane()),
+      resolveIndeterminate: vi.fn(async () => { throw Object.assign(new Error('revision moved'), { code: 'REVISION_CONFLICT' }) }),
+      reset: vi.fn(),
+    }
+    const conflict = await register(conflicting).call('session_id=session-1&action=resolve&revision=7')
+    expect(conflict.status()).toBe(409)
+    expect(conflict.json()).toMatchObject({ error: 'STATE_CHANGED' })
+
+    const broken = {
+      inspect: vi.fn(async () => lane()), resolveIndeterminate: vi.fn(),
+      reset: vi.fn(async () => { throw new Error('daemon down') }),
+    }
+    const failed = await register(broken).call('session_id=session-1&action=reset&revision=7')
+    expect(failed.status()).toBe(503)
+    expect(failed.json()).toEqual({ error: 'RESIDENT_RECOVERY_FAILED', message: 'daemon down' })
+
+    const stillClosed = {
+      inspect: vi.fn(async () => lane()), resolveIndeterminate: vi.fn(async () => {}), reset: vi.fn(),
+    }
+    const closed = await register(stillClosed).call('session_id=session-1&action=resolve&revision=7')
+    expect(closed.status()).toBe(409)
+    expect(closed.json()).toMatchObject({ error: 'LANE_STILL_CLOSED' })
+  })
+
+  it('lists a closed lane even when its workspace is a diagnostic one', async () => {
+    const closed = lane({ workspace: '/private/tmp/dsh-resident-canary-1' })
+    const service = {
+      providers: vi.fn(async () => []),
+      list: vi.fn(async () => [closed, lane({ sessionId: 'session-2', workspace: '/private/tmp/dsh-resident-canary-2', health: 'ok', healthReason: undefined })]),
+      readEvents: vi.fn(async () => ({ events: [], nextSequence: 0 })),
+    }
+    const dashboard = await readResidentDashboard({ residentOperators: service } as unknown as Context)
+    expect(dashboard.sessions.map(value => value.sessionId)).toEqual(['session-1'])
+    expect(dashboard.hiddenDiagnosticSessions).toBe(1)
   })
 })

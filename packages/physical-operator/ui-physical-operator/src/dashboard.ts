@@ -4,6 +4,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import { authorizeRemoteRequest } from '@deepseek-ai/dsh-host-remote-auth'
+import {
+  ResidentOperatorCommandId,
+  ResidentOperatorSessionId,
+} from '@deepseek-ai/dsh-resident-operator'
 import type {
   ResidentEvent,
   ResidentProviderStatus,
@@ -21,7 +25,13 @@ import type {
   DesktopResidentSession,
   DesktopResidentTurn,
 } from './contracts.ts'
-import { RESIDENT_CLI_PATH, RESIDENT_DASHBOARD_PATH } from './contracts.ts'
+import {
+  RESIDENT_CLI_PATH,
+  RESIDENT_DASHBOARD_PATH,
+  RESIDENT_NATIVE_OUTCOME_UNCONFIRMED,
+  RESIDENT_SESSION_RECOVERY_PATH,
+} from './contracts.ts'
+import type { DesktopResidentRecoveryFailure } from './contracts.ts'
 import { buildResidentActivities, isDiagnosticResidentWorkspace } from './presentation.ts'
 
 /**
@@ -41,8 +51,9 @@ async function assembleResidentDashboard(
   sessions: ResidentSessionSnapshot[],
   sessionId?: string,
 ): Promise<DesktopResidentDashboard> {
+  // A closed lane is always listed: it is the only place the owner can release it.
   const visibleSessions = sessions
-    .filter(session => !isDiagnosticResidentWorkspace(session.workspace))
+    .filter(session => !isDiagnosticResidentWorkspace(session.workspace) || session.healthReason === RESIDENT_NATIVE_OUTCOME_UNCONFIRMED)
     .sort((left, right) => {
       const lifecycle = Number(right.lifecycle === 'running') - Number(left.lifecycle === 'running')
       return lifecycle === 0 ? right.updatedAt.localeCompare(left.updatedAt) : lifecycle
@@ -300,6 +311,79 @@ export function registerResidentCliRuntimes(ctx: Context): () => void {
           error: 'RESIDENT_CLI_UNAVAILABLE',
           message: cause instanceof Error ? cause.message : String(cause),
         })
+      }
+    },
+  })
+}
+
+/** Messages for the refusals the Resident service can answer to a recovery request. */
+const RECOVERY_CONFLICT_CODES = new Set(['REVISION_CONFLICT', 'COMMAND_CONFLICT', 'SESSION_BUSY'])
+
+/**
+ * Register the local-owner route that releases a lane closed by a native turn whose end is not known.
+ * `?action=resolve` records that the owner accepts the lane without that turn and keeps the native session;
+ * `?action=reset` drops the native session so the next task starts a new one. The route refuses any other
+ * lane, takes the command to resolve from the lane's own latest turn, and never stops anything in the native product.
+ * @param ctx - Host context carrying Web Server, Remote Auth, and Resident services.
+ * @returns a disposer that unregisters the route.
+ */
+export function registerResidentSessionRecovery(ctx: Context): () => void {
+  return ctx.webServer.register({
+    kind: 'exact',
+    path: RESIDENT_SESSION_RECOVERY_PATH,
+    handler: async (request, response) => {
+      const authority = authorize(ctx, request, response)
+      if (authority === undefined) return
+      if (request.method !== 'POST') {
+        response.writeHead(405, { Allow: 'POST' })
+        response.end()
+        return
+      }
+      const fail = (status: number, error: DesktopResidentRecoveryFailure['error'], message?: string): void => {
+        sendJson(response, status, { error, ...message === undefined ? {} : { message } } satisfies DesktopResidentRecoveryFailure)
+      }
+      if (!authority.local) return fail(403, 'LOCAL_OWNER_REQUIRED')
+      const query = new URL(request.url ?? RESIDENT_SESSION_RECOVERY_PATH, 'http://127.0.0.1').searchParams
+      const sessionId = query.get('session_id')
+      const action = query.get('action')
+      const revision = Number(query.get('revision'))
+      if (sessionId === null || sessionId.trim().length === 0) return fail(400, 'SESSION_REQUIRED')
+      if (action !== 'resolve' && action !== 'reset') return fail(400, 'ACTION_REQUIRED')
+      if (!Number.isSafeInteger(revision) || revision < 0) return fail(400, 'REVISION_REQUIRED')
+      try {
+        const session = await ctx.residentOperators.inspect(sessionId)
+        if (session.healthReason !== RESIDENT_NATIVE_OUTCOME_UNCONFIRMED) {
+          return fail(409, 'LANE_NOT_CLOSED', '这条 lane 当前没有被暂停，无需处理。')
+        }
+        const blocking = session.latestTurn
+        if (action === 'resolve') {
+          if (blocking === undefined || blocking.state !== 'indeterminate') {
+            return fail(409, 'STATE_CHANGED', '这条 lane 的状态已变化，请刷新后再看。')
+          }
+          await ctx.residentOperators.resolveIndeterminate({
+            commandId: ResidentOperatorCommandId(String(blocking.commandId)),
+            decision: 'abandon',
+            expectedStateRevision: revision,
+          })
+        } else {
+          await ctx.residentOperators.reset({
+            sessionId: ResidentOperatorSessionId(sessionId),
+            expectedStateRevision: revision,
+            reason: 'owner reset of a lane closed by an unconfirmed native turn',
+          })
+        }
+        const after = await ctx.residentOperators.inspect(sessionId)
+        if (after.healthReason === RESIDENT_NATIVE_OUTCOME_UNCONFIRMED) {
+          return fail(409, 'LANE_STILL_CLOSED', '这条 lane 仍然被暂停：还有另一条任务没有确认结束。')
+        }
+        sendJson(response, 200, { session: sessionValue(after) })
+      } catch (cause) {
+        ctx.logger.warn(cause)
+        const code = typeof cause === 'object' && cause !== null && 'code' in cause ? String(cause.code) : undefined
+        if (code !== undefined && RECOVERY_CONFLICT_CODES.has(code)) {
+          return fail(409, 'STATE_CHANGED', '这条 lane 的状态已变化，请刷新后再看。')
+        }
+        return fail(503, 'RESIDENT_RECOVERY_FAILED', cause instanceof Error ? cause.message : String(cause))
       }
     },
   })
