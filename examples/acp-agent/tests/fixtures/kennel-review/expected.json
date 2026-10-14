@@ -238,6 +238,80 @@
       "effects": []
     }
   ],
+  "taskOpenings": [
+    {
+      "member": "gamma",
+      "nodeId": "review-1",
+      "opening": [
+        "TaskGraph node review-1: 评审：Summarize the parser for me.",
+        "",
+        "你是狗窝成员「gamma」。",
+        "你的角色目标：查资料、读代码、写调研结论。",
+        "用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：",
+        "评审时先看边界条件"
+      ]
+    },
+    {
+      "member": "gamma",
+      "nodeId": "review-1",
+      "opening": [
+        "TaskGraph node review-1: 复审：返工：Summarize the parser for me.",
+        "",
+        "你是狗窝成员「gamma」。",
+        "你的角色目标：查资料、读代码、写调研结论。",
+        "用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：",
+        "评审时先看边界条件"
+      ]
+    },
+    {
+      "member": "beta",
+      "nodeId": "review-2",
+      "opening": [
+        "TaskGraph node review-2: 评审：Summarize the parser for me.",
+        "",
+        "你是狗窝成员「beta」。",
+        "你的角色目标：查资料、读代码、写调研结论。",
+        "",
+        "现在评审「alpha」已完成的任务。只读检查，不修改文件，不执行命令。"
+      ]
+    },
+    {
+      "member": "beta",
+      "nodeId": "review-2",
+      "opening": [
+        "TaskGraph node review-2: 复审：返工：Summarize the parser for me.",
+        "",
+        "你是狗窝成员「beta」。",
+        "你的角色目标：查资料、读代码、写调研结论。",
+        "",
+        "现在复审「alpha」已完成的任务。只读检查，不修改文件，不执行命令。"
+      ]
+    },
+    {
+      "member": "alpha",
+      "nodeId": "work",
+      "opening": [
+        "TaskGraph node work: Summarize the parser for me.",
+        "",
+        "你是狗窝成员「alpha」。",
+        "你的角色目标：查资料、读代码、写调研结论。",
+        "用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：",
+        "先写测试，再改代码"
+      ]
+    },
+    {
+      "member": "alpha",
+      "nodeId": "work",
+      "opening": [
+        "TaskGraph node work: 返工：Summarize the parser for me.",
+        "",
+        "你是狗窝成员「alpha」。",
+        "你的角色目标：查资料、读代码、写调研结论。",
+        "用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：",
+        "先写测试，再改代码"
+      ]
+    }
+  ],
   "reviewersReadTheResult": false,
   "reviewersReceivedTheirComment": true,
   "authorReceivedTheComment": true,
