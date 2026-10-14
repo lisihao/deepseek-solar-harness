@@ -5934,7 +5934,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentHealthReason',
-    declaration: 'export type ResidentHealthReason = \'auth_required\' | \'quota_exhausted\' | \'protocol_mismatch\' | \'process_crashed\' | \'workspace_missing\';',
+    declaration: 'export type ResidentHealthReason = \'auth_required\' | \'quota_exhausted\' | \'protocol_mismatch\' | \'process_crashed\' | \'native_outcome_unconfirmed\' | \'workspace_missing\';',
   },
   {
     name: 'ResidentIndeterminateResolutionRequest',
