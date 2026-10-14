@@ -574,7 +574,7 @@ describe('closed-lane recovery route', () => {
       recorded.response)
       return recorded
     }
-    return { call }
+    return { call, handler }
   }
 
   it('answers only the local owner, and only with a session, an action and a revision', async () => {
@@ -682,8 +682,13 @@ describe('closed-lane recovery route', () => {
     await handler?.({ method: 'POST', url: '/x', headers: {}, socket: { remoteAddress: '127.0.0.1' } }, denied.response)
     expect(denied.status()).toBe(503)
 
-    const { call } = register({ inspect: vi.fn() })
+    const { call, handler: registered } = register({ inspect: vi.fn() })
     expect((await call('')).json()).toEqual({ error: 'SESSION_REQUIRED' })
+    const noUrl = responseRecorder()
+    await registered?.({
+      method: 'POST', headers: { host: '127.0.0.1:13080', origin: 'http://127.0.0.1:13080' }, socket: { remoteAddress: '127.0.0.1' },
+    }, noUrl.response)
+    expect(noUrl.json()).toEqual({ error: 'SESSION_REQUIRED' })
   })
 
   it('reports a failure that is not an Error as its text', async () => {

@@ -151,7 +151,7 @@ describe('Resident panel with a closed lane', () => {
       if (path.endsWith('/cli')) return json({ runtimes: [] })
       if (init?.method === 'POST') return json({ session: closedLane({ health: 'ok' }) })
       reads += 1
-      if (reads > 1) throw new Error('daemon unreachable')
+      if (reads > 1) return rejectWith('daemon unreachable')
       return json({
         generatedAt: TIME, providers: [], sessions: [closedLane()], events: [], activities: [],
         hiddenDiagnosticSessions: 0, activeWorkers: 0,
@@ -163,6 +163,17 @@ describe('Resident panel with a closed lane', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认重置' }))
     expect(await screen.findByText(/daemon unreachable/)).toBeTruthy()
     expect(reads).toBeGreaterThan(1)
+  })
+
+  it('selects a lane when its row is clicked', async () => {
+    window.history.replaceState({}, '', '/')
+    const second = closedLane({ sessionId: 'session-2', laneId: 'lane-2', health: 'ok', stateRevision: 3 })
+    delete (second as { healthReason?: string }).healthReason
+    render(<ResidentOperatorsPanel request={panelRequest([closedLane(), second])} />)
+    fireEvent.click(screen.getByRole('button', { name: /物理算子/ }))
+    const rows = await screen.findAllByRole('button', { name: /Codex · Fix parser/ })
+    fireEvent.click(rows[1]!)
+    await waitFor(() => { expect(rows[1]!.getAttribute('data-selected')).toBe('true') })
   })
 
   it('keeps a remote frontend from releasing the lane', async () => {
