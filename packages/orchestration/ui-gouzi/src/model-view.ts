@@ -18,7 +18,9 @@ function clip(value: unknown): unknown {
 function viewOf(candidate: KennelDispatchCandidate): KennelDispatchCandidate {
   if (candidate.kind !== 'collaboration') return candidate
   const details = clip(candidate.details) as KennelCollaborationCandidate['details']
-  return { ...candidate, details }
+  // The members' notes belong to their task text, not to the choice, and would fill the input once per candidate.
+  const members = candidate.members.map(({ profile: _notes, ...member }) => member)
+  return { ...candidate, members, details }
 }
 
 /**

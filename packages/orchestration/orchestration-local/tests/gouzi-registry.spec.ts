@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  GOUZI_MEMBER_LIMIT, GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId,
+  GOUZI_MEMBER_LIMIT, GOUZI_PROFILE_LIMIT, GouziAuthorityEpoch, GouziHostId, GouziId, GouziOwnerId,
 } from '@deepseek-ai/dsh-orchestration'
 import { OrchestrationStore } from '../src/store.ts'
 
@@ -186,6 +186,40 @@ describe('GouziRegistry members', () => {
     expect(store.gouzi.read(id)?.model).toBe('gpt-5.5')
     expect(store.gouzi.read(GouziId('gouzi-2'))).toBeUndefined()
     expect(store.gouzi.edit(id, { model: 'x'.repeat(128) }).model).toHaveLength(128)
+    store.close()
+  })
+
+  it('keeps the notes written for a member, trims them, keeps them when other fields change, and clears them with null', async () => {
+    const { store, root } = await open()
+    store.gouzi.pairHost(HOST)
+    expect(store.gouzi.create(member(1))).not.toHaveProperty('profile')
+    expect(store.gouzi.create(member(2, { profile: '  先写测试\n再改代码  ' })).profile).toBe('先写测试\n再改代码')
+    const id = GouziId('gouzi-1')
+    expect(store.gouzi.edit(id, { profile: '回答简短' }).profile).toBe('回答简短')
+    expect(store.gouzi.edit(id, { name: 'Pixel', role: 'testing', model: 'gpt-5.5' }).profile).toBe('回答简短')
+    store.close()
+
+    const reopened = await open(root)
+    expect(reopened.store.gouzi.read(id)?.profile).toBe('回答简短')
+    expect(reopened.store.gouzi.read(GouziId('gouzi-2'))?.profile).toBe('先写测试\n再改代码')
+    expect(reopened.store.gouzi.edit(id, { profile: null })).not.toHaveProperty('profile')
+    reopened.store.close()
+  })
+
+  it('rejects empty, overlong, or control-character notes without changing the member', async () => {
+    const { store } = await open()
+    store.gouzi.pairHost(HOST)
+    store.gouzi.create(member(1, { profile: '保持原样' }))
+    const id = GouziId('gouzi-1')
+    const message = `gouzi profile must be 1 to ${String(GOUZI_PROFILE_LIMIT)} characters without control characters`
+    for (const profile of ['', '   ', 'x'.repeat(GOUZI_PROFILE_LIMIT + 1), 'a\u0000b', 'a\u001bb']) {
+      expect(() => store.gouzi.edit(id, { profile })).toThrow(message)
+      expect(() => store.gouzi.create(member(2, { profile }))).toThrow(message)
+    }
+    expect(store.gouzi.read(id)?.profile).toBe('保持原样')
+    expect(store.gouzi.read(GouziId('gouzi-2'))).toBeUndefined()
+    // Line breaks and tabs are ordinary text; the limit counts characters, so the longest notes are accepted.
+    expect(store.gouzi.edit(id, { profile: `a\tb\r\nc${'x'.repeat(GOUZI_PROFILE_LIMIT - 6)}` }).profile).toHaveLength(GOUZI_PROFILE_LIMIT)
     store.close()
   })
 

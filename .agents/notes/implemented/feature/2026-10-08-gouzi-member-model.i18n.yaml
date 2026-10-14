@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-08-gouzi-member-model.md
-2026-10-08-gouzi-member-model.md: 455f08866bd31f6f78a83936d5fc964d246d7bc7
-2026-10-08-gouzi-member-model.zh.md: 8509354cdd72a85612952dfd5578f30d03d32562
+2026-10-08-gouzi-member-model.md: 805e754dcd8f8effeea61ac5d253fd65cd89c5ca
+2026-10-08-gouzi-member-model.zh.md: 0d60a2818963f0d43f44c7137c0353b99132b567
