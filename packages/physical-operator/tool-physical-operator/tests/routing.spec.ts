@@ -2295,6 +2295,39 @@ describe('host physical-operator routing', () => {
       } finally { dispose() }
     })
 
+    it('recovers a dispatch written before lanes existed on the default lane, with no handoff, under its own command id', async () => {
+      const { ctx, agent, codex } = await setup({ codexImmediate: false })
+      await ctx.commands.execute(agent, '/operator direct', new AbortController().signal)
+      const earlier = createUserMessage({ content: [{ type: 'text', text: '旧版本发出的任务' }], source: { kind: 'user' } })
+      agent.session.append('user/message', earlier, { surfaceOp: 'append' })
+      // The event a build without lanes wrote: no `residentLaneId`, no `handoff`, never terminated and never answered.
+      agent.session.append('physical-operator/dispatch', {
+        commandId: 'resident-legacy-command',
+        operatorId: 'codex',
+        promptMessageId: String(earlier.id),
+        requestedByMessageId: String(earlier.id),
+        turn: 1,
+        step: 1,
+        recovered: false,
+        executionMode: 'resident',
+        residentProfile: { model: 'gpt-5.6-sol', effort: 'low' },
+      }, { ignorable: true })
+      // The user now names another model; the recovered dispatch keeps the profile it was frozen with.
+      const dispose = select(agent, 'codex:gpt-5.6-terra', 'xhigh')
+      try {
+        send(agent, '继续')
+        while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+        const request = codex.requests[0]
+        // The unanswered dispatch is requested again, not replaced by a second one.
+        expect(agent.session.events.filter(event => event.type === 'physical-operator/dispatch')).toHaveLength(1)
+        expect(request?.residentLaneId).toBeUndefined()
+        expect(request?.residentProfile).toEqual({ model: 'gpt-5.6-sol', effort: 'low' })
+        expect(request?.contextEnvelope?.contexts.some(context => context.name === 'session-handoff')).toBe(false)
+        codex.receipts.get(String(request?.executionId))?.result.resolve({ output: [{ type: 'text', text: 'done' }], stopReason: 'completed' })
+        await agent.whenIdle()
+      } finally { dispose() }
+    })
+
     it('uses the profile the daemon resolved when the dispatch named none, so a later explicit model gets its own lane', async () => {
       const { agent, codex } = await setup({ primary: 'codex' })
       codex.resolvedProfile = { model: 'gpt-5.6-luna', effort: 'low' }
