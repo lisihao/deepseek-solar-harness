@@ -58,6 +58,14 @@ const model = {
   supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
 } as const
 
+/**
+ * Wall-clock bound for the tests that write and run several fresh executables. Their idle maximum was 2.1 s, and the
+ * default 5 s was exceeded in full-suite runs under load (see `cli-runtimes.spec.ts` for the measurements behind the
+ * slow first run of a new file and for the limits of this bound). With the bound, six concurrent copies of this spec
+ * all passed (0 of 12 failed).
+ */
+const FRESH_EXECUTABLE_TIMEOUT_MS = 15_000
+
 describe('Claude Code resident driver environment', () => {
   it('classifies owner-actionable native login failures without starting a login', () => {
     expect(claudeAuthenticationFailureCode(new Error(
@@ -304,7 +312,7 @@ describe('Claude Code resident driver environment', () => {
         rmSync(root, { recursive: true, force: true })
       }
     }
-  })
+  }, FRESH_EXECUTABLE_TIMEOUT_MS)
 
   it('classifies a missing product executable as runtime unavailability', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-missing-product-'))
@@ -797,7 +805,7 @@ describe('Codex protocol qualification', () => {
       else process.env.PATH = previousPath
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, FRESH_EXECUTABLE_TIMEOUT_MS)
 
   it.runIf(process.platform !== 'win32')('reads no daemon identity from failed, non-JSON, or relative version output', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-codex-daemon-version-'))
@@ -812,7 +820,7 @@ describe('Codex protocol qualification', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, FRESH_EXECUTABLE_TIMEOUT_MS)
 })
 
 

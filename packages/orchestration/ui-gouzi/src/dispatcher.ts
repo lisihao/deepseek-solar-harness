@@ -5,7 +5,7 @@ import { HarnessError, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { PhysicalOperatorExecutionId, PhysicalOperatorId } from '@deepseek-ai/dsh-physical-operator'
 import type { Session } from '@deepseek-ai/dsh-session'
 import {
-  admissionGouziRecipients, GouziId, KENNEL_WORK_NODE_ID, OrchestrationRunId,
+  admissionGouziRecipients, GouziId, KENNEL_WORK_NODE_ID, kennelMemberBrief, OrchestrationRunId,
   type KennelCollaborationCandidate, type KennelCollaborationFacts, type KennelCollaborationKind, type KennelWorkOffer,
   type GouziControl, type GouziMemberView,
   type LogicalTaskGraphV1, type OrchestrationNodeSpecV1, type OrchestrationRunSnapshot,
@@ -61,7 +61,13 @@ export type KennelDispatchCandidate = KennelWorkCandidate | KennelControlCandida
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Immutable input and qualified choices retained before model invocation. */
-    'kennel/dispatch-request': { messageId: string; message: UserMessage; candidates: readonly KennelDispatchCandidate[] }
+    'kennel/dispatch-request': {
+      messageId: string
+      message: UserMessage
+      candidates: readonly KennelDispatchCandidate[]
+      /** Notes of the offered members at this moment, by member id: the text a selected member's task carries. */
+      profiles?: Readonly<Record<string, string>>
+    }
     /** Complete auxiliary model request and terminal output or failure. */
     'kennel/dispatch-model': { messageId: string; record: DispatchModelRecord }
     /** AI-selected fixed member; this record is not an execution receipt. */
@@ -111,19 +117,21 @@ export function parseDispatchSelection(text: string, candidates: readonly Kennel
  * @param text - unmodified user objective.
  * @param config - task and context limits.
  * @param title - title of the task in the room; the objective when absent.
+ * @param profile - the member's notes, when it has any; they follow the member's role at the start of the task.
  * @returns one certified task, with a completion-critical verifier for writes.
  */
 export function kennelDispatchGraph(
-  selected: KennelWorkCandidate, text: string, config: KennelDispatchConfig, title = text,
+  selected: KennelWorkCandidate, text: string, config: KennelDispatchConfig, title = text, profile?: string,
 ): LogicalTaskGraphV1 {
+  const brief = kennelMemberBrief({ name: selected.name, role: selected.role, profile })
   const read = selected.mode === 'chat' ? [] : ['**']
   const write = selected.mode === 'write' ? ['**'] : []
   const node: OrchestrationNodeSpecV1 = {
     id: KENNEL_WORK_NODE_ID, dependsOn: [], requiredForCompletion: true,
     title: title.trim().slice(0, config.titleMaxChars),
     task: selected.mode === 'chat'
-      ? `你是狗窝成员「${selected.name}」。直接回复这条聊天消息，不读取、修改文件或执行命令：\n${text}`
-      : text,
+      ? `${brief}\n直接回复这条聊天消息，不读取、修改文件或执行命令：\n${text}`
+      : `${brief}\n\n${text}`,
     role: selected.mode === 'write' ? 'implementation' : 'analysis', phase: 'execution',
     capabilityRequirements: [], capabilityBudget: [],
     contextPolicy: { maxTokens: config.contextTokens, allowedSourceKinds: ['intent', 'artifact', 'capsule'], unavailableSource: 'block' },
@@ -219,7 +227,13 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
       )
       if (fitted === undefined) throw new HarnessError('这条消息和候选资料超过调度输入上限。', 'KENNEL_INPUT_LIMIT')
       const { candidates, options } = fitted
-      agent.session.append('kennel/dispatch-request', { messageId: message.id, message, candidates }, { ignorable: true })
+      // The notes go to the member's task text, not to the scheduling model; the event keeps them so the task is reproducible.
+      const workMembers = new Set(candidates.flatMap(value => value.kind === 'work' ? [value.gouziId] : []))
+      const profiles = Object.fromEntries(facts.members.flatMap(member =>
+        member.profile !== undefined && workMembers.has(String(member.gouziId)) ? [[String(member.gouziId), member.profile]] : []))
+      agent.session.append('kennel/dispatch-request', {
+        messageId: message.id, message, candidates, ...Object.keys(profiles).length === 0 ? {} : { profiles },
+      }, { ignorable: true })
       await flushDispatch(ctx, agent)
       if (candidates.length === 0) throw new HarnessError('当前没有已确认项目和可用执行入口的狗子；请检查狗子的连接与项目。', 'GOUZI_NO_EXECUTOR')
       let modelConfig: DispatchModelConfig = config
@@ -267,11 +281,12 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
         await startCollaboration(ctx, agent, message, decoded, selected, config, signal)
         continue
       }
-      await confirmCandidate(ctx, selected)
+      await confirmCandidate(ctx, selected, profiles[selected.gouziId])
       signal.throwIfAborted()
       const runtimeContext = captureRuntimeContextSnapshot(agent.session.deriveMessages(), String(agent.id))
       const compilation = await ctx.orchestrations.compile({
-        intent: { request: decoded.text }, graph: kennelDispatchGraph(selected, decoded.text, config),
+        intent: { request: decoded.text },
+        graph: kennelDispatchGraph(selected, decoded.text, config, undefined, profiles[selected.gouziId]),
         admission: { policy: 'auto', route: 'taskgraph', sourceSessionId: String(agent.id), sourceMessageId: String(message.id),
           ...runtimeContext === undefined ? {} : { runtimeContext },
           gouziRecipient: { gouziId: GouziId(selected.gouziId), generation: selected.generation,
@@ -281,7 +296,7 @@ export function installKennelDispatch(ctx: Context, config: KennelDispatchConfig
       const commandId = `kennel:start:${String(agent.id)}:${String(message.id)}`
       agent.session.append('kennel/dispatch-submission', { messageId: message.id, compilationId: compilation.compilationId, commandId }, { ignorable: true })
       await flushDispatch(ctx, agent)
-      await confirmCandidate(ctx, selected)
+      await confirmCandidate(ctx, selected, profiles[selected.gouziId])
       signal.throwIfAborted()
       const run = await ctx.orchestrations.start({ commandId, compilationId: compilation.compilationId })
       agent.session.append('kennel/dispatch-admitted', { messageId: message.id, runId: String(run.runId) }, { ignorable: true })
@@ -359,8 +374,15 @@ async function startCollaboration(
   if (kind === undefined) throw new HarnessError(`协作「${selected.collaboration}」已不可用。`, 'KENNEL_COLLABORATION_UNAVAILABLE')
   const confirm = async (): Promise<void> => {
     const current = await kind.offer(await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient, decoded.text))
-    if (!current.some(value => value.id === selected.id)) {
+    // A candidate id names members, entries, and models but not notes, so notes are compared as for a single member's task:
+    // the notes the candidate was logged with must still be the notes each member has.
+    const same = current.find(value => value.id === selected.id)
+    if (same === undefined) {
       throw new HarnessError('参加协作的狗子、执行实例、项目或对象已变化；未改派给其他成员。', 'GOUZI_STATE_CONFLICT')
+    }
+    const edited = selected.members.filter((member, index) => member.profile !== same.members[index]?.profile).map(member => member.name)
+    if (edited.length > 0) {
+      throw new HarnessError(`${edited.join('、')}的备忘在你发出消息之后被修改；没有按旧备忘开始协作，请重新发送。`, 'GOUZI_STATE_CONFLICT')
     }
   }
   await confirm()
@@ -377,7 +399,7 @@ async function startCollaboration(
       contextTokens: config.contextTokens, taskTimeoutMs: config.taskTimeoutMs, titleMaxChars: config.titleMaxChars,
       generationLimits: config.taskGenerationLimits, workspaceToolLimits: config.workspaceToolLimits,
     },
-    workGraph: input => kennelDispatchGraph({ kind: 'work', ...input.offer }, input.text, config, input.title),
+    workGraph: input => kennelDispatchGraph({ kind: 'work', ...input.offer }, input.text, config, input.title, input.profile),
     ...runtimeContext === undefined ? {} : { runtimeContext },
   })
   agent.session.append('kennel/dispatch-collaboration-admitted', {
@@ -386,13 +408,13 @@ async function startCollaboration(
   await flushDispatch(ctx, agent)
 }
 
-async function confirmCandidate(ctx: Context, selected: KennelWorkCandidate): Promise<void> {
+async function confirmCandidate(ctx: Context, selected: KennelWorkCandidate, profile: string | undefined): Promise<void> {
   const control = ctx.orchestrations.gouzi
   if (!control) throw new HarnessError('狗子编排服务已不可用。', 'GOUZI_UNAVAILABLE')
   const member = (await control.list()).members.find(value => String(value.gouziId) === selected.gouziId)
   const entry = (await control.executionOperators()).find(value => String(value.gouziId) === selected.gouziId
     && value.generation === selected.generation)
-  if (member?.membership !== 'enabled' || member.generation !== selected.generation || member.model !== selected.model || !entry
+  if (member?.membership !== 'enabled' || member.generation !== selected.generation || member.model !== selected.model || member.profile !== profile || !entry
     || !entry.projectScopes.includes(selected.workspace)
     || selected.operatorIds.some(id => !entry.operators.some(operator => operator.operatorId === id
       && operator.available && operator.supportsGenerationLimits === true

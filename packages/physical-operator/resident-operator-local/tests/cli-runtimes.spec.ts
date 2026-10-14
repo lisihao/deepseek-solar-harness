@@ -177,17 +177,30 @@ describe('managed runtime directories', () => {
   })
 })
 
-describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('CliRuntimeManager', () => {
-  it('reports system versions against the registry and switches Claude Code to a qualified managed copy', async () => {
+/**
+ * Wall-clock bound for a test that runs freshly written executables. Observed on macOS 26 with 10 CPUs at a load
+ * average of 4-7: the first run of a new script took 0.3-2.5 s and a later run of the same file 5-19 ms. Six
+ * concurrent copies of this spec failed in 18 of 18 copies before the long tests were split, in 12 of 18 after the
+ * split, and in 0 of 12 with this bound, where the slowest test took 12.9 s. The cause of the slow first run is not
+ * established; the files carry `com.apple.provenance`, which is only an observed correlate. The bound is an observed
+ * margin, not a proof: heavier contention can still exceed it.
+ */
+const FRESH_EXECUTABLE_TIMEOUT_MS = 15_000
+
+describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('CliRuntimeManager', { timeout: FRESH_EXECUTABLE_TIMEOUT_MS }, () => {
+  it('reports system versions against the registry', async () => {
     publishClaude('2.1.300')
     publishCodex('0.160.0')
-    mkdirSync(join(root, 'runtimes', 'claude-code', '2.1.250'), { recursive: true })
-    const runtimes = manager()
-    await expect(runtimes.statuses()).resolves.toEqual([
+    await expect(manager().statuses()).resolves.toEqual([
       { product: 'claude-code', currentVersion: '2.1.239', latestVersion: '2.1.300', updateAvailable: true, managed: false },
       { product: 'codex', currentVersion: '0.149.1', latestVersion: '0.160.0', updateAvailable: true, managed: false },
     ])
+  })
 
+  it('switches Claude Code to a qualified managed copy and prunes older copies', async () => {
+    publishClaude('2.1.300')
+    mkdirSync(join(root, 'runtimes', 'claude-code', '2.1.250'), { recursive: true })
+    const runtimes = manager()
     const first = runtimes.update('claude-code')
     expect(runtimes.update('claude-code')).toBe(first)
     await expect(first).resolves.toEqual({ product: 'claude-code', version: '2.1.300', status: 'activated' })
@@ -249,15 +262,23 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('C
     expect(readFileSync(process.env.FAKE_CODEX_STATE ?? '', 'utf8').trim()).toBe('0.161.0')
   })
 
-  it('reports a package that did not move and an app-server the daemon does not manage', async () => {
+  it('reports a daemon package that did not move to the requested version', async () => {
     publishCodex('0.162.0')
     await expect(manager().update('codex')).rejects.toThrow('daemon package is 0.149.1 after updating to 0.162.0')
+  })
 
+  it('reports an app-server the daemon does not manage as one to stop by hand', async () => {
+    publishCodex('0.162.0')
     process.env.FAKE_CODEX_STANDALONE_TO = '0.162.0'
     process.env.FAKE_CODEX_RESTART_ERROR = 'app server is running but is not managed by codex app-server daemon'
     await expect(manager().update('codex')).rejects.toThrow(
       'Codex 0.162.0 is installed, but the running app-server 0.149.1 was not started by `codex app-server daemon`',
     )
+  })
+
+  it('reports another app-server restart failure with its cause', async () => {
+    publishCodex('0.162.0')
+    process.env.FAKE_CODEX_STANDALONE_TO = '0.162.0'
     process.env.FAKE_CODEX_RESTART_ERROR = 'socket busy'
     await expect(manager().update('codex')).rejects.toThrow(/Codex app-server restart failed: .*socket busy/su)
   })

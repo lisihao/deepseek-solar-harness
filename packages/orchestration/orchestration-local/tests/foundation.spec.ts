@@ -1,3 +1,4 @@
+import { existsSync, writeFileSync } from 'node:fs'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -14,7 +15,7 @@ import { canonicalSha256 } from '../src/canonical.ts'
 import { graphCertificate, nodesConflict, validateGraph } from '../src/graph.ts'
 import { GitWorktreeManager } from '../src/git-worktrees.ts'
 import { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from '../src/providers.ts'
-import { OrchestrationStore } from '../src/store.ts'
+import { OrchestrationStore, verifyBackupCopy } from '../src/store.ts'
 
 const roots: string[] = []
 const run = promisify(execFile)
@@ -207,7 +208,7 @@ describe('immutable compilation foundations', () => {
     database.close()
 
     const store = new OrchestrationStore(root)
-    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(7)
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'command_receipts'").get())
       .toBeDefined()
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'autonomous_states'").get())
@@ -226,7 +227,7 @@ describe('immutable compilation foundations', () => {
     database.close()
 
     const store = new OrchestrationStore(root)
-    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(7)
     expect(store.gouzi.list()).toEqual([])
     store.close()
   })
@@ -241,24 +242,163 @@ describe('immutable compilation foundations', () => {
       gouziId: GouziId('gouzi-1'), ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
       name: 'Dog', avatarId: 'shiba', role: 'research', grantDeadlineMs: 3_600_000,
     })
-    created.db.exec('ALTER TABLE gouzi_members DROP COLUMN model; PRAGMA user_version = 5;')
+    created.db.exec('ALTER TABLE gouzi_members DROP COLUMN profile; ALTER TABLE gouzi_members DROP COLUMN model; PRAGMA user_version = 5;')
     created.close()
 
     const store = new OrchestrationStore(root)
-    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(7)
     const migrated = store.gouzi.read(GouziId('gouzi-1'))
     expect(migrated).toMatchObject({ name: 'Dog' })
     expect(migrated).not.toHaveProperty('model')
+    expect(migrated).not.toHaveProperty('profile')
     expect(store.gouzi.edit(GouziId('gouzi-1'), { model: 'gpt-5.5' }).model).toBe('gpt-5.5')
     store.close()
+  })
+
+  it('adds the member profile column to a schema-6 store, keeps one copy of the old file, and never overwrites it', async () => {
+    const root = await temporary()
+    const created = new OrchestrationStore(root)
+    created.gouzi.pairHost({
+      hostId: GouziHostId('host-1'), label: 'Mac', authorityEpoch: GouziAuthorityEpoch('e1'), credentialRef: 'ref',
+    })
+    created.gouzi.create({
+      gouziId: GouziId('gouzi-1'), ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
+      name: 'Dog', avatarId: 'shiba', role: 'research', model: 'gpt-5.5', grantDeadlineMs: 3_600_000,
+    })
+    created.db.exec('ALTER TABLE gouzi_members DROP COLUMN profile; PRAGMA user_version = 6;')
+    created.close()
+
+    const store = new OrchestrationStore(root)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(7)
+    const migrated = store.gouzi.read(GouziId('gouzi-1'))
+    expect(migrated).toMatchObject({ name: 'Dog', model: 'gpt-5.5' })
+    expect(migrated).not.toHaveProperty('profile')
+    expect(store.gouzi.edit(GouziId('gouzi-1'), { profile: '  爱用中文回复  ' }).profile).toBe('爱用中文回复')
+    expect(store.gouzi.edit(GouziId('gouzi-1'), { profile: null })).not.toHaveProperty('profile')
+    store.close()
+
+    const backup = new DatabaseSync(join(root, 'state.sqlite.before-schema-7'), { readOnly: true })
+    expect(Number(backup.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    expect((backup.prepare('PRAGMA table_info(gouzi_members)').all() as { name: string }[]).map(column => column.name)).not.toContain('profile')
+    expect(backup.prepare('SELECT name FROM gouzi_members').get()).toEqual({ name: 'Dog' })
+    backup.close()
+
+    // A later start from an older schema leaves the first copy alone.
+    const again = new OrchestrationStore(root)
+    again.db.exec('ALTER TABLE gouzi_members DROP COLUMN profile; PRAGMA user_version = 6;')
+    again.close()
+    const reopened = new OrchestrationStore(root)
+    reopened.close()
+    const kept = new DatabaseSync(join(root, 'state.sqlite.before-schema-7'), { readOnly: true })
+    expect(Number(kept.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    kept.close()
+  })
+
+  it('backs up a schema-6 store from one consistent snapshot while another connection holds an older read and has committed since', async () => {
+    const root = await temporary()
+    const created = new OrchestrationStore(root)
+    created.gouzi.pairHost({
+      hostId: GouziHostId('host-1'), label: 'Mac', authorityEpoch: GouziAuthorityEpoch('e1'), credentialRef: 'ref',
+    })
+    created.gouzi.create({
+      gouziId: GouziId('gouzi-1'), ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
+      name: 'Dog', avatarId: 'shiba', role: 'research', model: 'gpt-5.5', grantDeadlineMs: 3_600_000,
+    })
+    created.db.exec('ALTER TABLE gouzi_members DROP COLUMN profile; PRAGMA user_version = 6;')
+    created.close()
+
+    // A reader pinned to the state before a later commit keeps the WAL from being checkpointed past that commit.
+    const path = join(root, 'state.sqlite')
+    const reader = new DatabaseSync(path)
+    reader.exec('BEGIN')
+    expect(reader.prepare('SELECT name FROM gouzi_members').get()).toEqual({ name: 'Dog' })
+    const writer = new DatabaseSync(path)
+    writer.exec("UPDATE gouzi_members SET name = 'Renamed'")
+    writer.close()
+
+    const store = new OrchestrationStore(root)
+    store.close()
+    reader.exec('ROLLBACK')
+    reader.close()
+
+    const backup = new DatabaseSync(join(root, 'state.sqlite.before-schema-7'), { readOnly: true })
+    expect(Number(backup.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    // Everything committed before the migration started is in the copy, and the copy is a whole database.
+    expect(backup.prepare('SELECT name FROM gouzi_members').get()).toEqual({ name: 'Renamed' })
+    expect(backup.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' })
+    backup.close()
+    expect(existsSync(join(root, 'state.sqlite.before-schema-7.partial'))).toBe(false)
+  })
+
+  it('discards the leftover of an interrupted backup instead of reusing it', async () => {
+    const root = await temporary()
+    const created = new OrchestrationStore(root)
+    created.gouzi.pairHost({
+      hostId: GouziHostId('host-1'), label: 'Mac', authorityEpoch: GouziAuthorityEpoch('e1'), credentialRef: 'ref',
+    })
+    created.gouzi.create({
+      gouziId: GouziId('gouzi-1'), ownerId: GouziOwnerId('owner-1'), hostId: GouziHostId('host-1'),
+      name: 'Dog', avatarId: 'shiba', role: 'research', grantDeadlineMs: 3_600_000,
+    })
+    created.db.exec('ALTER TABLE gouzi_members DROP COLUMN profile; PRAGMA user_version = 6;')
+    created.close()
+    writeFileSync(join(root, 'state.sqlite.before-schema-7.partial'), 'not a database')
+
+    new OrchestrationStore(root).close()
+    expect(existsSync(join(root, 'state.sqlite.before-schema-7.partial'))).toBe(false)
+    const backup = new DatabaseSync(join(root, 'state.sqlite.before-schema-7'), { readOnly: true })
+    expect(backup.prepare('SELECT name FROM gouzi_members').get()).toEqual({ name: 'Dog' })
+    expect(backup.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' })
+    backup.close()
+  })
+
+  it('stops before migrating when the backup cannot be made, and migrates once it can', async () => {
+    const root = await temporary()
+    const created = new OrchestrationStore(root)
+    created.db.exec('ALTER TABLE gouzi_members DROP COLUMN profile; PRAGMA user_version = 6;')
+    created.close()
+    // A non-empty directory in the way of the staging file makes the first removal fail.
+    const blocker = join(root, 'state.sqlite.before-schema-7.partial')
+    await mkdir(join(blocker, 'inner'), { recursive: true })
+    await writeFile(join(blocker, 'inner', 'file'), 'x')
+
+    expect(() => new OrchestrationStore(root)).toThrow(expect.objectContaining({ code: 'ORCHESTRATION_UNAVAILABLE' }))
+    expect(existsSync(join(root, 'state.sqlite.before-schema-7'))).toBe(false)
+    const unmigrated = new DatabaseSync(join(root, 'state.sqlite'), { readOnly: true })
+    expect(Number(unmigrated.prepare('PRAGMA user_version').get()?.user_version)).toBe(6)
+    unmigrated.close()
+
+    const retried = new OrchestrationStore(root)
+    expect(Number(retried.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(7)
+    retried.close()
+    expect(existsSync(join(root, 'state.sqlite.before-schema-7'))).toBe(true)
+  })
+
+  it('rejects a backup copy that is not a database or has another schema version', async () => {
+    const root = await temporary()
+    const good = join(root, 'good.sqlite')
+    const database = new DatabaseSync(good)
+    database.exec('CREATE TABLE t (a); PRAGMA user_version = 6;')
+    database.close()
+    expect(() => { verifyBackupCopy(good, 6) }).not.toThrow()
+    expect(() => { verifyBackupCopy(good, 5) }).toThrow('schema 6')
+    const garbage = join(root, 'garbage.sqlite')
+    writeFileSync(garbage, 'x'.repeat(4096))
+    expect(() => { verifyBackupCopy(garbage, 6) }).toThrow()
+  })
+
+  it('makes no backup for a new store', async () => {
+    const root = await temporary()
+    new OrchestrationStore(root).close()
+    expect(existsSync(join(root, 'state.sqlite.before-schema-7'))).toBe(false)
   })
 
   it('refuses a store from a newer schema instead of opening it', async () => {
     const root = await temporary()
     const database = new DatabaseSync(join(root, 'state.sqlite'))
-    database.exec('PRAGMA user_version = 7;')
+    database.exec('PRAGMA user_version = 8;')
     database.close()
-    expect(() => new OrchestrationStore(root)).toThrow('schema 7 is newer than supported 6')
+    expect(() => new OrchestrationStore(root)).toThrow('schema 8 is newer than supported 7')
   })
 
   it('requires explicit execute authority for Autonomous shell gates', async () => {

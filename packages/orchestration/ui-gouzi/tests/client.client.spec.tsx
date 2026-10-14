@@ -137,7 +137,10 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
 
     fireEvent.click(screen.getByRole('radio', { name: /测试/ }))
-    expect(screen.queryByRole('textbox')).toBeNull()
+    // The notes are optional and come with the role; the project step has no text input.
+    const notes = screen.getByRole('textbox', { name: /个性与备忘/ })
+    expect(notes).toHaveProperty('value', '')
+    fireEvent.change(notes, { target: { value: '  先写测试  ' } })
     await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
     expect(screen.getByRole('checkbox', { name: /beta/ })).toHaveProperty('checked', false)
     fireEvent.click(screen.getByRole('checkbox', { name: /beta/ }))
@@ -146,11 +149,12 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
 
     expect(screen.getByText('领养后 1 / 10')).toBeTruthy()
+    expect(screen.getByText('4 字')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
     await waitFor(() => { expect(harness.posts.filter(post => post.body.action === 'adopt')).toHaveLength(1) })
     expect(harness.posts.find(post => post.body.action === 'adopt')).toEqual({
       header: '1',
-      body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', hostId: 'local', projects: ['/work/beta', '/work/alpha'] },
+      body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', hostId: 'local', projects: ['/work/beta', '/work/alpha'], profile: '先写测试' },
     })
     // The model is offered once the dog exists; skipping leaves it on automatic selection and sends no edit.
     fireEvent.click(await screen.findByRole('button', { name: '以后再说' }))
@@ -448,7 +452,21 @@ describe('Gouzi sidebar entry and roster', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => { expect(harness.posts).toHaveLength(2) })
     expect(harness.posts[0]!.body).toEqual({ action: 'models', gouziId: 'g1' })
-    expect(harness.posts[1]!.body).toEqual({ action: 'edit', gouziId: 'g1', name: 'Pixel', avatarId: 'bichon', role: 'research', model: null })
+    expect(harness.posts[1]!.body).toEqual({ action: 'edit', gouziId: 'g1', name: 'Pixel', avatarId: 'bichon', role: 'research', model: null, profile: null })
+  })
+
+  it('shows the notes a member keeps, saves the edited text trimmed, and clears them when the box is emptied', async () => {
+    const harness = fakeRequest({ roster: dashboard([member({ profile: '回答先给结论' })]) })
+    render(<GouziManager request={harness.request} folders={fakeFolders().folders} />)
+    fireEvent.click(await screen.findByRole('button', { name: '修改' }))
+    const notes = screen.getByRole('textbox', { name: /个性与备忘/ })
+    expect(notes).toHaveProperty('value', '回答先给结论')
+    expect(notes).toHaveProperty('maxLength', 2000)
+    expect(screen.getByText(/6\/2000/)).toBeTruthy()
+    fireEvent.change(notes, { target: { value: '  先写测试再改代码  ' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(harness.posts.some(post => post.body.action === 'edit')).toBe(true) })
+    expect(harness.posts.find(post => post.body.action === 'edit')!.body).toMatchObject({ action: 'edit', gouziId: 'g1', profile: '先写测试再改代码' })
   })
 
   it('pins a model chosen from the ones the member\'s runtimes offer, and returns to Smart Auto on request', async () => {

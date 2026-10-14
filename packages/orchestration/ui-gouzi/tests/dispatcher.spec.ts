@@ -10,6 +10,7 @@ import {
 import { expect, it, vi } from 'vitest'
 import { KennelCollaborationRegistry } from '../src/collaboration.ts'
 import { Config } from '../src/index.ts'
+import { kennelMemberBrief } from '@deepseek-ai/dsh-orchestration'
 import { installKennelDispatch, kennelDispatchGraph, parseDispatchSelection, type KennelWorkCandidate, type KennelDispatchConfig } from '../src/dispatcher.ts'
 import { encodeKennelMessage } from '../src/recipient-message.ts'
 const config: KennelDispatchConfig = { ...Config({}).dispatcher!, deepseek: { ...Config({}).dispatcher!.deepseek, model: 'fixture' }, timeoutMs: 1000 }
@@ -158,6 +159,45 @@ it('does not start a task whose member model changed after selection', async () 
   await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
   expect(f.start).not.toHaveBeenCalled()
 })
+it('tells a member who it is, what its role asks, and its notes, in every kind of task', () => {
+  const dog = { ...candidate, name: 'Dog', role: 'research' }
+  const notes = '回答先给结论，再给依据'
+  const chat = kennelDispatchGraph({ ...dog, mode: 'chat' }, 'hello', config, undefined, notes).nodes[0]!.task
+  expect(chat).toBe(`你是狗窝成员「Dog」。\n你的角色目标：查资料、读代码、写调研结论。\n用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：\n${notes}\n直接回复这条聊天消息，不读取、修改文件或执行命令：\nhello`)
+  for (const mode of ['read', 'write'] as const) {
+    const work = kennelDispatchGraph({ ...dog, mode }, 'change it', config, undefined, notes).nodes[0]!.task
+    expect(work.startsWith('你是狗窝成员「Dog」。')).toBe(true)
+    expect(work).toContain(notes)
+    expect(work.endsWith('\n\nchange it')).toBe(true)
+  }
+  // Without notes the task still opens with the member and its role; a custom role states no goal.
+  expect(kennelDispatchGraph({ ...dog, mode: 'chat' }, 'hello', config).nodes[0]!.task).toBe('你是狗窝成员「Dog」。\n你的角色目标：查资料、读代码、写调研结论。\n直接回复这条聊天消息，不读取、修改文件或执行命令：\nhello')
+  expect(kennelMemberBrief({ name: 'Dog', role: 'custom' })).toBe('你是狗窝成员「Dog」。')
+  expect(kennelMemberBrief({ name: 'Dog', role: 'unknown' })).toBe('你是狗窝成员「Dog」。')
+})
+it('puts a member\'s notes in its task and in the logged request, but not in what the scheduling model sees', async () => {
+  const f = await fixture()
+  Object.assign(f.member, { profile: '回答先给结论，再给依据' })
+  await f.run()
+  const request = f.agent.session.events.find(event => event.type === 'kennel/dispatch-request')
+  expect(request?.type === 'kennel/dispatch-request' && request.data.profiles).toEqual({ dog: '回答先给结论，再给依据' })
+  expect(JSON.stringify(f.generate.mock.calls[0]![0])).not.toContain('回答先给结论')
+  const graph = (f.compile.mock.calls[0]![0] as { graph: { nodes: { task: string }[] } }).graph
+  expect(graph.nodes[0]!.task).toContain('回答先给结论，再给依据')
+})
+it('logs no notes for a member that has none', async () => {
+  const f = await fixture()
+  await f.run()
+  const request = f.agent.session.events.find(event => event.type === 'kennel/dispatch-request')
+  expect(request?.type === 'kennel/dispatch-request' && 'profiles' in request.data).toBe(false)
+})
+it('does not start a task whose member notes changed after selection', async () => {
+  const f = await fixture()
+  Object.assign(f.member, { profile: '旧备忘' })
+  f.compile.mockImplementation(async () => { Object.assign(f.member, { profile: '新备忘' }); return { compilationId: 'compiled' } })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  expect(f.start).not.toHaveBeenCalled()
+})
 it('rechecks project and execution availability after compile before start', async () => {
   const f = await fixture()
   f.compile.mockImplementation(async () => { f.entry.projectScopes = []; return { compilationId: 'compiled' } })
@@ -251,6 +291,7 @@ function pairKind(extra: Partial<KennelCollaborationKind> = {}) {
     const members = facts.members.filter(value => value.membership === 'enabled').slice(0, 2).map(value => ({
       gouziId: String(value.gouziId), generation: value.generation, name: value.name, role: value.role,
       operatorId: `gouzi.${String(value.gouziId)}.codex`, model: 'm',
+      ...value.profile === undefined ? {} : { profile: value.profile },
     }))
     return members.length < 2 ? [] : [{ kind: 'collaboration', collaboration: 'pair', workspace: '/project', details: { note: 'x' },
       id: JSON.stringify(['pair', ...members.map(value => [value.gouziId, value.generation])]), members }]
@@ -300,6 +341,25 @@ it('offers a kind\'s candidates and its guidance only while the kind offers some
   await expect(silent.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
 })
 /** Candidates that each carry a long earlier review comment, oldest first, as unanswered reviews accumulate. */
+it('keeps the members\' notes out of what the scheduling model sees of a collaboration', async () => {
+  const withNotes = (facts: KennelCollaborationFacts): KennelCollaborationCandidate[] => [{
+    kind: 'collaboration', collaboration: 'pair', workspace: '/project', details: {}, id: 'pair-notes',
+    members: facts.members.slice(0, 2).map(value => ({
+      gouziId: String(value.gouziId), generation: value.generation, name: value.name, role: value.role,
+      operatorId: `gouzi.${String(value.gouziId)}.codex`, model: 'm', profile: 'SECRET-NOTES',
+    })),
+  }]
+  const f = await collaborationFixture({ offer: withNotes })
+  let seen = ''
+  f.generate.mockImplementation((options) => {
+    const block = options.messages[0]!.content[0]!
+    seen = block.type === 'text' ? block.text : ''
+    return '{"candidateId":"clarify"}'
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'KENNEL_CLARIFICATION_REQUIRED' })
+  expect(seen).toContain('pair-notes')
+  expect(seen).not.toContain('SECRET-NOTES')
+})
 function commented(count: number, comment: string): Partial<KennelCollaborationKind> {
   const members = [{ gouziId: 'dog', generation: 2, name: 'Dog', role: 'research', operatorId: 'gouzi.dog.codex', model: 'm' }]
   return {
@@ -420,7 +480,8 @@ it('gives kinds the work offers, the work and collaborations already admitted wi
   const titled = request!.workGraph({ offer: given, text: 'redo it', title: '返工：old task' })
   expect(titled).toEqual(kennelDispatchGraph({ kind: 'work', ...given }, 'redo it', config, '返工：old task'))
   expect(titled.title).toBe('返工：old task')
-  expect(titled.nodes[0]).toMatchObject({ title: '返工：old task', task: 'redo it' })
+  expect(titled.nodes[0]!.task).toBe(`${kennelMemberBrief(given)}\n\nredo it`)
+  expect(request!.workGraph({ offer: given, text: 'redo it', profile: '先写测试' }).nodes[0]!.task).toContain('先写测试')
 })
 it('starts the selected collaboration through its kind after durably recording the candidate, without compiling a task', async () => {
   const f = await collaborationFixture()
@@ -451,13 +512,54 @@ it('starts the selected collaboration through its kind after durably recording t
 it('does not start a collaboration whose candidate is no longer offered or whose kind was removed', async () => {
   const f = await collaborationFixture()
   f.generate.mockImplementation(() => { f.members[1]!.generation = 9; return JSON.stringify({ candidateId: f.pairId }) })
-  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  // A changed member is not an edit of its notes, so the refusal keeps the general wording.
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT', message: '参加协作的狗子、执行实例、项目或对象已变化；未改派给其他成员。' })
   expect(f.startMock).not.toHaveBeenCalled()
 
   const removed = await collaborationFixture()
   removed.generate.mockImplementation(() => { removed.dispose(); return JSON.stringify({ candidateId: removed.pairId }) })
   await expect(removed.run()).rejects.toMatchObject({ code: 'KENNEL_COLLABORATION_UNAVAILABLE' })
   expect(removed.startMock).not.toHaveBeenCalled()
+})
+it('starts a collaboration whose members\' notes are unchanged, with the notes it was logged with', async () => {
+  const f = await collaborationFixture()
+  Object.assign(f.members[0]!, { profile: '先写测试' })
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
+  await f.run()
+  expect(f.startMock).toHaveBeenCalledOnce()
+  expect(f.starts[0]?.candidate.members.map(value => [value.gouziId, value.profile])).toEqual([['dog', '先写测试'], ['cat', undefined]])
+  expect(f.agent.session.events.find(event => event.type === 'kennel/dispatch-collaboration')).toMatchObject({
+    data: { candidate: { members: [{ gouziId: 'dog', profile: '先写测试' }, { gouziId: 'cat' }] } } })
+})
+it.each([
+  ['changed', { dog: '旧备忘' }, { dog: '新备忘' }, 'Dog'],
+  ['cleared', { dog: '旧备忘' }, { dog: undefined }, 'Dog'],
+  ['added to a member that had none', {}, { cat: '新备忘' }, 'cat'],
+])('does not start a collaboration when a member\'s notes were %s after selection, and names the member', async (_name, before, after, who) => {
+  const f = await collaborationFixture()
+  for (const [id, notes] of Object.entries(before)) Object.assign(f.members[id === 'dog' ? 0 : 1]!, { profile: notes })
+  f.generate.mockImplementation(() => {
+    for (const [id, notes] of Object.entries(after)) Object.assign(f.members[id === 'dog' ? 0 : 1]!, { profile: notes })
+    return JSON.stringify({ candidateId: f.pairId })
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT', message: `${who}的备忘在你发出消息之后被修改；没有按旧备忘开始协作，请重新发送。` })
+  expect(f.startMock).not.toHaveBeenCalled()
+  expect(f.agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration')).toBe(false)
+})
+it('does not start a collaboration whose member notes changed after the candidate was logged, just before the start', async () => {
+  const f = await collaborationFixture()
+  Object.assign(f.members[0]!, { profile: '旧备忘' })
+  let offers = 0
+  f.offer.mockImplementation((facts: KennelCollaborationFacts) => {
+    offers += 1
+    // The third offer is the check made after the candidate was durably recorded.
+    if (offers === 3) Object.assign(f.members[0]!, { profile: '新备忘' })
+    return pairKind().offer(facts)
+  })
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT', message: 'Dog的备忘在你发出消息之后被修改；没有按旧备忘开始协作，请重新发送。' })
+  expect(f.agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration')).toBe(true)
+  expect(f.startMock).not.toHaveBeenCalled()
 })
 it('registers kinds once, refuses names the dispatcher owns, and removes a kind with its disposer', async () => {
   const f = await fixture()

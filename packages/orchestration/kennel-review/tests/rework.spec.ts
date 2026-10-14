@@ -68,6 +68,18 @@ describe('rework offers', () => {
     expect(offered[0]?.id).toBe(JSON.stringify(['rework', 'review-1', author.id, author.operatorIds, 'gpt-5.6-sol']))
   })
 
+  it('carries the author\'s current notes in the logged candidate, and leaves the member without them when it has none', () => {
+    const member = { gouziId: 'author', profile: '做事保守，先写测试' } as never
+    const [withNotes] = offer(facts({ members: [member] }))
+    expect(withNotes?.members[0]).toMatchObject({ gouziId: 'author', profile: '做事保守，先写测试' })
+    const [without] = offer(facts({ members: [{ gouziId: 'author' } as never] }))
+    expect(without?.members[0]).not.toHaveProperty('profile')
+    // The id cannot tell changed or cleared notes apart, so the dispatcher compares the notes itself before it starts a rework.
+    const [changed] = offer(facts({ members: [{ gouziId: 'author', profile: '另一份备忘' } as never] }))
+    expect(changed?.id).toBe(withNotes?.id)
+    expect(without?.id).toBe(withNotes?.id)
+  })
+
   it('marks an unpinned member as automatic', () => {
     const { model: _model, ...unpinned } = author
     const [candidate] = offer(facts({ workOffers: [unpinned], work: [{ runId: 'task-1', offer: unpinned }] }))
@@ -159,6 +171,14 @@ function chosen(workGraph: KennelCollaborationRequest['workGraph'], patch: Parti
 }
 
 describe('rework start', () => {
+  it('hands the author\'s logged notes to the Host\'s graph', async () => {
+    const { ctx, workGraph } = service()
+    const base = chosen(workGraph)
+    const candidate = { ...base.candidate, members: [{ ...base.candidate.members[0]!, profile: '做事保守，先写测试' }] }
+    await kennelReworkKind(ctx, resolveConfig({})).start({ ...base, candidate })
+    expect(workGraph.mock.calls[0]![0]).toMatchObject({ profile: '做事保守，先写测试' })
+  })
+
   it('has the author take the task again through the Host\'s own graph, admitted to that one member', async () => {
     const { ctx, compile, start, workGraph } = service()
     const runtimeContext = { version: 1 as const, sourceSessionId: 's', contextSnapshotMessageId: 'ctx', sections: [] }
@@ -172,7 +192,9 @@ describe('rework start', () => {
     const again = chosen(workGraph)
     await kennelReworkKind(ctx, resolveConfig({})).start({ ...again, candidate: { ...again.candidate, details: { ...again.candidate.details, target: { runId: 't', title: '返工：返工：Write the parser' } } } })
     expect(workGraph.mock.calls[1]![0].title).toBe('返工：Write the parser')
-    expect(text).toContain('「Author」')
+    // The Host's graph adds who the member is and its notes; the rework text only says what to redo.
+    expect(text).not.toContain('你是狗窝成员')
+    expect(workGraph.mock.calls[0]![0]).not.toHaveProperty('profile')
     expect(text).toContain('任务：Write the parser'.replace('任务：', ''))
     expect(text).toContain('- X：\n没处理空输入')
     expect(text).not.toContain('好')

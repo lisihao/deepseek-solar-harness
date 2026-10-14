@@ -36,6 +36,9 @@ export const GOUZI_ROLE_COPY: Readonly<Record<GouziRoleId, { readonly label: str
   custom: { label: '自定义', goal: '由你在任务里说明它要做什么' },
 }
 
+/** Most characters of the notes written for one member; a Host test pins it to the orchestration limit. */
+export const GOUZI_PROFILE_MAX_LENGTH = 2000
+
 /** Display name of every avatar. */
 export const GOUZI_AVATAR_NAMES: Readonly<Record<GouziAvatar, string>> = {
   shiba: '柴犬',
@@ -96,6 +99,8 @@ export interface GouziMemberProjection {
   readonly role: GouziRoleId
   /** Native model the member is pinned to; absent means Smart Auto chooses. */
   readonly model?: string
+  /** Notes the user wrote for the member: personality, preferences, standing instructions; absent when none. */
+  readonly profile?: string
   /** Machine the member lives on. */
   readonly hostId: string
   readonly hostLabel: string
@@ -182,6 +187,8 @@ export type GouziControlRequest =
     readonly name: string
     readonly avatarId: GouziAvatar
     readonly role: GouziRoleId
+    /** Notes for the member, at most {@link GOUZI_PROFILE_MAX_LENGTH} characters; absent or blank means none. */
+    readonly profile?: string
     /** Machine the member lives on; absent means {@link GOUZI_LOCAL_HOST_ID}. */
     readonly hostId?: string
     /** Absolute paths, on that machine, of the Git workspaces the member may work on. */
@@ -213,6 +220,8 @@ export type GouziControlRequest =
     readonly role?: GouziRoleId
     /** A native model id to pin, or `null` to return to Smart Auto. */
     readonly model?: string | null
+    /** The member's notes; `null` or blank clears them. */
+    readonly profile?: string | null
   }
   | { readonly action: 'models'; readonly gouziId: string }
   | { readonly action: 'wake'; readonly gouziId: string }

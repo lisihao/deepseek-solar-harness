@@ -56,6 +56,21 @@ const offer = (value: KennelCollaborationFacts, config = defaults) =>
   kennelReviewKind(new Context(), config).offer(value) as Promise<KennelCollaborationCandidate[]> | KennelCollaborationCandidate[]
 
 describe('review kind offers', () => {
+  it('carries each reviewer\'s current notes in the offered candidate, whose id does not change with them', async () => {
+    const base = facts(['author', 'x', 'y'])
+    const noted = (profile: string | undefined) => base.members.map(value =>
+      String(value.gouziId) === 'x' && profile !== undefined ? { ...value, profile } : value)
+    const [before] = await offer({ ...base, members: noted('评审时先看边界条件') })
+    const [after] = await offer({ ...base, members: noted('评审时先看性能') })
+    const [none] = await offer({ ...base, members: noted(undefined) })
+    expect(before?.members[0]).toMatchObject({ gouziId: 'x', profile: '评审时先看边界条件' })
+    expect(after?.members[0]).toMatchObject({ gouziId: 'x', profile: '评审时先看性能' })
+    expect(none?.members[0]).not.toHaveProperty('profile')
+    // The id cannot tell these apart, so the dispatcher compares the notes itself before it starts a review.
+    expect(after?.id).toBe(before?.id)
+    expect(none?.id).toBe(before?.id)
+  })
+
   it('names a finished task, its authors, and up to two members who did not do it, in registry order', async () => {
     const offered = await offer(facts(['author', 'x', 'y', 'z']))
     expect(offered).toHaveLength(1)
@@ -204,6 +219,18 @@ describe('review kind start', () => {
     })
     expect(admission.gouziRecipient).toBeUndefined()
     expect(start).toHaveBeenCalledWith({ commandId: 'kennel:review:s:m', compilationId: 'compiled' })
+  })
+
+  it('tells each reviewer what its role asks and only its own notes', async () => {
+    const { ctx, compile } = service([[accepted('the parser is in src/parse.ts')], []])
+    const request = chosen(['x', 'y'])
+    const members = request.candidate.members.map(member => member.gouziId === 'x' ? { ...member, profile: '评审时先看边界条件' } : member)
+    await kennelReviewKind(ctx, defaults).start({ ...request, candidate: { ...request.candidate, members } })
+    const { graph } = compile.mock.calls[0]![0] as { graph: { nodes: { task: string }[] } }
+    expect(graph.nodes[0]!.task).toContain('你的角色目标：查资料、读代码、写调研结论。')
+    expect(graph.nodes[0]!.task).toContain('评审时先看边界条件')
+    expect(graph.nodes[1]!.task).toContain('你的角色目标：查资料、读代码、写调研结论。')
+    expect(graph.nodes[1]!.task).not.toContain('评审时先看边界条件')
   })
 
   it('binds one reviewer as the single recipient and omits an absent runtime context', async () => {

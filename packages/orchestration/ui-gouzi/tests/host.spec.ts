@@ -4,12 +4,13 @@ import { PassThrough } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  GOUZI_AVATAR_IDS, GOUZI_MEMBER_LIMIT, GOUZI_ROLES, GouziId, OrchestrationError,
+  GOUZI_AVATAR_IDS, GOUZI_MEMBER_LIMIT, GOUZI_PROFILE_LIMIT, GOUZI_ROLE_GOALS, GOUZI_ROLES, GouziId, OrchestrationError,
   type GouziControl, type GouziHostRecord, type GouziMemberView, type GouziMembership,
 } from '@deepseek-ai/dsh-orchestration'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
-  apply, Config, GOUZI_AVATARS, GOUZI_CONTROL_HEADER, GOUZI_DASHBOARD_PATH, GOUZI_ROLE_IDS, gouziPrimaryState,
+  apply, Config, GOUZI_AVATARS, GOUZI_CONTROL_HEADER, GOUZI_DASHBOARD_PATH, GOUZI_PROFILE_MAX_LENGTH, GOUZI_ROLE_COPY,
+  GOUZI_ROLE_IDS, gouziPrimaryState,
   GouziHostService, type GouziHostProjection, type GouziProjectSource, type GouziProvisionInput, type GouziSshTarget,
 } from '../src/index.ts'
 
@@ -55,13 +56,15 @@ class FakeControl implements GouziControl {
   }
   edit(gouziId: string, edit: Parameters<GouziControl['edit']>[1]) {
     this.calls.push('edit')
-    const { model, ...rest } = edit
+    const { model, profile, ...rest } = edit
     const current = this.find(gouziId)
-    // Like the registry: a null model removes the property instead of storing null.
-    const { model: _previous, ...withoutModel } = current
-    const next = model === undefined
-      ? { ...current, ...rest }
-      : model === null ? { ...withoutModel, ...rest } : { ...current, ...rest, model }
+    // Like the registry: a null model or profile removes the property instead of storing null.
+    const { model: _model, profile: _profile, ...bare } = current
+    const kept = {
+      ...model === undefined ? current.model === undefined ? {} : { model: current.model } : model === null ? {} : { model },
+      ...profile === undefined ? current.profile === undefined ? {} : { profile: current.profile } : profile === null ? {} : { profile },
+    }
+    const next = { ...bare, ...rest, ...kept }
     this.members = this.members.map(value => value === current ? next : value)
     return Promise.resolve(next)
   }
@@ -292,6 +295,8 @@ describe('Gouzi Host route', () => {
     expect(route).toMatchObject({ kind: 'exact', path: '/api/gouzi' })
     expect([...GOUZI_AVATARS]).toEqual([...GOUZI_AVATAR_IDS])
     expect([...GOUZI_ROLE_IDS]).toEqual([...GOUZI_ROLES])
+    expect(GOUZI_PROFILE_MAX_LENGTH).toBe(GOUZI_PROFILE_LIMIT)
+    expect(Object.fromEntries(GOUZI_ROLE_IDS.map(id => [id, GOUZI_ROLE_COPY[id].goal]))).toEqual(GOUZI_ROLE_GOALS)
   })
 
   it('projects members without archived ones and counts only members that hold a slot', async () => {
@@ -734,6 +739,33 @@ describe('Gouzi Host route', () => {
     for (const model of ['', 5, ['gpt-5.5']]) {
       expect(await send('POST', { action: 'edit', gouziId: id, model }, CONTROL)).toMatchObject({ status: 400 })
     }
+  })
+
+  it('adopts with notes, shows them in the projection, keeps them across other edits, and clears them with null or blank text', async () => {
+    const { control, send } = await mount()
+    const adopted = (await send('POST', { ...ADOPT, profile: '  回答先给结论  ' }, CONTROL)).body
+    expect(adopted).toMatchObject({ profile: '回答先给结论' })
+    expect(control.members[0]).toMatchObject({ profile: '回答先给结论' })
+    // Blank notes at adoption mean none.
+    expect((await send('POST', { ...ADOPT, name: 'Blank', profile: '   ' }, CONTROL)).body).not.toHaveProperty('profile')
+    const id = adopted.gouziId
+    expect((await send('POST', { action: 'edit', gouziId: id, profile: '先写测试' }, CONTROL)).body).toMatchObject({ profile: '先写测试' })
+    expect((await send('POST', { action: 'edit', gouziId: id, name: 'Pixel' }, CONTROL)).body).toMatchObject({ name: 'Pixel', profile: '先写测试' })
+    expect((await send('POST', { action: 'edit', gouziId: id, profile: null }, CONTROL)).body).not.toHaveProperty('profile')
+    await send('POST', { action: 'edit', gouziId: id, profile: '再写一次' }, CONTROL)
+    expect((await send('POST', { action: 'edit', gouziId: id, profile: '  ' }, CONTROL)).body).not.toHaveProperty('profile')
+    expect((await send('GET')).body.members[0]).not.toHaveProperty('profile')
+  })
+
+  it('refuses notes that are not text or run past the limit, at adoption and at edit', async () => {
+    const { send } = await mount()
+    const id = (await send('POST', ADOPT, CONTROL)).body.gouziId
+    const tooLong = 'x'.repeat(GOUZI_PROFILE_MAX_LENGTH + 1)
+    for (const profile of [5, ['a'], tooLong]) {
+      expect(await send('POST', { ...ADOPT, name: 'Bad', profile }, CONTROL)).toMatchObject({ status: 400 })
+      expect(await send('POST', { action: 'edit', gouziId: id, profile }, CONTROL)).toMatchObject({ status: 400 })
+    }
+    expect((await send('POST', { action: 'edit', gouziId: id, profile: 'x'.repeat(GOUZI_PROFILE_MAX_LENGTH) }, CONTROL)).status).toBe(200)
   })
 
   it('lists the models a member\'s available runtimes offer, once each, and none while it is offline', async () => {

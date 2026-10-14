@@ -229,6 +229,7 @@ export class OrchestrationDaemonClient {
     avatarId: string
     role: string
     model?: string
+    profile?: string
     grantDeadlineMs: number
   }): Promise<GouziMemberView> {
     return this.request('gouzi.create', {
@@ -236,19 +237,20 @@ export class OrchestrationDaemonClient {
         gouzi_id: member.gouziId, owner_id: member.ownerId, host_id: member.hostId, name: member.name,
         avatar_id: member.avatarId, role: member.role, grant_deadline_ms: member.grantDeadlineMs,
         ...member.model === undefined ? {} : { model: member.model },
+        ...member.profile === undefined ? {} : { profile: member.profile },
       },
     })
   }
 
   /**
-   * Change a member's name, avatar, role, or pinned model.
+   * Change a member's name, avatar, role, pinned model, or notes.
    * @param gouziId - member identity.
-   * @param edit - fields to change; a `null` model returns the member to Smart Auto.
+   * @param edit - fields to change; a `null` model returns the member to Smart Auto and a `null` profile clears the notes.
    * @returns the updated member.
    */
   gouziEdit(
     gouziId: string,
-    edit: { name?: string; avatarId?: string; role?: string; model?: string | null },
+    edit: { name?: string; avatarId?: string; role?: string; model?: string | null; profile?: string | null },
   ): Promise<GouziMemberView> {
     return this.request('gouzi.edit', {
       gouzi_id: gouziId,
@@ -257,6 +259,7 @@ export class OrchestrationDaemonClient {
         ...edit.avatarId === undefined ? {} : { avatar_id: edit.avatarId },
         ...edit.role === undefined ? {} : { role: edit.role },
         ...edit.model === undefined ? {} : { model: edit.model },
+        ...edit.profile === undefined ? {} : { profile: edit.profile },
       },
     })
   }

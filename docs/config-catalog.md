@@ -2860,7 +2860,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent-codex/src/index.ts:48`](../packages/subagent/subagent-codex/src/index.ts)
+Source: [`packages/subagent/subagent-codex/src/index.ts:50`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
@@ -3688,7 +3688,7 @@ export interface DispatchModelConfig {
 
 Depends on: [`LogicalTaskGraphV1`](../packages/orchestration/orchestration/src/index.ts) · [`OrchestrationNodeSpecV1`](../packages/orchestration/orchestration/src/index.ts)
 
-Source: [`packages/orchestration/ui-gouzi/src/index.ts:57`](../packages/orchestration/ui-gouzi/src/index.ts)
+Source: [`packages/orchestration/ui-gouzi/src/index.ts:58`](../packages/orchestration/ui-gouzi/src/index.ts)
 
 <a id="deepseek-aidsh-user-approval"></a>
 

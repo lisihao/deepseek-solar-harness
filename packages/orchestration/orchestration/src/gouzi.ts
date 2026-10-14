@@ -62,6 +62,22 @@ export const GOUZI_ROLES = ['research', 'development', 'testing', 'curation', 'd
 export type GouziRole = (typeof GOUZI_ROLES)[number]
 
 /**
+ * What each role template asks of a member, in the words the member's task text uses. The browser shows the same goals
+ * from its own wire vocabulary; a Host test pins the two tables together.
+ */
+export const GOUZI_ROLE_GOALS: Readonly<Record<GouziRole, string>> = {
+  research: '查资料、读代码、写调研结论',
+  development: '在隔离的工作区里实现一个明确的改动',
+  testing: '补测试、复现问题、验证修复',
+  curation: '整理文档、清理目录、归档结论',
+  daily: '处理琐碎、重复的小任务',
+  custom: '由你在任务里说明它要做什么',
+}
+
+/** Most characters of the notes a user writes for one member; they are part of every task the member receives. */
+export const GOUZI_PROFILE_LIMIT = 2000
+
+/**
  * Membership of one Gouzi. Every value except `archived` holds one of the {@link GOUZI_MEMBER_LIMIT} slots,
  * including a member whose process is stopped or whose host is unreachable.
  */
@@ -100,6 +116,11 @@ export interface GouziRecord {
    * offers it qualifies.
    */
   readonly model?: string
+  /**
+   * Notes the user wrote for this member: personality, preferences, standing instructions. They are added to every
+   * task the member receives. Absent when the user wrote none.
+   */
+  readonly profile?: string
   readonly membership: GouziMembership
   readonly createdAt: string
   readonly updatedAt: string
@@ -269,6 +290,8 @@ export interface GouziMemberEdit {
   readonly role?: GouziRole
   /** A native model id to pin, or `null` to return to Smart Auto. */
   readonly model?: string | null
+  /** The member's notes, or `null` to clear them. */
+  readonly profile?: string | null
 }
 
 /** Facts required before a retiring member leaves the member count. */
@@ -287,6 +310,7 @@ export interface GouziCreateInput {
   readonly avatarId: GouziAvatarId
   readonly role: GouziRole
   readonly model?: string
+  readonly profile?: string
   readonly grantDeadlineMs: number
 }
 

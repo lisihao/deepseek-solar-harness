@@ -4,11 +4,13 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -35,7 +37,7 @@ import type {
 } from './cluster.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 6
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 7
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
@@ -148,6 +150,13 @@ const GOUZI_TABLES = `
  */
 const GOUZI_MODEL_COLUMN = 'ALTER TABLE gouzi_members ADD COLUMN model TEXT;'
 
+/**
+ * Schema 7: the notes a user wrote for a member. NULL means none. The column is nullable, so older rows stay valid; an
+ * older program refuses the newer schema, which is why {@link SqliteOrchestrationStore} keeps a copy of the file
+ * made just before the first migration to this schema.
+ */
+const GOUZI_PROFILE_COLUMN = 'ALTER TABLE gouzi_members ADD COLUMN profile TEXT;'
+
 function makePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
   chmodSync(path, 0o700)
@@ -173,6 +182,23 @@ function attemptFromRow(row: Record<string, unknown>): AttemptRecord {
     ...errorCode === undefined ? {} : { errorCode },
     ...errorMessage === undefined ? {} : { errorMessage },
     createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+  }
+}
+
+/**
+ * Check a copy of the state file before it is put in place as a backup.
+ * @param path - the copy.
+ * @param version - the schema version the original had.
+ * @throws Error - when the copy is not a database, fails SQLite's integrity check, or has another schema version.
+ */
+export function verifyBackupCopy(path: string, version: number): void {
+  const copy = new DatabaseSync(path, { readOnly: true })
+  try {
+    const integrity = copy.prepare('PRAGMA integrity_check').get()?.integrity_check
+    const copied = Number(copy.prepare('PRAGMA user_version').get()?.user_version)
+    if (integrity !== 'ok' || copied !== version) throw new Error(`the copy failed its check (integrity ${String(integrity)}, schema ${String(copied)})`)
+  } finally {
+    copy.close()
   }
 }
 
@@ -206,6 +232,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         'ORCHESTRATION_UNAVAILABLE',
       )
     }
+    if (version > 0 && version < 7) this.backUpBeforeSchema7(path, version)
     if (version === 0) this.createSchema()
     else if (version === 1) {
       this.migrateSchema1To2()
@@ -213,19 +240,26 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       this.migrateSchema3To4()
       this.migrateSchema4To5()
       this.migrateSchema5To6()
+      this.migrateSchema6To7()
     } else if (version === 2) {
       this.migrateSchema2To3()
       this.migrateSchema3To4()
       this.migrateSchema4To5()
       this.migrateSchema5To6()
+      this.migrateSchema6To7()
     } else if (version === 3) {
       this.migrateSchema3To4()
       this.migrateSchema4To5()
       this.migrateSchema5To6()
+      this.migrateSchema6To7()
     } else if (version === 4) {
       this.migrateSchema4To5()
       this.migrateSchema5To6()
-    } else if (version === 5) this.migrateSchema5To6()
+      this.migrateSchema6To7()
+    } else if (version === 5) {
+      this.migrateSchema5To6()
+      this.migrateSchema6To7()
+    } else if (version === 6) this.migrateSchema6To7()
     this.gouzi = new GouziRegistry(this.db)
     this.clusterTracking = true
   }
@@ -884,6 +918,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       VALUES (1, 0, 'follower', 0, 0);
       ${GOUZI_TABLES}
       ${GOUZI_MODEL_COLUMN}
+      ${GOUZI_PROFILE_COLUMN}
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
   }
@@ -960,5 +995,56 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         PRAGMA user_version = 6;
       `)
     })
+  }
+
+  private migrateSchema6To7(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        ${GOUZI_PROFILE_COLUMN}
+        PRAGMA user_version = 7;
+      `)
+    })
+  }
+
+  /**
+   * Keep one copy of the state from before the first migration to schema 7. A program that only knows an older
+   * schema refuses the migrated file, so this copy is what a manual rollback restores. An existing copy is kept: it
+   * holds the state from before the migration, which a later start must not overwrite.
+   *
+   * The copy is one SQLite snapshot written by `VACUUM INTO`, so it includes every commit still in the write-ahead log
+   * and cannot mix pages from two moments, which copying the file after a checkpoint cannot promise while another
+   * connection holds an older read. It is written beside the final name, checked, and renamed into place, so the final
+   * name never holds a partial or unchecked copy; a leftover from an interrupted attempt is discarded, never reused.
+   * A copy that cannot be made or checked stops the start before anything is migrated.
+   * @param path - the state file.
+   * @param version - the schema version the file has before migration.
+   */
+  private backUpBeforeSchema7(path: string, version: number): void {
+    const backup = `${path}.before-schema-7`
+    if (existsSync(backup)) return
+    const partial = `${backup}.partial`
+    try {
+      rmSync(partial, { force: true })
+      this.db.prepare('VACUUM INTO ?').run(partial)
+      chmodSync(partial, 0o600)
+      verifyBackupCopy(partial, version)
+      // VACUUM INTO does not sync its output; without this a crash after the migration could leave a truncated copy
+      // under the final name, and the next start would keep it.
+      const descriptor = openSync(partial, 'r+')
+      try {
+        fsyncSync(descriptor)
+      } finally {
+        closeSync(descriptor)
+      }
+      renameSync(partial, backup)
+    } catch (error) {
+      rmSync(partial, { force: true, recursive: true })
+      // The constructor fails, so no caller holds a handle to close.
+      this.db.close()
+      throw new OrchestrationError(
+        `orchestration state could not be backed up before migrating to schema 7: ${String(error)}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
   }
 }

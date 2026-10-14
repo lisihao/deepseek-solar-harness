@@ -1,7 +1,7 @@
 /** The Debate kind of the kennel registry: candidates over members, role assignment, policy, and approval. */
 
 import { Context } from '@deepseek-ai/cordis'
-import { validateDebatePolicy, type DebateControlRequestV1, type DebateStartRequestV1 } from '@deepseek-ai/dsh-debate'
+import { DEFAULT_DEBATE_PERSONAS, validateDebatePolicy, type DebateControlRequestV1, type DebateStartRequestV1 } from '@deepseek-ai/dsh-debate'
 import type {
   KennelCollaborationCandidate, KennelCollaborationFacts, KennelCollaborationKind, KennelCollaborationMember,
   KennelCollaborationRequest, KennelCollaborations,
@@ -66,6 +66,21 @@ function facts(ids: string[], patch: Partial<KennelCollaborationFacts> = {}, sco
 }
 
 describe('Debate kennel kind', () => {
+  it('carries each member\'s current notes in the offered candidate, whose id does not change with them', async () => {
+    const { kind } = await setup()
+    const withNotes = (profile: string | undefined) => facts(['a', 'b', 'c']).members.map(value =>
+      String(value.gouziId) === 'a' && profile !== undefined ? { ...value, profile } : value)
+    const [before] = await kind.offer({ ...facts(['a', 'b', 'c']), members: withNotes('先给结论') })
+    const [after] = await kind.offer({ ...facts(['a', 'b', 'c']), members: withNotes('先列依据') })
+    const [none] = await kind.offer({ ...facts(['a', 'b', 'c']), members: withNotes(undefined) })
+    expect(before?.members[0]).toMatchObject({ gouziId: 'a', profile: '先给结论' })
+    expect(after?.members[0]).toMatchObject({ gouziId: 'a', profile: '先列依据' })
+    expect(none?.members[0]).not.toHaveProperty('profile')
+    // The id cannot tell these apart, so the dispatcher compares the notes itself before it starts a Debate.
+    expect(after?.id).toBe(before?.id)
+    expect(none?.id).toBe(before?.id)
+  })
+
   it('offers one Debate per project that three members hold, in registry order, up to four members', async () => {
     const { kind } = await setup()
     const offered = await kind.offer(facts(['a', 'b', 'c', 'd', 'e']))
@@ -123,6 +138,22 @@ describe('Debate kennel kind', () => {
     // The user's request is the approval: the run is approved against the revision the start returned.
     await vi.waitFor(() => { expect(controls).toHaveLength(1) })
     expect(controls[0]).toMatchObject({ runId: 'debate-1', expectedRevision: 2, action: 'approve', commandId: 'kennel:debate:s:m:approve' })
+  })
+
+  it('gives each debating member its name and role goal, and the notes only to the member that has them', async () => {
+    const { starts, kind } = await setup()
+    await kind.start(request([{ ...member('alpha'), profile: '先给结论，再列依据' }, member('beta'), member('gamma')]))
+    const roster = starts[0]!.policy.roster
+    const defaults = DEFAULT_DEBATE_PERSONAS['constructive-proposer'].instructions
+    expect(roster[0]!.persona.instructions).toEqual([
+      ...defaults, '你是狗窝成员「alpha」。', '你的角色目标：查资料、读代码、写调研结论。',
+      '用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：', '先给结论，再列依据',
+    ])
+    expect(roster[1]!.persona.instructions.some(line => line.includes('先给结论'))).toBe(false)
+    expect(roster[1]!.persona.instructions.at(-2)).toBe('你是狗窝成员「beta」。')
+    // The default persona object is never changed by a member's instructions.
+    expect(DEFAULT_DEBATE_PERSONAS['constructive-proposer'].instructions).toEqual(defaults)
+    expect(validateDebatePolicy(starts[0]?.policy)).toEqual(starts[0]?.policy)
   })
 
   it('adds the evidence auditor for a fourth member and keeps the judge last', async () => {

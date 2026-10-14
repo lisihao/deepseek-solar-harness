@@ -664,7 +664,7 @@ Source: [`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-
 'kennel/dispatch-admitted': { messageId: string; runId: string }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:78`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-collaboration--log-only"></a>
 
@@ -675,7 +675,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orc
 'kennel/dispatch-collaboration': { messageId: string; candidate: KennelCollaborationCandidate; commandId: string }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:80`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-collaboration-admitted--log-only"></a>
 
@@ -691,7 +691,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orc
 }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:82`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-control--log-only"></a>
 
@@ -702,7 +702,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orc
 'kennel/dispatch-control': { messageId: string; candidate: KennelControlCandidate; result: OrchestrationRunSnapshot }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:83`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:89`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-decision--log-only"></a>
 
@@ -713,7 +713,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:83`](../packages/orc
 'kennel/dispatch-decision': { messageId: string; source: 'jev' | 'deepseek' | 'codex'; provider: string; model?: string; candidateId: string; fallbackReason?: string }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:74`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-model--log-only"></a>
 
@@ -724,7 +724,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:68`](../packages/orc
 'kennel/dispatch-model': { messageId: string; record: DispatchModelRecord }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:66`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:72`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 <a id="kenneldispatch-request--log-only"></a>
 
@@ -732,7 +732,13 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:66`](../packages/orc
 
 ```ts persistence-catalog
 /** Immutable input and qualified choices retained before model invocation. */
-'kennel/dispatch-request': { messageId: string; message: UserMessage; candidates: readonly KennelDispatchCandidate[] }
+'kennel/dispatch-request': {
+  messageId: string
+  message: UserMessage
+  candidates: readonly KennelDispatchCandidate[]
+  /** Notes of the offered members at this moment, by member id: the text a selected member's task carries. */
+  profiles?: Readonly<Record<string, string>>
+}
 ```
 
 Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:64`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
@@ -746,7 +752,7 @@ Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:64`](../packages/orc
 'kennel/dispatch-submission': { messageId: string; compilationId: string; commandId: string }
 ```
 
-Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:70`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
+Source: [`packages/orchestration/ui-gouzi/src/dispatcher.ts:76`](../packages/orchestration/ui-gouzi/src/dispatcher.ts)
 
 ### `llm/*`
 

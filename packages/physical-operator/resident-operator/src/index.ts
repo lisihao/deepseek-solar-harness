@@ -69,12 +69,17 @@ export interface NativeContext {
 export type ResidentLifecycle = 'starting' | 'idle' | 'running' | 'draining' | 'stopped'
 /** Independent health dimension for a Resident Session. */
 export type ResidentHealth = 'ok' | 'degraded' | 'unavailable'
-/** Stable reason attached to a non-ok Resident health snapshot. */
+/**
+ * Stable reason attached to a non-ok Resident health snapshot. `native_outcome_unconfirmed` means a turn was started
+ * whose native execution is not known to have stopped, so the Session admits no new command until that outcome is
+ * resolved explicitly.
+ */
 export type ResidentHealthReason =
   | 'auth_required'
   | 'quota_exhausted'
   | 'protocol_mismatch'
   | 'process_crashed'
+  | 'native_outcome_unconfirmed'
   | 'workspace_missing'
 
 /** Durable command-receipt state machine. */
