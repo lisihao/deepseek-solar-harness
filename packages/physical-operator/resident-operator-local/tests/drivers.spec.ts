@@ -58,6 +58,14 @@ const model = {
   supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
 } as const
 
+/**
+ * Wall-clock bound for a test that runs freshly written executables. On macOS the first execution of each new file
+ * carries the `com.apple.provenance` attribute (SIP-protected, so it cannot be cleared) and waits for a system
+ * policy assessment: a measured 0.3-2.5 s per file when idle and 5 s or more under parallel load, against 5-10 ms
+ * for every later run of the same file. A test with at most three such files fits 3 x 2.5 s with margin in 15 s.
+ */
+const FRESH_EXECUTABLE_TIMEOUT_MS = 15_000
+
 describe('Claude Code resident driver environment', () => {
   it('classifies owner-actionable native login failures without starting a login', () => {
     expect(claudeAuthenticationFailureCode(new Error(
@@ -304,7 +312,7 @@ describe('Claude Code resident driver environment', () => {
         rmSync(root, { recursive: true, force: true })
       }
     }
-  })
+  }, FRESH_EXECUTABLE_TIMEOUT_MS)
 
   it('classifies a missing product executable as runtime unavailability', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-missing-product-'))
@@ -797,7 +805,7 @@ describe('Codex protocol qualification', () => {
       else process.env.PATH = previousPath
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, FRESH_EXECUTABLE_TIMEOUT_MS)
 
   it.runIf(process.platform !== 'win32')('reads no daemon identity from failed, non-JSON, or relative version output', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-codex-daemon-version-'))
@@ -812,7 +820,7 @@ describe('Codex protocol qualification', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, FRESH_EXECUTABLE_TIMEOUT_MS)
 })
 
 
