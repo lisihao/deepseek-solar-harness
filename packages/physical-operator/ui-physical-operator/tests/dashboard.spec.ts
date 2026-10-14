@@ -543,6 +543,9 @@ describe('native CLI route', () => {
   })
 })
 
+// oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the point is a reason that is not an Error
+const rejectWithText = (reason: string): Promise<never> => new Promise((_resolve, reject) => { reject(reason) })
+
 describe('closed-lane recovery route', () => {
   const lane = (patch: Record<string, unknown> = {}) => ({
     sessionId: 'session-1', operatorId: 'codex', workspace: '/project', laneId: 'lane-1', lifecycle: 'idle', health: 'degraded',
@@ -685,7 +688,7 @@ describe('closed-lane recovery route', () => {
 
   it('reports a failure that is not an Error as its text', async () => {
     const service = {
-      inspect: vi.fn(async () => lane()), reset: vi.fn(() => new Promise((_resolve, reject) => { reject('daemon gone') })), resolveIndeterminate: vi.fn(),
+      inspect: vi.fn(async () => lane()), reset: vi.fn(() => rejectWithText('daemon gone')), resolveIndeterminate: vi.fn(),
     }
     const failed = await register(service).call('session_id=session-1&action=reset&revision=7')
     expect(failed.json()).toEqual({ error: 'RESIDENT_RECOVERY_FAILED', message: 'daemon gone' })

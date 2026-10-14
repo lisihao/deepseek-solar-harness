@@ -13,6 +13,7 @@ afterEach(() => {
 })
 
 /** A rejection whose reason is not an Error, as some transports produce. */
+// oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the point is a reason that is not an Error
 const rejectWith = (reason: unknown): Promise<never> => new Promise((_resolve, reject) => { reject(reason) })
 
 const TIME = '2026-10-14T10:00:00.000Z'
