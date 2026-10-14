@@ -14,8 +14,9 @@ import css from './ServedByCaption.module.css'
  */
 export function ServedByCaption({ served, useDirectory, t }: ServedByProps) {
   const groups = useDirectory(state => state.groups)
+  const failures = useDirectory(state => state.failures)
   if (served === undefined) return null
-  const label = describeSelection(groups, {
+  const label = describeSelection({ groups, failures }, {
     provider: served.provider,
     model: served.model,
     ...served.reasoningEffort === undefined ? {} : { reasoningEffort: served.reasoningEffort },
