@@ -1206,6 +1206,50 @@ describe('CodexAppServerWire', () => {
     wire.close()
   })
 
+  it('keeps the turn id a valid response named when reading the notifications before it fails, and tells that apart from no response', async () => {
+    {
+      const { child, wire } = await initializeWire()
+      const result = wire.runTurn(['task'], new AbortController().signal)
+      const turnStart = await child.peer.nextMethod('turn/start')
+      // A terminal notification of the turn the response will name, with a status the wire cannot accept.
+      child.peer.send(turnCompleted('bogus', 'turn-1'))
+      child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+      const error = await result.then(() => undefined, (caught: unknown) => caught) as CodexTurnStartUncertainError
+      expect(error).toBeInstanceOf(CodexTurnStartUncertainError)
+      expect(error.startedTurnId).toBe('turn-1')
+      expect(error.message).toContain('the response named turn turn-1')
+      expect(error.message).toContain('invalid terminal turn status')
+      // The notification that could not be read is in the frames, with the turn id it named.
+      expect(error.frames.map(frame => [frame.kind, frame.method, frame.turnId])).toEqual([
+        ['notification', 'turn/completed', 'turn-1'], ['response', 'turn/start', 'turn-1'],
+      ])
+      wire.close()
+    }
+    {
+      const { child, wire } = await initializeWire()
+      const result = wire.runTurn(['task'], new AbortController().signal)
+      await child.peer.nextMethod('turn/start')
+      child.fromChild.end()
+      const error = await result.then(() => undefined, (caught: unknown) => caught) as CodexTurnStartUncertainError
+      expect(error.startedTurnId).toBeUndefined()
+      expect(error.message).not.toContain('the response named')
+      wire.close()
+    }
+  })
+
+  it('reads the status of one turn by id among the thread\'s newest', async () => {
+    const { child, wire } = await initializeWire()
+    const status = wire.turnStatus('turn-b', new AbortController().signal)
+    const list = await child.peer.nextMethod('thread/turns/list')
+    expect(list.params).toEqual({ threadId: 'thread-1', limit: 20, sortDirection: 'desc' })
+    child.peer.respond(list, { data: [{ id: 'turn-c', status: 'completed' }, { id: 'turn-b', status: 'inProgress' }] })
+    await expect(status).resolves.toBe('inProgress')
+    const missing = wire.turnStatus('turn-z', new AbortController().signal)
+    child.peer.respond(await child.peer.nextMethod('thread/turns/list'), { data: [{ id: 'turn-c', status: 'completed' }] })
+    await expect(missing).resolves.toBeUndefined()
+    wire.close()
+  })
+
   it('treats a server refusal of turn/start as not started, and an aborted signal as no request at all', async () => {
     {
       const { child, wire } = await initializeWire()

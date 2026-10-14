@@ -275,8 +275,12 @@ export interface CodexWireFrame {
 }
 
 /**
- * `turn/start` was sent, but no valid response named its turn. The native turn may be running, so the caller must not
- * treat the command as not started: it has to inspect the thread before it releases anything.
+ * `turn/start` was sent, but the run could not take its turn from it. The native turn may be running, so the caller must
+ * not treat the command as not started: it has to inspect the thread before it releases anything.
+ *
+ * Two cases differ in what is known. Without a valid response no turn id is known (`startedTurnId` is undefined) and
+ * the turn can only be inferred. When a valid response did name the turn but reading the notifications that arrived
+ * before it failed, `startedTurnId` is that turn, confirmed by the server, and it is kept on the error.
  */
 export class CodexTurnStartUncertainError extends Error {
   constructor(
@@ -287,6 +291,8 @@ export class CodexTurnStartUncertainError extends Error {
     readonly baselineTurnId: string | undefined,
     /** The most recent frames in receive order, without any task content. */
     readonly frames: readonly CodexWireFrame[],
+    /** The turn the `turn/start` response named, when it did. */
+    readonly startedTurnId?: string,
     options?: { cause: unknown },
   ) {
     super(message, options)
@@ -594,7 +600,7 @@ export class CodexAppServerWire {
     void commit.promise.catch(() => {})
     this.turnCommit = commit
     const threadId = this.threadId as string
-    let startedTurnId: string
+    let startedTurnId: string | undefined
     try {
       const response = object(await this.guarded(this.transport.request('turn/start', {
         threadId,
@@ -614,11 +620,13 @@ export class CodexAppServerWire {
       // A refusal from the server means nothing started. Any other failure leaves the native turn possibly running.
       if (error instanceof JsonRpcResponseError) throw error
       const cause = thrown(error)
+      const known = startedTurnId === undefined ? '' : ` (the response named turn ${startedTurnId})`
       throw new CodexTurnStartUncertainError(
-        `subagent-codex: turn/start outcome is unknown (${cause.message}); frames: ${describeFrames(this.frames)}`,
+        `subagent-codex: turn/start outcome is unknown${known} (${cause.message}); frames: ${describeFrames(this.frames)}`,
         threadId,
         this.baselineTurnId,
         [...this.frames],
+        startedTurnId,
         { cause: error },
       )
     }
@@ -665,22 +673,36 @@ export class CodexAppServerWire {
     }
   }
 
+  private async listTurns(limit: number, signal: AbortSignal): Promise<Array<{ readonly id: string; readonly status: string }>> {
+    const response = object(await this.guarded(this.transport.request('thread/turns/list', {
+      threadId: this.threadId,
+      limit,
+      sortDirection: 'desc',
+    }, signal), signal), 'thread/turns/list response')
+    if (!Array.isArray(response.data)) throw new Error('subagent-codex: app-server returned invalid thread/turns/list data')
+    return (response.data as unknown[]).map((value) => {
+      const turn = object(value, 'thread/turns/list turn')
+      return { id: string(turn.id, 'thread/turns/list turn id'), status: string(turn.status, 'thread/turns/list turn status') }
+    })
+  }
+
   /**
    * Read the newest turn of the current thread.
    * @param signal - cancellation for the control request.
    * @returns its id and status as the app-server reports them, or undefined when the thread has no turn.
    */
   async latestTurn(signal: AbortSignal): Promise<{ readonly id: string; readonly status: string } | undefined> {
-    const response = object(await this.guarded(this.transport.request('thread/turns/list', {
-      threadId: this.threadId,
-      limit: 1,
-      sortDirection: 'desc',
-    }, signal), signal), 'thread/turns/list response')
-    if (!Array.isArray(response.data)) throw new Error('subagent-codex: app-server returned invalid thread/turns/list data')
-    const first: unknown = response.data[0]
-    if (first === undefined) return undefined
-    const turn = object(first, 'thread/turns/list turn')
-    return { id: string(turn.id, 'thread/turns/list turn id'), status: string(turn.status, 'thread/turns/list turn status') }
+    return (await this.listTurns(1, signal))[0]
+  }
+
+  /**
+   * Read the status of one native turn of the current thread by its id.
+   * @param turnId - the turn to look up, such as the one a `turn/start` response named.
+   * @param signal - cancellation for the control request.
+   * @returns its status as the app-server reports it, or undefined when it is not among the thread's newest turns.
+   */
+  async turnStatus(turnId: string, signal: AbortSignal): Promise<string | undefined> {
+    return (await this.listTurns(20, signal)).find(turn => turn.id === turnId)?.status
   }
 
   /**

@@ -734,3 +734,72 @@ describe('Resident turn unknown-effect fence', () => {
     store.close()
   })
 })
+
+function refusalOf(run: () => unknown): { code: string; message: string } {
+  try { run() } catch (error: unknown) { return error as { code: string; message: string } }
+  throw new Error('expected a refusal')
+}
+
+describe('Resident Session with a native turn that may still be running', () => {
+  function unconfirmed(directory: string) {
+    const store = new ResidentStore(directory)
+    const accepted = store.accept('first', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.markRunning('first', 'thread-1')
+    store.markTurnIndeterminate('first', 'the native turn may still be running', true)
+    return { store, accepted }
+  }
+
+  it('closes the Session to a new command under a new id, and the refusal names the unresolved command', () => {
+    const { store, accepted } = unconfirmed(root())
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({ lifecycle: 'idle', health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
+    expect(() => store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE))
+      .toThrow(/command first/u)
+    expect(refusalOf(() => store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).code).toBe('COMMAND_INDETERMINATE')
+    // Nothing was admitted: there is no receipt for the refused command and the Session has no active turn.
+    expect(() => store.inspectTurn('second')).toThrow('unknown resident turn')
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({ lifecycle: 'idle' })
+    // The same command id still returns the original indeterminate receipt, never a new execution.
+    expect(store.accept('first', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'indeterminate' })
+    // Another Session of the same operator is unaffected.
+    expect(store.accept('elsewhere', 'hash-3', 'codex', '/other-workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
+    store.close()
+  })
+
+  it('keeps refusing after the store is reopened, because the refusal is read from the persisted Session', () => {
+    const directory = root()
+    const { store } = unconfirmed(directory)
+    store.close()
+    const reopened = new ResidentStore(directory)
+    expect(() => reopened.accept('after-reload', 'hash-4', 'codex', '/workspace', PROFILE, PROFILE_SOURCE))
+      .toThrow(expect.objectContaining({ code: 'COMMAND_INDETERMINATE' }))
+    reopened.close()
+  })
+
+  it('is lifted only by resolving the indeterminate command explicitly, after which a new command is admitted', () => {
+    const { store, accepted } = unconfirmed(root())
+    const revision = store.inspectSession(accepted.sessionId).stateRevision
+    store.resolveIndeterminate('first', revision)
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({ health: 'ok' })
+    expect(store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
+    store.close()
+  })
+
+  it('releases the Session as before when the native execution is known to have stopped', () => {
+    const store = new ResidentStore(root())
+    const accepted = store.accept('first', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.markRunning('first', 'thread-1')
+    store.markTurnIndeterminate('first', 'the native turn ended; its output was not captured')
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({ healthReason: 'process_crashed' })
+    expect(store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
+    store.close()
+  })
+
+  it('does not name a command in the refusal when no unresolved receipt remains', () => {
+    const { store, accepted } = unconfirmed(root())
+    ;(store as unknown as { db: DatabaseSync }).db.prepare("UPDATE command_receipts SET resolution = 'abandon' WHERE command_id = 'first'").run()
+    expect(() => store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE))
+      .toThrow(/not known to have stopped; resolve/u)
+    expect(accepted.sessionId).toBeDefined()
+    store.close()
+  })
+})

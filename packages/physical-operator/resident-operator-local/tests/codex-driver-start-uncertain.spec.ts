@@ -85,8 +85,9 @@ describe('Codex resident turn with an unknown start', () => {
     const { driver, opened } = driverWith([main, probe])
     const { value, onRunning, onProgress } = request()
     const error = await driver.execute(value).then(() => undefined, (caught: unknown) => caught)
-    expect(error).toMatchObject({ code: 'COMMAND_INDETERMINATE' })
-    expect((error as Error).message).toContain('native turn turn-new ended with status completed')
+    expect(error).toMatchObject({ code: 'COMMAND_INDETERMINATE', nativeOutcomeUnconfirmed: true })
+    // The turn is only inferred, so its end is reported as unproven rather than as this command's.
+    expect((error as Error).message).toContain('native turn turn-new appeared after it and ended with status completed')
     expect((error as Error).message).not.toContain('the task')
     expect(opened).toHaveBeenCalledTimes(2)
     expect(main.methods).toEqual(['initialize', 'thread/resume', 'thread/turns/list', 'turn/start'])
@@ -108,8 +109,35 @@ describe('Codex resident turn with an unknown start', () => {
     })
     const { driver } = driverWith([main])
     const error = await driver.execute(request().value).then(() => undefined, (caught: unknown) => caught)
-    expect(error).toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    expect(error).toMatchObject({ code: 'COMMAND_INDETERMINATE', nativeOutcomeUnconfirmed: true })
     expect((error as Error).message).toContain('could not be inspected')
+  }, 20_000)
+
+  it('keeps the turn id the response named when reading the notifications before it fails, and waits for that turn by id', async () => {
+    const statuses = ['inProgress', 'completed']
+    let read = 0
+    const main = new FakeAppServer((method, _params, server) => {
+      if (method === 'thread/turns/list') return { data: [] }
+      if (method === 'turn/start') {
+        // A terminal notification of the turn the response is about to name, with a status the wire cannot accept.
+        server.push(`${JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-known', status: 'bogus', error: null } } })}\n`)
+        return { turn: { id: 'turn-known' } }
+      }
+      return baseAnswers(method)
+    })
+    const probe = new FakeAppServer(method => method === 'thread/turns/list'
+      ? { data: [{ id: 'turn-other', status: 'completed' }, { id: 'turn-known', status: statuses[Math.min(read++, 1)] }] }
+      : baseAnswers(method))
+    const { driver } = driverWith([main, probe])
+    const { value, onRunning, onProgress } = request()
+    const error = await driver.execute(value).then(() => undefined, (caught: unknown) => caught)
+    // The server named the turn and it was seen to end, so the execution is known to have stopped: the Session is released.
+    expect(error).toMatchObject({ code: 'COMMAND_INDETERMINATE', nativeOutcomeUnconfirmed: false })
+    expect((error as Error).message).toContain('Codex turn turn-known ended with status completed')
+    expect((error as Error).message).toContain('the response named turn turn-known')
+    expect(probe.requests.filter(entry => entry.method === 'thread/turns/list').map(entry => entry.params.limit)).toEqual([20, 20])
+    expect(onRunning.mock.calls).toEqual([['thread-1']])
+    expect(onProgress.mock.calls.map(([phase]) => phase)).toEqual(['connecting', 'session_ready'])
   }, 20_000)
 
   it('reports the progress phase only after the native turn is named', async () => {

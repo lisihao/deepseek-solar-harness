@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-14-codex-turn-correlation-and-unknown-start.md
-2026-10-14-codex-turn-correlation-and-unknown-start.md: ac1aba70dc413fc21be4061024206ec29f0281bc
-2026-10-14-codex-turn-correlation-and-unknown-start.zh.md: 844928372e7d86b3d7f93077c80799deabdc9c45
+2026-10-14-codex-turn-correlation-and-unknown-start.md: be21da60873586779efeb54ae3108a7f3a2c15d3
+2026-10-14-codex-turn-correlation-and-unknown-start.zh.md: 3d8c8cc155c852b5b3dfced7f33163841d76ea62

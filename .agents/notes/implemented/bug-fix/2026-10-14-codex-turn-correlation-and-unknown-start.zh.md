@@ -16,7 +16,12 @@ Status: implemented
 
 `turn/start` 已发出却没有有效响应（流关闭、响应格式错误、被中断）时，以 `CodexTurnStartUncertainError` 拒绝，其中带有线程、`captureBaseline` 记录的基线轮次 id（`turn/start` 之前最新的轮次，取自 `thread/turns/list`），以及按接收顺序的最近 64 帧：类型、方法、线程 id、轮次 id。不保存任务文本、工具参数或输出。JSON-RPC 错误应答表示服务器拒绝了请求，按普通失败重新抛出。
 
-[Resident 驱动](../../../../packages/physical-operator/resident-operator-local/README.md)对结果未知的启动做核对，而不是失败：它重新打开一条到同一线程的连接，等待基线之后出现的最新回合运行结束（如果 Resident 回合被中断，会对它中断一次；最长 20 分钟），然后抛出 `COMMAND_INDETERMINATE`。守护进程已经把它记录为不会重放的 receipt，整个等待期间 Session 保持被占用。`reasoning` 阶段在原生回合有了名字之后才上报。
+[Resident 驱动](../../../../packages/physical-operator/resident-operator-local/README.md)对没有让运行拿到回合的启动做核对，而不是失败：它重新打开一条到同一线程的连接（恢复线程时不带任何覆盖，所以线程的配置不会改变），并以 `COMMAND_INDETERMINATE` 结束，守护进程把它记录为不会重放的 receipt。先做什么取决于已知的信息：
+
+- **响应指明了回合**（读取其之前保存的通知失败了）：服务器已确认这个回合，所以按 id 等待它，如果 Resident 回合被中断就对它中断一次，最长 20 分钟。看到它结束，就知道原生执行已经停止，Session 被释放。
+- **没有响应指明回合：** 把基线之后的第一个新回合固定下来，只做观察。绝不中断它，出现第二个不同的新回合就说明身份有歧义，推断出的回合结束了也只报告为未证实，绝不当作这条命令的。
+
+其余结果（推断的回合、线程无法读取、等待结束时回合仍在运行）都带 `nativeOutcomeUnconfirmed`。守护进程随后让 Session 保持关闭：健康原因是 `native_outcome_unconfirmed`，准入会拒绝任何新命令（无论命令 id 是什么），直到显式解决该 indeterminate 命令或重置 Session。这个拒绝读自持久化的 Session 行，所以重启之后依然有效。守护进程还会保留驱动给出的 `COMMAND_INDETERMINATE` 结论，即使它的诊断引用了传输失败；早先的版本会把它改写成普通的 `RUNTIME_UNAVAILABLE` 失败并释放 Session。`reasoning` 阶段在原生回合有了名字之后才上报。
 
 ## Alternatives considered
 
@@ -26,10 +31,12 @@ Status: implemented
 
 **采用原生回合的输出。** 基线之后找到的那个回合大概率是本次的，但"大概率"不足以把输出归到某条命令上。核对只报告原生回合发生了什么，由阅读该 indeterminate receipt 的人决定。
 
+**推断的回合一结束就当作本次的。** 这会在无法区分是本次启动的回合还是线程上另一个回合的证据上释放 Session；对第一个版本的审计还显示，它每次读取都会跟着当时最新的回合走，并可能中断一个无关的回合。
+
 **把 `thread/turns/list` 设为必需。** 旧版 Codex 会因此不再通过资格检查。它是可选的：没有它就没有基线，核对此时只等待正在运行的回合。
 
 ## Consequences
 
-一次运行不再因为线程的其他轮次在响应之前上报而失败。响应丢失的启动会以 indeterminate receipt 结束，写明原生回合及其最终状态，命令不会被意外再次派发；该原生回合的输出没有被采集，需要到 Codex 里查看。这段等待最长会占用一个 Session 20 分钟。
+一次运行不再因为线程的其他轮次在响应之前上报而失败。没有让运行拿到回合的启动会以 indeterminate receipt 结束，写明看到了什么，命令不会被意外再次派发，无论用原来的 id 还是新 id。原生结果未确认的 Session 会拒绝新命令，直到有人解决该命令或重置 Session；不会自动释放，因为没有任何观察能证明那是谁的回合。该原生回合的输出没有被采集，需要到 Codex 里查看。这段等待最长会占用一个 Session 20 分钟。
 
 最初的冲突没有在真实 Codex 上复现：失败的那次运行没有保留冲突帧，所以哪条通知先到仍未确认。wire 现在会记录这些帧，下次出现时就能看到它们。诊断里没有 RPC 请求 id，因为共用的 JSON-RPC 传输层没有暴露它。

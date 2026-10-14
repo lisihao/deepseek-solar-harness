@@ -1084,6 +1084,111 @@ describe('ResidentDaemon', () => {
     await daemon.close()
   })
 
+  describe('a turn whose native execution is not known to have stopped', () => {
+    /** Fails each execution with the verdict a Codex driver gives when a start has no authoritative response. */
+    class UnconfirmedDriver extends MemoryDriver {
+      verdict: ResidentOperatorError | undefined
+      override async execute(request: ResidentDriverExecuteRequest) {
+        if (this.verdict === undefined) return super.execute(request)
+        this.commandIds.push(String(request.commandId))
+        throw this.verdict
+      }
+    }
+    const unconfirmed = (): ResidentOperatorError => new ResidentOperatorError(
+      // The diagnostic quotes a transport failure, which must not turn the verdict into a plain failure.
+      'Codex turn start outcome is unknown and the thread could not be read (subagent-codex: app-server protocol stream closed); inspect it',
+      'COMMAND_INDETERMINATE',
+      { nativeOutcomeUnconfirmed: true },
+    )
+    const stopped = (): ResidentOperatorError => new ResidentOperatorError(
+      'Codex turn t ended with status completed; its output was not captured', 'COMMAND_INDETERMINATE',
+    )
+
+    it('keeps an indeterminate verdict that quotes a transport failure, instead of settling the command as failed', () => {
+      expect(normalizeResidentDriverError(unconfirmed(), false)).toMatchObject({ code: 'COMMAND_INDETERMINATE', nativeOutcomeUnconfirmed: true })
+      // A plain transport failure is still a runtime outage.
+      expect(normalizeResidentDriverError(new Error('subagent-codex: app-server protocol stream closed'), false)).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    })
+
+    it('refuses a new command under a new id and never calls the driver for it, and the first command is not replayed', async () => {
+      const root = temporaryRoot()
+      const workspace = join(root, 'workspace')
+      mkdirSync(workspace)
+      const driver = new UnconfirmedDriver()
+      driver.verdict = unconfirmed()
+      const daemon = new ResidentDaemon({ root, drivers: [driver] })
+      await daemon.start()
+      const connected = client(root)
+      const first = await connected.execute({
+        commandId: 'first', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })
+      await expect(first.result).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      expect(await connected.inspect(first.sessionId)).toMatchObject({ lifecycle: 'idle', health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
+      driver.verdict = undefined
+      // The same work under a new command id is the retry the fence exists to stop.
+      await expect(connected.execute({
+        commandId: 'second', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      expect(driver.commandIds).toEqual(['first'])
+      await daemon.close()
+    })
+
+    it('still refuses after the daemon restarts, and admits again only after the command is resolved explicitly', async () => {
+      const root = temporaryRoot()
+      const workspace = join(root, 'workspace')
+      mkdirSync(workspace)
+      const driver = new UnconfirmedDriver()
+      driver.verdict = unconfirmed()
+      const daemon = new ResidentDaemon({ root, drivers: [driver] })
+      await daemon.start()
+      const first = await client(root).execute({
+        commandId: 'first', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })
+      await expect(first.result).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      await daemon.close()
+
+      const restartedDriver = new UnconfirmedDriver()
+      const restarted = new ResidentDaemon({ root, drivers: [restartedDriver] })
+      await restarted.start()
+      const connected = client(root)
+      await expect(connected.execute({
+        commandId: 'after-restart', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      expect(restartedDriver.commandIds).toEqual([])
+
+      const snapshot = await connected.inspect(first.sessionId)
+      await connected.resolveIndeterminate('first', snapshot.stateRevision)
+      const admitted = await connected.execute({
+        commandId: 'after-resolution', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })
+      await expect(admitted.result).resolves.toMatchObject({ stopReason: 'completed' })
+      expect(restartedDriver.commandIds).toEqual(['after-resolution'])
+      await restarted.close()
+    })
+
+    it('releases the Session when the native execution is known to have stopped, so the next command runs', async () => {
+      const root = temporaryRoot()
+      const workspace = join(root, 'workspace')
+      mkdirSync(workspace)
+      const driver = new UnconfirmedDriver()
+      driver.verdict = stopped()
+      const daemon = new ResidentDaemon({ root, drivers: [driver] })
+      await daemon.start()
+      const connected = client(root)
+      const first = await connected.execute({
+        commandId: 'first', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })
+      await expect(first.result).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      expect(await connected.inspect(first.sessionId)).toMatchObject({ lifecycle: 'idle', healthReason: 'process_crashed' })
+      driver.verdict = undefined
+      const second = await connected.execute({
+        commandId: 'second', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })
+      await expect(second.result).resolves.toMatchObject({ stopReason: 'completed' })
+      await daemon.close()
+    })
+  })
+
   it('marks a post-product native identity mismatch indeterminate instead of leaving a running receipt', async () => {
     const root = temporaryRoot()
     const workspace = join(root, 'workspace')

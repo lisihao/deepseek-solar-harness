@@ -104,6 +104,9 @@ export interface ResidentDaemonOptions {
  * @returns One stable Resident protocol error for durable receipt storage.
  */
 export function normalizeResidentDriverError(error: unknown, aborted: boolean): ResidentOperatorError {
+  // A driver's own indeterminate verdict is final: its diagnostic may quote a transport failure that must not turn it
+  // into a plain failure, which would release the Session.
+  if (error instanceof ResidentOperatorError && error.code === 'COMMAND_INDETERMINATE') return error
   const message = error instanceof Error ? error.message : String(error)
   if (/claude code.*(?:oauth access token has expired|re-authenticate to continue|\b401\b)/isu.test(message)) {
     return new ResidentOperatorError(
@@ -904,7 +907,7 @@ export class ResidentDaemon {
       const aborted = controller.signal.aborted
       const normalized = normalizeResidentDriverError(error, aborted)
       if (normalized.code === 'COMMAND_INDETERMINATE') {
-        this.store.markTurnIndeterminate(commandId, safeDiagnostic(normalized.message, prompt))
+        this.store.markTurnIndeterminate(commandId, safeDiagnostic(normalized.message, prompt), normalized.nativeOutcomeUnconfirmed)
       } else {
         this.store.fail(commandId, normalized.code, safeDiagnostic(normalized.message, prompt), aborted ? 'aborted' : 'error')
       }

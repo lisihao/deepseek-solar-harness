@@ -646,6 +646,7 @@ export class ResidentStore {
         )
       }
       this.assertCodexNativeToolCatalog(session, nativeToolPolicy, modelToolBridge)
+      this.assertNativeOutcomeResolved(session)
       if (session.active_turn_id !== null || session.lifecycle !== 'idle') {
         throw new ResidentOperatorError(
           session.active_turn_id === null
@@ -832,9 +833,11 @@ export class ResidentStore {
    * Fence one turn whose file or provider effect has no proven durable outcome.
    * @param commandId - admitted durable command identity.
    * @param message - bounded caller-redacted diagnostic.
+   * @param nativeOutcomeUnconfirmed - the native execution is not known to have stopped, so the Session stays closed to
+   *   every new command, under any command id, until `resolveIndeterminate` or a reset; otherwise the Session is released.
    * @returns the indeterminate receipt, requiring explicit reconciliation before replay.
    */
-  markTurnIndeterminate(commandId: string, message: string): TurnInspection {
+  markTurnIndeterminate(commandId: string, message: string, nativeOutcomeUnconfirmed = false): TurnInspection {
     return this.transaction(() => {
       const receipt = this.requireReceipt(commandId)
       if (receipt.state === 'indeterminate') return this.inspectTurn(receipt.turn_id)
@@ -849,13 +852,13 @@ export class ResidentStore {
       `).run(message, now, commandId)
       this.db.prepare(`
         UPDATE resident_sessions
-        SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed',
+        SET lifecycle = 'idle', health = 'degraded', health_reason = ?,
             active_turn_id = NULL, revision = revision + 1, updated_at = ?
         WHERE id = ?
-      `).run(now, receipt.session_id)
+      `).run(nativeOutcomeUnconfirmed ? 'native_outcome_unconfirmed' : 'process_crashed', now, receipt.session_id)
       this.db.prepare('DELETE FROM session_leases WHERE session_id = ?').run(receipt.session_id)
       this.appendEvent(receipt.session_id, 'turn.indeterminate', {
-        commandId, turnId: receipt.turn_id, reason: 'external_outcome_unproven',
+        commandId, turnId: receipt.turn_id, reason: nativeOutcomeUnconfirmed ? 'native_outcome_unconfirmed' : 'external_outcome_unproven',
       }, now)
       return this.inspectTurn(receipt.turn_id)
     })
@@ -1320,6 +1323,24 @@ export class ResidentStore {
         'PROTOCOL_MISMATCH',
       )
     }
+  }
+
+  /**
+   * Refuse a new command on a Session whose last turn may still be running natively. The refusal is read from the
+   * persisted Session row, so it holds under any command id and after a restart; only an explicit resolution of the
+   * indeterminate command, or a reset of the Session, lifts it.
+   * @param session - the Session the command would run on.
+   */
+  private assertNativeOutcomeResolved(session: SessionRow): void {
+    if (session.health_reason !== 'native_outcome_unconfirmed') return
+    const open = this.db.prepare(
+      "SELECT command_id FROM command_receipts WHERE session_id = ? AND state = 'indeterminate' AND resolution IS NULL ORDER BY created_at DESC LIMIT 1",
+    ).get(session.id) as { command_id: string } | undefined
+    throw new ResidentOperatorError(
+      `resident session ${session.id} has a turn whose native execution is not known to have stopped${open === undefined ? '' : ` (command ${open.command_id})`}; `
+      + 'resolve that command explicitly or reset the Session before sending another',
+      'COMMAND_INDETERMINATE',
+    )
   }
 
   private releaseSession(sessionId: string, now: string, runtimeHealthy: boolean): void {

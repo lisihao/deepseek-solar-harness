@@ -1495,13 +1495,16 @@ export class CodexResidentDriver implements ResidentProductDriver {
       probe.start()
       await probe.initialize(opening)
       await probe.resumeThread(error.threadId, request.workspace, opening)
-      return await reconcileUncertainStart(probe, error.baselineTurnId, error.message, request.signal)
+      return await reconcileUncertainStart(
+        probe, { baselineTurnId: error.baselineTurnId, startedTurnId: error.startedTurnId }, error.message, request.signal,
+      )
     } catch (caught: unknown) {
       if (caught instanceof ResidentOperatorError) throw caught
       throw new ResidentOperatorError(
         `Codex turn start outcome is unknown and the thread could not be inspected (${caught instanceof Error ? caught.message : String(caught)}); `
         + `inspect the existing command before retrying. ${error.message}`,
         'COMMAND_INDETERMINATE',
+        { nativeOutcomeUnconfirmed: true },
       )
     } finally {
       probe?.close()
