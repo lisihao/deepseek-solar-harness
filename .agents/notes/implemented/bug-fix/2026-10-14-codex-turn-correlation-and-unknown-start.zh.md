@@ -21,7 +21,7 @@ Status: implemented
 - **响应指明了回合**（读取其之前保存的通知失败了）：服务器已确认这个回合，所以按 id 等待它，如果 Resident 回合被中断就对它中断一次，最长 20 分钟。看到它结束，就知道原生执行已经停止，Session 被释放。
 - **没有响应指明回合：** 把基线之后的第一个新回合固定下来，只做观察。绝不中断它，出现第二个不同的新回合就说明身份有歧义，推断出的回合结束了也只报告为未证实，绝不当作这条命令的。
 
-其余结果（推断的回合、线程无法读取、等待结束时回合仍在运行）都带 `nativeOutcomeUnconfirmed`。守护进程随后让 Session 保持关闭：健康原因是 `native_outcome_unconfirmed`，准入会拒绝任何新命令（无论命令 id 是什么），直到显式解决该 indeterminate 命令或重置 Session。这个拒绝读自持久化的 Session 行，所以重启之后依然有效。守护进程还会保留驱动给出的 `COMMAND_INDETERMINATE` 结论，即使它的诊断引用了传输失败；早先的版本会把它改写成普通的 `RUNTIME_UNAVAILABLE` 失败并释放 Session。`reasoning` 阶段在原生回合有了名字之后才上报。
+其余结果（推断的回合、线程无法读取、等待结束时回合仍在运行）都带 `nativeOutcomeUnconfirmed`。守护进程随后让 Session 保持关闭：健康原因是 `native_outcome_unconfirmed`，准入会拒绝任何新命令（无论命令 id 是什么），直到显式解决该 indeterminate 命令或重置 Session。这个阻断属于未解决的命令 Receipt（解决或重置 Session 之前，其 `resolution` 为 `unconfirmed`），Session 的健康原因只是它的镜像，所以重启后依然有效，其他路径也无法解除：已处置的命令不能再次处置，处置另一条命令、完成压缩或压缩失败都会在该 Receipt 未解决期间让 Session 保持关闭，已关闭的 Session 也不准入压缩。daemon 崩溃时已开始运行的 Codex Receipt 同样按此恢复，因为原生 turn 可能仍在 daemon 遗留的 app-server 中运行。只有 `completed`、`interrupted`、`failed` 能证明原生 turn 已结束；线程列表会拒绝其他状态，对账读到的非这三者之一的状态让 Session 保持关闭。守护进程还会保留驱动给出的 `COMMAND_INDETERMINATE` 结论，即使它的诊断引用了传输失败；早先的版本会把它改写成普通的 `RUNTIME_UNAVAILABLE` 失败并释放 Session。`reasoning` 阶段在原生回合有了名字之后才上报。
 
 ## Alternatives considered
 

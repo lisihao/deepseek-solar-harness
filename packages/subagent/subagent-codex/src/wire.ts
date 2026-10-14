@@ -52,6 +52,18 @@ export const CODEX_APP_SERVER_METHODS = {
  * Methods the wire uses when a build offers them and goes without when it does not: a build that lacks one still
  * qualifies, and the feature that uses it is skipped.
  */
+/** The statuses a Codex turn ends in; any other status is not evidence that its execution stopped. */
+export const CODEX_TERMINAL_TURN_STATUSES = ['completed', 'interrupted', 'failed'] as const
+
+/**
+ * Whether a turn status proves the turn ended.
+ * @param status - status as the app-server reported it.
+ * @returns true only for `completed`, `interrupted` and `failed`.
+ */
+export function isCodexTerminalTurnStatus(status: string): boolean {
+  return (CODEX_TERMINAL_TURN_STATUSES as readonly string[]).includes(status)
+}
+
 export const CODEX_APP_SERVER_OPTIONAL_METHODS = {
   /** Lists a thread's turns, which a start of unknown outcome uses to find the turn it may have created. */
   ClientRequest: ['thread/turns/list'],
@@ -682,7 +694,11 @@ export class CodexAppServerWire {
     if (!Array.isArray(response.data)) throw new Error('subagent-codex: app-server returned invalid thread/turns/list data')
     return (response.data as unknown[]).map((value) => {
       const turn = object(value, 'thread/turns/list turn')
-      return { id: string(turn.id, 'thread/turns/list turn id'), status: string(turn.status, 'thread/turns/list turn status') }
+      const status = string(turn.status, 'thread/turns/list turn status')
+      if (status !== 'inProgress' && !isCodexTerminalTurnStatus(status)) {
+        throw new Error(`subagent-codex: app-server returned invalid thread/turns/list turn status ${status}`)
+      }
+      return { id: string(turn.id, 'thread/turns/list turn id'), status }
     })
   }
 
@@ -975,7 +991,7 @@ export class CodexAppServerWire {
       return
     }
     if (id !== this.turnId) return
-    if (!['completed', 'interrupted', 'failed'].includes(String(turn.status))) {
+    if (!isCodexTerminalTurnStatus(String(turn.status))) {
       throw new Error(`subagent-codex: app-server returned invalid terminal turn status ${String(turn.status)}`)
     }
     turnCompleted.resolve(params)

@@ -48,6 +48,35 @@ describe('a start whose response named the turn', () => {
     expect(turns.latestTurn).not.toHaveBeenCalled()
   })
 
+  it.each(['completed', 'interrupted', 'failed'])('releases the Session when the named turn ends as %s', async (status) => {
+    const error = await outcome(reconcileUncertainStart(probe([], [status]), { startedTurnId: 'turn-known' }, 'd', live(), timing))
+    expect(error.nativeOutcomeUnconfirmed).toBe(false)
+  })
+
+  it.each(['aborted', 'cancelled', 'in_progress', '', 'COMPLETED'])('does not take the unrecognised status %j as proof that the turn ended', async (status) => {
+    const turns = probe([], [status])
+    const error = await outcome(reconcileUncertainStart(turns, { startedTurnId: 'turn-known' }, 'd', live(), timing))
+    expect(error.nativeOutcomeUnconfirmed).toBe(true)
+    expect(turns.turnStatus.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('still interrupts the named turn once when it reports an unrecognised status', async () => {
+    const turns = probe([], ['aborted'])
+    const controller = new AbortController()
+    controller.abort(new Error('resident turn interrupted'))
+    const error = await outcome(reconcileUncertainStart(turns, { startedTurnId: 'turn-known' }, 'd', controller.signal, timing))
+    expect(turns.interruptTurn).toHaveBeenCalledOnce()
+    expect(error.nativeOutcomeUnconfirmed).toBe(true)
+  })
+
+  it('does not take an inferred turn with an unrecognised status as ended', async () => {
+    const turns = probe([{ id: 'turn-new', status: 'aborted' }])
+    const error = await outcome(reconcileUncertainStart(turns, { baselineTurnId: 'turn-old' }, 'd', live(), timing))
+    expect(error.nativeOutcomeUnconfirmed).toBe(true)
+    expect(error.message).toContain('turn-new was still running when the wait ended')
+    expect(error.message).not.toContain('ended with status')
+  })
+
   it('interrupts that turn once when the Resident turn is interrupted, and still waits for it to end', async () => {
     const turns = probe([], ['inProgress', 'inProgress', 'interrupted'])
     const controller = new AbortController()

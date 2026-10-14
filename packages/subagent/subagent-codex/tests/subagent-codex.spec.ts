@@ -1319,6 +1319,16 @@ describe('CodexAppServerWire', () => {
     const bad = wire.latestTurn(new AbortController().signal)
     child.peer.respond(await child.peer.nextMethod('thread/turns/list'), { data: 'nope' })
     await expect(bad).rejects.toThrow('invalid thread/turns/list data')
+    for (const status of ['aborted', 'COMPLETED', '']) {
+      const unknown = wire.latestTurn(new AbortController().signal)
+      child.peer.respond(await child.peer.nextMethod('thread/turns/list'), { data: [{ id: 'turn-x', status }] })
+      await expect(unknown).rejects.toThrow('invalid thread/turns/list turn status')
+    }
+    for (const status of ['completed', 'interrupted', 'failed', 'inProgress']) {
+      const legal = wire.latestTurn(new AbortController().signal)
+      child.peer.respond(await child.peer.nextMethod('thread/turns/list'), { data: [{ id: 'turn-x', status }] })
+      await expect(legal).resolves.toEqual({ id: 'turn-x', status })
+    }
 
     const running = wire.runTurn(['task'], new AbortController().signal)
     await child.peer.nextMethod('turn/start')

@@ -486,7 +486,7 @@ describe('ResidentStore', () => {
   it('marks a pre-crash running receipt indeterminate and never replays it', () => {
     const path = root()
     const first = new ResidentStore(path)
-    const accepted = first.accept('crash-command', 'hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    const accepted = first.accept('crash-command', 'hash', 'claude-code', '/workspace', PROFILE, PROFILE_SOURCE)
     first.markRunning('crash-command', 'thread-1', 'turn-1')
     first.close()
 
@@ -794,12 +794,116 @@ describe('Resident Session with a native turn that may still be running', () => 
     store.close()
   })
 
-  it('does not name a command in the refusal when no unresolved receipt remains', () => {
+  it('closes a Codex Session whose running turn was interrupted by a daemon crash, before any marker was persisted', () => {
+    const directory = root()
+    const first = new ResidentStore(directory)
+    const accepted = first.accept('crash', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    first.markRunning('crash', 'thread-1')
+    first.close()
+
+    const bootstrap = new ResidentStore(directory, { recoverInterrupted: false })
+    bootstrap.recoverInterrupted()
+    const snapshot = bootstrap.inspectSession(accepted.sessionId)
+    expect(snapshot).toMatchObject({ lifecycle: 'idle', health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
+    expect(refusalOf(() => bootstrap.accept('after', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).code)
+      .toBe('COMMAND_INDETERMINATE')
+    expect(bootstrap.readEvents(accepted.sessionId).events).toContainEqual(expect.objectContaining({
+      type: 'turn.indeterminate',
+      data: expect.objectContaining({ commandId: 'crash', reason: 'daemon_recovery', nativeOutcomeUnconfirmed: true }),
+    }))
+    bootstrap.resolveIndeterminate('crash', snapshot.stateRevision)
+    expect(bootstrap.accept('after', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
+    bootstrap.close()
+  })
+
+  it('releases a Codex Session whose command crashed before it started running, and a non-Codex running one', () => {
+    const directory = root()
+    const first = new ResidentStore(directory)
+    first.accept('never-ran', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    first.accept('claude-ran', 'hash-2', 'claude-code', '/workspace', PROFILE, PROFILE_SOURCE)
+    first.markRunning('claude-ran', 'native-1')
+    first.close()
+    const recovered = new ResidentStore(directory)
+    expect(recovered.accept('next-codex', 'hash-3', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
+    expect(recovered.accept('next-claude', 'hash-4', 'claude-code', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
+    recovered.close()
+  })
+
+  it('does not let a historical command release the Session that a later unresolved command closed', () => {
+    const store = new ResidentStore(root())
+    const accepted = store.accept('older', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.markRunning('older', 'thread-1')
+    store.markTurnIndeterminate('older', 'file effect unproven')
+    store.resolveIndeterminate('older', store.inspectSession(accepted.sessionId).stateRevision)
+    store.accept('newer', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.markRunning('newer', 'thread-1')
+    store.markTurnIndeterminate('newer', 'the native turn may still be running', true)
+    const revision = store.inspectSession(accepted.sessionId).stateRevision
+
+    expect(refusalOf(() => store.resolveIndeterminate('older', revision)).code).toBe('COMMAND_CONFLICT')
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({
+      health: 'degraded', healthReason: 'native_outcome_unconfirmed', stateRevision: revision,
+    })
+    expect(refusalOf(() => store.accept('third', 'hash-3', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).message).toMatch(/command newer/u)
+    store.close()
+  })
+
+  it('keeps the Session closed when a different unresolved command is resolved, until the blocking one is', () => {
+    const store = new ResidentStore(root())
+    const accepted = store.accept('ordinary', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.markRunning('ordinary', 'thread-1')
+    store.markTurnIndeterminate('ordinary', 'file effect unproven')
+    store.accept('blocking', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.markRunning('blocking', 'thread-1')
+    store.markTurnIndeterminate('blocking', 'the native turn may still be running', true)
+
+    store.resolveIndeterminate('ordinary', store.inspectSession(accepted.sessionId).stateRevision)
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({ health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
+    expect(refusalOf(() => store.accept('third', 'hash-3', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).code).toBe('COMMAND_INDETERMINATE')
+
+    store.resolveIndeterminate('blocking', store.inspectSession(accepted.sessionId).stateRevision)
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({ health: 'ok' })
+    expect(store.accept('third', 'hash-3', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
+    store.close()
+  })
+
+  it('refuses to compact a closed Session, and compaction paths never lift or overwrite the block', () => {
+    const store = new ResidentStore(root())
+    const source = store.accept('source', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.markRunning('source', 'thread-1')
+    store.settle('source', { output: [], stopReason: 'completed' })
+    const before = store.inspectSession(source.sessionId)
+    const hash = canonicalCompactRequestHash(source.sessionId, before.stateRevision)
+    store.acceptCompaction('compact', hash, source.sessionId, before.stateRevision)
+    // A block that appears while a compaction is in flight must survive the compaction ending either way.
+    const db = (store as unknown as { db: DatabaseSync }).db
+    db.prepare("UPDATE command_receipts SET state = 'indeterminate', resolution = 'unconfirmed' WHERE command_id = 'source'").run()
+    expect(store.completeCompaction('compact', source.sessionId, 'thread-1', false).session)
+      .toMatchObject({ health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
+    const blocked = store.inspectSession(source.sessionId)
+    expect(refusalOf(() => store.acceptCompaction('compact-2', canonicalCompactRequestHash(source.sessionId, blocked.stateRevision), source.sessionId, blocked.stateRevision)).code)
+      .toBe('COMMAND_INDETERMINATE')
+
+    db.prepare("UPDATE command_receipts SET resolution = 'abandon' WHERE command_id = 'source'").run()
+    const healed = store.inspectSession(source.sessionId)
+    store.acceptCompaction('compact-3', canonicalCompactRequestHash(source.sessionId, healed.stateRevision), source.sessionId, healed.stateRevision)
+    db.prepare("UPDATE command_receipts SET resolution = 'unconfirmed' WHERE command_id = 'source'").run()
+    expect(store.markCompactionIndeterminate('compact-3', 'unproven')).toMatchObject({ healthReason: 'native_outcome_unconfirmed' })
+    // Resolving the compaction leaves the turn block in place; resolving it twice is refused.
+    const afterCompaction = store.inspectSession(source.sessionId)
+    store.resolveIndeterminate('compact-3', afterCompaction.stateRevision)
+    expect(store.inspectSession(source.sessionId)).toMatchObject({ health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
+    expect(refusalOf(() => store.resolveIndeterminate('compact-3', store.inspectSession(source.sessionId).stateRevision)).code).toBe('COMMAND_CONFLICT')
+    store.close()
+  })
+
+  it('resets away the block only through an explicit reset, which records that the command was not resolved', () => {
     const { store, accepted } = unconfirmed(root())
-    ;(store as unknown as { db: DatabaseSync }).db.prepare("UPDATE command_receipts SET resolution = 'abandon' WHERE command_id = 'first'").run()
-    expect(() => store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE))
-      .toThrow(/not known to have stopped; resolve/u)
-    expect(accepted.sessionId).toBeDefined()
+    const snapshot = store.inspectSession(accepted.sessionId)
+    store.reset(accepted.sessionId, snapshot.stateRevision, 'operator reset')
+    expect(store.inspectSession(accepted.sessionId)).toMatchObject({ health: 'ok' })
+    expect(refusalOf(() => store.resolveIndeterminate('first', store.inspectSession(accepted.sessionId).stateRevision)).code).toBe('COMMAND_CONFLICT')
+    expect(store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
     store.close()
   })
 })

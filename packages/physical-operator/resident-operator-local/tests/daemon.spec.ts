@@ -1166,6 +1166,36 @@ describe('ResidentDaemon', () => {
       await restarted.close()
     })
 
+    it('keeps the Session closed when the daemon crashed while a Codex turn was still running, before any marker was persisted', async () => {
+      const root = temporaryRoot()
+      const workspace = join(root, 'workspace')
+      mkdirSync(workspace)
+      const bootstrap = new ResidentStore(root, { recoverInterrupted: false })
+      const crashed = bootstrap.accept(
+        'crashed', 'crashed-hash', 'codex', realpathSync(workspace), { model: 'gpt-test', effort: 'medium' }, 'manual',
+      )
+      bootstrap.markRunning('crashed', 'native-crashed')
+      bootstrap.close()
+
+      const driver = new MemoryDriver()
+      const daemon = new ResidentDaemon({ root, drivers: [driver] })
+      await daemon.start()
+      const connected = client(root)
+      expect(await connected.inspect(crashed.sessionId)).toMatchObject({ lifecycle: 'idle', health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
+      await expect(connected.execute({
+        commandId: 'after-crash', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      expect(driver.commandIds).toEqual([])
+
+      await connected.resolveIndeterminate('crashed', (await connected.inspect(crashed.sessionId)).stateRevision)
+      const admitted = await connected.execute({
+        commandId: 'after-resolution', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })
+      await expect(admitted.result).resolves.toMatchObject({ stopReason: 'completed' })
+      expect(driver.commandIds).toEqual(['after-resolution'])
+      await daemon.close()
+    })
+
     it('releases the Session when the native execution is known to have stopped, so the next command runs', async () => {
       const root = temporaryRoot()
       const workspace = join(root, 'workspace')

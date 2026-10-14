@@ -33,6 +33,11 @@ import {
 const MAX_INLINE_RESULT_BYTES = 64 * 1024
 const MAX_OBSERVATION_PREVIEW_CHARS = 1_600
 const MAX_OBSERVATION_NAME_CHARS = 160
+/**
+ * Pending `command_receipts.resolution` of an indeterminate command whose native execution is not known to have
+ * stopped. It blocks the Session until an explicit resolution (`abandon`) or a Session reset (`reset`) replaces it.
+ */
+const NATIVE_OUTCOME_UNCONFIRMED = 'unconfirmed'
 
 /**
  * Bound trace text and remove the small set of credential-shaped values that
@@ -498,26 +503,44 @@ export class ResidentStore {
     `)
   }
 
-  /** Any pre-crash accepted/running command is unsafe to replay automatically. */
-  /** Recover pre-crash work after the owning daemon has acquired authority. */
+  /**
+   * Recover pre-crash work after the owning daemon has acquired authority. No pre-crash command is replayed. A Codex
+   * turn that had started running may still be executing in an app-server the crashed daemon left behind, so its
+   * Session stays closed to every new command until the receipt is resolved or the Session is reset.
+   */
   recoverInterrupted(): void {
     const now = new Date().toISOString()
     this.transaction(() => {
-      const interrupted = this.db.prepare(
-        "SELECT command_id, session_id, turn_id FROM command_receipts WHERE state IN ('accepted', 'running')",
-      ).all() as unknown as Array<{ command_id: string; session_id: string; turn_id: string }>
+      const interrupted = this.db.prepare(`
+        SELECT r.command_id, r.session_id, r.turn_id, r.state, s.operator_id
+        FROM command_receipts r JOIN resident_sessions s ON s.id = r.session_id
+        WHERE r.state IN ('accepted', 'running')
+      `).all() as unknown as Array<{
+        command_id: string
+        session_id: string
+        turn_id: string
+        state: string
+        operator_id: string
+      }>
       for (const row of interrupted) {
+        const unconfirmed = row.state === 'running' && row.operator_id === 'codex'
         this.db.prepare(
-          "UPDATE command_receipts SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, updated_at = ? WHERE command_id = ?",
-        ).run('daemon stopped before durable settlement; automatic replay is forbidden', now, row.command_id)
+          "UPDATE command_receipts SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, resolution = ?, updated_at = ? WHERE command_id = ?",
+        ).run(
+          'daemon stopped before durable settlement; automatic replay is forbidden',
+          unconfirmed ? NATIVE_OUTCOME_UNCONFIRMED : null,
+          now,
+          row.command_id,
+        )
         this.db.prepare('DELETE FROM session_leases WHERE session_id = ?').run(row.session_id)
         this.db.prepare(
-          "UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed', active_turn_id = NULL, revision = revision + 1, updated_at = ? WHERE id = ?",
-        ).run(now, row.session_id)
+          "UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = ?, active_turn_id = NULL, revision = revision + 1, updated_at = ? WHERE id = ?",
+        ).run(this.degradedReason(row.session_id, 'process_crashed'), now, row.session_id)
         this.appendEvent(row.session_id, 'turn.indeterminate', {
           commandId: row.command_id,
           turnId: row.turn_id,
           reason: 'daemon_recovery',
+          ...unconfirmed ? { nativeOutcomeUnconfirmed: true } : {},
         }, now)
       }
       const interruptedCompactions = this.db.prepare(
@@ -530,9 +553,9 @@ export class ResidentStore {
           WHERE command_id = ?
         `).run('daemon stopped before native compaction settlement; automatic replay is forbidden', now, row.command_id)
         this.db.prepare(`
-          UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed',
+          UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = ?,
             revision = revision + 1, updated_at = ? WHERE id = ?
-        `).run(now, row.session_id)
+        `).run(this.degradedReason(row.session_id, 'process_crashed'), now, row.session_id)
         this.appendEvent(row.session_id, 'session.compaction_indeterminate', {
           commandId: row.command_id,
           reason: 'daemon_recovery',
@@ -847,15 +870,15 @@ export class ResidentStore {
       const now = new Date().toISOString()
       this.db.prepare(`
         UPDATE command_receipts
-        SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, updated_at = ?
+        SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, resolution = ?, updated_at = ?
         WHERE command_id = ?
-      `).run(message, now, commandId)
+      `).run(message, nativeOutcomeUnconfirmed ? NATIVE_OUTCOME_UNCONFIRMED : null, now, commandId)
       this.db.prepare(`
         UPDATE resident_sessions
         SET lifecycle = 'idle', health = 'degraded', health_reason = ?,
             active_turn_id = NULL, revision = revision + 1, updated_at = ?
         WHERE id = ?
-      `).run(nativeOutcomeUnconfirmed ? 'native_outcome_unconfirmed' : 'process_crashed', now, receipt.session_id)
+      `).run(this.degradedReason(receipt.session_id, 'process_crashed'), now, receipt.session_id)
       this.db.prepare('DELETE FROM session_leases WHERE session_id = ?').run(receipt.session_id)
       this.appendEvent(receipt.session_id, 'turn.indeterminate', {
         commandId, turnId: receipt.turn_id, reason: nativeOutcomeUnconfirmed ? 'native_outcome_unconfirmed' : 'external_outcome_unproven',
@@ -1031,6 +1054,9 @@ export class ResidentStore {
           profile_source = NULL, health = 'ok', health_reason = NULL,
           revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(now, sessionId)
+      this.db.prepare(
+        "UPDATE command_receipts SET resolution = 'reset', updated_at = ? WHERE session_id = ? AND state = 'indeterminate' AND resolution = ?",
+      ).run(now, sessionId, NATIVE_OUTCOME_UNCONFIRMED)
       this.appendEvent(sessionId, 'session.reset', { reason }, now)
       return this.inspectSession(sessionId)
     })
@@ -1086,6 +1112,7 @@ export class ResidentStore {
         }
       }
       const row = this.requireIdleRevision(sessionId, expectedRevision)
+      this.assertNativeOutcomeResolved(row)
       if (row.native_session_id === null) {
         throw new ResidentOperatorError(`resident session ${sessionId} has no native history to compact`, 'SESSION_UNAVAILABLE')
       }
@@ -1152,10 +1179,11 @@ export class ResidentStore {
         throw new ResidentOperatorError('native compaction replaced the Resident Session identity', 'INVALID_RESULT')
       }
       const now = new Date().toISOString()
+      const blocked = this.degradedReason(sessionId, undefined)
       this.db.prepare(`
-        UPDATE resident_sessions SET lifecycle = 'idle', health = 'ok', health_reason = NULL,
+        UPDATE resident_sessions SET lifecycle = 'idle', health = ?, health_reason = ?,
           revision = revision + 1, updated_at = ? WHERE id = ?
-      `).run(now, sessionId)
+      `).run(blocked === undefined ? 'ok' : 'degraded', blocked ?? null, now, sessionId)
       const result = { session: this.inspectSession(sessionId), nativeSessionId, compactedAt: now }
       this.db.prepare(`
         UPDATE session_compaction_receipts
@@ -1215,9 +1243,9 @@ export class ResidentStore {
         WHERE command_id = ?
       `).run(message, now, commandId)
       this.db.prepare(`
-        UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed',
+        UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = ?,
           revision = revision + 1, updated_at = ? WHERE id = ?
-      `).run(now, receipt.session_id)
+      `).run(this.degradedReason(receipt.session_id, 'process_crashed'), now, receipt.session_id)
       this.appendEvent(receipt.session_id, 'session.compaction_indeterminate', {
         commandId,
         reason: 'native_outcome_unproven',
@@ -1235,8 +1263,8 @@ export class ResidentStore {
     this.transaction(() => {
       const compact = this.compactReceiptByCommand(commandId)
       if (compact !== undefined) {
-        if (compact.state !== 'indeterminate') {
-          throw new ResidentOperatorError(`command ${commandId} is not indeterminate`, 'COMMAND_CONFLICT')
+        if (compact.state !== 'indeterminate' || compact.resolution !== null) {
+          throw new ResidentOperatorError(`command ${commandId} is not an unresolved indeterminate command`, 'COMMAND_CONFLICT')
         }
         const session = this.sessionRow(compact.session_id)
         if (session.revision !== expectedRevision) {
@@ -1249,9 +1277,7 @@ export class ResidentStore {
         this.db.prepare(`
           UPDATE session_compaction_receipts SET resolution = 'abandon', updated_at = ? WHERE command_id = ?
         `).run(now, commandId)
-        this.db.prepare(`
-          UPDATE resident_sessions SET health = 'ok', health_reason = NULL, revision = revision + 1, updated_at = ? WHERE id = ?
-        `).run(now, compact.session_id)
+        this.restoreHealth(compact.session_id, now)
         this.appendEvent(compact.session_id, 'session.compaction_indeterminate_resolved', {
           commandId,
           decision: 'abandon',
@@ -1259,8 +1285,8 @@ export class ResidentStore {
         return
       }
       const receipt = this.requireReceipt(commandId)
-      if (receipt.state !== 'indeterminate') {
-        throw new ResidentOperatorError(`command ${commandId} is not indeterminate`, 'COMMAND_CONFLICT')
+      if (receipt.state !== 'indeterminate' || (receipt.resolution !== null && receipt.resolution !== NATIVE_OUTCOME_UNCONFIRMED)) {
+        throw new ResidentOperatorError(`command ${commandId} is not an unresolved indeterminate command`, 'COMMAND_CONFLICT')
       }
       const session = this.sessionRow(receipt.session_id)
       if (session.revision !== expectedRevision) {
@@ -1273,9 +1299,7 @@ export class ResidentStore {
       this.db.prepare(
         "UPDATE command_receipts SET resolution = 'abandon', updated_at = ? WHERE command_id = ?",
       ).run(now, commandId)
-      this.db.prepare(`
-        UPDATE resident_sessions SET health = 'ok', health_reason = NULL, revision = revision + 1, updated_at = ? WHERE id = ?
-      `).run(now, receipt.session_id)
+      this.restoreHealth(receipt.session_id, now)
       this.appendEvent(receipt.session_id, 'turn.indeterminate_resolved', {
         commandId,
         decision: 'abandon',
@@ -1326,18 +1350,47 @@ export class ResidentStore {
   }
 
   /**
-   * Refuse a new command on a Session whose last turn may still be running natively. The refusal is read from the
-   * persisted Session row, so it holds under any command id and after a restart; only an explicit resolution of the
-   * indeterminate command, or a reset of the Session, lifts it.
+   * Command whose native execution is not known to have stopped and that has not been resolved or reset away.
+   * @param sessionId - Session to inspect.
+   * @returns the blocking command id, or `undefined` when no command blocks the Session.
+   */
+  private blockingCommand(sessionId: string): string | undefined {
+    const row = this.db.prepare(
+      "SELECT command_id FROM command_receipts WHERE session_id = ? AND state = 'indeterminate' AND resolution = ? ORDER BY created_at DESC LIMIT 1",
+    ).get(sessionId, NATIVE_OUTCOME_UNCONFIRMED) as { command_id: string } | undefined
+    return row?.command_id
+  }
+
+  /**
+   * Health reason for a degraded Session: the native-outcome block outranks any other reason, so no other degrading
+   * or healing path can drop it while its command is unresolved.
+   * @param sessionId - Session to inspect.
+   * @param fallback - reason to use when no command blocks the Session.
+   */
+  private degradedReason<F extends string | undefined>(sessionId: string, fallback: F): 'native_outcome_unconfirmed' | F {
+    return this.blockingCommand(sessionId) === undefined ? fallback : 'native_outcome_unconfirmed'
+  }
+
+  /** Heal a Session after one command is resolved, keeping it degraded while another command still blocks it. */
+  private restoreHealth(sessionId: string, now: string): void {
+    const reason = this.degradedReason(sessionId, undefined)
+    this.db.prepare(
+      'UPDATE resident_sessions SET health = ?, health_reason = ?, revision = revision + 1, updated_at = ? WHERE id = ?',
+    ).run(reason === undefined ? 'ok' : 'degraded', reason ?? null, now, sessionId)
+  }
+
+  /**
+   * Refuse a new command on a Session with a command whose native execution may still be running. The refusal is
+   * derived from the command receipts, so it holds under any command id and after a restart; only an explicit
+   * resolution of that command, or a reset of the Session, lifts it. Neither is evidence that the native execution
+   * ended.
    * @param session - the Session the command would run on.
    */
   private assertNativeOutcomeResolved(session: SessionRow): void {
-    if (session.health_reason !== 'native_outcome_unconfirmed') return
-    const open = this.db.prepare(
-      "SELECT command_id FROM command_receipts WHERE session_id = ? AND state = 'indeterminate' AND resolution IS NULL ORDER BY created_at DESC LIMIT 1",
-    ).get(session.id) as { command_id: string } | undefined
+    const blocking = this.blockingCommand(session.id)
+    if (blocking === undefined) return
     throw new ResidentOperatorError(
-      `resident session ${session.id} has a turn whose native execution is not known to have stopped${open === undefined ? '' : ` (command ${open.command_id})`}; `
+      `resident session ${session.id} has a turn whose native execution is not known to have stopped (command ${blocking}); `
       + 'resolve that command explicitly or reset the Session before sending another',
       'COMMAND_INDETERMINATE',
     )

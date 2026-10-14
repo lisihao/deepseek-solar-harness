@@ -16,6 +16,7 @@
  *   the identity ambiguous, and every outcome keeps the Session closed to new commands until it is resolved.
  */
 import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
+import { isCodexTerminalTurnStatus } from '@deepseek-ai/dsh-subagent-codex'
 
 /** The thread reads and the interrupt the reconciliation needs from a Codex app-server connection. */
 export interface CodexTurnProbe {
@@ -86,15 +87,16 @@ async function waitForKnownTurn(
     } catch (error: unknown) {
       throw unreadable(error, diagnostic)
     }
-    if (status !== undefined && status !== 'inProgress') {
-      // The server named this turn and it has ended: the execution is known to have stopped, so the Session is released.
+    if (status !== undefined && isCodexTerminalTurnStatus(status)) {
+      // The server named this turn and reported a legal terminal status: the execution is known to have stopped, so the
+      // Session is released. An unrecognised status proves nothing and is handled as still running.
       throw new ResidentOperatorError(
         `Codex turn ${turnId} ended with status ${status} before its notifications could be read; its output was not captured, `
         + `so inspect the existing command before retrying. ${diagnostic}`,
         'COMMAND_INDETERMINATE',
       )
     }
-    if (status === 'inProgress' && signal.aborted && !interrupted) {
+    if (status !== undefined && !isCodexTerminalTurnStatus(status) && signal.aborted && !interrupted) {
       // The turn is the one the response named, so interrupting it cannot touch another turn.
       interrupted = true
       probe.interruptTurn(turnId)
@@ -135,7 +137,7 @@ async function observeInferredTurn(
         )
       } else pinned.status = latest.status
     }
-    if (pinned !== undefined && pinned.status !== 'inProgress') {
+    if (pinned !== undefined && isCodexTerminalTurnStatus(pinned.status)) {
       throw unconfirmed(
         `Codex turn start outcome is unknown; native turn ${pinned.id} appeared after it and ended with status ${pinned.status}, `
         + 'but nothing proves it is this command\'s turn',

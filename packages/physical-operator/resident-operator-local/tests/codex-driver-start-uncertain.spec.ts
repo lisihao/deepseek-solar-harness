@@ -4,7 +4,8 @@
  */
 import { Duplex } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
-import type { ResidentDriverExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
+import { ResidentOperatorError, type ResidentDriverExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
+import { normalizeResidentDriverError } from '../src/daemon.ts'
 import { CodexResidentDriver } from '../src/drivers.ts'
 
 type Frame = { id?: number | string; method?: string; params?: Record<string, unknown> }
@@ -59,11 +60,15 @@ function request(patch: Partial<ResidentDriverExecuteRequest> = {}) {
   return { value, onRunning, onProgress }
 }
 
-function driverWith(streams: FakeAppServer[]) {
+function driverWith(streams: Array<FakeAppServer | Error>) {
   const driver = new CodexResidentDriver()
   const internals = driver as unknown as { openStream: () => Promise<FakeAppServer>; requireAvailable: () => Promise<void> }
   internals.requireAvailable = async () => {}
-  const opened = vi.fn(async () => streams.shift()!)
+  const opened = vi.fn(async () => {
+    const next = streams.shift()
+    if (next instanceof Error) throw next
+    return next!
+  })
   internals.openStream = opened
   return { driver, opened }
 }
@@ -111,6 +116,27 @@ describe('Codex resident turn with an unknown start', () => {
     const error = await driver.execute(request().value).then(() => undefined, (caught: unknown) => caught)
     expect(error).toMatchObject({ code: 'COMMAND_INDETERMINATE', nativeOutcomeUnconfirmed: true })
     expect((error as Error).message).toContain('could not be inspected')
+  }, 20_000)
+
+  it('keeps the Session closed when the inspecting connection cannot be opened, with the real typed unavailability error', async () => {
+    const main = new FakeAppServer((method, _params, server) => {
+      if (method === 'thread/turns/list') return { data: [] }
+      if (method === 'turn/start') { setImmediate(() => { server.push(null) }); return undefined }
+      return baseAnswers(method)
+    })
+    const unavailable = new ResidentOperatorError('Codex app-server could not be started', 'RUNTIME_UNAVAILABLE')
+    const { driver, opened } = driverWith([main, unavailable])
+    const error = await driver.execute(request().value).then(() => undefined, (caught: unknown) => caught)
+    expect(opened).toHaveBeenCalledTimes(2)
+    expect(error).toBeInstanceOf(ResidentOperatorError)
+    expect(error).toMatchObject({ code: 'COMMAND_INDETERMINATE', nativeOutcomeUnconfirmed: true })
+    expect((error as Error).message).toContain('could not be inspected')
+    expect((error as Error).message).toContain('Codex app-server could not be started')
+    expect((error as Error).message).not.toContain('the task')
+    // The daemon keeps the verdict: the command is fenced, not failed, and the Session stays closed.
+    expect(normalizeResidentDriverError(error, false)).toMatchObject({ code: 'COMMAND_INDETERMINATE', nativeOutcomeUnconfirmed: true })
+    // The turn was started once on the main connection and never replayed.
+    expect(main.methods.filter(method => method === 'turn/start')).toHaveLength(1)
   }, 20_000)
 
   it('keeps the turn id the response named when reading the notifications before it fails, and waits for that turn by id', async () => {
