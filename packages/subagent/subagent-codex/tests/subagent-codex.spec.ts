@@ -1094,20 +1094,41 @@ describe('CodexAppServerWire', () => {
     }
   })
 
-  it('rejects conflicting early turn identities before accepting output', async () => {
+  it('reads only the responded turn when the app-server reports other turns of the thread before the response', async () => {
     const { child, wire } = await initializeWire()
     const result = wire.runTurn(['task'], new AbortController().signal)
     const turnStart = await child.peer.nextMethod('turn/start')
-    child.peer.send({
-      method: 'turn/started',
-      params: { threadId: 'thread-1', turn: { id: 'turn-early' } },
-    })
+    // An unfinished turn of an earlier process and a turn the server started itself, both before the response.
+    child.peer.send(
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-stale' } } },
+      agentMessage('stale output', 'final_answer', 'turn-stale'),
+      turnCompleted('interrupted', 'turn-stale'),
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-internal' } } },
+      agentMessage('internal output', 'final_answer', 'turn-internal'),
+      agentMessage('early output', 'commentary', 'turn-response'),
+    )
     child.peer.respond(turnStart, { turn: { id: 'turn-response' } })
-    await expect(result).rejects.toThrow('did not match the active turn')
+    child.peer.send(agentMessage('the answer', 'final_answer', 'turn-response'), turnCompleted('completed', 'turn-response'))
+    await expect(result).resolves.toMatchObject({ output: [{ type: 'text', text: 'the answer' }], stopReason: 'completed' })
+    expect(wire.currentTurnId).toBe('turn-response')
     wire.close()
   })
 
-  it('rejects conflicting early notifications and requests before turn/start', async () => {
+  it('takes the terminal notification of the responded turn when it arrives before the response, and not another turn\'s', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      turnCompleted('failed', 'turn-stale'),
+      agentMessage('the answer', 'final_answer', 'turn-response'),
+      turnCompleted('completed', 'turn-response'),
+    )
+    child.peer.respond(turnStart, { turn: { id: 'turn-response' } })
+    await expect(result).resolves.toMatchObject({ output: [{ type: 'text', text: 'the answer' }], stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('still refuses a request that names a turn before turn/start, and conflicting turns in early requests', async () => {
     {
       const { child, wire } = await initializeWire()
       child.peer.send({
@@ -1124,11 +1145,8 @@ describe('CodexAppServerWire', () => {
       const result = wire.runTurn(['task'], new AbortController().signal)
       await child.peer.nextMethod('turn/start')
       child.peer.send(
-        {
-          method: 'turn/started',
-          params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
-        },
-        agentMessage('wrong', 'final_answer', 'turn-2'),
+        { id: 'first', method: 'item/fileChange/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-1' } },
+        { id: 'second', method: 'item/fileChange/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-2' } },
       )
       await expect(result).rejects.toThrow('conflicting turns')
       wire.close()

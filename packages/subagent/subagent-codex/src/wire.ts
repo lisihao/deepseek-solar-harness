@@ -633,6 +633,16 @@ export class CodexAppServerWire {
     this.pendingTurnId = id
   }
 
+  /**
+   * Keep a notification that arrived before the `turn/start` response. The response names this turn; a notification
+   * can belong to another turn the app-server runs on the same thread, such as an unfinished turn of an earlier
+   * process or one it starts itself, so the id it carries is not a conflict. After the response only the notifications
+   * of the responded turn are read again.
+   */
+  private holdEarlyNotification(method: string, params: JsonObject): void {
+    if (this.turnCompleted !== undefined) this.earlyTurnNotifications.push({ method, params })
+  }
+
   private commitTurnId(id: string): void {
     if (this.pendingTurnId !== undefined && this.pendingTurnId !== id) {
       throw new Error('subagent-codex: turn/start response did not match the active turn')
@@ -726,10 +736,7 @@ export class CodexAppServerWire {
     if (method === 'turn/started') {
       const threadId = string(params.threadId, 'turn/started thread id')
       if (threadId !== this.threadId) return
-      const turn = object(params.turn, 'turn/started turn')
-      if (this.turnCompleted !== undefined && this.turnId === undefined) {
-        this.observePendingTurnId(string(turn.id, 'turn/started turn id'))
-      }
+      string(object(params.turn, 'turn/started turn').id, 'turn/started turn id')
       return
     }
     if (method === 'thread/tokenUsage/updated') {
@@ -737,10 +744,7 @@ export class CodexAppServerWire {
       if (threadId !== this.threadId) return
       const id = string(params.turnId, 'thread/tokenUsage/updated turn id')
       if (this.turnId === undefined) {
-        if (this.turnCompleted !== undefined) {
-          this.observePendingTurnId(id)
-          this.earlyTurnNotifications.push({ method, params })
-        }
+        this.holdEarlyNotification(method, params)
         return
       }
       if (id !== this.turnId) return
@@ -754,10 +758,7 @@ export class CodexAppServerWire {
       if (threadId !== this.threadId) return
       const id = string(params.turnId, 'item/started turn id')
       if (this.turnId === undefined) {
-        if (this.turnCompleted !== undefined) {
-          this.observePendingTurnId(id)
-          this.earlyTurnNotifications.push({ method, params })
-        }
+        this.holdEarlyNotification(method, params)
         return
       }
       if (id !== this.turnId) return
@@ -770,10 +771,7 @@ export class CodexAppServerWire {
       if (threadId !== this.threadId) return
       const id = string(params.turnId, 'item/completed turn id')
       if (this.turnId === undefined) {
-        if (this.turnCompleted !== undefined) {
-          this.observePendingTurnId(id)
-          this.earlyTurnNotifications.push({ method, params })
-        }
+        this.holdEarlyNotification(method, params)
         return
       }
       if (id !== this.turnId) return
@@ -804,8 +802,7 @@ export class CodexAppServerWire {
     const turnCompleted = this.turnCompleted
     if (turnCompleted === undefined) return
     if (this.turnId === undefined) {
-      this.observePendingTurnId(id)
-      this.earlyTurnNotifications.push({ method, params })
+      this.holdEarlyNotification(method, params)
       return
     }
     if (id !== this.turnId) return
