@@ -1,0 +1,19 @@
+{
+  "closedHeader": "物理算子：1 个常驻宿主，0 个 worker 运行中，1 条 lane 已暂停",
+  "notice": [
+    "这条 lane 已暂停接收新任务",
+    "上一条任务「Refactor the parser」（<本机时间>）在 Codex 里是否已经结束，DSH 无法确认。为避免同一件事被做两遍，新任务会被拒绝。",
+    "下面的处理不会停止 Codex 里可能还在运行的任务，也不会撤销它已经改动的文件。",
+    "我已确认它结束了，恢复这条 lane",
+    "重置这条 lane"
+  ],
+  "calls": [
+    {
+      "action": "resolve",
+      "expectedStateRevision": 7,
+      "commandId": "resident-closed-lane-command"
+    }
+  ],
+  "releasedHeaderLabel": "物理算子：1 个常驻宿主，0 个 worker 运行中",
+  "noticeAfterRelease": 0
+}
