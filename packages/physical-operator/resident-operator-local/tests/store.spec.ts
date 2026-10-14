@@ -816,14 +816,18 @@ describe('Resident Session with a native turn that may still be running', () => 
     bootstrap.close()
   })
 
-  it('releases a Codex Session whose command crashed before it started running, and a non-Codex running one', () => {
+  it('releases a Codex Session whose command crashed before it started running or had no native thread, and a non-Codex running one', () => {
     const directory = root()
     const first = new ResidentStore(directory)
     first.accept('never-ran', 'hash-1', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
     first.accept('claude-ran', 'hash-2', 'claude-code', '/workspace', PROFILE, PROFILE_SOURCE)
     first.markRunning('claude-ran', 'native-1')
+    // A Codex turn with no native thread (a direct-model turn) cannot have reached an app-server.
+    first.accept('direct-ran', 'hash-5', 'codex', '/direct-model', PROFILE, PROFILE_SOURCE)
+    first.markRunning('direct-ran')
     first.close()
     const recovered = new ResidentStore(directory)
+    expect(recovered.accept('next-direct', 'hash-6', 'codex', '/direct-model', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
     expect(recovered.accept('next-codex', 'hash-3', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
     expect(recovered.accept('next-claude', 'hash-4', 'claude-code', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
     recovered.close()

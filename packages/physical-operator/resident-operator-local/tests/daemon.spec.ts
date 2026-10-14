@@ -1088,9 +1088,12 @@ describe('ResidentDaemon', () => {
     /** Fails each execution with the verdict a Codex driver gives when a start has no authoritative response. */
     class UnconfirmedDriver extends MemoryDriver {
       verdict: ResidentOperatorError | undefined
+      /** Holds the failing execution open, standing in for the reconciliation wait on the native turn. */
+      hold: Promise<void> | undefined
       override async execute(request: ResidentDriverExecuteRequest) {
         if (this.verdict === undefined) return super.execute(request)
         this.commandIds.push(String(request.commandId))
+        if (this.hold !== undefined) await this.hold
         throw this.verdict
       }
     }
@@ -1164,6 +1167,37 @@ describe('ResidentDaemon', () => {
       await expect(admitted.result).resolves.toMatchObject({ stopReason: 'completed' })
       expect(restartedDriver.commandIds).toEqual(['after-resolution'])
       await restarted.close()
+    })
+
+    it('refuses a new command with SESSION_BUSY while the unconfirmed turn is still being waited for, then keeps the Session closed', async () => {
+      const root = temporaryRoot()
+      const workspace = join(root, 'workspace')
+      mkdirSync(workspace)
+      const driver = new UnconfirmedDriver()
+      driver.verdict = unconfirmed()
+      let release: () => void = () => {}
+      driver.hold = new Promise<void>((resolve) => { release = resolve })
+      const daemon = new ResidentDaemon({ root, drivers: [driver] })
+      await daemon.start()
+      const connected = client(root)
+      const first = await connected.execute({
+        commandId: 'first', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })
+      await vi.waitFor(() => { expect(driver.commandIds).toEqual(['first']) })
+      expect(await connected.inspect(first.sessionId)).toMatchObject({ lifecycle: 'running' })
+      await expect(connected.execute({
+        commandId: 'during-wait', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'SESSION_BUSY' })
+      expect(driver.commandIds).toEqual(['first'])
+
+      release()
+      await expect(first.result).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      driver.verdict = undefined
+      await expect(connected.execute({
+        commandId: 'after-wait', operatorId: 'codex', workspace, prompt: [{ type: 'text', text: 'task' }], signal: new AbortController().signal,
+      })).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+      expect(driver.commandIds).toEqual(['first'])
+      await daemon.close()
     })
 
     it('keeps the Session closed when the daemon crashed while a Codex turn was still running, before any marker was persisted', async () => {

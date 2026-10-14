@@ -505,14 +505,16 @@ export class ResidentStore {
 
   /**
    * Recover pre-crash work after the owning daemon has acquired authority. No pre-crash command is replayed. A Codex
-   * turn that had started running may still be executing in an app-server the crashed daemon left behind, so its
-   * Session stays closed to every new command until the receipt is resolved or the Session is reset.
+   * turn that was running on a native thread may still be executing in an app-server the crashed daemon left behind,
+   * so its Session stays closed to every new command until the receipt is resolved or the Session is reset. A turn
+   * with no native thread (a direct-model turn, or one that crashed before the thread was known) cannot have
+   * reached an app-server and releases the Session.
    */
   recoverInterrupted(): void {
     const now = new Date().toISOString()
     this.transaction(() => {
       const interrupted = this.db.prepare(`
-        SELECT r.command_id, r.session_id, r.turn_id, r.state, s.operator_id
+        SELECT r.command_id, r.session_id, r.turn_id, r.state, s.operator_id, s.native_session_id
         FROM command_receipts r JOIN resident_sessions s ON s.id = r.session_id
         WHERE r.state IN ('accepted', 'running')
       `).all() as unknown as Array<{
@@ -521,9 +523,10 @@ export class ResidentStore {
         turn_id: string
         state: string
         operator_id: string
+        native_session_id: string | null
       }>
       for (const row of interrupted) {
-        const unconfirmed = row.state === 'running' && row.operator_id === 'codex'
+        const unconfirmed = row.state === 'running' && row.operator_id === 'codex' && row.native_session_id !== null
         this.db.prepare(
           "UPDATE command_receipts SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, resolution = ?, updated_at = ? WHERE command_id = ?",
         ).run(
