@@ -178,12 +178,13 @@ describe('managed runtime directories', () => {
 })
 
 /**
- * Wall-clock bound for a test that runs freshly written executables. Observed on macOS 26 with 10 CPUs at a load
- * average of 4-7: the first run of a new script took 0.3-2.5 s and a later run of the same file 5-19 ms. Six
- * concurrent copies of this spec failed in 18 of 18 copies before the long tests were split, in 12 of 18 after the
- * split, and in 0 of 12 with this bound, where the slowest test took 12.9 s. The cause of the slow first run is not
- * established; the files carry `com.apple.provenance`, which is only an observed correlate. The bound is an observed
- * margin, not a proof: heavier contention can still exceed it.
+ * Wall-clock budget for the whole of a test that runs freshly written executables, not for one run. A call trace of
+ * this spec (10 CPUs, load average 4-7, wall time per observed call) recorded the first observed call of a newly
+ * written script at 0.3-2.5 s and later observed calls of the same file at 5-19 ms; it observes calls, so it does not
+ * show when a file was first physically executed. Six concurrent copies of this spec failed in 18 of 18 copies before
+ * the long tests were split, in 12 of 18 after the split, and in 0 of 12 with this budget, where the slowest test took
+ * 12.9 s. The cause of the slow first observed call is not established. The budget is an observed margin, not a proof:
+ * heavier contention can still exceed it.
  */
 const FRESH_EXECUTABLE_TIMEOUT_MS = 15_000
 
