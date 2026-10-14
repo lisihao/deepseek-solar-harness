@@ -1394,7 +1394,8 @@ export class ResidentStore {
     if (blocking === undefined) return
     throw new ResidentOperatorError(
       `resident session ${session.id} has a turn whose native execution is not known to have stopped (command ${blocking}); `
-      + 'resolve that command explicitly or reset the Session before sending another',
+      + 'new commands are refused so the same work is not done twice. The owner can release this lane from the 算子 (Resident) panel in Desktop, '
+      + 'or resolve that command explicitly or reset the Session through the Resident client',
       'COMMAND_INDETERMINATE',
     )
   }
