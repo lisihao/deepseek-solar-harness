@@ -143,7 +143,10 @@ describe('Resident panel with a closed lane', () => {
     })
   })
 
-  it('reads the panel again after a release, and shows it when that read fails', async () => {
+  it.each([
+    ['an Error', () => Promise.reject(new Error('daemon unreachable'))],
+    ['text', () => rejectWith('daemon unreachable')],
+  ])('reads the panel again after a release, and shows it when that read fails with %s', async (_kind, fail) => {
     window.history.replaceState({}, '', '/')
     let reads = 0
     const request = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
@@ -151,7 +154,7 @@ describe('Resident panel with a closed lane', () => {
       if (path.endsWith('/cli')) return json({ runtimes: [] })
       if (init?.method === 'POST') return json({ session: closedLane({ health: 'ok' }) })
       reads += 1
-      if (reads > 1) return rejectWith('daemon unreachable')
+      if (reads > 1) return fail()
       return json({
         generatedAt: TIME, providers: [], sessions: [closedLane()], events: [], activities: [],
         hiddenDiagnosticSessions: 0, activeWorkers: 0,
