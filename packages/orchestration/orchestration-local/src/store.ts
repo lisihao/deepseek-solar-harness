@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto'
 import {
   chmodSync,
   closeSync,
-  copyFileSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -214,7 +215,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         'ORCHESTRATION_UNAVAILABLE',
       )
     }
-    if (version > 0 && version < 7) this.backUpBeforeSchema7(path)
+    if (version > 0 && version < 7) this.backUpBeforeSchema7(path, version)
     if (version === 0) this.createSchema()
     else if (version === 1) {
       this.migrateSchema1To2()
@@ -989,15 +990,51 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
   }
 
   /**
-   * Keep one copy of the state file from before the first migration to schema 7. A program that only knows an older
+   * Keep one copy of the state from before the first migration to schema 7. A program that only knows an older
    * schema refuses the migrated file, so this copy is what a manual rollback restores. An existing copy is kept: it
    * holds the state from before the migration, which a later start must not overwrite.
+   *
+   * The copy is one SQLite snapshot written by `VACUUM INTO`, so it includes every commit still in the write-ahead log
+   * and cannot mix pages from two moments, which copying the file after a checkpoint cannot promise while another
+   * connection holds an older read. It is written beside the final name, checked, and renamed into place, so the final
+   * name never holds a partial or unchecked copy; a leftover from an interrupted attempt is discarded, never reused.
+   * A copy that cannot be made or checked stops the start before anything is migrated.
+   * @param path - the state file.
+   * @param version - the schema version the file has before migration.
    */
-  private backUpBeforeSchema7(path: string): void {
+  private backUpBeforeSchema7(path: string, version: number): void {
     const backup = `${path}.before-schema-7`
     if (existsSync(backup)) return
-    this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
-    copyFileSync(path, backup)
-    chmodSync(backup, 0o600)
+    const partial = `${backup}.partial`
+    try {
+      rmSync(partial, { force: true })
+      this.db.prepare('VACUUM INTO ?').run(partial)
+      chmodSync(partial, 0o600)
+      const copy = new DatabaseSync(partial, { readOnly: true })
+      try {
+        const intact = copy.prepare('PRAGMA integrity_check').get()?.integrity_check === 'ok'
+        const copied = Number(copy.prepare('PRAGMA user_version').get()?.user_version)
+        if (!intact || copied !== version) throw new Error(`the copy failed its check (integrity ${String(intact)}, schema ${String(copied)})`)
+      } finally {
+        copy.close()
+      }
+      // VACUUM INTO does not sync its output; without this a crash after the migration could leave a truncated copy
+      // under the final name, and the next start would keep it.
+      const descriptor = openSync(partial, 'r+')
+      try {
+        fsyncSync(descriptor)
+      } finally {
+        closeSync(descriptor)
+      }
+      renameSync(partial, backup)
+    } catch (error) {
+      rmSync(partial, { force: true, recursive: true })
+      // The constructor fails, so no caller holds a handle to close.
+      this.db.close()
+      throw new OrchestrationError(
+        `orchestration state could not be backed up before migrating to schema 7: ${error instanceof Error ? error.message : String(error)}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
   }
 }

@@ -291,6 +291,7 @@ function pairKind(extra: Partial<KennelCollaborationKind> = {}) {
     const members = facts.members.filter(value => value.membership === 'enabled').slice(0, 2).map(value => ({
       gouziId: String(value.gouziId), generation: value.generation, name: value.name, role: value.role,
       operatorId: `gouzi.${String(value.gouziId)}.codex`, model: 'm',
+      ...value.profile === undefined ? {} : { profile: value.profile },
     }))
     return members.length < 2 ? [] : [{ kind: 'collaboration', collaboration: 'pair', workspace: '/project', details: { note: 'x' },
       id: JSON.stringify(['pair', ...members.map(value => [value.gouziId, value.generation])]), members }]
@@ -518,6 +519,46 @@ it('does not start a collaboration whose candidate is no longer offered or whose
   removed.generate.mockImplementation(() => { removed.dispose(); return JSON.stringify({ candidateId: removed.pairId }) })
   await expect(removed.run()).rejects.toMatchObject({ code: 'KENNEL_COLLABORATION_UNAVAILABLE' })
   expect(removed.startMock).not.toHaveBeenCalled()
+})
+it('starts a collaboration whose members\' notes are unchanged, with the notes it was logged with', async () => {
+  const f = await collaborationFixture()
+  Object.assign(f.members[0]!, { profile: '先写测试' })
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
+  await f.run()
+  expect(f.startMock).toHaveBeenCalledOnce()
+  expect(f.starts[0]?.candidate.members.map(value => [value.gouziId, value.profile])).toEqual([['dog', '先写测试'], ['cat', undefined]])
+  expect(f.agent.session.events.find(event => event.type === 'kennel/dispatch-collaboration')).toMatchObject({
+    data: { candidate: { members: [{ gouziId: 'dog', profile: '先写测试' }, { gouziId: 'cat' }] } } })
+})
+it.each([
+  ['changed', { dog: '旧备忘' }, { dog: '新备忘' }],
+  ['cleared', { dog: '旧备忘' }, { dog: undefined }],
+  ['added to a member that had none', {}, { cat: '新备忘' }],
+])('does not start a collaboration when a member\'s notes were %s after selection', async (_name, before, after) => {
+  const f = await collaborationFixture()
+  for (const [id, notes] of Object.entries(before)) Object.assign(f.members[id === 'dog' ? 0 : 1]!, { profile: notes })
+  f.generate.mockImplementation(() => {
+    for (const [id, notes] of Object.entries(after)) Object.assign(f.members[id === 'dog' ? 0 : 1]!, { profile: notes })
+    return JSON.stringify({ candidateId: f.pairId })
+  })
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  expect(f.startMock).not.toHaveBeenCalled()
+  expect(f.agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration')).toBe(false)
+})
+it('does not start a collaboration whose member notes changed after the candidate was logged, just before the start', async () => {
+  const f = await collaborationFixture()
+  Object.assign(f.members[0]!, { profile: '旧备忘' })
+  let offers = 0
+  f.offer.mockImplementation((facts: KennelCollaborationFacts) => {
+    offers += 1
+    // The third offer is the check made after the candidate was durably recorded.
+    if (offers === 3) Object.assign(f.members[0]!, { profile: '新备忘' })
+    return pairKind().offer(facts)
+  })
+  f.generate.mockReturnValue(JSON.stringify({ candidateId: f.pairId }))
+  await expect(f.run()).rejects.toMatchObject({ code: 'GOUZI_STATE_CONFLICT' })
+  expect(f.agent.session.events.some(event => event.type === 'kennel/dispatch-collaboration')).toBe(true)
+  expect(f.startMock).not.toHaveBeenCalled()
 })
 it('registers kinds once, refuses names the dispatcher owns, and removes a kind with its disposer', async () => {
   const f = await fixture()

@@ -14,9 +14,9 @@ Status: implemented
 
 狗窝成员收到的每个任务都以 `kennelMemberBrief` 开头：成员是谁、角色模板的一句话目标（`GOUZI_ROLE_GOALS`，浏览器那张表由一个 Host 测试与它绑定；`custom` 角色不写目标），以及作为风格和偏好引用、不改变任务范围和限制的备忘。它对聊天、读取、写入、[评审和返工](../../../../packages/orchestration/kennel-review/README.md)任务，以及 Debate 都适用（Debate 里这几行成为成员角色 persona 的追加指令），所以备忘不会只到达部分任务。文本在主实例上生成，远程成员不需要升级。
 
-任务必须能从会话日志复现。[调度器](../../../../packages/orchestration/ui-gouzi/README.md)把每个被提供成员的备忘作为 `profiles` 快照进 `kennel/dispatch-request` 事件（没有成员带备忘时不写这个字段），并在被选中成员的备忘于决定之后变化时拒绝启动，与它对模型变化的处理一致。协作候选在记录的 `members` 里带着成员的备忘，返工从已记录的候选取备忘。备忘不进入调度模型看到的内容，包括协作候选里的成员，因为它们会让每个候选各占一份输入，而且不属于选择成员的依据。
+任务必须能从会话日志复现。[调度器](../../../../packages/orchestration/ui-gouzi/README.md)把每个被提供成员的备忘作为 `profiles` 快照进 `kennel/dispatch-request` 事件（没有成员带备忘时不写这个字段），并在被选中成员的备忘于决定之后被修改或清除时拒绝启动，与它对模型变化的处理一致。协作候选 id 包含成员、入口和模型但不包含备忘，所以调度器在记录前后各一次，把它记录的候选里每个成员的备忘与该类协作再次提供的备忘比较，有任何差异就拒绝启动。协作候选在记录的 `members` 里带着成员的备忘，返工从已记录的候选取备忘。备忘不进入调度模型看到的内容，包括协作候选里的成员，因为它们会让每个候选各占一份输入，而且不属于选择成员的依据。
 
-存储是 state schema 7 新增的可空列 `gouzi_members.profile`。首次迁移到 schema 7 之前，存储会把状态文件复制为 `state.sqlite.before-schema-7`，并且不覆盖它。
+存储是 state schema 7 新增的可空列 `gouzi_members.profile`。首次迁移到 schema 7 之前，存储会把状态写成一个 `VACUUM INTO` 快照 `state.sqlite.before-schema-7`，并且不覆盖它。早先的版本先做预写日志 checkpoint 再复制文件，只要另一个连接持有更早的读，仍在日志里的已提交内容就会丢；现在的快照先写在最终名字旁边，检查完整性和 schema 版本后再改名就位，无法生成副本时在迁移之前停止启动。
 
 ## Alternatives considered
 

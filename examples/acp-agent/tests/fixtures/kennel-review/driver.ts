@@ -35,8 +35,8 @@ for (const [id, port] of Object.entries(ports)) {
 }
 registry.gouzi.edit(GouziId('gamma'), { model: 'gpt-5.6-luna' })
 // Two members carry notes, beta none: the notes reach exactly the tasks of the members that have them.
-registry.gouzi.edit(GouziId('alpha'), { profile: '先写测试，再改代码' })
-registry.gouzi.edit(GouziId('gamma'), { profile: '评审时先看边界条件' })
+const NOTES: Readonly<Record<string, string>> = { alpha: '先写测试，再改代码', gamma: '评审时先看边界条件' }
+for (const [id, profile] of Object.entries(NOTES)) registry.gouzi.edit(GouziId(id), { profile })
 registry.close()
 
 const WORK_RESULT = 'The parser lives in src/parse.ts and handles empty input.'
@@ -129,9 +129,12 @@ const offered = {
 
 let step = 1
 let modelCalls = 0
+let schedulerSawNotes = false
 class Judgment extends LlmAdapter {
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     modelCalls++
+    // Everything the scheduling model is given, system prompt and messages alike.
+    if (Object.values(NOTES).some(notes => JSON.stringify(options).includes(notes))) schedulerSawNotes = true
     const block = options.messages[0]?.content[0]
     if (block?.type !== 'text') throw new Error('missing judgment request')
     const input = JSON.parse(block.text) as { candidates: Choice[] }
@@ -229,6 +232,22 @@ try {
         return { member: value.member, nodeId: value.nodeId, opening: task.split('\n').slice(0, 6) }
       })
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId) || left.member.localeCompare(right.member)),
+    // The whole request each member receives, not only its opening: a member's notes appear in its own task and nowhere
+    // else, and the scheduling model never saw any.
+    notesIsolation: {
+      schedulerSawNotes,
+      tasks: executed
+        .map((value) => {
+          const text = JSON.stringify(value.request)
+          const count = (notes: string) => text.split(JSON.stringify(notes).slice(1, -1)).length - 1
+          return {
+            member: value.member, nodeId: value.nodeId,
+            ownNotesOccurrences: NOTES[value.member] === undefined ? 0 : count(NOTES[value.member]!),
+            foreignNotes: Object.entries(NOTES).filter(([id, notes]) => id !== value.member && count(notes) > 0).map(([id]) => id),
+          }
+        })
+        .sort((left, right) => left.nodeId.localeCompare(right.nodeId) || left.member.localeCompare(right.member)),
+    },
     reviewersReadTheResult: reviewTasks.length === 2 && reviewTasks.every(value => JSON.stringify(value.request).includes(WORK_RESULT)),
     reviewersReceivedTheirComment: reviewTasks.slice(2).length === 2
       && reviewTasks.slice(2).every(value => JSON.stringify(value.request).includes(BETA_COMMENT)),

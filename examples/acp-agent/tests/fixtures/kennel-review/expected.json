@@ -312,6 +312,47 @@
       ]
     }
   ],
+  "notesIsolation": {
+    "schedulerSawNotes": false,
+    "tasks": [
+      {
+        "member": "gamma",
+        "nodeId": "review-1",
+        "ownNotesOccurrences": 2,
+        "foreignNotes": []
+      },
+      {
+        "member": "gamma",
+        "nodeId": "review-1",
+        "ownNotesOccurrences": 2,
+        "foreignNotes": []
+      },
+      {
+        "member": "beta",
+        "nodeId": "review-2",
+        "ownNotesOccurrences": 0,
+        "foreignNotes": []
+      },
+      {
+        "member": "beta",
+        "nodeId": "review-2",
+        "ownNotesOccurrences": 0,
+        "foreignNotes": []
+      },
+      {
+        "member": "alpha",
+        "nodeId": "work",
+        "ownNotesOccurrences": 2,
+        "foreignNotes": []
+      },
+      {
+        "member": "alpha",
+        "nodeId": "work",
+        "ownNotesOccurrences": 2,
+        "foreignNotes": []
+      }
+    ]
+  },
   "reviewersReadTheResult": false,
   "reviewersReceivedTheirComment": true,
   "authorReceivedTheComment": true,

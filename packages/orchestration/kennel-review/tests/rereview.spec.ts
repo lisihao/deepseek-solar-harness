@@ -61,6 +61,21 @@ function facts(patch: Partial<KennelCollaborationFacts> = {}, ids = ['author', '
 const offer = (value: KennelCollaborationFacts) => kennelRereviewKind(new Context()).offer(value) as KennelCollaborationCandidate[]
 
 describe('rereview offers', () => {
+  it('carries each reviewer\'s current notes, not the first review\'s, in a candidate whose id does not change with them', () => {
+    const base = facts()
+    const noted = (profile: string | undefined) => base.members.map(value =>
+      String(value.gouziId) === 'x' && profile !== undefined ? { ...value, profile } : value)
+    const [before] = offer({ ...base, members: noted('先看边界条件') })
+    const [after] = offer({ ...base, members: noted('先看性能') })
+    const [none] = offer({ ...base, members: noted(undefined) })
+    expect(before?.members[0]).toMatchObject({ gouziId: 'x', profile: '先看边界条件' })
+    expect(after?.members[0]).toMatchObject({ gouziId: 'x', profile: '先看性能' })
+    expect(none?.members[0]).not.toHaveProperty('profile')
+    // The id cannot tell these apart, so the dispatcher compares the notes itself before it starts a re-review.
+    expect(after?.id).toBe(before?.id)
+    expect(none?.id).toBe(before?.id)
+  })
+
   it('sends a reworked task back to the same reviewers, in the same order, with the comments that asked for changes', () => {
     const offered = offer(facts())
     expect(offered).toHaveLength(1)
