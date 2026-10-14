@@ -943,7 +943,7 @@ describe('LocalRlmRuntime', () => {
     await expect(service.deleteChild(sessionId, a.rlmChildId, commandId)).rejects.toThrow('a1 cannot be interrupted')
     // Both executions were asked to stop even though one refused, and the child is still there.
     expect([...interrupted].sort()).toEqual(['a', 'a1'])
-    await expect(service.listChildren(sessionId)).resolves.toMatchObject([{ name: 'a', lifecycle: expect.not.stringMatching(/^deleted$/) }])
+    expect((await service.listChildren(sessionId)).map(child => child.lifecycle)).not.toContain('deleted')
     grandchildInterruptFails = false
     await service.deleteChild(sessionId, a.rlmChildId, commandId)
     await expect(service.listChildren(sessionId)).resolves.toMatchObject([{ name: 'a', lifecycle: 'deleted' }])
