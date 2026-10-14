@@ -26,8 +26,11 @@ import {
 
 export {
   CODEX_APP_SERVER_METHODS,
+  CODEX_APP_SERVER_OPTIONAL_METHODS,
   CodexAppServerWire,
   CodexApprovalRequiredError,
+  CodexTurnStartUncertainError,
+  type CodexWireFrame,
   type CodexAppServerExecutionBoundary,
   type CodexAppServerExecutionProfile,
   type CodexAppServerModel,

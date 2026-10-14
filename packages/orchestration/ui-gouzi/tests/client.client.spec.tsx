@@ -152,7 +152,64 @@ describe('Gouzi sidebar entry and roster', () => {
       header: '1',
       body: { action: 'adopt', name: 'Pixel', avatarId: 'poodle', role: 'testing', hostId: 'local', projects: ['/work/beta', '/work/alpha'] },
     })
+    // The model is offered once the dog exists; skipping leaves it on automatic selection and sends no edit.
+    fireEvent.click(await screen.findByRole('button', { name: '以后再说' }))
     await waitFor(() => { expect(screen.queryByLabelText('领养一只狗子')).toBeNull() })
+    expect(screen.queryByLabelText(/已加入狗窝/)).toBeNull()
+    expect(harness.posts.some(post => post.body.action === 'edit')).toBe(false)
+  })
+
+  describe('model step after adoption', () => {
+    const adoptReply = (body: Record<string, unknown>): Response =>
+      body.action === 'models' ? Response.json({ models: ['deepseek-v4-pro', 'gpt-5.6-sol'] }) : Response.json(member())
+
+    async function adoptDog(harness: ReturnType<typeof fakeRequest>): Promise<void> {
+      await openProjectStep(harness, fakeFolders([ALPHA], async () => null, 'w1').folders)
+      await waitFor(() => { expect(screen.getByRole('checkbox', { name: /alpha/ })).toHaveProperty('checked', true) })
+      fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+      fireEvent.click(screen.getByRole('button', { name: '领养' }))
+      await screen.findByLabelText(/已加入狗窝/)
+    }
+
+    it('pins the chosen model on the new dog with one edit request', async () => {
+      const harness = fakeRequest({ roster: dashboard([]), reply: adoptReply })
+      await adoptDog(harness)
+      const pin = screen.getByRole('button', { name: '固定这个模型' })
+      expect(pin).toHaveProperty('disabled', true)
+      await waitFor(() => { expect(screen.getByRole('option', { name: 'gpt-5.6-sol' })).toBeTruthy() })
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'gpt-5.6-sol' } })
+      fireEvent.click(pin)
+      await waitFor(() => { expect(screen.queryByLabelText(/已加入狗窝/)).toBeNull() })
+      expect(harness.posts.filter(post => post.body.action === 'edit').map(post => post.body))
+        .toEqual([{ action: 'edit', gouziId: 'g1', model: 'gpt-5.6-sol' }])
+    })
+
+    it('keeps the step open with the Host refusal when pinning fails', async () => {
+      const harness = fakeRequest({
+        roster: dashboard([]),
+        reply: body => body.action === 'models'
+          ? Response.json({ models: ['deepseek-v4-pro'] })
+          : body.action === 'edit' ? Response.json({ error: 'GOUZI_INVALID', message: '模型无效' }, { status: 400 }) : Response.json(member()),
+      })
+      await adoptDog(harness)
+      await waitFor(() => { expect(screen.getByRole('option', { name: 'deepseek-v4-pro' })).toBeTruthy() })
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deepseek-v4-pro' } })
+      fireEvent.click(screen.getByRole('button', { name: '固定这个模型' }))
+      expect((await screen.findByRole('alert')).textContent).toContain('模型无效')
+      expect(screen.getByLabelText(/已加入狗窝/)).toBeTruthy()
+    })
+
+    it('offers a reread while no model is offered', async () => {
+      const harness = fakeRequest({
+        roster: dashboard([]),
+        reply: body => body.action === 'models' ? Response.json({ models: [] }) : Response.json(member()),
+      })
+      await adoptDog(harness)
+      const reread = await screen.findByRole('button', { name: '重新读取' })
+      const before = harness.posts.filter(post => post.body.action === 'models').length
+      fireEvent.click(reread)
+      await waitFor(() => { expect(harness.posts.filter(post => post.body.action === 'models')).toHaveLength(before + 1) })
+    })
   })
 
   it('preselects the newest project when no recent workspace is known and blocks next when none is selected', async () => {
@@ -676,8 +733,8 @@ describe('Gouzi remote hosts in the adoption wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一步' }))
     expect(screen.getByText('Mac mini')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '领养' }))
-    await waitFor(() => { expect(harness.posts.at(-1)!.body.action).toBe('adopt') })
-    expect(harness.posts.at(-1)!.body).toEqual({
+    await waitFor(() => { expect(harness.posts.some(post => post.body.action === 'adopt')).toBe(true) })
+    expect(harness.posts.find(post => post.body.action === 'adopt')!.body).toEqual({
       action: 'adopt', name: 'Pixel', avatarId: 'shiba', role: 'development', hostId: 'ssh-1', projects: ['/Users/lisihao/project/PetGoGo', '/Users/lisihao/project/notes', '/Users/lisihao/project'],
     })
   })
