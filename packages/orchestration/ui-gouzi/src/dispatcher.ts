@@ -377,8 +377,12 @@ async function startCollaboration(
     // A candidate id names members, entries, and models but not notes, so notes are compared as for a single member's task:
     // the notes the candidate was logged with must still be the notes each member has.
     const same = current.find(value => value.id === selected.id)
-    if (same === undefined || memberNotes(same) !== memberNotes(selected)) {
+    if (same === undefined) {
       throw new HarnessError('参加协作的狗子、执行实例、项目或对象已变化；未改派给其他成员。', 'GOUZI_STATE_CONFLICT')
+    }
+    const edited = selected.members.filter((member, index) => member.profile !== same.members[index]?.profile).map(member => member.name)
+    if (edited.length > 0) {
+      throw new HarnessError(`${edited.join('、')}的备忘在你发出消息之后被修改；没有按旧备忘开始协作，请重新发送。`, 'GOUZI_STATE_CONFLICT')
     }
   }
   await confirm()
@@ -402,11 +406,6 @@ async function startCollaboration(
     messageId: message.id, collaboration: kind.kind, runId: run.runId, assignments: run.assignments,
   }, { ignorable: true })
   await flushDispatch(ctx, agent)
-}
-
-/** Each member of a collaboration candidate with its notes, so two candidates compare equal only when every member's notes do. */
-function memberNotes(candidate: KennelCollaborationCandidate): string {
-  return JSON.stringify(candidate.members.map(member => [member.gouziId, member.profile ?? null]))
 }
 
 async function confirmCandidate(ctx: Context, selected: KennelWorkCandidate, profile: string | undefined): Promise<void> {
