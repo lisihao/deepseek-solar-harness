@@ -4184,10 +4184,7 @@ export class OrchestrationDaemon {
         } },
       }
       const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-      if (drained.lastContinuation !== undefined) result = {
-        ...result,
-        ...rlmContinuationResult(drained.lastContinuation, result),
-      }
+      result = { ...result, ...rlmContinuationResult(drained.lastContinuation, result) }
     }
   }
 
