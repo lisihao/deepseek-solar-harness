@@ -1125,8 +1125,11 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     if (child === undefined) throw new RlmRuntimeError(`RLM child not found: ${String(childId)}`, 'RLM_SESSION_NOT_FOUND')
     const requestHash = sha256({ parentSessionId, childId })
     if (this.receipt<true>(String(commandId), requestHash) !== undefined) return
-    const active = this.activeExecutions.get(String(child.sessionId))
-    if (active !== undefined) await active.interrupt()
+    // The child and everything it spawned stop together, as for `interrupt`; nothing above or beside it does.
+    const active = this.subtreeSessions(child.sessionId)
+      .map(value => this.activeExecutions.get(String(value.snapshot.sessionId)))
+      .filter((value): value is RlmChildExecution => value !== undefined)
+    await Promise.allSettled(active.map(value => value.interrupt()))
     this.replaceChild(parentSessionId, childId, { lifecycle: 'deleted', updatedAt: now() })
     const childSession = this.requireSession(child.sessionId)
     this.updateSession(childSession, { lifecycle: 'stopped' })

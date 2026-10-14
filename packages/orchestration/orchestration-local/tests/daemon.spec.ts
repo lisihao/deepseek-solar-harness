@@ -2053,6 +2053,36 @@ describe('orchestration daemon', () => {
       expect(f.settled.state).toBe('failed')
     })
 
+    it.each(['max-tokens', 'refusal'] as const)('does not report a root that stopped with %s and no continuation as completed', async (stopReason) => {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-root-stop-'))
+      const resident = new FakeResidentClient()
+      resident.available = false
+      const worker = new KeylessModelWorker()
+      worker.resultFor = () => ({ output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason })
+      const daemon = createDaemon(join(home, 'orchestrations'), home, resident, 10, [worker])
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root: join(home, 'orchestrations'), dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'A root that stops early.' },
+        admission: {
+          policy: 'codex', route: 'taskgraph', sourceSessionId: 'root-stop-fixture', rlm: 'enabled',
+          continualHarness: 'off', optimization: 'balanced',
+        },
+        graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Stop early.', writeScopes: [] }] },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      const events = (await client.readEvents({ runId: run.runId, limit: 400 })).events
+      expect(events.filter(event => event.type === 'rlm.execution.settled').map(event => event.data.stopReason)).toEqual([stopReason])
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(settled.state).toBe('failed')
+    })
+
     it('still completes the run when a continuation succeeds, and when an exploratory child merely fails', async () => {
       const succeeded = await deliveredRun({ output: [{ type: 'text', text: 'delivered' }], stopReason: 'completed' })
       expect(succeeded.settled.state).toBe('completed')

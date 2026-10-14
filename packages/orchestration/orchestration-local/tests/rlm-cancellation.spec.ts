@@ -32,6 +32,17 @@ describe('RLM cancellation scope', () => {
     expect(next.signal.aborted).toBe(true)
   })
 
+  it('does not abort the later turn of a child because the turn of its parent was interrupted', () => {
+    const attempt = new AbortController()
+    const scope = new RlmCancellationScope(attempt.signal, 'root')
+    const rootTurn = scope.begin('root')
+    const spawned = scope.begin('a', 'root')
+    rootTurn.abort()
+    expect(spawned.signal.aborted).toBe(true)
+    // A message to the child arrives after the parent's interrupted turn; its continuation starts alive.
+    expect(scope.begin('a').signal.aborted).toBe(false)
+  })
+
   it('aborts every execution once when the attempt is cancelled, including one started afterwards', () => {
     const attempt = new AbortController()
     const scope = new RlmCancellationScope(attempt.signal, 'root')

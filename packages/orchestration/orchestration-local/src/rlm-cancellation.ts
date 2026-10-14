@@ -11,14 +11,15 @@ export interface RlmExecutionCancellation {
 /**
  * Gives every execution of an RLM attempt its own abort controller that also follows its ancestors.
  *
- * The attempt's controller is the root: cancelling the attempt reaches every execution once. A child's controller
- * follows the execution of the session that spawned it, so interrupting or deleting that child aborts it and the
- * children it spawned, and never the parent or a sibling. A later execution of a session (a continuation) follows
- * the session's parent, not its own earlier execution, so an interrupted turn does not abort the turn after it.
+ * The attempt's controller is the root: cancelling the attempt reaches every execution once. A child's first execution
+ * follows the current execution of the session that spawned it, so interrupting or deleting that parent's turn aborts
+ * the child and, in turn, what the child spawned, and never a sibling. A later execution of a session (a continuation)
+ * follows only the attempt, so it is not born aborted because the turn of an ancestor that spawned it was interrupted.
+ * A delete or interrupt of an ancestor reaches the active executions of its subtree through the runtime, not through
+ * this scope.
  */
 export class RlmCancellationScope {
   private readonly signals = new Map<string, AbortSignal>()
-  private readonly parents = new Map<string, string>()
 
   /**
    * @param attempt - cancellation of the whole attempt.
@@ -31,13 +32,11 @@ export class RlmCancellationScope {
   /**
    * Start a new execution of a session.
    * @param sessionId - the runtime session the execution runs for.
-   * @param parentSessionId - the session that spawned it; omit for a later execution of a known session.
+   * @param parentSessionId - the session that spawned it, for the first execution of a child; omit for a later execution.
    * @returns the execution's signal and its own abort.
    */
   begin(sessionId: string, parentSessionId?: string): RlmExecutionCancellation {
-    if (parentSessionId !== undefined) this.parents.set(sessionId, parentSessionId)
-    const parent = this.parents.get(sessionId)
-    const inherited = (parent === undefined ? undefined : this.signals.get(parent)) ?? this.attempt
+    const inherited = (parentSessionId === undefined ? undefined : this.signals.get(parentSessionId)) ?? this.attempt
     const own = new AbortController()
     const signal = AbortSignal.any([inherited, own.signal])
     this.signals.set(sessionId, signal)

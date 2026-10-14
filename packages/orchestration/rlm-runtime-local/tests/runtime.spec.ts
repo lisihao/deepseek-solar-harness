@@ -903,6 +903,26 @@ describe('LocalRlmRuntime', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('interrupts the active executions of a deleted child and of what it spawned, and no others', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-delete-subtree-'))
+    const interrupted: string[] = []
+    const dispatchChild: RlmRuntimeHostBindings['dispatchChild'] = async request => ({
+      nativeSessionId: `child:${request.childSessionId}`,
+      nativeTurnId: `child-turn:${request.childId}`,
+      // Every child execution stays open, so each one is active when the delete arrives.
+      result: new Promise<RlmChildExecutionResult>(() => undefined),
+      interrupt: () => { interrupted.push(request.name); return Promise.resolve() },
+    })
+    const { ctx, service, sessionId } = await runtime(root, { dispatchChild })
+    const a = await service.spawn({ commandId: RlmCommandId('subtree-a'), parentSessionId: sessionId, name: 'a', task: 'child a' })
+    const a1 = await service.spawn({ commandId: RlmCommandId('subtree-a1'), parentSessionId: a.sessionId, name: 'a1', task: 'grandchild' })
+    await service.spawn({ commandId: RlmCommandId('subtree-a2'), parentSessionId: a1.sessionId, name: 'a2', task: 'great-grandchild' })
+    await service.spawn({ commandId: RlmCommandId('subtree-b'), parentSessionId: sessionId, name: 'b', task: 'sibling' })
+    await service.deleteChild(sessionId, a.rlmChildId, RlmCommandId('subtree-delete'))
+    expect([...interrupted].sort()).toEqual(['a', 'a1', 'a2'])
+    await ctx.root.fiber.dispose()
+  })
+
   it('admits one continuation when concurrent pumps observe the same queued message', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-message-pump-'))
     const continuationRequests: string[] = []
