@@ -169,9 +169,18 @@ export interface RlmChildHandleV1 {
   readonly modelOrigin: RlmChildModelOriginV1
 }
 
+/** Why a native or API turn stopped, as the Consumer's executor reported it. */
+export type RlmStopReason = 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+
 /** Final child execution data supplied asynchronously by the DSH Consumer. */
 export interface RlmChildExecutionResult {
   readonly status: 'settled' | 'failed' | 'indeterminate'
+  /**
+   * The stop reason the executor reported, kept so a failed or indeterminate execution that still returned output is
+   * never read as a success. When absent, `settled` means `completed`, `failed` means `error`, and `indeterminate`
+   * means `aborted`.
+   */
+  readonly stopReason?: RlmStopReason
   readonly output?: readonly ContentBlock[]
   readonly resultRef?: string
   readonly outputPreview?: string

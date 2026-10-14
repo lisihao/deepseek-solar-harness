@@ -803,10 +803,31 @@ function asRlmExecutionResult(result: PhysicalOperatorResult): RlmChildExecution
   const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
   return {
     status,
+    stopReason: result.stopReason,
     output: result.output,
     outputPreview: operatorOutputPreview(result.output).outputPreview,
     ...status === 'failed' ? { error: `native execution stopped with ${result.stopReason}` } : {},
   }
+}
+
+/**
+ * The operator result an RLM execution ends in after its last continuation. A continuation that did not settle keeps
+ * its own stop reason, and its partial output when it has one, so a failed or indeterminate continuation can no longer
+ * be reported as a completed run.
+ * @param continuation - the last continuation the runtime drained, when there was one.
+ * @param previous - the result before that continuation.
+ * @returns `previous` when there was no continuation; otherwise the continuation's stop reason with its output, or
+ *   with `previous`'s output when the continuation returned none.
+ */
+function rlmContinuationResult(
+  continuation: RlmChildExecutionResult | undefined,
+  previous: PhysicalOperatorResult,
+): PhysicalOperatorResult {
+  if (continuation === undefined) return previous
+  const stopReason = continuation.stopReason
+    ?? (continuation.status === 'settled' ? 'completed' : continuation.status === 'failed' ? 'error' : 'aborted')
+  if (continuation.output === undefined && stopReason === 'completed') return previous
+  return { output: [...continuation.output ?? previous.output], stopReason }
 }
 
 function primeRlmRootPrompt(
@@ -3172,9 +3193,7 @@ export class OrchestrationDaemon {
     const { rootSessionId, bindings, node, signal } = prepared
     await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
     const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-    const afterMessages = drained.lastContinuation?.output === undefined
-      ? rootResult
-      : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
+    const afterMessages = rlmContinuationResult(drained.lastContinuation, rootResult)
     const result = plan.autonomousPolicy?.enabled === true
       ? await this.continueAutonomousRlm(
         record,
@@ -3618,6 +3637,7 @@ export class OrchestrationDaemon {
           const usage = rlmAttributedUsage(accounted, request.model)
           return {
             status,
+            stopReason: settled.stopReason,
             output: settled.output,
             resultRef: String(artifactRef),
             outputPreview: preview.slice(0, 8_000),
@@ -4007,7 +4027,7 @@ export class OrchestrationDaemon {
       await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
       const usage = rlmAttributedUsage(accounted, request.model)
       return {
-        status, output: result.output, resultRef: String(artifactRef),
+        status, stopReason: result.stopReason, output: result.output, resultRef: String(artifactRef),
         outputPreview: operatorOutputPreview(result.output).outputPreview,
         ...usage === undefined ? {} : {
           usage,
@@ -4183,9 +4203,9 @@ export class OrchestrationDaemon {
         } },
       }
       const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-      if (drained.lastContinuation?.output !== undefined) result = {
+      if (drained.lastContinuation !== undefined) result = {
         ...result,
-        output: [...drained.lastContinuation.output],
+        ...rlmContinuationResult(drained.lastContinuation, result),
       }
     }
   }
@@ -4258,9 +4278,7 @@ export class OrchestrationDaemon {
       }
       if (continuation.output !== undefined) result = { output: [...continuation.output], stopReason: 'completed' }
       const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(timeoutMs ?? 120_000, 300_000))
-      if (drained.lastContinuation?.output !== undefined) {
-        result = { output: [...drained.lastContinuation.output], stopReason: 'completed' }
-      }
+      result = rlmContinuationResult(drained.lastContinuation, result)
     }
   }
 

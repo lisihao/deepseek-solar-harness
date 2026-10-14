@@ -857,6 +857,52 @@ describe('LocalRlmRuntime', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it.each([
+    ['failed', 'error'],
+    ['indeterminate', 'aborted'],
+  ] as const)('keeps the %s status, partial output and stop reason of the last continuation through drain', async (status, stopReason) => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-continuation-failure-'))
+    const rootExecution = deferred<RlmChildExecutionResult>()
+    const continuation = deferred<RlmChildExecutionResult>()
+    const requests: string[] = []
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: async request => ({
+        nativeSessionId: `child:${request.childSessionId}`,
+        nativeTurnId: `child-turn:${request.childId}`,
+        result: Promise.resolve({ status: 'settled' }),
+        interrupt: () => Promise.resolve(),
+      }),
+      dispatchContinuation: async (request) => {
+        requests.push(String(request.commandId))
+        return {
+          nativeSessionId: `continuation:${request.sessionId}`,
+          nativeTurnId: `continuation-turn:${request.commandId}`,
+          result: continuation.promise,
+          interrupt: () => Promise.resolve(),
+        }
+      },
+    }
+    const { ctx, service, sessionId } = await runtime(root, bindings)
+    await service.trackExecution(sessionId, {
+      nativeSessionId: 'root-native', nativeTurnId: 'root-turn', result: rootExecution.promise, interrupt: () => Promise.resolve(),
+    })
+    const child = await service.spawn({
+      commandId: RlmCommandId('failure-child'), parentSessionId: sessionId, name: 'messenger', task: 'send bounded evidence',
+    })
+    await service.sendMessage({
+      commandId: RlmCommandId('failure-message'), fromSessionId: child.sessionId, toSessionId: sessionId,
+      mode: 'follow_up', text: 'evidence',
+    })
+    rootExecution.resolve({ status: 'settled' })
+    await waitUntil(() => requests.length === 1)
+    continuation.resolve({ status, stopReason, output: [{ type: 'text', text: 'partial output' }], error: 'did not finish' })
+    const drained = await service.drain(sessionId, 1_000)
+    expect(drained.lastContinuation).toEqual({
+      status, stopReason, output: [{ type: 'text', text: 'partial output' }], error: 'did not finish',
+    })
+    await ctx.root.fiber.dispose()
+  })
+
   it('admits one continuation when concurrent pumps observe the same queued message', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-message-pump-'))
     const continuationRequests: string[] = []

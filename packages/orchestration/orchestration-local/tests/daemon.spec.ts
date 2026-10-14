@@ -1953,7 +1953,7 @@ describe('orchestration daemon', () => {
     const stopReasons = ['error', 'aborted', 'max-tokens', 'refusal'] as const
 
     /** The root completes, then a child's parent message makes the daemon dispatch a `:deliver` continuation. */
-    async function deliveredRun(continuation: ModelWorkerResult | undefined, childFails = false) {
+    async function deliveredRun(continuation: ModelWorkerResult | Error | undefined, childFails = false) {
       const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-terminal-'))
       const root = join(home, 'orchestrations')
       const resident = new FakeResidentClient()
@@ -1966,6 +1966,7 @@ describe('orchestration daemon', () => {
           await callRlmTool(request, 'terminal-spawn', 'await rlm("child evidence", { name: "evidence" }); "spawned"')
         } else if (request.commandId.endsWith(':deliver')) {
           await continuationGate.promise
+          if (continuation instanceof Error) throw continuation
         } else {
           await childGate.promise
           if (!childFails) {
@@ -1974,7 +1975,7 @@ describe('orchestration daemon', () => {
         }
       }
       worker.resultFor = (request) => {
-        if (request.commandId.endsWith(':deliver')) return continuation
+        if (request.commandId.endsWith(':deliver')) return continuation instanceof Error ? undefined : continuation
         return childFails && !request.commandId.endsWith(':rlm:root')
           ? { output: [{ type: 'text', text: 'child failed' }], stopReason: 'error' }
           : undefined
@@ -2018,8 +2019,17 @@ describe('orchestration daemon', () => {
       // not pass, and the run does not complete.
       const settledEvents = await f.events('rlm.execution.settled')
       expect(settledEvents.map(event => event.data.stopReason)).toEqual([stopReason])
-      expect(f.settled.nodes[0]?.state).not.toBe('passed')
-      expect(f.settled.state).not.toBe('completed')
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('does not report a continuation that threw, and so returned no output, as a completed run', async () => {
+      const f = await deliveredRun(new Error('worker down'))
+      const [continuation] = await f.events('rlm.message.continuation.failed')
+      expect(continuation).toBeUndefined()
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual(['error'])
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
     })
 
     it('still completes the run when a continuation succeeds, and when an exploratory child merely fails', async () => {

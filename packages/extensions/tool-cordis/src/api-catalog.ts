@@ -6082,7 +6082,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmChildExecutionResult',
-    declaration: 'export interface RlmChildExecutionResult {\n    readonly status: \'settled\' | \'failed\' | \'indeterminate\';\n    readonly output?: readonly ContentBlock[];\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly messages?: readonly Omit<RlmMessageSendRequest, \'commandId\' | \'fromSessionId\'>[];\n    readonly usage?: {\n        readonly provider: string;\n        readonly model: string;\n        readonly authMode: \'subscription\' | \'api\' | \'local\';\n        readonly inputTokens?: number;\n        readonly outputTokens?: number;\n        readonly cacheReadInputTokens?: number;\n        readonly cacheWriteInputTokens?: number;\n        readonly costUsd?: number;\n    };\n}',
+    declaration: 'export interface RlmChildExecutionResult {\n    readonly status: \'settled\' | \'failed\' | \'indeterminate\';\n    readonly stopReason?: RlmStopReason;\n    readonly output?: readonly ContentBlock[];\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly messages?: readonly Omit<RlmMessageSendRequest, \'commandId\' | \'fromSessionId\'>[];\n    readonly usage?: {\n        readonly provider: string;\n        readonly model: string;\n        readonly authMode: \'subscription\' | \'api\' | \'local\';\n        readonly inputTokens?: number;\n        readonly outputTokens?: number;\n        readonly cacheReadInputTokens?: number;\n        readonly cacheWriteInputTokens?: number;\n        readonly costUsd?: number;\n    };\n}',
   },
   {
     name: 'RlmChildHandleV1',
@@ -6295,6 +6295,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RlmRuntimeSessionSnapshotV1',
     declaration: 'export interface RlmRuntimeSessionSnapshotV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly executionId: string;\n    readonly parentSessionId?: RlmRuntimeSessionId;\n    readonly parentChildId?: RlmChildId;\n    readonly workspace: string;\n    readonly sessionDir: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly childModelPolicy?: RlmChildModelPolicyV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly depth: number;\n    readonly lifecycle: \'idle\' | \'running\' | \'degraded\' | \'stopped\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n    readonly children: readonly RlmChildSnapshotV1[];\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n    readonly goal?: RlmGoalV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'RlmStopReason',
+    declaration: 'export type RlmStopReason = \'completed\' | \'aborted\' | \'error\' | \'max-tokens\' | \'refusal\';',
   },
   {
     name: 'RlmStrategyRequest',
