@@ -754,6 +754,9 @@ describe('Resident Session with a native turn that may still be running', () => 
     expect(store.inspectSession(accepted.sessionId)).toMatchObject({ lifecycle: 'idle', health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
     expect(() => store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE))
       .toThrow(/command first/u)
+    // The refusal reaches the user in chat, so it names where the owner can release the lane.
+    expect(refusalOf(() => store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).message)
+      .toContain('算子 (Resident) panel in Desktop')
     expect(refusalOf(() => store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).code).toBe('COMMAND_INDETERMINATE')
     // Nothing was admitted: there is no receipt for the refused command and the Session has no active turn.
     expect(() => store.inspectTurn('second')).toThrow('unknown resident turn')
