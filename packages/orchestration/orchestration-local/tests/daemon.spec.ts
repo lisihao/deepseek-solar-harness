@@ -1953,7 +1953,7 @@ describe('orchestration daemon', () => {
     const stopReasons = ['error', 'aborted', 'max-tokens', 'refusal'] as const
 
     /** The root completes, then a child's parent message makes the daemon dispatch a `:deliver` continuation. */
-    async function deliveredRun(continuation: ModelWorkerResult | Error | undefined, childFails = false) {
+    async function deliveredRun(continuation: ModelWorkerResult | Error | undefined, childFails = false, interrupt = false) {
       const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-terminal-'))
       const root = join(home, 'orchestrations')
       const resident = new FakeResidentClient()
@@ -1965,7 +1965,11 @@ describe('orchestration daemon', () => {
         if (request.commandId.endsWith(':rlm:root')) {
           await callRlmTool(request, 'terminal-spawn', 'await rlm("child evidence", { name: "evidence" }); "spawned"')
         } else if (request.commandId.endsWith(':deliver')) {
-          await continuationGate.promise
+          // An interrupted call ends the way a real API worker does: with an error once its signal aborts.
+          const aborted = new Promise<never>((_resolve, reject) => {
+            request.signal.addEventListener('abort', () => { reject(new Error('worker interrupted')) })
+          })
+          await (interrupt ? Promise.race([continuationGate.promise, aborted]) : continuationGate.promise)
           if (continuation instanceof Error) throw continuation
         } else {
           await childGate.promise
@@ -2003,7 +2007,17 @@ describe('orchestration daemon', () => {
       await eventually(() => events('rlm.usage'), value => value.some(event => event.data.source === 'root'))
       childGate.resolve(undefined)
       if (!childFails) await eventually(async () => worker.requests, value => value.some(request => request.commandId.endsWith(':deliver')))
-      continuationGate.resolve(undefined)
+      if (interrupt) {
+        interface Runtime {
+          list(): Promise<readonly { sessionId: string; parentSessionId?: string }[]>
+          interrupt(id: string): Promise<void>
+        }
+        const runtime = (daemon as unknown as { ctx: { rlmRuntime: Runtime } }).ctx.rlmRuntime
+        const rootSession = (await runtime.list()).find(value => value.parentSessionId === undefined)!.sessionId
+        await runtime.interrupt(rootSession)
+      } else {
+        continuationGate.resolve(undefined)
+      }
       const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
       return { client, run, settled, events, worker, daemon }
     }
@@ -2028,6 +2042,13 @@ describe('orchestration daemon', () => {
       const [continuation] = await f.events('rlm.message.continuation.failed')
       expect(continuation).toBeUndefined()
       expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual(['error'])
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('reports a continuation that was interrupted as aborted, not completed', async () => {
+      const f = await deliveredRun(undefined, false, true)
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual(['aborted'])
       expect(f.settled.nodes[0]?.state).toBe('failed')
       expect(f.settled.state).toBe('failed')
     })
