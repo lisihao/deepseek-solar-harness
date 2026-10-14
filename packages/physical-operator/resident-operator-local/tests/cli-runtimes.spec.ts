@@ -178,10 +178,12 @@ describe('managed runtime directories', () => {
 })
 
 /**
- * Wall-clock bound for a test that runs freshly written executables. On macOS the first execution of each new file
- * carries the `com.apple.provenance` attribute (SIP-protected, so it cannot be cleared) and waits for a system
- * policy assessment: a measured 0.3-2.5 s per file when idle and 5 s or more under parallel load, against 5-10 ms
- * for every later run of the same file. A test with at most three such files fits 3 x 2.5 s with margin in 15 s.
+ * Wall-clock bound for a test that runs freshly written executables. Observed on macOS 26 with 10 CPUs at a load
+ * average of 4-7: the first run of a new script took 0.3-2.5 s and a later run of the same file 5-19 ms. Six
+ * concurrent copies of this spec failed in 18 of 18 copies before the long tests were split, in 12 of 18 after the
+ * split, and in 0 of 12 with this bound, where the slowest test took 12.9 s. The cause of the slow first run is not
+ * established; the files carry `com.apple.provenance`, which is only an observed correlate. The bound is an observed
+ * margin, not a proof: heavier contention can still exceed it.
  */
 const FRESH_EXECUTABLE_TIMEOUT_MS = 15_000
 

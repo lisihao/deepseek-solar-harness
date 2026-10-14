@@ -59,10 +59,10 @@ const model = {
 } as const
 
 /**
- * Wall-clock bound for a test that runs freshly written executables. On macOS the first execution of each new file
- * carries the `com.apple.provenance` attribute (SIP-protected, so it cannot be cleared) and waits for a system
- * policy assessment: a measured 0.3-2.5 s per file when idle and 5 s or more under parallel load, against 5-10 ms
- * for every later run of the same file. A test with at most three such files fits 3 x 2.5 s with margin in 15 s.
+ * Wall-clock bound for the tests that write and run several fresh executables. Their idle maximum was 2.1 s, and the
+ * default 5 s was exceeded in full-suite runs under load (see `cli-runtimes.spec.ts` for the measurements behind the
+ * slow first run of a new file and for the limits of this bound). With the bound, six concurrent copies of this spec
+ * all passed (0 of 12 failed).
  */
 const FRESH_EXECUTABLE_TIMEOUT_MS = 15_000
 
