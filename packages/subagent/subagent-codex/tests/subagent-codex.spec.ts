@@ -22,7 +22,7 @@ import {
   textTask,
   type CodexRunSpec,
 } from '../src/run.ts'
-import { CodexAppServerWire } from '../src/wire.ts'
+import { CodexAppServerWire, CodexTurnStartUncertainError } from '../src/wire.ts'
 
 type JsonObject = Record<string, unknown>
 
@@ -966,11 +966,11 @@ describe('CodexAppServerWire', () => {
         availableDecisions: ['decline', 'cancel'],
       },
     })
+    // A request that arrives before the turn/start response waits for it, so the run knows its own turn first.
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
     expect(await child.peer.nextResponse('command')).toMatchObject({
       result: { decision: 'cancel' },
     })
-
-    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
     await nextTask()
     const requests = [
       {
@@ -1075,11 +1075,6 @@ describe('CodexAppServerWire', () => {
         method: 'item/fileChange/requestApproval',
         params: { threadId: 'thread-2', turnId: 'turn-1' },
       },
-      {
-        id: 'turn',
-        method: 'item/fileChange/requestApproval',
-        params: { threadId: 'thread-1', turnId: 'turn-2' },
-      },
     ]) {
       const { child, wire } = await initializeWire()
       const result = wire.runTurn(['task'], new AbortController().signal)
@@ -1094,45 +1089,217 @@ describe('CodexAppServerWire', () => {
     }
   })
 
-  it('rejects conflicting early turn identities before accepting output', async () => {
+  it('reads only the responded turn when the app-server reports other turns of the thread before the response', async () => {
     const { child, wire } = await initializeWire()
     const result = wire.runTurn(['task'], new AbortController().signal)
     const turnStart = await child.peer.nextMethod('turn/start')
-    child.peer.send({
-      method: 'turn/started',
-      params: { threadId: 'thread-1', turn: { id: 'turn-early' } },
-    })
+    // An unfinished turn of an earlier process and a turn the server started itself, both before the response.
+    child.peer.send(
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-stale' } } },
+      agentMessage('stale output', 'final_answer', 'turn-stale'),
+      turnCompleted('interrupted', 'turn-stale'),
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-internal' } } },
+      agentMessage('internal output', 'final_answer', 'turn-internal'),
+      agentMessage('early output', 'commentary', 'turn-response'),
+    )
     child.peer.respond(turnStart, { turn: { id: 'turn-response' } })
-    await expect(result).rejects.toThrow('did not match the active turn')
+    child.peer.send(agentMessage('the answer', 'final_answer', 'turn-response'), turnCompleted('completed', 'turn-response'))
+    await expect(result).resolves.toMatchObject({ output: [{ type: 'text', text: 'the answer' }], stopReason: 'completed' })
+    expect(wire.currentTurnId).toBe('turn-response')
     wire.close()
   })
 
-  it('rejects conflicting early notifications and requests before turn/start', async () => {
-    {
-      const { child, wire } = await initializeWire()
-      child.peer.send({
-        id: 'too-early',
-        method: 'item/fileChange/requestApproval',
-        params: { threadId: 'thread-1', turnId: 'turn-1' },
-      })
-      const response = await child.peer.nextResponse('too-early')
-      expect(response.error).toMatchObject({ code: -32603 })
-      wire.close()
-    }
+  it('takes the terminal notification of the responded turn when it arrives before the response, and not another turn\'s', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      turnCompleted('failed', 'turn-stale'),
+      agentMessage('the answer', 'final_answer', 'turn-response'),
+      turnCompleted('completed', 'turn-response'),
+    )
+    child.peer.respond(turnStart, { turn: { id: 'turn-response' } })
+    await expect(result).resolves.toMatchObject({ output: [{ type: 'text', text: 'the answer' }], stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('refuses a request that names a turn before any turn is started', async () => {
+    const { child, wire } = await initializeWire()
+    child.peer.send({ id: 'too-early', method: 'item/fileChange/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-1' } })
+    expect((await child.peer.nextResponse('too-early')).error).toMatchObject({ code: -32603 })
+    wire.close()
+  })
+
+  it('holds a tool call or approval that arrives before the response and answers it only for the responded turn', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      { id: 'ours', method: 'item/fileChange/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-1' } },
+      { id: 'foreign', method: 'item/fileChange/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-stale' } },
+    )
+    await nextTask()
+    // Neither is answered before the run knows its turn.
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    expect(await child.peer.nextResponse('ours')).toMatchObject({ result: { decision: 'decline' } })
+    // The foreign turn's request is rejected without failing the run.
+    expect((await child.peer.nextResponse('foreign')).error).toMatchObject({ code: -32603 })
+    child.peer.send(agentMessage('the answer', 'final_answer'), turnCompleted('completed'))
+    await expect(result).resolves.toMatchObject({ output: [{ type: 'text', text: 'the answer' }], stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('rejects a request for another turn after the response without failing the run', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send({ id: 'foreign', method: 'item/fileChange/requestApproval', params: { threadId: 'thread-1', turnId: 'turn-2' } })
+    expect((await child.peer.nextResponse('foreign')).error).toMatchObject({ code: -32603 })
+    child.peer.send(agentMessage('the answer', 'final_answer'), turnCompleted('completed'))
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('counts usage only from the responded turn when old and new usage notifications interleave', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    const usage = (turnId: string, total: number) => ({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'thread-1', turnId,
+        tokenUsage: {
+          last: { inputTokens: total, outputTokens: 1, cachedInputTokens: 0, reasoningOutputTokens: 0, totalTokens: total + 1 },
+          total: {},
+        },
+      },
+    })
+    child.peer.send(usage('turn-stale', 111), usage('turn-1', 7))
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    child.peer.send(usage('turn-stale', 222), agentMessage('the answer', 'final_answer'), turnCompleted('completed'))
+    await expect(result).resolves.toMatchObject({ usage: { inputTokens: 7 } })
+    wire.close()
+  })
+
+  it('reports a start whose response never came as unknown, with the frames in receive order and no task text', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['secret task text'], new AbortController().signal)
+    await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      { method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: 'turn-9', tokenUsage: { last: {}, total: {} } } },
+      { id: 'tool', method: 'item/tool/call', params: { threadId: 'thread-1', turnId: 'turn-9', tool: 't', callId: 'c', arguments: {} } },
+    )
+    await nextTask()
+    child.fromChild.end()
+    const error = await result.then(() => undefined, (caught: unknown) => caught)
+    expect(error).toBeInstanceOf(CodexTurnStartUncertainError)
+    const uncertain = error as CodexTurnStartUncertainError
+    expect(uncertain.threadId).toBe('thread-1')
+    expect(uncertain.frames.map(frame => [frame.order, frame.kind, frame.method, frame.turnId])).toEqual([
+      [1, 'notification', 'thread/tokenUsage/updated', 'turn-9'],
+      [2, 'request', 'item/tool/call', 'turn-9'],
+    ])
+    expect(uncertain.message).toContain('#1 notification thread/tokenUsage/updated turn=turn-9')
+    expect(uncertain.message).not.toContain('secret task text')
+    wire.close()
+  })
+
+  it('treats a server refusal of turn/start as not started, and an aborted signal as no request at all', async () => {
     {
       const { child, wire } = await initializeWire()
       const result = wire.runTurn(['task'], new AbortController().signal)
-      await child.peer.nextMethod('turn/start')
-      child.peer.send(
-        {
-          method: 'turn/started',
-          params: { threadId: 'thread-1', turn: { id: 'turn-1' } },
-        },
-        agentMessage('wrong', 'final_answer', 'turn-2'),
-      )
-      await expect(result).rejects.toThrow('conflicting turns')
+      const turnStart = await child.peer.nextMethod('turn/start')
+      child.peer.send({ id: turnStart.id, error: { code: -32000, message: 'thread is busy' } })
+      const error = await result.then(() => undefined, (caught: unknown) => caught)
+      expect(error).not.toBeInstanceOf(CodexTurnStartUncertainError)
+      expect((error as Error).message).toContain('thread is busy')
       wire.close()
     }
+    {
+      const { wire } = await initializeWire()
+      const controller = new AbortController()
+      controller.abort(new Error('stopped before start'))
+      await expect(wire.runTurn(['task'], controller.signal)).rejects.toThrow('stopped before start')
+      wire.close()
+    }
+  })
+
+  it('reports a start aborted after it was sent as unknown, because the turn may be running', async () => {
+    const { child, wire } = await initializeWire()
+    const controller = new AbortController()
+    const result = wire.runTurn(['task'], controller.signal)
+    await child.peer.nextMethod('turn/start')
+    controller.abort(new Error('interrupted'))
+    await expect(result).rejects.toBeInstanceOf(CodexTurnStartUncertainError)
+    wire.close()
+  })
+
+  it('reports a malformed turn/start response as unknown', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: {} })
+    await expect(result).rejects.toBeInstanceOf(CodexTurnStartUncertainError)
+    wire.close()
+  })
+
+  it('stops holding notifications when too many arrive before the response, and reports the start as unknown', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    await child.peer.nextMethod('turn/start')
+    const flood = Array.from({ length: 513 }, () => agentMessage('x', 'commentary', 'turn-stale'))
+    child.peer.send(...flood)
+    const error = await result.then(() => undefined, (caught: unknown) => caught)
+    expect(error).toBeInstanceOf(CodexTurnStartUncertainError)
+    expect((error as Error).message).toContain('too many notifications')
+    // The diagnostic keeps only the most recent frames.
+    expect((error as CodexTurnStartUncertainError).frames).toHaveLength(64)
+    wire.close()
+  })
+
+  it('reads the newest turn, keeps the baseline for an unknown start, and interrupts a turn it did not start', async () => {
+    const { child, wire } = await initializeWire()
+    const capturing = wire.captureBaseline(new AbortController().signal)
+    const first = await child.peer.nextMethod('thread/turns/list')
+    expect(first.params).toEqual({ threadId: 'thread-1', limit: 1, sortDirection: 'desc' })
+    child.peer.respond(first, { data: [{ id: 'turn-old', status: 'completed' }], nextCursor: null, backwardsCursor: null })
+    await capturing
+    const latest = wire.latestTurn(new AbortController().signal)
+    child.peer.respond(await child.peer.nextMethod('thread/turns/list'), { data: [{ id: 'turn-new', status: 'inProgress' }] })
+    await expect(latest).resolves.toEqual({ id: 'turn-new', status: 'inProgress' })
+    const empty = wire.latestTurn(new AbortController().signal)
+    child.peer.respond(await child.peer.nextMethod('thread/turns/list'), { data: [] })
+    await expect(empty).resolves.toBeUndefined()
+    const bad = wire.latestTurn(new AbortController().signal)
+    child.peer.respond(await child.peer.nextMethod('thread/turns/list'), { data: 'nope' })
+    await expect(bad).rejects.toThrow('invalid thread/turns/list data')
+
+    const running = wire.runTurn(['task'], new AbortController().signal)
+    await child.peer.nextMethod('turn/start')
+    child.fromChild.end()
+    expect((await running.then(() => undefined, (caught: unknown) => caught) as CodexTurnStartUncertainError).baselineTurnId).toBe('turn-old')
+
+    const { child: other, wire: second } = await initializeWire()
+    second.interruptTurn('turn-x')
+    expect((await other.peer.nextMethod('turn/interrupt')).params).toEqual({ threadId: 'thread-1', turnId: 'turn-x' })
+    wire.close()
+    second.close()
+  })
+
+  it('leaves the baseline unknown when the thread cannot be listed', async () => {
+    const { child, wire } = await initializeWire()
+    const capturing = wire.captureBaseline(new AbortController().signal)
+    const list = await child.peer.nextMethod('thread/turns/list')
+    child.peer.send({ id: list.id, error: { code: -32601, message: 'method not found' } })
+    await capturing
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    await child.peer.nextMethod('turn/start')
+    child.fromChild.end()
+    const unknownStart = await result.then(() => undefined, (caught: unknown) => caught) as CodexTurnStartUncertainError
+    expect(unknownStart.baselineTurnId).toBeUndefined()
+    wire.close()
   })
 
   it('interrupts only an active open turn and contains remote interrupt failure', async () => {

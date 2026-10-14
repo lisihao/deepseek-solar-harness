@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { CODEX_APP_SERVER_METHODS } from '../src/wire.ts'
+import { CODEX_APP_SERVER_METHODS, CODEX_APP_SERVER_OPTIONAL_METHODS } from '../src/wire.ts'
 
 const WIRE_SOURCE = readFileSync(new URL('../src/wire.ts', import.meta.url), 'utf8')
 const WIRE_BODY = WIRE_SOURCE.slice(WIRE_SOURCE.indexOf('} as const satisfies'))
@@ -11,6 +11,11 @@ describe('CODEX_APP_SERVER_METHODS', () => {
     for (const match of WIRE_BODY.matchAll(/(?:request|notify)\('([^']+)'|case '([^'/]+\/[^']+)':|method (?:===|!==) '([^']+)'/gu)) {
       used.add(match[1] ?? match[2] ?? match[3] ?? '')
     }
-    expect([...used].sort()).toEqual(Object.values(CODEX_APP_SERVER_METHODS).flat().sort())
+    expect([...used].sort())
+      .toEqual([...Object.values(CODEX_APP_SERVER_METHODS).flat(), ...Object.values(CODEX_APP_SERVER_OPTIONAL_METHODS).flat()].sort())
+    // An optional method is never also required, so a build without it still qualifies.
+    for (const method of Object.values(CODEX_APP_SERVER_OPTIONAL_METHODS).flat()) {
+      expect(Object.values(CODEX_APP_SERVER_METHODS).flat()).not.toContain(method)
+    }
   })
 })

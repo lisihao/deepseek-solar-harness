@@ -39,6 +39,7 @@ import {
   CODEX_APP_SERVER_METHODS,
   CodexApprovalRequiredError,
   CodexAppServerWire,
+  CodexTurnStartUncertainError,
   type CodexDynamicToolCall,
   type CodexDynamicToolResult,
   type CodexDynamicToolSpec,
@@ -48,6 +49,7 @@ import {
 } from '@deepseek-ai/dsh-subagent-codex'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { readFreshCodexCatalog } from './codex-catalog.ts'
+import { reconcileUncertainStart } from './codex-reconcile.ts'
 import { generateCodexJudgment } from './codex-judgment.ts'
 import { generateCodexBridgeTurn } from './codex-bridge-turn.ts'
 import { generateCodexGovernedTurn } from './codex-governed-turn.ts'
@@ -1457,9 +1459,11 @@ export class CodexResidentDriver implements ResidentProductDriver {
       }
       request.onRunning(threadId)
       request.onProgress('session_ready')
-      request.onProgress('reasoning')
+      await wire.captureBaseline(request.signal)
       const result = await wire.runTurn(texts, request.signal, (turnId) => {
         request.onRunning(threadId, turnId)
+        // The native turn is named, so the model has started: the phase follows the start, not the request for it.
+        request.onProgress('reasoning')
       }, request.profile, executionBoundary)
       request.onProgress('finalizing')
       return { ...result, nativeSessionId: threadId }
@@ -1467,11 +1471,41 @@ export class CodexResidentDriver implements ResidentProductDriver {
       if (error instanceof CodexApprovalRequiredError) {
         throw new ResidentOperatorError(error.message, 'APPROVAL_REQUIRED')
       }
+      if (error instanceof CodexTurnStartUncertainError) return await this.reconcileUncertainStart(request, error)
       throw codexExecutionFailure(error)
     } finally {
       request.signal.removeEventListener('abort', abort)
       wire.close()
       stream.destroy()
+    }
+  }
+
+  /**
+   * A `turn/start` that was sent without an authoritative response may have started the native turn. Open a fresh
+   * connection to the same thread and hold this Resident turn until that native turn settles, then report the outcome
+   * as unknown so the command is fenced instead of failed and dispatched again.
+   */
+  private async reconcileUncertainStart(request: ResidentDriverExecuteRequest, error: CodexTurnStartUncertainError): Promise<never> {
+    const opening = AbortSignal.timeout(30_000)
+    let stream: Awaited<ReturnType<CodexResidentDriver['openStream']>> | undefined
+    let probe: CodexAppServerWire | undefined
+    try {
+      stream = await this.openStream(opening)
+      probe = new CodexAppServerWire(stream, stream, 'require')
+      probe.start()
+      await probe.initialize(opening)
+      await probe.resumeThread(error.threadId, request.workspace, opening)
+      return await reconcileUncertainStart(probe, error.baselineTurnId, error.message, request.signal)
+    } catch (caught: unknown) {
+      if (caught instanceof ResidentOperatorError) throw caught
+      throw new ResidentOperatorError(
+        `Codex turn start outcome is unknown and the thread could not be inspected (${caught instanceof Error ? caught.message : String(caught)}); `
+        + `inspect the existing command before retrying. ${error.message}`,
+        'COMMAND_INDETERMINATE',
+      )
+    } finally {
+      probe?.close()
+      stream?.destroy()
     }
   }
 
