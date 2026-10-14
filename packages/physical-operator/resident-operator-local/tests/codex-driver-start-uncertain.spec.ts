@@ -12,6 +12,7 @@ type Frame = { id?: number | string; method?: string; params?: Record<string, un
 /** An app-server connection that answers each request from a handler; the handler may leave one unanswered. */
 class FakeAppServer extends Duplex {
   readonly methods: string[] = []
+  readonly requests: Array<{ method: string; params: Record<string, unknown> }> = []
   private buffer = ''
 
   constructor(private readonly answer: (method: string, params: Record<string, unknown>, server: FakeAppServer) => unknown) {
@@ -29,6 +30,7 @@ class FakeAppServer extends Duplex {
       this.buffer = this.buffer.slice(newline + 1)
       if (frame.method === undefined || frame.id === undefined) continue
       this.methods.push(frame.method)
+      this.requests.push({ method: frame.method, params: frame.params ?? {} })
       const result = this.answer(frame.method, frame.params ?? {}, this)
       if (result !== undefined) this.push(`${JSON.stringify({ id: frame.id, result })}\n`)
     }
@@ -89,6 +91,10 @@ describe('Codex resident turn with an unknown start', () => {
     expect(opened).toHaveBeenCalledTimes(2)
     expect(main.methods).toEqual(['initialize', 'thread/resume', 'thread/turns/list', 'turn/start'])
     expect(probe.methods).toEqual(['initialize', 'thread/resume', 'thread/turns/list', 'thread/turns/list'])
+    // The inspecting connection changes nothing about the thread: no model, sandbox, approval, or instruction overrides.
+    expect(probe.requests.find(entry => entry.method === 'thread/resume')?.params).toEqual({ threadId: 'thread-1', cwd: '/project' })
+    expect(probe.requests.filter(entry => entry.method === 'thread/turns/list').map(entry => entry.params))
+      .toEqual([{ threadId: 'thread-1', limit: 1, sortDirection: 'desc' }, { threadId: 'thread-1', limit: 1, sortDirection: 'desc' }])
     // No native turn was named, so the model was never reported as reasoning.
     expect(onRunning).toHaveBeenCalledWith('thread-1')
     expect(onProgress.mock.calls.map(([phase]) => phase)).toEqual(['connecting', 'session_ready'])

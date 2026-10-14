@@ -2206,6 +2206,25 @@ describe('host physical-operator routing', () => {
       expect(codex.requests).toHaveLength(3)
     })
 
+    it('settles a run whose native outcome is unknown as terminal: one dispatch, no fallback operator, no second request', async () => {
+      const { ctx, agent, codex, deepseek } = await setup({ codexImmediate: false })
+      await ctx.commands.execute(agent, '/operator direct', new AbortController().signal)
+      const dispose = select(agent, 'codex:gpt-5.6-sol', 'low')
+      try {
+        send(agent, '第一轮')
+        while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+        const receipt = codex.receipts.get(String(codex.requests[0]?.executionId))
+        receipt?.result.reject(new PhysicalOperatorError('Codex turn start outcome is unknown; native turn t ended with status completed', 'COMMAND_INDETERMINATE'))
+        await agent.whenIdle()
+      } finally { dispose() }
+      const ended = agent.session.events.findLast(event => event.type === 'turn/end')
+      expect(ended?.type === 'turn/end' && ended.data.reason.kind).toBe('error')
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/dispatch')).toHaveLength(1)
+      expect(agent.session.events.some(event => event.type === 'physical-operator/dispatch-terminal' && event.data.code === 'COMMAND_INDETERMINATE')).toBe(true)
+      expect(codex.requests).toHaveLength(1)
+      expect(deepseek.requests).toHaveLength(0)
+    })
+
     it('gives another native configuration its own lane, returns to the first lane, and reuses the newest lane for a bare entry', async () => {
       const { agent, codex } = await setup()
       await turn(agent, 'codex:gpt-5.6-sol', 'low', '第一轮')
