@@ -10,7 +10,7 @@
 import type { Readable, Writable } from 'node:stream'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SubagentResult, SubagentUsage } from '@deepseek-ai/dsh-subagent'
-import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { JsonRpcLineTransport, JsonRpcResponseError } from '@deepseek-ai/dsh-sdk-protocol'
 
 type JsonObject = Record<string, unknown>
 
@@ -46,6 +46,15 @@ export const CODEX_APP_SERVER_METHODS = {
     'item/completed',
     'turn/completed',
   ],
+} as const satisfies Readonly<Record<string, readonly string[]>>
+
+/**
+ * Methods the wire uses when a build offers them and goes without when it does not: a build that lacks one still
+ * qualifies, and the feature that uses it is skipped.
+ */
+export const CODEX_APP_SERVER_OPTIONAL_METHODS = {
+  /** Lists a thread's turns, which a start of unknown outcome uses to find the turn it may have created. */
+  ClientRequest: ['thread/turns/list'],
 } as const satisfies Readonly<Record<string, readonly string[]>>
 
 /** Model catalog row returned by the qualified app-server. */
@@ -237,6 +246,62 @@ function isContextWindowExceeded(turn: JsonObject): boolean {
     && (error as JsonObject).codexErrorInfo === 'contextWindowExceeded'
 }
 
+/** Most protocol frames kept for the diagnostic of a start whose outcome is unknown. */
+const FRAME_DIAGNOSTIC_LIMIT = 64
+
+/** Most notifications held before the `turn/start` response; a server that sends more is not answering. */
+const EARLY_NOTIFICATION_LIMIT = 512
+
+/** Server requests that belong to one turn and so wait for the `turn/start` response before they are answered. */
+const TURN_SCOPED_REQUESTS: ReadonlySet<string> = new Set([
+  'item/tool/call',
+  'item/commandExecution/requestApproval',
+  'item/fileChange/requestApproval',
+  'item/permissions/requestApproval',
+  'item/tool/requestUserInput',
+  'mcpServer/elicitation/request',
+])
+
+/**
+ * One protocol frame as the diagnostic keeps it: the receive order, the kind of frame, the method, and the thread and
+ * turn ids it names. Task text, tool arguments, and output are never kept.
+ */
+export interface CodexWireFrame {
+  readonly order: number
+  readonly kind: 'notification' | 'request' | 'response'
+  readonly method: string
+  readonly threadId?: string
+  readonly turnId?: string
+}
+
+/**
+ * `turn/start` was sent, but no valid response named its turn. The native turn may be running, so the caller must not
+ * treat the command as not started: it has to inspect the thread before it releases anything.
+ */
+export class CodexTurnStartUncertainError extends Error {
+  constructor(
+    message: string,
+    /** The thread the turn was started on. */
+    readonly threadId: string,
+    /** Id of the newest turn the thread had before `turn/start`, when the caller captured it. */
+    readonly baselineTurnId: string | undefined,
+    /** The most recent frames in receive order, without any task content. */
+    readonly frames: readonly CodexWireFrame[],
+    options?: { cause: unknown },
+  ) {
+    super(message, options)
+    this.name = 'CodexTurnStartUncertainError'
+  }
+}
+
+/** A request named a turn other than the run's: it is rejected, and the run it does not belong to continues. */
+class CodexForeignTurnError extends Error {}
+
+function describeFrames(frames: readonly CodexWireFrame[]): string {
+  return frames.map(frame =>
+    `#${String(frame.order)} ${frame.kind} ${frame.method}${frame.turnId === undefined ? '' : ` turn=${frame.turnId}`}`).join('; ')
+}
+
 function thrown(value: unknown): Error {
   /* v8 ignore next -- typed protocol and stream failures reject with Error. */
   return value instanceof Error ? value : new Error(String(value))
@@ -291,7 +356,10 @@ export class CodexAppServerWire {
   private readonly fatal = Promise.withResolvers<never>()
   private threadId: string | undefined
   private turnId: string | undefined
-  private pendingTurnId: string | undefined
+  private turnCommit: PromiseWithResolvers<string> | undefined
+  private baselineTurnId: string | undefined
+  private frameOrder = 0
+  private readonly frames: CodexWireFrame[] = []
   private turnCompleted: PromiseWithResolvers<JsonObject> | undefined
   private readonly earlyTurnNotifications: Array<{
     readonly method: string
@@ -318,6 +386,7 @@ export class CodexAppServerWire {
     this.transport.onRequest((method, params) => this.handleServerRequest(method, params))
     this.transport.onNotification((method, params) => {
       try {
+        this.recordFrame('notification', method, params)
         this.handleNotification(method, params)
       } catch (error: unknown) {
         this.fail(thrown(error))
@@ -517,22 +586,42 @@ export class CodexAppServerWire {
     profile?: CodexAppServerExecutionProfile,
     executionBoundary?: CodexAppServerExecutionBoundary,
   ): Promise<SubagentResult> {
+    if (signal.aborted) throw abortError(signal)
     this.resetTurnState()
     const completion = Promise.withResolvers<JsonObject>()
     this.turnCompleted = completion
+    const commit = Promise.withResolvers<string>()
+    void commit.promise.catch(() => {})
+    this.turnCommit = commit
     const threadId = this.threadId as string
-    const response = object(await this.guarded(this.transport.request('turn/start', {
-      threadId,
-      input: texts.map(text => ({ type: 'text', text, text_elements: [] })),
-      ...profile === undefined ? {} : {
-        model: profile.model,
-        ...profile.effort === undefined ? {} : { effort: profile.effort },
-      },
-      ...turnStartBoundary(executionBoundary),
-    }, signal), signal), 'turn/start response')
-    const turn = object(response.turn, 'turn/start turn')
-    const startedTurnId = string(turn.id, 'turn/start turn id')
-    this.commitTurnId(startedTurnId)
+    let startedTurnId: string
+    try {
+      const response = object(await this.guarded(this.transport.request('turn/start', {
+        threadId,
+        input: texts.map(text => ({ type: 'text', text, text_elements: [] })),
+        ...profile === undefined ? {} : {
+          model: profile.model,
+          ...profile.effort === undefined ? {} : { effort: profile.effort },
+        },
+        ...turnStartBoundary(executionBoundary),
+      }, signal), signal), 'turn/start response')
+      const turn = object(response.turn, 'turn/start turn')
+      startedTurnId = string(turn.id, 'turn/start turn id')
+      this.recordFrame('response', 'turn/start', { threadId, turnId: startedTurnId })
+      this.commitTurnId(startedTurnId)
+    } catch (error: unknown) {
+      commit.reject(error)
+      // A refusal from the server means nothing started. Any other failure leaves the native turn possibly running.
+      if (error instanceof JsonRpcResponseError) throw error
+      const cause = thrown(error)
+      throw new CodexTurnStartUncertainError(
+        `subagent-codex: turn/start outcome is unknown (${cause.message}); frames: ${describeFrames(this.frames)}`,
+        threadId,
+        this.baselineTurnId,
+        [...this.frames],
+        { cause: error },
+      )
+    }
     onStarted?.(startedTurnId)
 
     const completed = await this.guarded(completion.promise, signal)
@@ -560,6 +649,47 @@ export class CodexAppServerWire {
       stopReason: 'completed',
       ...this.lastUsage === undefined ? {} : { usage: this.lastUsage },
     }
+  }
+
+  /**
+   * Record the newest turn the thread has, so a start whose outcome is unknown can tell the turn it may have created
+   * from the ones that were already there. A failure leaves the baseline unknown and is not reported.
+   * @param signal - cancellation for the control request.
+   */
+  async captureBaseline(signal: AbortSignal): Promise<void> {
+    try {
+      this.baselineTurnId = (await this.latestTurn(signal))?.id
+    } catch {
+      // A thread whose turns cannot be listed has no baseline; the start itself is still attempted.
+      this.baselineTurnId = undefined
+    }
+  }
+
+  /**
+   * Read the newest turn of the current thread.
+   * @param signal - cancellation for the control request.
+   * @returns its id and status as the app-server reports them, or undefined when the thread has no turn.
+   */
+  async latestTurn(signal: AbortSignal): Promise<{ readonly id: string; readonly status: string } | undefined> {
+    const response = object(await this.guarded(this.transport.request('thread/turns/list', {
+      threadId: this.threadId,
+      limit: 1,
+      sortDirection: 'desc',
+    }, signal), signal), 'thread/turns/list response')
+    if (!Array.isArray(response.data)) throw new Error('subagent-codex: app-server returned invalid thread/turns/list data')
+    const first: unknown = response.data[0]
+    if (first === undefined) return undefined
+    const turn = object(first, 'thread/turns/list turn')
+    return { id: string(turn.id, 'thread/turns/list turn id'), status: string(turn.status, 'thread/turns/list turn status') }
+  }
+
+  /**
+   * Best-effort interruption of one native turn this connection did not start.
+   * @param turnId - the native turn to interrupt.
+   */
+  interruptTurn(turnId: string): void {
+    if (this.threadId === undefined || this.closed) return
+    void this.transport.request('turn/interrupt', { threadId: this.threadId, turnId }).catch(() => {})
   }
 
   /**
@@ -604,7 +734,6 @@ export class CodexAppServerWire {
 
   private resetTurnState(): void {
     this.turnId = undefined
-    this.pendingTurnId = undefined
     this.earlyTurnNotifications.length = 0
     this.lastFinalAnswer = undefined
     this.lastUnphasedAnswer = undefined
@@ -623,16 +752,6 @@ export class CodexAppServerWire {
     this.fail(new Error('subagent-codex: app-server protocol stream closed'))
   }
 
-  private observePendingTurnId(id: string): void {
-    if (this.turnCompleted === undefined) {
-      throw new Error('subagent-codex: app-server referenced a turn before turn/start')
-    }
-    if (this.pendingTurnId !== undefined && this.pendingTurnId !== id) {
-      throw new Error('subagent-codex: app-server referenced conflicting turns')
-    }
-    this.pendingTurnId = id
-  }
-
   /**
    * Keep a notification that arrived before the `turn/start` response. The response names this turn; a notification
    * can belong to another turn the app-server runs on the same thread, such as an unfinished turn of an earlier
@@ -640,14 +759,32 @@ export class CodexAppServerWire {
    * of the responded turn are read again.
    */
   private holdEarlyNotification(method: string, params: JsonObject): void {
-    if (this.turnCompleted !== undefined) this.earlyTurnNotifications.push({ method, params })
+    if (this.turnCompleted === undefined) return
+    if (this.earlyTurnNotifications.length >= EARLY_NOTIFICATION_LIMIT) {
+      throw new Error('subagent-codex: app-server sent too many notifications before the turn/start response')
+    }
+    this.earlyTurnNotifications.push({ method, params })
+  }
+
+  private recordFrame(kind: CodexWireFrame['kind'], method: string, params: JsonObject): void {
+    const turn = params.turn
+    const turnId = typeof params.turnId === 'string'
+      ? params.turnId
+      : typeof turn === 'object' && turn !== null && typeof (turn as JsonObject).id === 'string' ? (turn as JsonObject).id as string : undefined
+    this.frameOrder += 1
+    this.frames.push({
+      order: this.frameOrder,
+      kind,
+      method,
+      ...typeof params.threadId === 'string' ? { threadId: params.threadId } : {},
+      ...turnId === undefined ? {} : { turnId },
+    })
+    if (this.frames.length > FRAME_DIAGNOSTIC_LIMIT) this.frames.shift()
   }
 
   private commitTurnId(id: string): void {
-    if (this.pendingTurnId !== undefined && this.pendingTurnId !== id) {
-      throw new Error('subagent-codex: turn/start response did not match the active turn')
-    }
     this.turnId = id
+    this.turnCommit?.resolve(id)
     const notifications = this.earlyTurnNotifications.splice(0)
     for (const notification of notifications) {
       this.handleNotification(notification.method, notification.params)
@@ -661,15 +798,25 @@ export class CodexAppServerWire {
     if (nullableTurn && params.turnId === null) return
     const id = string(params.turnId, 'server request turn id')
     if (this.turnId === undefined) {
-      this.observePendingTurnId(id)
-      return
+      throw new Error('subagent-codex: app-server referenced a turn before turn/start')
     }
     if (id !== this.turnId) {
-      throw new Error('subagent-codex: app-server request referenced another turn')
+      throw new CodexForeignTurnError('subagent-codex: app-server request referenced another turn')
     }
   }
 
   private handleServerRequest(method: string, params: JsonObject): Promise<unknown> {
+    this.recordFrame('request', method, params)
+    const commit = this.turnCommit
+    if (commit !== undefined && this.turnCompleted !== undefined && this.turnId === undefined && TURN_SCOPED_REQUESTS.has(method)) {
+      // The turn the request names is checked against the responded turn, so a stale or foreign turn's tool call or
+      // approval is never answered before the run knows its own turn.
+      return commit.promise.then(() => this.answerServerRequest(method, params))
+    }
+    return this.answerServerRequest(method, params)
+  }
+
+  private answerServerRequest(method: string, params: JsonObject): Promise<unknown> {
     try {
       switch (method) {
         case 'item/tool/call': {
@@ -720,7 +867,7 @@ export class CodexAppServerWire {
       }
     } catch (error: unknown) {
       const normalized = thrown(error)
-      this.fail(normalized)
+      if (!(normalized instanceof CodexForeignTurnError)) this.fail(normalized)
       return Promise.reject(normalized)
     }
   }
