@@ -59,10 +59,10 @@ const model = {
 } as const
 
 /**
- * Wall-clock bound for the tests that write and run several fresh executables. Their idle maximum was 2.1 s, and the
- * default 5 s was exceeded in full-suite runs under load (see `cli-runtimes.spec.ts` for the measurements behind the
- * slow first run of a new file and for the limits of this bound). With the bound, six concurrent copies of this spec
- * all passed (0 of 12 failed).
+ * Wall-clock budget for the whole of each test that writes and runs several fresh executables; the default 5 s was
+ * exceeded in full-suite runs under load. The cause of the slowness is not established; `cli-runtimes.spec.ts` records
+ * the call-trace measurements and the limits of this budget. Six concurrent copies of this spec all passed with the
+ * budget (0 of 12 failed).
  */
 const FRESH_EXECUTABLE_TIMEOUT_MS = 15_000
 
