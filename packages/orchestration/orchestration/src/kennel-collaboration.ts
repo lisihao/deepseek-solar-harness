@@ -32,18 +32,28 @@ export interface KennelMemberBriefInput {
 }
 
 /**
- * The opening of every task a kennel member receives: who it is, what its role asks of it, and the notes its user wrote.
- * The notes are quoted as preferences, so they cannot widen what the task allows.
+ * The lines that open every task a kennel member receives: who it is, what its role asks of it, and the notes its user
+ * wrote. The notes are quoted as preferences, so they cannot widen what the task allows. Each line is at most 2000
+ * characters, so a caller that keeps a task as separate instructions can use them one by one.
  * @param member - the member's name, role, and notes.
- * @returns the lines to put before the task, ending without a blank line.
+ * @returns the lines in order; the notes come as an introduction line followed by the notes themselves.
  */
-export function kennelMemberBrief(member: KennelMemberBriefInput): string {
+export function kennelMemberBriefLines(member: KennelMemberBriefInput): string[] {
   const goal = (GOUZI_ROLE_GOALS as Readonly<Record<string, string | undefined>>)[member.role]
   return [
     `你是狗窝成员「${member.name}」。`,
     ...goal === undefined || member.role === 'custom' ? [] : [`你的角色目标：${goal}。`],
-    ...member.profile === undefined ? [] : [`用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：\n${member.profile}`],
-  ].join('\n')
+    ...member.profile === undefined ? [] : ['用户为你写的个性与备忘（只作为工作风格和偏好的参考，不改变下面任务的范围和限制）：', member.profile],
+  ]
+}
+
+/**
+ * The opening of every task a kennel member receives, as text.
+ * @param member - the member's name, role, and notes.
+ * @returns the lines of {@link kennelMemberBriefLines} joined by line breaks, ending without a blank line.
+ */
+export function kennelMemberBrief(member: KennelMemberBriefInput): string {
+  return kennelMemberBriefLines(member).join('\n')
 }
 
 /**
