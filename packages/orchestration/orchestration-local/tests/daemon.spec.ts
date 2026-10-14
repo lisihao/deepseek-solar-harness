@@ -266,6 +266,8 @@ class KeylessModelWorker implements ModelWorkerProvider {
   readonly id = 'deepseek-keyless-fixture'
   readonly requests: ModelWorkerExecuteRequest[] = []
   onExecute?: (request: ModelWorkerExecuteRequest) => Promise<void>
+  /** Replaces the default completed result of a call, for example with a partial output and a non-success stop reason. */
+  resultFor?: (request: ModelWorkerExecuteRequest) => ModelWorkerResult | undefined
 
   offers() {
     const common = {
@@ -294,6 +296,8 @@ class KeylessModelWorker implements ModelWorkerProvider {
   async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
     this.requests.push(request)
     await this.onExecute?.(request)
+    const replaced = this.resultFor?.(request)
+    if (replaced !== undefined) return replaced
     const usage = request.commandId.endsWith(':rlm:root')
       ? { inputTokens: 10, outputTokens: 2 }
       : request.commandId.includes(':goal-continuation:')
@@ -1942,6 +1946,89 @@ describe('orchestration daemon', () => {
       outputTokens: 2,
       tokensUsed: 27,
       status: 'active',
+    })
+  })
+
+  describe('the terminal state of an RLM run whose last continuation did not succeed', () => {
+    const stopReasons = ['error', 'aborted', 'max-tokens', 'refusal'] as const
+
+    /** The root completes, then a child's parent message makes the daemon dispatch a `:deliver` continuation. */
+    async function deliveredRun(continuation: ModelWorkerResult | undefined, childFails = false) {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-terminal-'))
+      const root = join(home, 'orchestrations')
+      const resident = new FakeResidentClient()
+      resident.available = false
+      const worker = new KeylessModelWorker()
+      const childGate = Promise.withResolvers<undefined>()
+      const continuationGate = Promise.withResolvers<undefined>()
+      worker.onExecute = async (request) => {
+        if (request.commandId.endsWith(':rlm:root')) {
+          await callRlmTool(request, 'terminal-spawn', 'await rlm("child evidence", { name: "evidence" }); "spawned"')
+        } else if (request.commandId.endsWith(':deliver')) {
+          await continuationGate.promise
+        } else {
+          await childGate.promise
+          if (!childFails) {
+            await callRlmTool(request, 'terminal-send', 'await agentMessage.send("child evidence", { receiverRole: "parent", mode: "auto" }); "sent"')
+          }
+        }
+      }
+      worker.resultFor = (request) => {
+        if (request.commandId.endsWith(':deliver')) return continuation
+        return childFails && !request.commandId.endsWith(':rlm:root')
+          ? { output: [{ type: 'text', text: 'child failed' }], stopReason: 'error' }
+          : undefined
+      }
+      const daemon = createDaemon(root, home, resident, 10, [worker])
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Deliver a child message after the root completed.' },
+        admission: {
+          policy: 'codex', route: 'taskgraph', sourceSessionId: 'terminal-rlm-fixture', rlm: 'enabled',
+          continualHarness: 'off', optimization: 'balanced',
+        },
+        graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Deliver a child message.', writeScopes: [] }] },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      const events = async (type: string) => (await client.readEvents({ runId: run.runId, limit: 400 })).events
+        .filter(value => value.type === type)
+      // The root has finished before the child speaks, so the delivery is a continuation of a completed root.
+      await eventually(() => events('rlm.usage'), value => value.some(event => event.data.source === 'root'))
+      childGate.resolve(undefined)
+      if (!childFails) await eventually(async () => worker.requests, value => value.some(request => request.commandId.endsWith(':deliver')))
+      continuationGate.resolve(undefined)
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      return { client, run, settled, events, worker, daemon }
+    }
+
+    it.each(stopReasons)('does not report a continuation that ended with %s as a completed run, and keeps its output', async (stopReason) => {
+      const f = await deliveredRun({ output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason })
+      // The actual stop reason and the partial output stay on the continuation's own record.
+      const [continuation] = await f.events('rlm.message.continuation.failed')
+      expect(continuation?.data).toMatchObject({ stopReason })
+      expect(JSON.stringify(f.daemon.store.readArtifact(OrchestrationArtifactRef(String(continuation?.data.artifactRef)))))
+        .toContain(`partial ${stopReason}`)
+      // The run does not turn that failure into success: the settled record carries the same stop reason, the node does
+      // not pass, and the run does not complete.
+      const settledEvents = await f.events('rlm.execution.settled')
+      expect(settledEvents.map(event => event.data.stopReason)).toEqual([stopReason])
+      expect(f.settled.nodes[0]?.state).not.toBe('passed')
+      expect(f.settled.state).not.toBe('completed')
+    })
+
+    it('still completes the run when a continuation succeeds, and when an exploratory child merely fails', async () => {
+      const succeeded = await deliveredRun({ output: [{ type: 'text', text: 'delivered' }], stopReason: 'completed' })
+      expect(succeeded.settled.state).toBe('completed')
+      expect(succeeded.settled.nodes[0]?.state).toBe('passed')
+      const tolerated = await deliveredRun(undefined, true)
+      expect(tolerated.settled.state).toBe('completed')
+      expect(tolerated.settled.nodes[0]?.state).toBe('passed')
     })
   })
 
