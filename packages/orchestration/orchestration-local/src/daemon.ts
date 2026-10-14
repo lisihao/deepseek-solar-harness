@@ -138,6 +138,7 @@ import {
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import { RlmCancellationScope } from './rlm-cancellation.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
@@ -3563,8 +3564,10 @@ export class OrchestrationDaemon {
   ): RlmRuntimeHostBindings {
     const runId = String(record.snapshot.runId)
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
+    const cancellation = new RlmCancellationScope(controller.signal, `rlm:${String(plan.executionId)}`)
     return {
       dispatchChild: async (request) => {
+        const execution = cancellation.begin(String(request.childSessionId), String(request.parentSessionId))
         const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:${String(request.childId)}`)
         const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.childSessionId)
         assertRlmBridgeAllowed(request.executionOptions, bridge)
@@ -3625,7 +3628,7 @@ export class OrchestrationDaemon {
           }
         }
         const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
-          record, spec, plan, request.childSessionId, controller, error,
+          record, spec, plan, request.childSessionId, execution.signal, error,
         )
         if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
           const started = await this.startResidentTurn(
@@ -3636,7 +3639,7 @@ export class OrchestrationDaemon {
             executionId,
             request.model,
             childPrompt,
-            controller.signal,
+            execution.signal,
             `Prime RLM child ${request.name}`,
             bridge,
             String(request.childSessionId),
@@ -3669,7 +3672,7 @@ export class OrchestrationDaemon {
           model: request.model.model, prompt: modelWorkerEnvelopePrompt(childEnvelope),
           parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
           ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-          modelToolBridge: bridge, signal: controller.signal,
+          modelToolBridge: bridge, signal: execution.signal,
         })
         const syntheticSessionId = `model-worker:${request.model.operatorId}:${String(request.childSessionId)}`
         const syntheticTurnId = `model-worker-turn:${String(executionId)}`
@@ -3690,11 +3693,11 @@ export class OrchestrationDaemon {
             { output: [...result.output], stopReason: result.stopReason },
             result,
           ), failed),
-          interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+          interrupt: (): Promise<void> => { execution.abort(); return Promise.resolve() },
         }
       },
       dispatchContinuation: request => this.dispatchRlmContinuation(
-        record, spec, plan, request, controller, physicalRuns,
+        record, spec, plan, request, cancellation, physicalRuns,
       ),
       hostRequest: async ({ sessionId, method, params, sealedSkill }) => {
         const isRootSession = String(sessionId) === `rlm:${String(plan.executionId)}`
@@ -3944,9 +3947,10 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
     request: Parameters<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>[0],
-    controller: AbortController,
+    cancellation: RlmCancellationScope,
     physicalRuns: PhysicalOperatorRun[],
   ): Promise<Awaited<ReturnType<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>>> {
+    const execution = cancellation.begin(String(request.sessionId))
     const executionId = PhysicalOperatorExecutionId(String(request.commandId))
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
     assertRlmBridgeAllowed(request.executionOptions ?? { version: 1 }, bridge)
@@ -4012,12 +4016,12 @@ export class OrchestrationDaemon {
       }
     }
     const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
-      record, spec, plan, request.sessionId, controller, error,
+      record, spec, plan, request.sessionId, execution.signal, error,
     )
     if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
       const started = await this.startResidentTurn(
         record, spec, plan, plan.executionWorkspace.path, executionId, request.model,
-        prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId), 'disabled',
+        prompt, execution.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId), 'disabled',
       )
       this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
       return this.residentRlmExecution(started, settle, failed)
@@ -4036,7 +4040,7 @@ export class OrchestrationDaemon {
       model: request.model.model, prompt: modelWorkerEnvelopePrompt(continuationEnvelope),
       parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
       ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-      modelToolBridge: bridge, signal: controller.signal,
+      modelToolBridge: bridge, signal: execution.signal,
     })
     return {
       nativeSessionId: `model-worker:${request.model.operatorId}:${String(request.sessionId)}`,
@@ -4045,7 +4049,7 @@ export class OrchestrationDaemon {
         { output: [...value.output], stopReason: value.stopReason },
         value,
       ), failed),
-      interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+      interrupt: (): Promise<void> => { execution.abort(); return Promise.resolve() },
     }
   }
 
@@ -4054,12 +4058,12 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
     sessionId: RlmRuntimeSessionId,
-    controller: AbortController,
+    signal: AbortSignal,
     error: unknown,
   ): Promise<RlmChildExecutionResult> {
     await this.flushRlmHarnessBoundary(record, spec, plan, sessionId, 'turn-end')
     return {
-      status: controller.signal.aborted ? 'indeterminate' : 'failed',
+      status: signal.aborted ? 'indeterminate' : 'failed',
       error: error instanceof Error ? error.message : String(error),
     }
   }

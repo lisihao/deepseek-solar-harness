@@ -510,7 +510,12 @@ async function heldRlmRun(afterSpawn?: (request: ModelWorkerExecuteRequest) => P
   const events = async (type: string) => (await client.readEvents({ runId: run.runId, limit: 400 })).events
     .filter(value => value.type === type)
   // The daemon keeps its Cordis context private; the runtime service is the shipped entry for interrupting a session.
-  interface RuntimeEntry { list(): Promise<readonly { sessionId: string; task: string }[]>; interrupt(sessionId: string): Promise<void> }
+  interface RuntimeEntry {
+    list(): Promise<readonly { sessionId: string; task: string; parentSessionId?: string }[]>
+    interrupt(sessionId: string): Promise<void>
+    readEvents(request: { sessionId: string; limit: number }): Promise<readonly { type: string; data: Record<string, unknown> }[]>
+    inspect(sessionId: string): Promise<{ children: readonly { name: string; lifecycle: string }[] }>
+  }
   const runtime = (daemon as unknown as { ctx: { rlmRuntime: RuntimeEntry } }).ctx.rlmRuntime
   return { client, run, worker, call, events, runtime }
 }
@@ -1954,10 +1959,19 @@ describe('orchestration daemon', () => {
       expect(f.worker.requests).toHaveLength(3)
 
       // The sibling still settles, and a late result of the deleted child cannot bring it back.
+      const rootSession = (await f.runtime.list()).find(value => value.parentSessionId === undefined)!.sessionId
+      const lifecycles = async () => Object.fromEntries(
+        (await f.runtime.inspect(rootSession)).children.map(value => [value.name, value.lifecycle]),
+      )
       f.call('B').gate.resolve(undefined)
-      await eventually(() => f.events('rlm.child.settled'), value => value.length === 1)
+      await eventually(lifecycles, value => value.B === 'settled')
+      expect((await lifecycles()).A).toBe('deleted')
       f.call('A').gate.resolve(undefined)
-      await eventually(() => f.events('rlm.child.late_result_ignored'), value => value.length === 1)
+      await eventually(
+        () => f.runtime.readEvents({ sessionId: rootSession, limit: 400 }),
+        value => value.some(event => event.type === 'rlm.child.late_result_ignored'),
+      )
+      expect((await lifecycles()).A).toBe('deleted')
       await expect(deleted).resolves.toBeDefined()
       f.call('root').gate.resolve(undefined)
       const settled = await eventually(() => f.client.inspect(String(f.run.runId)), value => value.state === 'completed')
