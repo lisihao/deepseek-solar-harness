@@ -2206,6 +2206,25 @@ describe('host physical-operator routing', () => {
       expect(codex.requests).toHaveLength(3)
     })
 
+    it('settles a run whose native outcome is unknown as terminal: one dispatch, no fallback operator, no second request', async () => {
+      const { ctx, agent, codex, deepseek } = await setup({ codexImmediate: false })
+      await ctx.commands.execute(agent, '/operator direct', new AbortController().signal)
+      const dispose = select(agent, 'codex:gpt-5.6-sol', 'low')
+      try {
+        send(agent, '第一轮')
+        while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+        const receipt = codex.receipts.get(String(codex.requests[0]?.executionId))
+        receipt?.result.reject(new PhysicalOperatorError('Codex turn start outcome is unknown; native turn t ended with status completed', 'COMMAND_INDETERMINATE'))
+        await agent.whenIdle()
+      } finally { dispose() }
+      const ended = agent.session.events.findLast(event => event.type === 'turn/end')
+      expect(ended?.type === 'turn/end' && ended.data.reason.kind).toBe('error')
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/dispatch')).toHaveLength(1)
+      expect(agent.session.events.some(event => event.type === 'physical-operator/dispatch-terminal' && event.data.code === 'COMMAND_INDETERMINATE')).toBe(true)
+      expect(codex.requests).toHaveLength(1)
+      expect(deepseek.requests).toHaveLength(0)
+    })
+
     it('gives another native configuration its own lane, returns to the first lane, and reuses the newest lane for a bare entry', async () => {
       const { agent, codex } = await setup()
       await turn(agent, 'codex:gpt-5.6-sol', 'low', '第一轮')
@@ -2272,6 +2291,39 @@ describe('host physical-operator routing', () => {
         expect(codex.requests[1]?.residentProfile).toEqual(codex.requests[0]?.residentProfile)
         expect(codex.requests[1]?.contextEnvelope?.digest).toBe(codex.requests[0]?.contextEnvelope?.digest)
         receipt?.result.resolve({ output: [{ type: 'text', text: 'done' }], stopReason: 'completed' })
+        await agent.whenIdle()
+      } finally { dispose() }
+    })
+
+    it('recovers a dispatch written before lanes existed on the default lane, with no handoff, under its own command id', async () => {
+      const { ctx, agent, codex } = await setup({ codexImmediate: false })
+      await ctx.commands.execute(agent, '/operator direct', new AbortController().signal)
+      const earlier = createUserMessage({ content: [{ type: 'text', text: '旧版本发出的任务' }], source: { kind: 'user' } })
+      agent.session.append('user/message', earlier, { surfaceOp: 'append' })
+      // The event a build without lanes wrote: no `residentLaneId`, no `handoff`, never terminated and never answered.
+      agent.session.append('physical-operator/dispatch', {
+        commandId: 'resident-legacy-command',
+        operatorId: 'codex',
+        promptMessageId: String(earlier.id),
+        requestedByMessageId: String(earlier.id),
+        turn: 1,
+        step: 1,
+        recovered: false,
+        executionMode: 'resident',
+        residentProfile: { model: 'gpt-5.6-sol', effort: 'low' },
+      }, { ignorable: true })
+      // The user now names another model; the recovered dispatch keeps the profile it was frozen with.
+      const dispose = select(agent, 'codex:gpt-5.6-terra', 'xhigh')
+      try {
+        send(agent, '继续')
+        while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+        const request = codex.requests[0]
+        // The unanswered dispatch is requested again, not replaced by a second one.
+        expect(agent.session.events.filter(event => event.type === 'physical-operator/dispatch')).toHaveLength(1)
+        expect(request?.residentLaneId).toBeUndefined()
+        expect(request?.residentProfile).toEqual({ model: 'gpt-5.6-sol', effort: 'low' })
+        expect(request?.contextEnvelope?.contexts.some(context => context.name === 'session-handoff')).toBe(false)
+        codex.receipts.get(String(request?.executionId))?.result.resolve({ output: [{ type: 'text', text: 'done' }], stopReason: 'completed' })
         await agent.whenIdle()
       } finally { dispose() }
     })

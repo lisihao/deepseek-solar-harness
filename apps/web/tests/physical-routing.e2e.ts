@@ -10,6 +10,7 @@ import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { createChatScrollFixture } from './chat-scroll-fixture.ts'
+import { createNativeReplyFixture } from './native-reply-fixture.ts'
 import { launchWebScaffold, seedSession, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
@@ -313,6 +314,30 @@ describe('web e2e: physical operator qualification and routing', () => {
     if (scaffold.mode === 'refresh') await writeFile(CLI_SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(CLI_SNAPSHOT, 'utf8'))
     await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
+  it('names the native model and effort that served a reply under the closing reply', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-served-by'))
+    const fixture = createNativeReplyFixture({
+      operatorId: 'codex',
+      profile: { model: 'gpt-5.6-sol', effort: 'low' },
+      title: 'Native served-by check',
+      userMarker: 'SERVEDBY_NATIVE_USER',
+      reply: 'SERVEDBY_NATIVE_REPLY done.',
+    })
+    await seedSession(scaffold, fixture, 'physical-routing-served-by')
+    await page.reload({ waitUntil: 'load' })
+    const searchButton = page.getByRole('button', { name: 'Search sessions' })
+    await searchButton.waitFor({ timeout: 30_000 })
+    if (await searchButton.getAttribute('aria-expanded') !== 'true') await searchButton.click()
+    await page.getByRole('textbox', { name: 'Search sessions...', exact: true }).fill('SERVEDBY_NATIVE_USER')
+    const result = page.getByRole('tree', { name: 'Search results' }).getByRole('treeitem').first()
+    await result.waitFor({ timeout: 30_000 })
+    await result.click()
+    await page.getByText('SERVEDBY_NATIVE_REPLY done.').waitFor({ timeout: 30_000 })
+    // The log names the operator only; the dispatch's profile gives the model and effort the caption shows.
+    await page.getByText('Codex · gpt-5.6-sol · low', { exact: true }).waitFor({ timeout: 15_000 })
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 

@@ -260,7 +260,7 @@ export function ModelSelect(
   const effectiveNote = differs
     ? {
       selected: t('effective.selected', { name: triggerLabel }),
-      inEffect: t('effective.inEffect', { name: joinLabel(describeSelection(state.groups, inEffect)) }),
+      inEffect: t('effective.inEffect', { name: joinLabel(describeSelection(state, inEffect)) }),
     }
     : undefined
   const triggerAria = currentChoice === undefined
