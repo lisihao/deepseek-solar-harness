@@ -443,6 +443,78 @@ async function installInstructionCapsule(root: string): Promise<void> {
   await writeFile(join(capsuleRoot, 'extra.json'), JSON.stringify({ ...manifest, digest: canonicalSha256(manifest) }))
 }
 
+/** What one held model-worker call of a keyless RLM run records, and the gates that hold and release it. */
+interface HeldCall {
+  aborts: number
+  readonly started: PromiseWithResolvers<undefined>
+  readonly gate: PromiseWithResolvers<undefined>
+}
+
+/**
+ * A keyless RLM run on a real daemon whose model-worker calls for the root and for children A and B each stay open until
+ * the test releases them, so the test can see which of them a cancellation reaches. The root spawns A and B through the
+ * real REPL, waits until both calls are in flight, runs `afterSpawn`, and then waits for its own release.
+ */
+async function heldRlmRun(afterSpawn?: (request: ModelWorkerExecuteRequest) => Promise<void>) {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-held-'))
+  const root = join(home, 'orchestrations')
+  const resident = new FakeResidentClient()
+  resident.available = false
+  const worker = new KeylessModelWorker()
+  const daemon = createDaemon(root, home, resident, 10, [worker])
+  await daemon.start()
+  cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+  const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+  const workspace = join(home, 'workspace')
+  await mkdir(workspace)
+  const calls = new Map<string, HeldCall>()
+  const call = (name: string): HeldCall => {
+    let held = calls.get(name)
+    if (held === undefined) {
+      held = { aborts: 0, started: Promise.withResolvers<undefined>(), gate: Promise.withResolvers<undefined>() }
+      calls.set(name, held)
+    }
+    return held
+  }
+  const nameOf = (request: ModelWorkerExecuteRequest): string => {
+    const text = request.prompt.map(block => block.type === 'text' ? block.text : '').join('\n')
+    return request.commandId.endsWith(':rlm:root') ? 'root' : text.includes('child A') ? 'A' : text.includes('child B') ? 'B' : request.commandId
+  }
+  worker.onExecute = async (request) => {
+    const held = call(nameOf(request))
+    request.signal.addEventListener('abort', () => { held.aborts += 1 })
+    held.started.resolve(undefined)
+    if (nameOf(request) === 'root') {
+      await callRlmTool(request, 'held-spawn', [
+        'await rlm("child A", { name: "A" });',
+        'await rlm("child B", { name: "B" });',
+        '"spawned"',
+      ].join('\n'))
+      await Promise.all([call('A').started.promise, call('B').started.promise])
+      await afterSpawn?.(request)
+    }
+    await held.gate.promise
+  }
+  const fixture = graph(workspace)
+  const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+  const compilation = await client.compile({
+    intent: { request: 'Hold root and two children.' },
+    admission: {
+      policy: 'codex', route: 'taskgraph', sourceSessionId: 'held-rlm-fixture', rlm: 'enabled',
+      continualHarness: 'off', optimization: 'balanced',
+    },
+    graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Hold root and two children.', writeScopes: [] }] },
+  })
+  const run = await startCompilation(client, compilation.compilationId)
+  await Promise.all(['root', 'A', 'B'].map(name => call(name).started.promise))
+  const events = async (type: string) => (await client.readEvents({ runId: run.runId, limit: 400 })).events
+    .filter(value => value.type === type)
+  // The daemon keeps its Cordis context private; the runtime service is the shipped entry for interrupting a session.
+  interface RuntimeEntry { list(): Promise<readonly { sessionId: string; task: string }[]>; interrupt(sessionId: string): Promise<void> }
+  const runtime = (daemon as unknown as { ctx: { rlmRuntime: RuntimeEntry } }).ctx.rlmRuntime
+  return { client, run, worker, call, events, runtime }
+}
+
 describe('orchestration daemon', () => {
   it('starts and accepts clients when the durable root exceeds Unix socket limits', async () => {
     const home = await mkdtemp(join(tmpdir(), 'oc-long-root-'))
@@ -1865,6 +1937,59 @@ describe('orchestration daemon', () => {
       outputTokens: 2,
       tokensUsed: 27,
       status: 'active',
+    })
+  })
+
+  describe('cancelling one API child of an RLM run', () => {
+    it('cancels only the child the root deletes, and neither the root nor its sibling', async () => {
+      let deleted: Promise<unknown> = Promise.resolve()
+      const f = await heldRlmRun((request) => {
+        // Not awaited by the root: a cell that cancels the root as well would never answer, which the assertions report.
+        deleted = callRlmTool(request, 'held-delete', 'const kids = await rlm.listSubagents(); await rlm.deleteSubagent(kids.find(kid => kid.name === "A")); "deleted"')
+        deleted.catch(() => undefined)
+        return Promise.resolve()
+      })
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+      expect(f.worker.requests).toHaveLength(3)
+
+      // The sibling still settles, and a late result of the deleted child cannot bring it back.
+      f.call('B').gate.resolve(undefined)
+      await eventually(() => f.events('rlm.child.settled'), value => value.length === 1)
+      f.call('A').gate.resolve(undefined)
+      await eventually(() => f.events('rlm.child.late_result_ignored'), value => value.length === 1)
+      await expect(deleted).resolves.toBeDefined()
+      f.call('root').gate.resolve(undefined)
+      const settled = await eventually(() => f.client.inspect(String(f.run.runId)), value => value.state === 'completed')
+      expect(settled.nodes[0]?.state).toBe('passed')
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+      expect(f.worker.requests).toHaveLength(3)
+    })
+
+    it('cancels only the interrupted child through the runtime service', async () => {
+      const f = await heldRlmRun()
+      const children = await f.runtime.list()
+      const a = children.find(value => value.task.includes('child A'))
+      expect(a).toBeDefined()
+      await f.runtime.interrupt(a!.sessionId)
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+      for (const name of ['B', 'A', 'root']) f.call(name).gate.resolve(undefined)
+      await eventually(() => f.client.inspect(String(f.run.runId)), value => ['completed', 'failed'].includes(value.state))
+      expect(f.worker.requests).toHaveLength(3)
+    })
+
+    it('cancels the root and both children, each once, when the run is cancelled', async () => {
+      const f = await heldRlmRun()
+      const current = await f.client.inspect(String(f.run.runId))
+      await f.client.control({
+        commandId: 'held-cancel', runId: f.run.runId, expectedRevision: current.revision, action: 'cancel', reason: 'test',
+      })
+      await eventually(async () => ['root', 'A', 'B'].map(name => f.call(name).aborts), value => value.every(count => count === 1))
+      for (const name of ['root', 'A', 'B']) f.call(name).gate.resolve(undefined)
+      await eventually(() => f.client.inspect(String(f.run.runId)), value => value.state === 'cancelled')
+      expect(['root', 'A', 'B'].map(name => f.call(name).aborts)).toEqual([1, 1, 1])
+      expect(f.worker.requests).toHaveLength(3)
     })
   })
 
