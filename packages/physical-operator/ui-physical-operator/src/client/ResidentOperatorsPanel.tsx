@@ -510,6 +510,8 @@ function progressLabel(event: DesktopResidentEvent | undefined): string {
     'turn.settled': '执行结束（未验收）',
     'turn.failed': '任务失败',
     'turn.indeterminate': '结果待人工确认',
+    'turn.indeterminate_resolved': '已人工恢复',
+    'session.reset': '已重置',
   } as Record<string, string>)[event.type] ?? '状态已更新'
 }
 

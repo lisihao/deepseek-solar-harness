@@ -589,9 +589,31 @@ describe('closed-lane recovery route', () => {
     expect((await call('session_id=session-1&action=drop&revision=7')).json()).toEqual({ error: 'ACTION_REQUIRED' })
     expect((await call('session_id=session-1&action=reset&revision=-1')).json()).toEqual({ error: 'REVISION_REQUIRED' })
     expect((await call('session_id=session-1&action=reset&revision=x')).json()).toEqual({ error: 'REVISION_REQUIRED' })
+    expect((await call('session_id=session-1&action=reset')).json()).toEqual({ error: 'REVISION_REQUIRED' })
+    expect((await call('session_id=session-1&action=reset&revision=')).json()).toEqual({ error: 'REVISION_REQUIRED' })
+    expect((await call('session_id=session-1&action=reset&revision=7.5')).json()).toEqual({ error: 'REVISION_REQUIRED' })
     expect(service.inspect).not.toHaveBeenCalled()
     expect(service.reset).not.toHaveBeenCalled()
     expect(service.resolveIndeterminate).not.toHaveBeenCalled()
+  })
+
+  it('refuses a loopback request that carries a foreign Origin, without calling the service', async () => {
+    const service = { inspect: vi.fn(), resolveIndeterminate: vi.fn(), reset: vi.fn() }
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    registerResidentSessionRecovery({
+      residentOperators: service,
+      webServer: { register: vi.fn((route: { handler: typeof handler }) => { handler = route.handler; return () => {} }) },
+      get: () => ({ authenticate: () => undefined }),
+      logger: { warn: vi.fn() },
+    } as unknown as Context)
+    const recorded = responseRecorder()
+    await handler?.({
+      method: 'POST', url: '/api/resident-operators/session-recovery?session_id=session-1&action=reset&revision=7',
+      headers: { host: '127.0.0.1:13080', origin: 'https://evil.example' }, socket: { remoteAddress: '127.0.0.1' },
+    }, recorded.response)
+    expect(recorded.status()).toBe(401)
+    expect(service.inspect).not.toHaveBeenCalled()
+    expect(service.reset).not.toHaveBeenCalled()
   })
 
   it('refuses a lane that is not closed by an unconfirmed native turn, without calling the service', async () => {
@@ -653,6 +675,7 @@ describe('closed-lane recovery route', () => {
     const conflict = await register(conflicting).call('session_id=session-1&action=resolve&revision=7')
     expect(conflict.status()).toBe(409)
     expect(conflict.json()).toMatchObject({ error: 'STATE_CHANGED' })
+    expect((conflict.json() as { message: string }).message).toContain('请选择重置这条 lane')
 
     const broken = {
       inspect: vi.fn(async () => lane()), resolveIndeterminate: vi.fn(),

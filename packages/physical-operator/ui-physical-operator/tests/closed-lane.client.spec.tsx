@@ -168,6 +168,19 @@ describe('Resident panel with a closed lane', () => {
     expect(reads).toBeGreaterThan(1)
   })
 
+  it.each([
+    ['turn.indeterminate_resolved', '已人工恢复'],
+    ['session.reset', '已重置'],
+  ])('says what happened to a released lane after %s', async (type, label) => {
+    window.history.replaceState({}, '', '/')
+    const released = closedLane({ health: 'ok', latestEvent: { sequence: 3, type, time: TIME, data: {} } })
+    delete (released as { healthReason?: string }).healthReason
+    render(<ResidentOperatorsPanel request={panelRequest([released])} />)
+    fireEvent.click(screen.getByRole('button', { name: /物理算子/ }))
+    expect(await screen.findByText(label)).toBeTruthy()
+    expect(screen.queryByText('这条 lane 已暂停接收新任务')).toBeNull()
+  })
+
   it('selects a lane when its row is clicked', async () => {
     window.history.replaceState({}, '', '/')
     const second = closedLane({ sessionId: 'session-2', laneId: 'lane-2', health: 'ok', stateRevision: 3 })
