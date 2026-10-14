@@ -12,6 +12,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+/** A rejection whose reason is not an Error, as some transports produce. */
+const rejectWith = (reason: unknown): Promise<never> => new Promise((_resolve, reject) => { reject(reason) })
+
 const TIME = '2026-10-14T10:00:00.000Z'
 
 function closedLane(patch: Partial<DesktopResidentSession> = {}): DesktopResidentSession {
@@ -62,6 +65,22 @@ describe('closed lane notice', () => {
     expect(url.pathname).toBe('/api/resident-operators/session-recovery')
     expect(Object.fromEntries(url.searchParams)).toEqual({ session_id: 'session-1', action, revision: '7' })
     expect(init.method).toBe('POST')
+  })
+
+  it('names a task without a recorded turn generically and shows no time', () => {
+    render(<ClosedLaneNotice
+      session={closedLane({ latestTurn: undefined })} localOwner generatedAt={TIME} timeZone="UTC"
+      request={vi.fn()} onChanged={vi.fn()}
+    />)
+    expect(screen.getByText(/上一条任务「历史任务」在 Codex 里/)).toBeTruthy()
+  })
+
+  it('shows a refusal that is not an Error as text', async () => {
+    const request = vi.fn(() => rejectWith('connection lost'))
+    notice(request)
+    fireEvent.click(screen.getByRole('button', { name: '重置这条 lane' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认重置' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('connection lost')
   })
 
   it('goes back without a request when the owner cancels', () => {
@@ -120,6 +139,28 @@ describe('Resident panel with a closed lane', () => {
       expect(header.getAttribute('data-status')).toBe('warn')
       expect(header.getAttribute('aria-label')).toContain('1 条 lane 已暂停')
     })
+  })
+
+  it('reads the panel again after a release, and shows it when that read fails', async () => {
+    window.history.replaceState({}, '', '/')
+    let reads = 0
+    const request = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const path = input instanceof URL ? input.pathname : ''
+      if (path.endsWith('/cli')) return json({ runtimes: [] })
+      if (init?.method === 'POST') return json({ session: closedLane({ health: 'ok' }) })
+      reads += 1
+      if (reads > 1) throw new Error('daemon unreachable')
+      return json({
+        generatedAt: TIME, providers: [], sessions: [closedLane()], events: [], activities: [],
+        hiddenDiagnosticSessions: 0, activeWorkers: 0,
+      })
+    })
+    render(<ResidentOperatorsPanel request={request} />)
+    fireEvent.click(screen.getByRole('button', { name: /物理算子/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '重置这条 lane' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认重置' }))
+    expect(await screen.findByText(/daemon unreachable/)).toBeTruthy()
+    expect(reads).toBeGreaterThan(1)
   })
 
   it('keeps a remote frontend from releasing the lane', async () => {

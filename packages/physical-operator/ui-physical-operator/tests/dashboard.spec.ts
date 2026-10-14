@@ -6,6 +6,7 @@ import {
   ResidentOperatorTurnId,
 } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it, vi } from 'vitest'
+import { apply } from '../src/index.ts'
 import {
   readResidentDashboard,
   registerResidentCliRuntimes,
@@ -664,6 +665,46 @@ describe('closed-lane recovery route', () => {
     const closed = await register(stillClosed).call('session_id=session-1&action=resolve&revision=7')
     expect(closed.status()).toBe(409)
     expect(closed.json()).toMatchObject({ error: 'LANE_STILL_CLOSED' })
+  })
+
+  it('answers a request without a reader as unauthorized, and reads a missing URL as a missing session', async () => {
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    registerResidentSessionRecovery({
+      residentOperators: {},
+      webServer: { register: vi.fn((route: { handler: typeof handler }) => { handler = route.handler; return () => {} }) },
+      get: () => undefined,
+      logger: { warn: vi.fn() },
+    } as unknown as Context)
+    const denied = responseRecorder()
+    await handler?.({ method: 'POST', url: '/x', headers: {}, socket: { remoteAddress: '127.0.0.1' } }, denied.response)
+    expect(denied.status()).toBe(503)
+
+    const { call } = register({ inspect: vi.fn() })
+    expect((await call('')).json()).toEqual({ error: 'SESSION_REQUIRED' })
+  })
+
+  it('reports a failure that is not an Error as its text', async () => {
+    const service = {
+      inspect: vi.fn(async () => lane()), reset: vi.fn(() => new Promise((_resolve, reject) => { reject('daemon gone') })), resolveIndeterminate: vi.fn(),
+    }
+    const failed = await register(service).call('session_id=session-1&action=reset&revision=7')
+    expect(failed.json()).toEqual({ error: 'RESIDENT_RECOVERY_FAILED', message: 'daemon gone' })
+  })
+
+  it('registers the dashboard, CLI and recovery routes as effects of the plugin', () => {
+    const labels: string[] = []
+    const paths: string[] = []
+    const ctx = {
+      effect: (run: () => unknown, label: string) => { labels.push(label); run() },
+      webServer: { register: vi.fn((route: { path: string }) => { paths.push(route.path); return () => {} }) },
+    } as unknown as Context
+    apply(ctx)
+    expect(labels).toEqual([
+      'ui-physical-operator: Resident dashboard route',
+      'ui-physical-operator: native CLI route',
+      'ui-physical-operator: closed-lane recovery route',
+    ])
+    expect(paths).toEqual(['/api/resident-operators', '/api/resident-operators/cli', '/api/resident-operators/session-recovery'])
   })
 
   it('lists a closed lane even when its workspace is a diagnostic one', async () => {

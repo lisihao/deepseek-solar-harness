@@ -59,12 +59,11 @@ export function ClosedLaneNotice(props: {
   const turn = props.session.latestTurn
   const started = turn === undefined ? undefined : formatResidentTimestamp(turn.updatedAt, props.generatedAt, props.timeZone)
 
-  const confirm = async (): Promise<void> => {
-    if (choice === undefined) return
+  const confirm = async (action: DesktopResidentRecoveryAction): Promise<void> => {
     setBusy(true)
     setMessage(undefined)
     try {
-      await recoverResidentSession(props.session, choice, props.request)
+      await recoverResidentSession(props.session, action, props.request)
       setChoice(undefined)
       props.onChanged()
     } catch (cause) {
@@ -94,7 +93,7 @@ export function ClosedLaneNotice(props: {
         <div className="dshDesktopResidentRecoveryConfirm">
           <p>{CONSEQUENCE[choice]}</p>
           <div className="dshDesktopResidentRecoveryActions">
-            <button type="button" disabled={busy} onClick={() => { void confirm() }}>
+            <button type="button" disabled={busy} onClick={() => { void confirm(choice) }}>
               {busy ? '正在处理…' : choice === 'resolve' ? '确认恢复' : '确认重置'}
             </button>
             <button type="button" disabled={busy} onClick={() => { setChoice(undefined) }}>取消</button>
