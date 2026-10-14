@@ -809,7 +809,7 @@ describe('Resident Session with a native turn that may still be running', () => 
       .toBe('COMMAND_INDETERMINATE')
     expect(bootstrap.readEvents(accepted.sessionId).events).toContainEqual(expect.objectContaining({
       type: 'turn.indeterminate',
-      data: expect.objectContaining({ commandId: 'crash', reason: 'daemon_recovery', nativeOutcomeUnconfirmed: true }),
+      data: { commandId: 'crash', turnId: accepted.turnId, reason: 'daemon_recovery', nativeOutcomeUnconfirmed: true },
     }))
     bootstrap.resolveIndeterminate('crash', snapshot.stateRevision)
     expect(bootstrap.accept('after', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
@@ -840,7 +840,7 @@ describe('Resident Session with a native turn that may still be running', () => 
     store.markTurnIndeterminate('newer', 'the native turn may still be running', true)
     const revision = store.inspectSession(accepted.sessionId).stateRevision
 
-    expect(refusalOf(() => store.resolveIndeterminate('older', revision)).code).toBe('COMMAND_CONFLICT')
+    expect(refusalOf(() => { store.resolveIndeterminate('older', revision) }).code).toBe('COMMAND_CONFLICT')
     expect(store.inspectSession(accepted.sessionId)).toMatchObject({
       health: 'degraded', healthReason: 'native_outcome_unconfirmed', stateRevision: revision,
     })
@@ -893,7 +893,7 @@ describe('Resident Session with a native turn that may still be running', () => 
     const afterCompaction = store.inspectSession(source.sessionId)
     store.resolveIndeterminate('compact-3', afterCompaction.stateRevision)
     expect(store.inspectSession(source.sessionId)).toMatchObject({ health: 'degraded', healthReason: 'native_outcome_unconfirmed' })
-    expect(refusalOf(() => store.resolveIndeterminate('compact-3', store.inspectSession(source.sessionId).stateRevision)).code).toBe('COMMAND_CONFLICT')
+    expect(refusalOf(() => { store.resolveIndeterminate('compact-3', store.inspectSession(source.sessionId).stateRevision) }).code).toBe('COMMAND_CONFLICT')
     store.close()
   })
 
@@ -902,7 +902,7 @@ describe('Resident Session with a native turn that may still be running', () => 
     const snapshot = store.inspectSession(accepted.sessionId)
     store.reset(accepted.sessionId, snapshot.stateRevision, 'operator reset')
     expect(store.inspectSession(accepted.sessionId)).toMatchObject({ health: 'ok' })
-    expect(refusalOf(() => store.resolveIndeterminate('first', store.inspectSession(accepted.sessionId).stateRevision)).code).toBe('COMMAND_CONFLICT')
+    expect(refusalOf(() => { store.resolveIndeterminate('first', store.inspectSession(accepted.sessionId).stateRevision) }).code).toBe('COMMAND_CONFLICT')
     expect(store.accept('second', 'hash-2', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toMatchObject({ state: 'accepted' })
     store.close()
   })

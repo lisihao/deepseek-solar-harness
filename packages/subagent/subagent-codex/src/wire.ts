@@ -48,10 +48,6 @@ export const CODEX_APP_SERVER_METHODS = {
   ],
 } as const satisfies Readonly<Record<string, readonly string[]>>
 
-/**
- * Methods the wire uses when a build offers them and goes without when it does not: a build that lacks one still
- * qualifies, and the feature that uses it is skipped.
- */
 /** The statuses a Codex turn ends in; any other status is not evidence that its execution stopped. */
 export const CODEX_TERMINAL_TURN_STATUSES = ['completed', 'interrupted', 'failed'] as const
 
@@ -64,6 +60,10 @@ export function isCodexTerminalTurnStatus(status: string): boolean {
   return (CODEX_TERMINAL_TURN_STATUSES as readonly string[]).includes(status)
 }
 
+/**
+ * Methods the wire uses when a build offers them and goes without when it does not: a build that lacks one still
+ * qualifies, and the feature that uses it is skipped.
+ */
 export const CODEX_APP_SERVER_OPTIONAL_METHODS = {
   /** Lists a thread's turns, which a start of unknown outcome uses to find the turn it may have created. */
   ClientRequest: ['thread/turns/list'],

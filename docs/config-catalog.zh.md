@@ -2862,7 +2862,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/subagent/subagent-codex/src/index.ts:48`](../packages/subagent/subagent-codex/src/index.ts)
+来源： [`packages/subagent/subagent-codex/src/index.ts:50`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
