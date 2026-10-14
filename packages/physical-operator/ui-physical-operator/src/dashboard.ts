@@ -342,23 +342,25 @@ export function registerResidentSessionRecovery(ctx: Context): () => void {
       const fail = (status: number, error: DesktopResidentRecoveryFailure['error'], message?: string): void => {
         sendJson(response, status, { error, ...message === undefined ? {} : { message } } satisfies DesktopResidentRecoveryFailure)
       }
-      if (!authority.local) return fail(403, 'LOCAL_OWNER_REQUIRED')
+      if (!authority.local) { fail(403, 'LOCAL_OWNER_REQUIRED'); return }
       const query = new URL(request.url ?? RESIDENT_SESSION_RECOVERY_PATH, 'http://127.0.0.1').searchParams
       const sessionId = query.get('session_id')
       const action = query.get('action')
       const revision = Number(query.get('revision'))
-      if (sessionId === null || sessionId.trim().length === 0) return fail(400, 'SESSION_REQUIRED')
-      if (action !== 'resolve' && action !== 'reset') return fail(400, 'ACTION_REQUIRED')
-      if (!Number.isSafeInteger(revision) || revision < 0) return fail(400, 'REVISION_REQUIRED')
+      if (sessionId === null || sessionId.trim().length === 0) { fail(400, 'SESSION_REQUIRED'); return }
+      if (action !== 'resolve' && action !== 'reset') { fail(400, 'ACTION_REQUIRED'); return }
+      if (!Number.isSafeInteger(revision) || revision < 0) { fail(400, 'REVISION_REQUIRED'); return }
       try {
         const session = await ctx.residentOperators.inspect(sessionId)
         if (session.healthReason !== RESIDENT_NATIVE_OUTCOME_UNCONFIRMED) {
-          return fail(409, 'LANE_NOT_CLOSED', '这条 lane 当前没有被暂停，无需处理。')
+          fail(409, 'LANE_NOT_CLOSED', '这条 lane 当前没有被暂停，无需处理。')
+          return
         }
         const blocking = session.latestTurn
         if (action === 'resolve') {
           if (blocking === undefined || blocking.state !== 'indeterminate') {
-            return fail(409, 'STATE_CHANGED', '这条 lane 的状态已变化，请刷新后再看。')
+            fail(409, 'STATE_CHANGED', '这条 lane 的状态已变化，请刷新后再看。')
+            return
           }
           await ctx.residentOperators.resolveIndeterminate({
             commandId: ResidentOperatorCommandId(String(blocking.commandId)),
@@ -374,16 +376,19 @@ export function registerResidentSessionRecovery(ctx: Context): () => void {
         }
         const after = await ctx.residentOperators.inspect(sessionId)
         if (after.healthReason === RESIDENT_NATIVE_OUTCOME_UNCONFIRMED) {
-          return fail(409, 'LANE_STILL_CLOSED', '这条 lane 仍然被暂停：还有另一条任务没有确认结束。')
+          fail(409, 'LANE_STILL_CLOSED', '这条 lane 仍然被暂停：还有另一条任务没有确认结束。')
+          return
         }
         sendJson(response, 200, { session: sessionValue(after) })
       } catch (cause) {
         ctx.logger.warn(cause)
         const code = typeof cause === 'object' && cause !== null && 'code' in cause ? String(cause.code) : undefined
         if (code !== undefined && RECOVERY_CONFLICT_CODES.has(code)) {
-          return fail(409, 'STATE_CHANGED', '这条 lane 的状态已变化，请刷新后再看。')
+          fail(409, 'STATE_CHANGED', '这条 lane 的状态已变化，请刷新后再看。')
+          return
         }
-        return fail(503, 'RESIDENT_RECOVERY_FAILED', cause instanceof Error ? cause.message : String(cause))
+        fail(503, 'RESIDENT_RECOVERY_FAILED', cause instanceof Error ? cause.message : String(cause))
+        return
       }
     },
   })

@@ -412,7 +412,7 @@ describe('web e2e: physical operator qualification and routing', () => {
     await notice.getByRole('button', { name: '重置这条 lane' }).click()
     await notice.getByText('下一条任务会开启新的 Codex 对话并重新选择模型，原来的对话内容不会再被接续。').waitFor()
     await notice.getByRole('button', { name: '取消' }).click()
-    expect(JSON.parse(await readFile(stateFile, 'utf8')).calls).toEqual([])
+    expect((JSON.parse(await readFile(stateFile, 'utf8')) as { calls: unknown[] }).calls).toEqual([])
 
     // At phone width the notice and its buttons stay inside the panel.
     await page.setViewportSize({ width: 375, height: 812 })

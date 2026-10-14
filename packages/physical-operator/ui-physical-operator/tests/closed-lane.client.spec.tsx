@@ -36,7 +36,7 @@ function notice(request: BrowserRequest, options: { localOwner?: boolean; onChan
 
 describe('closed lane notice', () => {
   it('says what is not known and what the choices do not do, without any internal id', () => {
-    notice(vi.fn() as unknown as BrowserRequest)
+    notice(vi.fn())
     expect(screen.getByText('这条 lane 已暂停接收新任务')).toBeTruthy()
     expect(screen.getByText(/Fix parser/)).toBeTruthy()
     expect(screen.getByText(/无法确认/)).toBeTruthy()
@@ -89,7 +89,7 @@ describe('closed lane notice', () => {
   })
 
   it('offers guidance instead of buttons on a remote frontend', () => {
-    notice(vi.fn() as unknown as BrowserRequest, { localOwner: false })
+    notice(vi.fn(), { localOwner: false })
     expect(screen.getByText('请在运行 DSH 的这台电脑上处理。')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
   })
@@ -97,11 +97,11 @@ describe('closed lane notice', () => {
 
 describe('Resident panel with a closed lane', () => {
   function panelRequest(sessions: DesktopResidentSession[]): BrowserRequest {
-    return vi.fn(async (input: RequestInfo | URL) => (input as URL).pathname.endsWith('/cli')
+    return vi.fn(async (input: URL | RequestInfo) => (input instanceof URL ? input.pathname : '').endsWith('/cli')
       ? json({ runtimes: [] })
       : json({
         generatedAt: TIME, providers: [], sessions, events: [], activities: [], hiddenDiagnosticSessions: 0, activeWorkers: 0,
-      })) as unknown as BrowserRequest
+      }))
   }
 
   it('marks the header, and shows the notice only under the closed lane', async () => {
