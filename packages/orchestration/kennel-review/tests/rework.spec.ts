@@ -74,6 +74,10 @@ describe('rework offers', () => {
     expect(withNotes?.members[0]).toMatchObject({ gouziId: 'author', profile: '做事保守，先写测试' })
     const [without] = offer(facts({ members: [{ gouziId: 'author' } as never] }))
     expect(without?.members[0]).not.toHaveProperty('profile')
+    // The id cannot tell changed or cleared notes apart, so the dispatcher compares the notes itself before it starts a rework.
+    const [changed] = offer(facts({ members: [{ gouziId: 'author', profile: '另一份备忘' } as never] }))
+    expect(changed?.id).toBe(withNotes?.id)
+    expect(without?.id).toBe(withNotes?.id)
   })
 
   it('marks an unpinned member as automatic', () => {

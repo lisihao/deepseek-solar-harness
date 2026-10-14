@@ -66,6 +66,21 @@ function facts(ids: string[], patch: Partial<KennelCollaborationFacts> = {}, sco
 }
 
 describe('Debate kennel kind', () => {
+  it('carries each member\'s current notes in the offered candidate, whose id does not change with them', async () => {
+    const { kind } = await setup()
+    const withNotes = (profile: string | undefined) => facts(['a', 'b', 'c']).members.map(value =>
+      String(value.gouziId) === 'a' && profile !== undefined ? { ...value, profile } : value)
+    const [before] = await kind.offer({ ...facts(['a', 'b', 'c']), members: withNotes('先给结论') })
+    const [after] = await kind.offer({ ...facts(['a', 'b', 'c']), members: withNotes('先列依据') })
+    const [none] = await kind.offer({ ...facts(['a', 'b', 'c']), members: withNotes(undefined) })
+    expect(before?.members[0]).toMatchObject({ gouziId: 'a', profile: '先给结论' })
+    expect(after?.members[0]).toMatchObject({ gouziId: 'a', profile: '先列依据' })
+    expect(none?.members[0]).not.toHaveProperty('profile')
+    // The id cannot tell these apart, so the dispatcher compares the notes itself before it starts a Debate.
+    expect(after?.id).toBe(before?.id)
+    expect(none?.id).toBe(before?.id)
+  })
+
   it('offers one Debate per project that three members hold, in registry order, up to four members', async () => {
     const { kind } = await setup()
     const offered = await kind.offer(facts(['a', 'b', 'c', 'd', 'e']))

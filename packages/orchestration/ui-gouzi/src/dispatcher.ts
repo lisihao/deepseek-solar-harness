@@ -374,7 +374,10 @@ async function startCollaboration(
   if (kind === undefined) throw new HarnessError(`协作「${selected.collaboration}」已不可用。`, 'KENNEL_COLLABORATION_UNAVAILABLE')
   const confirm = async (): Promise<void> => {
     const current = await kind.offer(await collaborationFacts(ctx, agent.session, String(agent.id), decoded.recipient, decoded.text))
-    if (!current.some(value => value.id === selected.id)) {
+    // A candidate id names members, entries, and models but not notes, so notes are compared as for a single member's task:
+    // the notes the candidate was logged with must still be the notes each member has.
+    const same = current.find(value => value.id === selected.id)
+    if (same === undefined || memberNotes(same) !== memberNotes(selected)) {
       throw new HarnessError('参加协作的狗子、执行实例、项目或对象已变化；未改派给其他成员。', 'GOUZI_STATE_CONFLICT')
     }
   }
@@ -399,6 +402,11 @@ async function startCollaboration(
     messageId: message.id, collaboration: kind.kind, runId: run.runId, assignments: run.assignments,
   }, { ignorable: true })
   await flushDispatch(ctx, agent)
+}
+
+/** Each member of a collaboration candidate with its notes, so two candidates compare equal only when every member's notes do. */
+function memberNotes(candidate: KennelCollaborationCandidate): string {
+  return JSON.stringify(candidate.members.map(member => [member.gouziId, member.profile ?? null]))
 }
 
 async function confirmCandidate(ctx: Context, selected: KennelWorkCandidate, profile: string | undefined): Promise<void> {
