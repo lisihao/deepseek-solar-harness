@@ -69,6 +69,22 @@ describe('a start whose response named the turn', () => {
     expect(error.nativeOutcomeUnconfirmed).toBe(true)
   })
 
+  it('names the pinned turn when the Resident turn is interrupted while it runs, and interrupts nothing', async () => {
+    const turns = probe([{ id: 'turn-new', status: 'inProgress' }])
+    const controller = new AbortController()
+    controller.abort(new Error('resident turn interrupted'))
+    const error = await outcome(reconcileUncertainStart(turns, { baselineTurnId: 'turn-old' }, 'd', controller.signal, timing))
+    expect(error.nativeOutcomeUnconfirmed).toBe(true)
+    expect(error.message).toContain('native turn turn-new was still running')
+    expect(turns.interruptTurn).not.toHaveBeenCalled()
+  })
+
+  it('reports an unnamed turn when the longest wait ends before the settle time and nothing was pinned', async () => {
+    const error = await outcome(reconcileUncertainStart(probe([undefined]), {}, 'd', live(), { ...timing, settleMs: 20_000, maxMs: 2_000 }))
+    expect(error.nativeOutcomeUnconfirmed).toBe(true)
+    expect(error.message).toContain('native turn unknown was still running when the wait ended')
+  })
+
   it('does not take an inferred turn with an unrecognised status as ended', async () => {
     const turns = probe([{ id: 'turn-new', status: 'aborted' }])
     const error = await outcome(reconcileUncertainStart(turns, { baselineTurnId: 'turn-old' }, 'd', live(), timing))
