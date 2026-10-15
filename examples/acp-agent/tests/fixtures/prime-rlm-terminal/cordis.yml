@@ -1,6 +1,8 @@
-# The Loader assembles the orchestration client service. The driver supplies the keyless daemon it talks to.
+# The Loader assembles the orchestration client, and with autoStart the client starts the production daemon entry
+# (startup.ts in source mode, lib/startup.js in built-lib mode). The driver supplies only the provider endpoint.
 - id: orchestration
   name: '@deepseek-ai/dsh-orchestration-local'
   config:
-    autoStart: false
+    autoStart: true
+    connectTimeoutMs: 20000
     dshHome: !!js process.env.DSH_HOME

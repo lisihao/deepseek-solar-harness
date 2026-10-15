@@ -8,15 +8,28 @@
     "continuations": [
       "rlm.message.continuation.failed"
     ],
-    "laterTurnsStarted": []
+    "requests": {
+      "root": 1,
+      "child": 1,
+      "deliver": 1,
+      "goal continuation": 0,
+      "later turn": 0
+    }
   },
   "autonomous": {
     "run": "failed",
     "node": "failed",
     "stopReasons": [
-      "refusal"
+      "max-tokens"
     ],
     "continuations": [],
-    "laterTurnsStarted": []
-  }
+    "requests": {
+      "root": 1,
+      "child": 0,
+      "deliver": 0,
+      "goal continuation": 0,
+      "later turn": 0
+    }
+  },
+  "daemonsStopped": true
 }
