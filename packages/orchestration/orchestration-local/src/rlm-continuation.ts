@@ -21,3 +21,14 @@ export function rlmContinuationResult(
   if (continuation.output === undefined && stopReason === 'completed') return previous
   return { output: [...continuation.output ?? previous.output], stopReason }
 }
+
+/**
+ * Whether an RLM result may be followed by another turn of the same execution. Only `completed` may: after `error`,
+ * `aborted`, `max-tokens`, or `refusal` a later turn is not started, because its success would replace the real stop
+ * reason and the partial output of the turn that did not finish.
+ * @param result - the result of the last turn.
+ * @returns whether the result is a success.
+ */
+export function rlmResultSucceeded(result: PhysicalOperatorResult): boolean {
+  return result.stopReason === 'completed'
+}

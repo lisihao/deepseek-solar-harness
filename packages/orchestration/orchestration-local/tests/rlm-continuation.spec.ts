@@ -1,6 +1,6 @@
 import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
 import { describe, expect, it } from 'vitest'
-import { rlmContinuationResult } from '../src/rlm-continuation.ts'
+import { rlmContinuationResult, rlmResultSucceeded } from '../src/rlm-continuation.ts'
 
 const previous: PhysicalOperatorResult = { output: [{ type: 'text', text: 'root answer' }], stopReason: 'completed' }
 const partial = [{ type: 'text' as const, text: 'partial' }]
@@ -33,5 +33,15 @@ describe('RLM continuation result', () => {
   it('keeps the earlier output, but not its success, for a continuation that failed without output', () => {
     expect(rlmContinuationResult({ status: 'failed', error: 'worker down' }, previous)).toEqual({ output: previous.output, stopReason: 'error' })
     expect(rlmContinuationResult({ status: 'indeterminate' }, previous)).toEqual({ output: previous.output, stopReason: 'aborted' })
+  })
+
+  it.each([
+    ['completed', true],
+    ['error', false],
+    ['aborted', false],
+    ['max-tokens', false],
+    ['refusal', false],
+  ] as const)('lets another turn follow a %s result: %s', (stopReason, succeeded) => {
+    expect(rlmResultSucceeded({ output: partial, stopReason })).toBe(succeeded)
   })
 })

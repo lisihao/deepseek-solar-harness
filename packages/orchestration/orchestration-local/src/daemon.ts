@@ -139,7 +139,7 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
-import { rlmContinuationResult } from './rlm-continuation.ts'
+import { rlmContinuationResult, rlmResultSucceeded } from './rlm-continuation.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
@@ -4115,6 +4115,8 @@ export class OrchestrationDaemon {
           'ORCHESTRATION_UNAVAILABLE',
         )
       }
+      // `max-tokens` and `refusal` keep their stop reason and partial output instead of starting another round.
+      if (!rlmResultSucceeded(result)) return result
       const endConditionEvidence = policy.endCondition === undefined
         ? undefined
         : await this.autonomousEndConditionEvidence(spec, sessionId, result)
@@ -4231,6 +4233,8 @@ export class OrchestrationDaemon {
   ): Promise<PhysicalOperatorResult> {
     let result = initial
     for (;;) {
+      // A turn that did not succeed ends the execution as it is; the goal stays active for an explicit decision.
+      if (!rlmResultSucceeded(result)) return result
       const snapshot = await this.ctx.rlmRuntime.inspect(sessionId)
       const goal = snapshot.goal
       if (goal === undefined || goal.status !== 'active') return result
