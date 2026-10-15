@@ -21,17 +21,26 @@ try {
   const names = new Map<string, string>()
   const calls: string[] = []
   const nameOf = (sessionId: string): string => names.get(sessionId) ?? 'root'
-  // `a1` keeps running after its interrupt request, as a Resident turn that has not stopped yet does.
-  const execution = (name: string, turn: string): RlmChildExecution => ({
-    nativeSessionId: `keyless-${name}`,
-    nativeTurnId: turn,
-    result: name === 'a1' ? new Promise<RlmChildExecutionResult>(() => undefined) : Promise.resolve({ status: 'settled' }),
-    interrupt: () => { calls.push(`interrupt ${name}`); return Promise.resolve() },
-  })
+  // `a1` and `late` keep running after their interrupt request, as a Resident turn that has not stopped yet does; the
+  // transcript settles them by hand.
+  const open = new Map<string, PromiseWithResolvers<RlmChildExecutionResult>>()
+  const execution = (name: string, turn: string): RlmChildExecution => {
+    const pending = name === 'a1' || name === 'late'
+    if (pending) open.set(name, Promise.withResolvers<RlmChildExecutionResult>())
+    return {
+      nativeSessionId: `keyless-${name}`,
+      nativeTurnId: turn,
+      result: open.get(name)?.promise ?? Promise.resolve({ status: 'settled' }),
+      interrupt: () => { calls.push(`interrupt ${name}`); return Promise.resolve() },
+    }
+  }
+  // The host finishes starting `late` only when the transcript opens this gate.
+  const startGate = Promise.withResolvers<undefined>()
   const bindings: RlmRuntimeHostBindings = {
-    dispatchChild(request) {
+    async dispatchChild(request) {
       calls.push(`dispatch child ${request.name}`)
-      return Promise.resolve(execution(request.name, `turn-${request.name}`))
+      if (request.name === 'late') await startGate.promise
+      return execution(request.name, `turn-${request.name}`)
     },
     dispatchContinuation(request) {
       calls.push(`dispatch continuation for ${nameOf(String(request.sessionId))}`)
@@ -84,11 +93,31 @@ try {
     cellInDeleted: await refusal(() => runtime.executeCell({ sessionId: a1.sessionId, commandId: RlmCommandId('delete-loader-cell'), code: '1 + 1' })),
     drainWhileStopping: await refusal(() => runtime.drain(sessionId, 50)),
   }
+  // A child whose start finishes after it was deleted is interrupted, refused, and still counted until it ends.
+  const lateSpawn = refusal(() => spawn(sessionId, 'late'))
+  const findLate = async () => (await runtime.listChildren(sessionId)).find(child => child.name === 'late')
+  while (await findLate() === undefined) await new Promise(resolve => setTimeout(resolve, 5))
+  const late = (await findLate())!
+  await runtime.deleteChild(sessionId, late.rlmChildId, RlmCommandId('delete-loader-late-child'))
+  startGate.resolve(undefined)
+  const lateDispatch = {
+    spawn: await lateSpawn,
+    drainWithLateAndStopping: await refusal(() => runtime.drain(sessionId, 50)),
+    afterLateEnds: await (async () => {
+      open.get('late')?.resolve({ status: 'settled' })
+      return refusal(() => runtime.drain(sessionId, 50))
+    })(),
+    afterAllEnd: await (async () => {
+      open.get('a1')?.resolve({ status: 'settled' })
+      const { activeExecutions, queuedMessages } = await runtime.drain(sessionId, 500)
+      return JSON.stringify({ activeExecutions, queuedMessages })
+    })(),
+  }
   // The root and the sibling keep working.
   await send('delete-loader-sibling', sessionId, b.sessionId)
   const lifecycles = async (parent: RlmRuntimeSessionId) => (await runtime.listChildren(parent)).map(child => `${child.name}: ${child.lifecycle}`)
   process.stdout.write(`${JSON.stringify({
-    calls, heartbeatsAdmitted, refusals,
+    calls, heartbeatsAdmitted, refusals, lateDispatch,
     children: { root: await lifecycles(sessionId), a: await lifecycles(a.sessionId) },
   }, null, 2)}\n`)
 } finally {
