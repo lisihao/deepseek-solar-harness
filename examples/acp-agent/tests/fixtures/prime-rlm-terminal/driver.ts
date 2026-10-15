@@ -46,11 +46,12 @@ interface Scenario {
   readonly autonomous: boolean
 }
 
-// Worst case, with every limit used: the body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + two
-// scenarios of 12 s = 51 s, and the cleanup then takes abandoned requests 5 s + dispose 3 s + two daemon stops of 8 s + fake
-// close 2 s + late-sweep pause 0.7 s + two more stops of 8 s = 42.7 s, 93.7 s in all. The test passes a 100 s process limit, so
-// even that case has reported its stage and finished its cleanup before the launcher's SIGKILL; a normal failure needs about
-// 10 s of cleanup. A stage waits at most STAGE_MS and one request at most RPC_MS.
+// Timer budget, with every limit used: the body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + two
+// scenarios of 12 s = 51 s, plus the diagnostic read of the failing stage, 2 s; the cleanup then takes abandoned requests 5 s +
+// dispose 3 s + two daemon stops of 8 s + fake close 2 s + late-sweep pause 0.7 s + two more stops of 8 s = 42.7 s. That is
+// 95.7 s of timers. It is a sum of limits, not an absolute bound: creating directories, loading modules, and scheduling are not
+// in it. The test passes a 110 s process limit, which leaves room for them, and below the suite's 120 s per-test limit; a normal
+// failure needs about 10 s of cleanup. A stage waits at most STAGE_MS and one request at most RPC_MS.
 const FAKE_MS = 3_000
 const BOOT_MS = 12_000
 const DAEMON_MS = 12_000
@@ -241,7 +242,12 @@ function track<T>(work: Promise<T>): Promise<T> {
   return work
 }
 
+// Set when cleanup starts: abandoned code that wakes up later cannot start a new request, so nothing can begin after the
+// in-flight set was read.
+let closing = false
+
 function service(): Booted['orchestrations'] {
+  if (closing) throw new Error('the driver is cleaning up; no new request may start')
   if (owned.service === undefined) throw new Error('the orchestration service is not booted')
   return owned.service
 }
@@ -287,7 +293,7 @@ async function run(scenario: Scenario) {
   const until = Date.now() + SCENARIO_MS
   const progress: { runId?: OrchestrationRunId } = {}
   type Snapshot = Awaited<ReturnType<Booted['orchestrations']['inspect']>>
-  const inspect = (runId: OrchestrationRunId): Promise<Snapshot> => (fault === 'hang-inspect' ? never<Snapshot>() : track(service().inspect(runId)))
+  const inspect = (runId: OrchestrationRunId): Promise<Snapshot> => track(fault === 'hang-inspect' ? never<Snapshot>() : service().inspect(runId))
   const observed = async (): Promise<string> => {
     const requests = JSON.stringify(Object.fromEntries(KINDS.map(kind => [kind, counts.get(kind) ?? 0])))
     const snapshot = progress.runId === undefined ? undefined : await inspect(progress.runId)
@@ -368,6 +374,7 @@ try {
   bodyError = error
 } finally {
   current = undefined
+  closing = true
   // Every step is attempted whatever happened before it, with its own limit; each outcome is reported on stderr.
   const step = async (name: string, work: () => Promise<unknown>, limitMs: number): Promise<boolean> => {
     try {

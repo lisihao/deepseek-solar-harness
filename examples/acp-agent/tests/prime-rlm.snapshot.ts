@@ -47,10 +47,11 @@ it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overw
     libBinScript: driver,
     configPath: fileURLToPath(new URL('./fixtures/prime-rlm-terminal/cordis.yml', import.meta.url)),
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
-    // The driver starts the production orchestration and Resident daemons and runs two scenarios. Its own limits are listed in
-    // its header: a normal run takes about 10 s and its worst case 93.7 s, so this limit lets it fail by stage and finish its
-    // cleanup before the launcher's SIGKILL, which would skip it. The suite's per-test limit is 120 s.
-    processTimeoutMs: 100_000,
+    // The driver starts the production orchestration and Resident daemons and runs two scenarios. Its timer limits are listed in
+    // its header and sum to 95.7 s (not counting directory creation, module loading, and scheduling); a normal run takes about
+    // 10 s. This limit lets it fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it. The
+    // suite's per-test limit is 120 s.
+    processTimeoutMs: 110_000,
   })
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expected, stdout)
   expect(stdout).toBe(await readFile(expected, 'utf8'))
@@ -82,8 +83,9 @@ async function terminalFault(fault: string, reason: RegExp, cleanup: readonly st
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
     env: { DSH_TERMINAL_FIXTURE_FAULT: fault },
     expectedExitCode: 1,
-    // The faults end the driver in well under this; an unbounded wait would hit it instead of passing.
-    processTimeoutMs: 40_000,
+    // The faults end the driver in about 30 s even under load (a hung request adds the 5 s wait for abandoned requests); an
+    // unbounded wait would hit this limit instead of passing.
+    processTimeoutMs: 60_000,
     inspect: async (cwd) => {
       for (let second = 0; second < 5; second += 1) {
         for (const line of await processesIn(cwd)) {
@@ -102,15 +104,16 @@ async function terminalFault(fault: string, reason: RegExp, cleanup: readonly st
 }
 
 it('snapshot: prime-rlm-terminal bounds a client request that never returns and still stops its daemons (start)', async () => {
+  // A request that never returns is still held by the client, so the driver reports it as an abandoned request it could not settle.
   await terminalFault('hang-start', /request start did not return within 5000 ms/u, [
-    'cleanup dispose Loader context: ok', 'cleanup stop orchestration daemon: ok',
+    'cleanup settle abandoned requests: FAILED', 'cleanup dispose Loader context: ok', 'cleanup stop orchestration daemon: ok',
     'cleanup stop Resident daemon: ok', 'cleanup close fake DeepSeek: ok',
   ])
 })
 
 it('snapshot: prime-rlm-terminal bounds a status check that never returns and still stops its daemons (settle)', async () => {
   await terminalFault('hang-inspect', /stage "settle" did not happen in time; run state unavailable/u, [
-    'cleanup stop orchestration daemon: ok', 'cleanup stop Resident daemon: ok', 'cleanup close fake DeepSeek: ok',
+    'cleanup settle abandoned requests: FAILED', 'cleanup stop orchestration daemon: ok', 'cleanup stop Resident daemon: ok', 'cleanup close fake DeepSeek: ok',
   ])
 })
 
