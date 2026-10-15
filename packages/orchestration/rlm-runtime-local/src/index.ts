@@ -546,6 +546,11 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   private readonly kernels = new Map<string, PersistentTypeScriptKernel>()
   private readonly kernelCommands = new Map<string, { cellCommandId: RlmCommandId; callOrdinal: number }>()
   private readonly activeExecutions = new Map<string, RlmChildExecution>()
+  /**
+   * Executions that finished dispatching after their session was deleted. They were asked to stop and are not owned by a
+   * session, but stay counted and reachable until their result settles. Like `activeExecutions`, this lives in memory.
+   */
+  private readonly refusedExecutions = new Map<RlmChildExecution, RlmRuntimeSessionId>()
   private readonly activeMessagePumps = new Set<string>()
   private readonly lastContinuations = new Map<string, RlmChildExecutionResult>()
   private readonly messageRateBuckets = new Map<string, { tokens: number; updatedAt: number }>()
@@ -1138,10 +1143,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     }
     for (const session of subtree) this.updateSession(session, { lifecycle: 'stopped' })
     this.persist()
-    const interrupts = await Promise.allSettled(subtree
-      .map(value => this.activeExecutions.get(String(value.snapshot.sessionId)))
-      .filter((value): value is RlmChildExecution => value !== undefined)
-      .map(value => value.interrupt()))
+    const interrupts = await Promise.allSettled(this.executionsOf(subtree).map(value => value.interrupt()))
     // Every interrupt was attempted. A failure keeps the subtree closed and is recorded on the command; whatever is still
     // running stays visible to `drain`, and a new delete command interrupts it again.
     const failed = interrupts.find((value): value is PromiseRejectedResult => value.status === 'rejected')
@@ -1229,10 +1231,9 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     for (;;) {
       await this.pumpMessages()
       // A deleted session cannot start work again, but one that is still stopping is still running under this root.
-      const everyId = new Set(this.treeSessions(sessionId).map(value => String(value.snapshot.sessionId)))
       const openIds = new Set(this.subtreeSessions(sessionId).filter(value => !this.isClosed(value.snapshot.sessionId))
         .map(value => String(value.snapshot.sessionId)))
-      const activeExecutions = [...this.activeExecutions.keys()].filter(value => everyId.has(value)).length
+      const activeExecutions = this.executionsOf(this.treeSessions(sessionId)).length
       const queuedMessages = this.document.messages.filter(value => openIds.has(String(value.toSessionId)) && value.deliveryStatus === 'queued').length
       if (activeExecutions === 0 && queuedMessages === 0) {
         const lastContinuation = this.lastContinuations.get(String(sessionId))
@@ -1669,9 +1670,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   async interrupt(sessionId: RlmRuntimeSessionId): Promise<void> {
     this.requireSession(sessionId)
-    const active = this.treeSessions(sessionId)
-      .map(value => this.activeExecutions.get(String(value.snapshot.sessionId)))
-      .filter((value): value is RlmChildExecution => value !== undefined)
+    const active = this.executionsOf(this.treeSessions(sessionId))
     await Promise.allSettled(active.map(value => value.interrupt()))
     this.appendEvent(sessionId, 'rlm.session.interrupted', { activeExecutions: active.length })
     this.persist()
@@ -2158,11 +2157,26 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   }
 
   /**
-   * Stop an execution whose dispatch finished after its session was deleted, and report the refusal. The execution is never
-   * registered, so nothing waits for it; a failed interrupt is named in the error because no later command can reach it.
+   * Every execution that is running for one of these sessions: the registered ones, and the refused ones that have not
+   * settled yet.
+   */
+  private executionsOf(sessions: readonly StoredSession[]): RlmChildExecution[] {
+    const ids = new Set(sessions.map(value => String(value.snapshot.sessionId)))
+    const registered = [...ids].map(id => this.activeExecutions.get(id)).filter((value): value is RlmChildExecution => value !== undefined)
+    const refused = [...this.refusedExecutions].filter(([, owner]) => ids.has(String(owner))).map(([execution]) => execution)
+    return [...registered, ...refused]
+  }
+
+  /**
+   * Stop an execution whose dispatch finished after its session was deleted, and report the refusal. The execution is not
+   * registered to the session, but it stays counted by `drain` and is interrupted again by `interrupt` and by a later delete
+   * command until its result settles, because the interrupt request does not prove that it stopped. A failed interrupt is
+   * named in the error.
    */
   private async refuseClosedExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<never> {
-    execution.result.catch(() => undefined)
+    this.refusedExecutions.set(execution, sessionId)
+    const release = (): void => { this.refusedExecutions.delete(execution) }
+    void execution.result.then(release, release)
     const interruptFailure = await execution.interrupt().then(
       () => '',
       (error: unknown) => `; interrupting it also failed: ${error instanceof Error ? error.message : String(error)}`,

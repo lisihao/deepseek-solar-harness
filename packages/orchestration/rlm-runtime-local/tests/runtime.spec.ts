@@ -1537,7 +1537,7 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     readonly failInterruptPlain?: readonly string[]
     /** Executions whose result rejects once an interrupt was requested, even if the request itself failed. */
     readonly rejectResult?: readonly string[]
-    /** Continuations survive their interrupt request, as a Resident turn that has not stopped yet does. */
+    /** Continuations stay open and survive their interrupt request, as a Resident turn that has not stopped yet does. */
     readonly stuckContinuations?: boolean
     /** The child of this name is deleted at the moment the runtime first reads its result, right after it registered it. */
     readonly deleteOnRegistration?: string
@@ -1556,7 +1556,7 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     const race: { service?: LocalRlmRuntime; deletion?: Promise<void> | undefined } = {}
     const execution = (name: string, nativeTurnId: string, settleOnInterrupt: boolean) => {
       const result = deferred<RlmChildExecutionResult>()
-      if (!held.has(name)) result.resolve({ status: 'settled' })
+      if (!held.has(name) && !(options.stuckContinuations === true && name.startsWith('continuation:'))) result.resolve({ status: 'settled' })
       results.set(name, result)
       return {
         nativeSessionId: `native-${name}`,
