@@ -38,7 +38,7 @@ interface Scenario {
   readonly autonomous: boolean
 }
 
-// Each stage waits at most STAGE_MS, a scenario at most SCENARIO_MS, and the daemons at most DAEMON_MS. The test passes a 60 s
+// Each stage waits at most STAGE_MS, a scenario at most SCENARIO_MS, and the daemons at most DAEMON_MS. The test passes a 90 s
 // process limit, so the driver reports a stuck stage and still reaches its cleanup before the launcher's SIGKILL.
 const DAEMON_MS = 15_000
 const STAGE_MS = 8_000
