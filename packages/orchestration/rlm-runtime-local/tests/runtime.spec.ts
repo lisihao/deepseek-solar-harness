@@ -857,6 +857,72 @@ describe('LocalRlmRuntime', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it.each([
+    ['failed', 'error'],
+    ['indeterminate', 'aborted'],
+  ] as const)('keeps the %s status, partial output and stop reason of the last continuation through drain', async (status, stopReason) => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-continuation-failure-'))
+    const rootExecution = deferred<RlmChildExecutionResult>()
+    const continuation = deferred<RlmChildExecutionResult>()
+    const requests: string[] = []
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: async request => ({
+        nativeSessionId: `child:${request.childSessionId}`,
+        nativeTurnId: `child-turn:${request.childId}`,
+        result: Promise.resolve({ status: 'settled' }),
+        interrupt: () => Promise.resolve(),
+      }),
+      dispatchContinuation: async (request) => {
+        requests.push(String(request.commandId))
+        return {
+          nativeSessionId: `continuation:${request.sessionId}`,
+          nativeTurnId: `continuation-turn:${request.commandId}`,
+          result: continuation.promise,
+          interrupt: () => Promise.resolve(),
+        }
+      },
+    }
+    const { ctx, service, sessionId } = await runtime(root, bindings)
+    await service.trackExecution(sessionId, {
+      nativeSessionId: 'root-native', nativeTurnId: 'root-turn', result: rootExecution.promise, interrupt: () => Promise.resolve(),
+    })
+    const child = await service.spawn({
+      commandId: RlmCommandId('failure-child'), parentSessionId: sessionId, name: 'messenger', task: 'send bounded evidence',
+    })
+    await service.sendMessage({
+      commandId: RlmCommandId('failure-message'), fromSessionId: child.sessionId, toSessionId: sessionId,
+      mode: 'follow_up', text: 'evidence',
+    })
+    rootExecution.resolve({ status: 'settled' })
+    await waitUntil(() => requests.length === 1)
+    continuation.resolve({ status, stopReason, output: [{ type: 'text', text: 'partial output' }], error: 'did not finish' })
+    const drained = await service.drain(sessionId, 1_000)
+    expect(drained.lastContinuation).toEqual({
+      status, stopReason, output: [{ type: 'text', text: 'partial output' }], error: 'did not finish',
+    })
+    await ctx.root.fiber.dispose()
+  })
+
+  it('interrupts the active executions of a deleted child and of what it spawned, and no others', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-delete-subtree-'))
+    const interrupted: string[] = []
+    const dispatchChild: RlmRuntimeHostBindings['dispatchChild'] = async request => ({
+      nativeSessionId: `child:${request.childSessionId}`,
+      nativeTurnId: `child-turn:${request.childId}`,
+      // Every child execution stays open, so each one is active when the delete arrives.
+      result: new Promise<RlmChildExecutionResult>(() => undefined),
+      interrupt: () => { interrupted.push(request.name); return Promise.resolve() },
+    })
+    const { ctx, service, sessionId } = await runtime(root, { dispatchChild })
+    const a = await service.spawn({ commandId: RlmCommandId('subtree-a'), parentSessionId: sessionId, name: 'a', task: 'child a' })
+    const a1 = await service.spawn({ commandId: RlmCommandId('subtree-a1'), parentSessionId: a.sessionId, name: 'a1', task: 'grandchild' })
+    await service.spawn({ commandId: RlmCommandId('subtree-a2'), parentSessionId: a1.sessionId, name: 'a2', task: 'great-grandchild' })
+    await service.spawn({ commandId: RlmCommandId('subtree-b'), parentSessionId: sessionId, name: 'b', task: 'sibling' })
+    await service.deleteChild(sessionId, a.rlmChildId, RlmCommandId('subtree-delete'))
+    expect([...interrupted].sort()).toEqual(['a', 'a1', 'a2'])
+    await ctx.root.fiber.dispose()
+  })
+
   it('admits one continuation when concurrent pumps observe the same queued message', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-message-pump-'))
     const continuationRequests: string[] = []
@@ -1454,5 +1520,310 @@ describe('LocalRlmRuntime', () => {
       sessionId, commandId: RlmCommandId('after-timeout'), code: 'stable + 1',
     })).resolves.toMatchObject({ value: 42 })
     await ctx.root.fiber.dispose()
+  })
+})
+
+describe('LocalRlmRuntime after a permanent delete', () => {
+  /**
+   * Root with A and B; A has A1. Executions named in `held` stay open until their interrupt, the others settle at once, which
+   * leaves their session idle between two turns. A `stuck` execution survives its interrupt request, as a Resident turn
+   * that has not stopped yet does.
+   */
+  interface TreeOptions {
+    readonly held?: readonly string[]
+    readonly stuck?: readonly string[]
+    readonly failInterrupt?: readonly string[]
+    /** Executions whose interrupt rejects with a value that is not an Error. */
+    readonly failInterruptPlain?: readonly string[]
+    /** Executions whose result rejects once an interrupt was requested, even if the request itself failed. */
+    readonly rejectResult?: readonly string[]
+    /** The child of this name is deleted at the moment the runtime first reads its result, right after it registered it. */
+    readonly deleteOnRegistration?: string
+  }
+  async function tree(prefix: string, options: TreeOptions = {}) {
+    const root = await mkdtemp(join(tmpdir(), prefix))
+    const held = new Set(options.held ?? [])
+    const stuck = new Set(options.stuck ?? [])
+    const failInterrupt = new Set(options.failInterrupt ?? [])
+    const failInterruptPlain = new Set(options.failInterruptPlain ?? [])
+    const rejectResult = new Set(options.rejectResult ?? [])
+    const results = new Map<string, ReturnType<typeof deferred<RlmChildExecutionResult>>>()
+    const interrupted: string[] = []
+    const continuations: string[] = []
+    const gate = { dispatch: undefined as Promise<void> | undefined }
+    const race: { service?: LocalRlmRuntime; deletion?: Promise<void> | undefined } = {}
+    const execution = (name: string, nativeTurnId: string, settleOnInterrupt: boolean) => {
+      const result = deferred<RlmChildExecutionResult>()
+      if (!held.has(name)) result.resolve({ status: 'settled' })
+      results.set(name, result)
+      return {
+        nativeSessionId: `native-${name}`,
+        nativeTurnId,
+        result: result.promise,
+        interrupt: (): Promise<void> => {
+          interrupted.push(name)
+          if (rejectResult.has(name)) result.reject(new Error(`${name} stopped`))
+          if (failInterrupt.has(name)) return Promise.reject(new Error(`${name} cannot be interrupted`))
+          // oxlint-disable-next-line prefer-promise-reject-errors -- the service contract accepts any rejection value
+          if (failInterruptPlain.has(name)) return Promise.reject(`${name} refused`)
+          if (settleOnInterrupt) result.resolve({ status: 'failed', stopReason: 'aborted', error: 'interrupted' })
+          return Promise.resolve()
+        },
+      }
+    }
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: async (request) => {
+        await gate.dispatch
+        const started = execution(request.name, `turn-${request.name}`, !stuck.has(request.name))
+        if (request.name !== options.deleteOnRegistration) return started
+        return {
+          nativeSessionId: started.nativeSessionId,
+          nativeTurnId: started.nativeTurnId,
+          interrupt: started.interrupt,
+          get result() {
+            race.deletion ??= race.service?.deleteChild(request.parentSessionId, request.childId, RlmCommandId('race-delete'))
+            return started.result
+          },
+        }
+      },
+      dispatchContinuation: async (request) => {
+        continuations.push(String(request.sessionId))
+        await gate.dispatch
+        return execution(`continuation:${String(request.sessionId)}`, String(request.commandId), true)
+      },
+    }
+    const { ctx, service, sessionId } = await runtime(root, bindings)
+    race.service = service
+    const a = await service.spawn({ commandId: RlmCommandId('tree-a'), parentSessionId: sessionId, name: 'a', task: 'child a' })
+    const b = await service.spawn({ commandId: RlmCommandId('tree-b'), parentSessionId: sessionId, name: 'b', task: 'sibling' })
+    const a1 = await service.spawn({ commandId: RlmCommandId('tree-a1'), parentSessionId: a.sessionId, name: 'a1', task: 'grandchild' })
+    const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 20))
+    await settle()
+    return { root, ctx, service, sessionId, a, b, a1, results, interrupted, continuations, gate, race, bindings, settle }
+  }
+  const message = (id: string, from: RlmRuntimeSessionId, to: RlmRuntimeSessionId) => (
+    { commandId: RlmCommandId(id), fromSessionId: from, toSessionId: to, mode: 'follow_up', text: id } as const
+  )
+
+  it('does not deliver a message that was queued for a session of a deleted subtree', async () => {
+    const t = await tree('dsh-rlm-closed-queued-', { held: ['a1'] })
+    await t.service.sendMessage(message('queued-a1', t.a.sessionId, t.a1.sessionId))
+    expect(t.continuations).toEqual([])
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await t.settle()
+    await t.service.pumpMessages()
+    expect(t.continuations).toEqual([])
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('does not run a due heartbeat of a session in a deleted subtree', async () => {
+    const t = await tree('dsh-rlm-closed-heartbeat-')
+    const heartbeat = await t.service.createHeartbeat({
+      sessionId: t.a1.sessionId, commandId: RlmCommandId('closed-heartbeat'), instruction: 'check progress', interval: '1s',
+    })
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    const dueAt = new Date(Date.parse(heartbeat.nextRunAt!) + 1).toISOString()
+    await expect(t.service.pumpHeartbeats(dueAt)).resolves.toBe(0)
+    expect(t.continuations).toEqual([])
+    await expect(t.service.claimDueHeartbeats(dueAt)).resolves.toEqual([])
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('still admits the root and a sibling after A is deleted, and a plain interrupt of A keeps its subtree open', async () => {
+    const t = await tree('dsh-rlm-closed-controls-', { held: ['a1'] })
+    await t.service.sendMessage(message('queued-a1', t.a.sessionId, t.a1.sessionId))
+    await t.service.interrupt(t.a.sessionId)
+    await t.settle()
+    expect(t.continuations).toEqual([String(t.a1.sessionId)])
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await t.service.sendMessage(message('to-b', t.sessionId, t.b.sessionId))
+    await t.settle()
+    expect(t.continuations).toContain(String(t.b.sessionId))
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('interrupts a child execution that is dispatched while its subtree is being deleted, and keeps the child deleted', async () => {
+    const t = await tree('dsh-rlm-closed-late-child-')
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const spawned = t.service.spawn({
+      commandId: RlmCommandId('late-c'), parentSessionId: t.sessionId, name: 'c', task: 'dispatched while deleting',
+    })
+    const settled = spawned.then(() => 'registered', () => 'refused')
+    await waitUntil(async () => (await t.service.listChildren(t.sessionId)).some(child => child.name === 'c'))
+    const c = (await t.service.listChildren(t.sessionId)).find(child => child.name === 'c')!
+    await t.service.deleteChild(t.sessionId, c.rlmChildId, RlmCommandId('delete-c'))
+    opened.resolve(undefined)
+    await expect(settled).resolves.toBe('refused')
+    expect(t.interrupted).toContain('c')
+    expect((await t.service.listChildren(t.sessionId)).find(child => child.name === 'c')?.lifecycle).toBe('deleted')
+    await expect(t.service.drain(t.sessionId, 200)).resolves.toMatchObject({ activeExecutions: 0 })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it.each([
+    ['c', { held: ['c'], failInterrupt: ['c'], rejectResult: ['c'] }, 'interrupting it also failed: c cannot be interrupted'],
+    ['d', { failInterruptPlain: ['d'] }, 'interrupting it also failed: d refused'],
+  ] as const)('names a failed interrupt of the late execution %s in the refusal', async (name, options, expected) => {
+    const t = await tree('dsh-rlm-closed-late-failed-interrupt-', options)
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const spawned = t.service.spawn({ commandId: RlmCommandId(`late-${name}`), parentSessionId: t.sessionId, name, task: 'dispatched while deleting' })
+    const settled = spawned.then(() => 'registered', (error: unknown) => (error instanceof Error ? error.message : String(error)))
+    await waitUntil(async () => (await t.service.listChildren(t.sessionId)).some(child => child.name === name))
+    const child = (await t.service.listChildren(t.sessionId)).find(value => value.name === name)!
+    await t.service.deleteChild(t.sessionId, child.rlmChildId, RlmCommandId(`delete-${name}`))
+    opened.resolve(undefined)
+    await expect(settled).resolves.toContain(expected)
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('records a child whose dispatch failed with a value that is not an Error', async () => {
+    const t = await tree('dsh-rlm-closed-plain-dispatch-failure-')
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const spawned = t.service.spawn({ commandId: RlmCommandId('plain-failure'), parentSessionId: t.sessionId, name: 'e', task: 'dispatch rejects' })
+    const settled = spawned.then(() => 'registered', (error: unknown) => error)
+    await waitUntil(async () => (await t.service.listChildren(t.sessionId)).some(child => child.name === 'e'))
+    opened.reject('dispatch refused')
+    await expect(settled).resolves.toBe('dispatch refused')
+    const children = await t.service.listChildren(t.sessionId)
+    expect(children.find(child => child.name === 'e')).toMatchObject({ lifecycle: 'failed', error: 'dispatch refused' })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('interrupts a continuation that is dispatched while its subtree is being deleted', async () => {
+    const t = await tree('dsh-rlm-closed-late-continuation-')
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const sent = t.service.sendMessage(message('late-a1', t.a.sessionId, t.a1.sessionId))
+    await waitUntil(() => t.continuations.length === 1)
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    opened.resolve(undefined)
+    await sent.catch(() => undefined)
+    await t.settle()
+    expect(t.interrupted).toContain(`continuation:${String(t.a1.sessionId)}`)
+    await expect(t.service.readMessages({ sessionId: t.a1.sessionId })).resolves.toMatchObject([{ deliveryStatus: 'queued' }])
+    const events = await t.service.readEvents({ sessionId: t.a1.sessionId, limit: 100 })
+    expect(events.map(event => event.type)).not.toContain('rlm.message.delivered')
+    await expect(t.service.drain(t.sessionId, 200)).resolves.toMatchObject({ activeExecutions: 0 })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('interrupts a heartbeat execution that is dispatched while its subtree is being deleted, and does not count it', async () => {
+    const t = await tree('dsh-rlm-closed-late-heartbeat-')
+    const heartbeat = await t.service.createHeartbeat({
+      sessionId: t.a1.sessionId, commandId: RlmCommandId('late-heartbeat'), instruction: 'check progress', interval: '1s',
+    })
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const pumped = t.service.pumpHeartbeats(new Date(Date.parse(heartbeat.nextRunAt!) + 1).toISOString())
+    await waitUntil(() => t.continuations.length === 1)
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    opened.resolve(undefined)
+    await expect(pumped).resolves.toBe(0)
+    expect(t.interrupted).toContain(`continuation:${String(t.a1.sessionId)}`)
+    await expect(t.service.drain(t.sessionId, 200)).resolves.toMatchObject({ activeExecutions: 0 })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('keeps a child deleted when the delete lands right after its execution was registered', async () => {
+    const t = await tree('dsh-rlm-closed-registration-race-', { held: ['f'], deleteOnRegistration: 'f' })
+    await t.service.spawn({ commandId: RlmCommandId('race-f'), parentSessionId: t.sessionId, name: 'f', task: 'registered, then deleted' })
+    await t.race.deletion
+    expect(t.interrupted).toContain('f')
+    const children = await t.service.listChildren(t.sessionId)
+    expect(children.find(child => child.name === 'f')?.lifecycle).toBe('deleted')
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('interrupts a deleted descendant that is still stopping when the root is interrupted', async () => {
+    const t = await tree('dsh-rlm-closed-interrupt-root-', { held: ['a1'], stuck: ['a1'] })
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await t.service.interrupt(t.sessionId)
+    expect(t.interrupted.filter(name => name === 'a1')).toHaveLength(2)
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('does not report the root drained while an execution of a deleted descendant is still running', async () => {
+    const t = await tree('dsh-rlm-closed-drain-', { held: ['a1'], stuck: ['a1'] })
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('keeps the subtree closed after the Provider restarts', async () => {
+    const t = await tree('dsh-rlm-closed-restart-', { held: ['a1'], stuck: ['a1'] })
+    await t.service.sendMessage(message('queued-a1', t.a.sessionId, t.a1.sessionId))
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await t.ctx.root.fiber.dispose()
+    const recoveredContext = new Context()
+    const recovered = new LocalRlmRuntime(recoveredContext, t.root)
+    const before = t.continuations.length
+    await recovered.bindHost(t.a1.sessionId, t.bindings)
+    await recovered.pumpMessages()
+    await t.settle()
+    expect(t.continuations.length).toBe(before)
+    await recoveredContext.root.fiber.dispose()
+  })
+
+  it('treats a session as closed when only its ancestor\'s record of the child says deleted', async () => {
+    const t = await tree('dsh-rlm-closed-legacy-', { held: ['a1'], stuck: ['a1'] })
+    await t.service.sendMessage(message('queued-a1', t.a.sessionId, t.a1.sessionId))
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await t.ctx.root.fiber.dispose()
+    // A cell that finished after the delete, or a state written before this change, leaves every session open and only the
+    // record of the deleted child in its parent.
+    const statePath = join(t.root, 'state.json')
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as { sessions: Array<{ snapshot: { sessionId: string; lifecycle: string } }> }
+    for (const session of state.sessions) {
+      if ([t.a.sessionId, t.a1.sessionId].map(String).includes(session.snapshot.sessionId)) session.snapshot.lifecycle = 'idle'
+    }
+    await writeFile(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 })
+    const recoveredContext = new Context()
+    const recovered = new LocalRlmRuntime(recoveredContext, t.root)
+    const before = t.continuations.length
+    await recovered.bindHost(t.a1.sessionId, t.bindings)
+    await recovered.pumpMessages()
+    await t.settle()
+    expect(t.continuations.length).toBe(before)
+    await expect(recovered.executeCell({
+      sessionId: t.a1.sessionId, commandId: RlmCommandId('legacy-cell'), code: '1 + 1',
+    })).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    await recoveredContext.root.fiber.dispose()
+  })
+
+  it('refuses to spawn under, message, or run a cell in a session of a deleted subtree', async () => {
+    const t = await tree('dsh-rlm-closed-refusals-')
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await expect(t.service.spawn({
+      commandId: RlmCommandId('closed-spawn'), parentSessionId: t.a1.sessionId, name: 'late', task: 'must not start',
+    })).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    // Refused before anything was created or dispatched.
+    await expect(t.service.listChildren(t.a1.sessionId)).resolves.toEqual([])
+    expect(t.results.has('late')).toBe(false)
+    await expect(t.service.sendMessage(message('closed-send', t.a.sessionId, t.a1.sessionId))).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    // Only the sender is closed (A to its open sibling B), then only the receiver is closed (the root to A).
+    await expect(t.service.sendMessage(message('closed-sender', t.a.sessionId, t.b.sessionId))).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    await expect(t.service.sendMessage(message('closed-receiver', t.sessionId, t.a.sessionId))).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    await expect(t.service.executeCell({
+      sessionId: t.a1.sessionId, commandId: RlmCommandId('closed-cell'), code: '1 + 1',
+    })).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('records a delete whose interrupt failed, keeps the subtree closed, and lets a new delete command interrupt again', async () => {
+    const t = await tree('dsh-rlm-closed-failed-delete-', { held: ['a1'], failInterrupt: ['a1'] })
+    const command = RlmCommandId('delete-a')
+    await expect(t.service.deleteChild(t.sessionId, t.a.rlmChildId, command)).rejects.toThrow('a1 cannot be interrupted')
+    await expect(t.service.inspectReceipt(command)).resolves.toMatchObject({ state: 'failed' })
+    await expect(t.service.deleteChild(t.sessionId, t.a.rlmChildId, command)).rejects.toThrow('a1 cannot be interrupted')
+    expect((await t.service.listChildren(t.sessionId)).find(child => child.name === 'a')?.lifecycle).toBe('deleted')
+    await expect(t.service.sendMessage(message('after-failed-delete', t.a.sessionId, t.a1.sessionId))).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    const interruptsBefore = t.interrupted.filter(name => name === 'a1').length
+    await expect(t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a-again'))).rejects.toThrow('a1 cannot be interrupted')
+    expect(t.interrupted.filter(name => name === 'a1').length).toBe(interruptsBefore + 1)
+    await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
+    await t.ctx.root.fiber.dispose()
   })
 })

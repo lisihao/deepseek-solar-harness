@@ -138,6 +138,8 @@ import {
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import { RlmCancellationScope } from './rlm-cancellation.ts'
+import { rlmContinuationResult, rlmResultSucceeded } from './rlm-continuation.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
@@ -802,6 +804,7 @@ function asRlmExecutionResult(result: PhysicalOperatorResult): RlmChildExecution
   const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
   return {
     status,
+    stopReason: result.stopReason,
     output: result.output,
     outputPreview: operatorOutputPreview(result.output).outputPreview,
     ...status === 'failed' ? { error: `native execution stopped with ${result.stopReason}` } : {},
@@ -3171,9 +3174,7 @@ export class OrchestrationDaemon {
     const { rootSessionId, bindings, node, signal } = prepared
     await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
     const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-    const afterMessages = drained.lastContinuation?.output === undefined
-      ? rootResult
-      : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
+    const afterMessages = rlmContinuationResult(drained.lastContinuation, rootResult)
     const result = plan.autonomousPolicy?.enabled === true
       ? await this.continueAutonomousRlm(
         record,
@@ -3563,8 +3564,10 @@ export class OrchestrationDaemon {
   ): RlmRuntimeHostBindings {
     const runId = String(record.snapshot.runId)
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
+    const cancellation = new RlmCancellationScope(controller.signal, `rlm:${String(plan.executionId)}`)
     return {
       dispatchChild: async (request) => {
+        const execution = cancellation.begin(String(request.childSessionId), String(request.parentSessionId))
         const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:${String(request.childId)}`)
         const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.childSessionId)
         assertRlmBridgeAllowed(request.executionOptions, bridge)
@@ -3615,6 +3618,7 @@ export class OrchestrationDaemon {
           const usage = rlmAttributedUsage(accounted, request.model)
           return {
             status,
+            stopReason: settled.stopReason,
             output: settled.output,
             resultRef: String(artifactRef),
             outputPreview: preview.slice(0, 8_000),
@@ -3625,7 +3629,7 @@ export class OrchestrationDaemon {
           }
         }
         const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
-          record, spec, plan, request.childSessionId, controller, error,
+          record, spec, plan, request.childSessionId, execution.signal, error,
         )
         if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
           const started = await this.startResidentTurn(
@@ -3636,7 +3640,7 @@ export class OrchestrationDaemon {
             executionId,
             request.model,
             childPrompt,
-            controller.signal,
+            execution.signal,
             `Prime RLM child ${request.name}`,
             bridge,
             String(request.childSessionId),
@@ -3669,7 +3673,7 @@ export class OrchestrationDaemon {
           model: request.model.model, prompt: modelWorkerEnvelopePrompt(childEnvelope),
           parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
           ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-          modelToolBridge: bridge, signal: controller.signal,
+          modelToolBridge: bridge, signal: execution.signal,
         })
         const syntheticSessionId = `model-worker:${request.model.operatorId}:${String(request.childSessionId)}`
         const syntheticTurnId = `model-worker-turn:${String(executionId)}`
@@ -3690,11 +3694,11 @@ export class OrchestrationDaemon {
             { output: [...result.output], stopReason: result.stopReason },
             result,
           ), failed),
-          interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+          interrupt: (): Promise<void> => { execution.abort(); return Promise.resolve() },
         }
       },
       dispatchContinuation: request => this.dispatchRlmContinuation(
-        record, spec, plan, request, controller, physicalRuns,
+        record, spec, plan, request, cancellation, physicalRuns,
       ),
       hostRequest: async ({ sessionId, method, params, sealedSkill }) => {
         const isRootSession = String(sessionId) === `rlm:${String(plan.executionId)}`
@@ -3944,9 +3948,10 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
     request: Parameters<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>[0],
-    controller: AbortController,
+    cancellation: RlmCancellationScope,
     physicalRuns: PhysicalOperatorRun[],
   ): Promise<Awaited<ReturnType<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>>> {
+    const execution = cancellation.begin(String(request.sessionId))
     const executionId = PhysicalOperatorExecutionId(String(request.commandId))
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
     assertRlmBridgeAllowed(request.executionOptions ?? { version: 1 }, bridge)
@@ -4003,7 +4008,7 @@ export class OrchestrationDaemon {
       await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
       const usage = rlmAttributedUsage(accounted, request.model)
       return {
-        status, output: result.output, resultRef: String(artifactRef),
+        status, stopReason: result.stopReason, output: result.output, resultRef: String(artifactRef),
         outputPreview: operatorOutputPreview(result.output).outputPreview,
         ...usage === undefined ? {} : {
           usage,
@@ -4012,12 +4017,12 @@ export class OrchestrationDaemon {
       }
     }
     const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
-      record, spec, plan, request.sessionId, controller, error,
+      record, spec, plan, request.sessionId, execution.signal, error,
     )
     if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
       const started = await this.startResidentTurn(
         record, spec, plan, plan.executionWorkspace.path, executionId, request.model,
-        prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId), 'disabled',
+        prompt, execution.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId), 'disabled',
       )
       this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
       return this.residentRlmExecution(started, settle, failed)
@@ -4036,7 +4041,7 @@ export class OrchestrationDaemon {
       model: request.model.model, prompt: modelWorkerEnvelopePrompt(continuationEnvelope),
       parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
       ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-      modelToolBridge: bridge, signal: controller.signal,
+      modelToolBridge: bridge, signal: execution.signal,
     })
     return {
       nativeSessionId: `model-worker:${request.model.operatorId}:${String(request.sessionId)}`,
@@ -4045,7 +4050,7 @@ export class OrchestrationDaemon {
         { output: [...value.output], stopReason: value.stopReason },
         value,
       ), failed),
-      interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+      interrupt: (): Promise<void> => { execution.abort(); return Promise.resolve() },
     }
   }
 
@@ -4054,12 +4059,12 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
     sessionId: RlmRuntimeSessionId,
-    controller: AbortController,
+    signal: AbortSignal,
     error: unknown,
   ): Promise<RlmChildExecutionResult> {
     await this.flushRlmHarnessBoundary(record, spec, plan, sessionId, 'turn-end')
     return {
-      status: controller.signal.aborted ? 'indeterminate' : 'failed',
+      status: signal.aborted ? 'indeterminate' : 'failed',
       error: error instanceof Error ? error.message : String(error),
     }
   }
@@ -4110,6 +4115,8 @@ export class OrchestrationDaemon {
           'ORCHESTRATION_UNAVAILABLE',
         )
       }
+      // `max-tokens` and `refusal` keep their stop reason and partial output instead of starting another round.
+      if (!rlmResultSucceeded(result)) return result
       const endConditionEvidence = policy.endCondition === undefined
         ? undefined
         : await this.autonomousEndConditionEvidence(spec, sessionId, result)
@@ -4179,10 +4186,7 @@ export class OrchestrationDaemon {
         } },
       }
       const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-      if (drained.lastContinuation?.output !== undefined) result = {
-        ...result,
-        output: [...drained.lastContinuation.output],
-      }
+      result = { ...result, ...rlmContinuationResult(drained.lastContinuation, result) }
     }
   }
 
@@ -4229,6 +4233,8 @@ export class OrchestrationDaemon {
   ): Promise<PhysicalOperatorResult> {
     let result = initial
     for (;;) {
+      // A turn that did not succeed ends the execution as it is; the goal stays active for an explicit decision.
+      if (!rlmResultSucceeded(result)) return result
       const snapshot = await this.ctx.rlmRuntime.inspect(sessionId)
       const goal = snapshot.goal
       if (goal === undefined || goal.status !== 'active') return result
@@ -4254,9 +4260,7 @@ export class OrchestrationDaemon {
       }
       if (continuation.output !== undefined) result = { output: [...continuation.output], stopReason: 'completed' }
       const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(timeoutMs ?? 120_000, 300_000))
-      if (drained.lastContinuation?.output !== undefined) {
-        result = { output: [...drained.lastContinuation.output], stopReason: 'completed' }
-      }
+      result = rlmContinuationResult(drained.lastContinuation, result)
     }
   }
 

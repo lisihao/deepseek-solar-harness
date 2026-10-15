@@ -266,6 +266,8 @@ class KeylessModelWorker implements ModelWorkerProvider {
   readonly id = 'deepseek-keyless-fixture'
   readonly requests: ModelWorkerExecuteRequest[] = []
   onExecute?: (request: ModelWorkerExecuteRequest) => Promise<void>
+  /** Replaces the default completed result of a call, for example with a partial output and a non-success stop reason. */
+  resultFor?: (request: ModelWorkerExecuteRequest) => ModelWorkerResult | undefined
 
   offers() {
     const common = {
@@ -294,6 +296,8 @@ class KeylessModelWorker implements ModelWorkerProvider {
   async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
     this.requests.push(request)
     await this.onExecute?.(request)
+    const replaced = this.resultFor?.(request)
+    if (replaced !== undefined) return replaced
     const usage = request.commandId.endsWith(':rlm:root')
       ? { inputTokens: 10, outputTokens: 2 }
       : request.commandId.includes(':goal-continuation:')
@@ -441,6 +445,87 @@ async function installInstructionCapsule(root: string): Promise<void> {
     verification: [], operatorCompatibility: ['codex'],
   }
   await writeFile(join(capsuleRoot, 'extra.json'), JSON.stringify({ ...manifest, digest: canonicalSha256(manifest) }))
+}
+
+/** What one held model-worker call of a keyless RLM run records, and the gates that hold and release it. */
+interface HeldCall {
+  aborts: number
+  readonly started: PromiseWithResolvers<undefined>
+  readonly gate: PromiseWithResolvers<undefined>
+}
+
+/**
+ * A keyless RLM run on a real daemon whose model-worker calls for the root and for children A and B each stay open until
+ * the test releases them, so the test can see which of them a cancellation reaches. The root spawns A and B through the
+ * real REPL, waits until both calls are in flight, runs `afterSpawn`, and then waits for its own release.
+ */
+async function heldRlmRun(
+  afterSpawn?: (request: ModelWorkerExecuteRequest) => Promise<void>,
+  inChild?: (name: string, request: ModelWorkerExecuteRequest) => Promise<void>,
+) {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-held-'))
+  const root = join(home, 'orchestrations')
+  const resident = new FakeResidentClient()
+  resident.available = false
+  const worker = new KeylessModelWorker()
+  const daemon = createDaemon(root, home, resident, 10, [worker])
+  await daemon.start()
+  cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+  const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+  const workspace = join(home, 'workspace')
+  await mkdir(workspace)
+  const calls = new Map<string, HeldCall>()
+  const call = (name: string): HeldCall => {
+    let held = calls.get(name)
+    if (held === undefined) {
+      held = { aborts: 0, started: Promise.withResolvers<undefined>(), gate: Promise.withResolvers<undefined>() }
+      calls.set(name, held)
+    }
+    return held
+  }
+  const nameOf = (request: ModelWorkerExecuteRequest): string => {
+    const text = request.prompt.map(block => block.type === 'text' ? block.text : '').join('\n')
+    return request.commandId.endsWith(':rlm:root') ? 'root' : text.includes('child A') ? 'A' : text.includes('child B') ? 'B' : request.commandId
+  }
+  worker.onExecute = async (request) => {
+    const held = call(nameOf(request))
+    request.signal.addEventListener('abort', () => { held.aborts += 1 })
+    held.started.resolve(undefined)
+    if (nameOf(request) !== 'root') await inChild?.(nameOf(request), request)
+    if (nameOf(request) === 'root') {
+      await callRlmTool(request, 'held-spawn', [
+        'await rlm("child A", { name: "A" });',
+        'await rlm("child B", { name: "B" });',
+        '"spawned"',
+      ].join('\n'))
+      await Promise.all([call('A').started.promise, call('B').started.promise])
+      await afterSpawn?.(request)
+    }
+    await held.gate.promise
+  }
+  const fixture = graph(workspace)
+  const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+  const compilation = await client.compile({
+    intent: { request: 'Hold root and two children.' },
+    admission: {
+      policy: 'codex', route: 'taskgraph', sourceSessionId: 'held-rlm-fixture', rlm: 'enabled',
+      continualHarness: 'off', optimization: 'balanced',
+    },
+    graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Hold root and two children.', writeScopes: [] }] },
+  })
+  const run = await startCompilation(client, compilation.compilationId)
+  await Promise.all(['root', 'A', 'B'].map(name => call(name).started.promise))
+  const events = async (type: string) => (await client.readEvents({ runId: run.runId, limit: 400 })).events
+    .filter(value => value.type === type)
+  // The daemon keeps its Cordis context private; the runtime service is the shipped entry for interrupting a session.
+  interface RuntimeEntry {
+    list(): Promise<readonly { sessionId: string; task: string; parentSessionId?: string }[]>
+    interrupt(sessionId: string): Promise<void>
+    readEvents(request: { sessionId: string; limit: number }): Promise<readonly { type: string; data: Record<string, unknown> }[]>
+    inspect(sessionId: string): Promise<{ children: readonly { name: string; lifecycle: string }[] }>
+  }
+  const runtime = (daemon as unknown as { ctx: { rlmRuntime: RuntimeEntry } }).ctx.rlmRuntime
+  return { client, run, worker, call, events, runtime }
 }
 
 describe('orchestration daemon', () => {
@@ -1865,6 +1950,353 @@ describe('orchestration daemon', () => {
       outputTokens: 2,
       tokensUsed: 27,
       status: 'active',
+    })
+  })
+
+  describe('the terminal state of an RLM run whose last continuation did not succeed', () => {
+    const stopReasons = ['error', 'aborted', 'max-tokens', 'refusal'] as const
+
+    /** The root completes, then a child's parent message makes the daemon dispatch a `:deliver` continuation. */
+    async function deliveredRun(continuation: ModelWorkerResult | Error | undefined, childFails = false, interrupt = false, goal = false) {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-terminal-'))
+      const root = join(home, 'orchestrations')
+      const resident = new FakeResidentClient()
+      resident.available = false
+      const worker = new KeylessModelWorker()
+      const childGate = Promise.withResolvers<undefined>()
+      const continuationGate = Promise.withResolvers<undefined>()
+      worker.onExecute = async (request) => {
+        if (request.commandId.endsWith(':rlm:root')) {
+          await callRlmTool(request, 'terminal-spawn', 'await rlm("child evidence", { name: "evidence" }); "spawned"')
+          if (goal) await callRlmTool(request, 'terminal-goal', 'await goal.create("finish the objective", { continuationBudget: 2 }); "goal active"')
+        } else if (request.commandId.includes(':goal-continuation:')) {
+          // A later goal turn that would succeed; the tests below assert it is never started after a failure.
+          await callRlmTool(request, 'terminal-goal-complete', 'await goal.complete(); "goal complete"')
+        } else if (request.commandId.endsWith(':deliver')) {
+          // An interrupted call ends the way a real API worker does: with an error once its signal aborts.
+          const aborted = new Promise<never>((_resolve, reject) => {
+            request.signal.addEventListener('abort', () => { reject(new Error('worker interrupted')) })
+          })
+          await (interrupt ? Promise.race([continuationGate.promise, aborted]) : continuationGate.promise)
+          if (continuation instanceof Error) throw continuation
+        } else {
+          await childGate.promise
+          if (!childFails) {
+            await callRlmTool(request, 'terminal-send', 'await agentMessage.send("child evidence", { receiverRole: "parent", mode: "auto" }); "sent"')
+          }
+        }
+      }
+      worker.resultFor = (request) => {
+        if (request.commandId.endsWith(':deliver')) return continuation instanceof Error ? undefined : continuation
+        return childFails && !request.commandId.endsWith(':rlm:root')
+          ? { output: [{ type: 'text', text: 'child failed' }], stopReason: 'error' }
+          : undefined
+      }
+      const daemon = createDaemon(root, home, resident, 10, [worker])
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Deliver a child message after the root completed.' },
+        admission: {
+          policy: 'codex', route: 'taskgraph', sourceSessionId: 'terminal-rlm-fixture', rlm: 'enabled',
+          continualHarness: 'off', optimization: 'balanced',
+        },
+        graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Deliver a child message.', writeScopes: [] }] },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      const events = async (type: string) => (await client.readEvents({ runId: run.runId, limit: 400 })).events
+        .filter(value => value.type === type)
+      // The root has finished before the child speaks, so the delivery is a continuation of a completed root.
+      await eventually(() => events('rlm.usage'), value => value.some(event => event.data.source === 'root'))
+      childGate.resolve(undefined)
+      if (!childFails) await eventually(async () => worker.requests, value => value.some(request => request.commandId.endsWith(':deliver')))
+      if (interrupt) {
+        interface Runtime {
+          list(): Promise<readonly { sessionId: string; parentSessionId?: string }[]>
+          interrupt(id: string): Promise<void>
+        }
+        const runtime = (daemon as unknown as { ctx: { rlmRuntime: Runtime } }).ctx.rlmRuntime
+        const rootSession = (await runtime.list()).find(value => value.parentSessionId === undefined)!.sessionId
+        await runtime.interrupt(rootSession)
+      } else {
+        continuationGate.resolve(undefined)
+      }
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      return { client, run, settled, events, worker, daemon }
+    }
+
+    it.each(stopReasons)('does not report a continuation that ended with %s as a completed run, and keeps its output', async (stopReason) => {
+      const f = await deliveredRun({ output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason })
+      // The actual stop reason and the partial output stay on the continuation's own record.
+      const [continuation] = await f.events('rlm.message.continuation.failed')
+      expect(continuation?.data).toMatchObject({ stopReason })
+      expect(JSON.stringify(f.daemon.store.readArtifact(OrchestrationArtifactRef(String(continuation?.data.artifactRef)))))
+        .toContain(`partial ${stopReason}`)
+      // The run does not turn that failure into success: the settled record carries the same stop reason, the node does
+      // not pass, and the run does not complete.
+      const settledEvents = await f.events('rlm.execution.settled')
+      expect(settledEvents.map(event => event.data.stopReason)).toEqual([stopReason])
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('does not report a continuation that threw, and so returned no output, as a completed run', async () => {
+      const f = await deliveredRun(new Error('worker down'))
+      const [continuation] = await f.events('rlm.message.continuation.failed')
+      expect(continuation).toBeUndefined()
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual(['error'])
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('reports a continuation that was interrupted as aborted, not completed', async () => {
+      const f = await deliveredRun(undefined, false, true)
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual(['aborted'])
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it.each(['max-tokens', 'refusal'] as const)('does not report a root that stopped with %s and no continuation as completed', async (stopReason) => {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-root-stop-'))
+      const resident = new FakeResidentClient()
+      resident.available = false
+      const worker = new KeylessModelWorker()
+      worker.resultFor = () => ({ output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason })
+      const daemon = createDaemon(join(home, 'orchestrations'), home, resident, 10, [worker])
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root: join(home, 'orchestrations'), dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'A root that stops early.' },
+        admission: {
+          policy: 'codex', route: 'taskgraph', sourceSessionId: 'root-stop-fixture', rlm: 'enabled',
+          continualHarness: 'off', optimization: 'balanced',
+        },
+        graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Stop early.', writeScopes: [] }] },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      const events = (await client.readEvents({ runId: run.runId, limit: 400 })).events
+      expect(events.filter(event => event.type === 'rlm.execution.settled').map(event => event.data.stopReason)).toEqual([stopReason])
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(settled.state).toBe('failed')
+    })
+
+    const goalRequests = (f: Awaited<ReturnType<typeof deliveredRun>>) => f.worker.requests
+      .filter(request => request.commandId.includes(':goal-continuation:'))
+
+    it.each(stopReasons)('does not let an active goal start another turn after a message continuation ended with %s', async (stopReason) => {
+      const f = await deliveredRun({ output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason }, false, false, true)
+      expect(goalRequests(f)).toEqual([])
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual([stopReason])
+      const [continuation] = await f.events('rlm.message.continuation.failed')
+      expect(JSON.stringify(f.daemon.store.readArtifact(OrchestrationArtifactRef(String(continuation?.data.artifactRef)))))
+        .toContain(`partial ${stopReason}`)
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('does not let an active goal start another turn after a message continuation that threw', async () => {
+      const f = await deliveredRun(new Error('worker down'), false, false, true)
+      expect(goalRequests(f)).toEqual([])
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual(['error'])
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('still continues an active goal after a message continuation that succeeded', async () => {
+      const f = await deliveredRun({ output: [{ type: 'text', text: 'delivered' }], stopReason: 'completed' }, false, false, true)
+      expect(goalRequests(f)).toHaveLength(1)
+      expect(f.settled.state).toBe('completed')
+      expect(f.settled.nodes[0]?.state).toBe('passed')
+    })
+
+    it.each(['max-tokens', 'refusal'] as const)('does not let Autonomous Mode continue a root that stopped with %s', async (stopReason) => {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-autonomous-stop-'))
+      const resident = new FakeResidentClient()
+      resident.available = false
+      const worker = new KeylessModelWorker()
+      // Only the root stops early; a later Autonomous turn would succeed and satisfy the end condition.
+      worker.resultFor = request => request.commandId.endsWith(':rlm:root')
+        ? { output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason }
+        : undefined
+      const daemon = new OrchestrationDaemon({
+        root: join(home, 'orchestrations'),
+        dshHome: home,
+        residentClient: resident as unknown as ResidentDaemonClient,
+        modelWorkerProviders: [worker],
+        schedulerIntervalMs: 10,
+        autonomousEndConditionEvaluators: { quality: () => 'pass' as const },
+      })
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root: join(home, 'orchestrations'), dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Autonomous work whose root stops early.' },
+        admission: {
+          policy: 'codex', route: 'taskgraph', sourceSessionId: 'autonomous-stop-fixture', rlm: 'enabled',
+          continualHarness: 'off', optimization: 'balanced',
+        },
+        graph: {
+          ...fixture,
+          nodes: [{
+            ...baseNode,
+            role: 'recursive synthesis',
+            writeScopes: [],
+            rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+            autonomous: {
+              mode: 'enabled',
+              maxContinuations: 2,
+              endCondition: {
+                version: 1,
+                operator: 'all',
+                checks: [
+                  { id: 'completed', kind: 'acceptance', ref: 'done' },
+                  { id: 'quality', kind: 'evaluator', ref: 'quality' },
+                ],
+              },
+            },
+          }],
+        },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      const events = (await client.readEvents({ runId: run.runId, limit: 400 })).events
+      expect(worker.requests.filter(request => request.commandId.includes(':autonomous-continuation:'))).toEqual([])
+      expect(events.filter(event => event.type === 'rlm.execution.settled').map(event => event.data.stopReason)).toEqual([stopReason])
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(settled.state).toBe('failed')
+    })
+
+    it('still completes the run when a continuation succeeds, and when an exploratory child merely fails', async () => {
+      const succeeded = await deliveredRun({ output: [{ type: 'text', text: 'delivered' }], stopReason: 'completed' })
+      expect(succeeded.settled.state).toBe('completed')
+      expect(succeeded.settled.nodes[0]?.state).toBe('passed')
+      const tolerated = await deliveredRun(undefined, true)
+      expect(tolerated.settled.state).toBe('completed')
+      expect(tolerated.settled.nodes[0]?.state).toBe('passed')
+    })
+  })
+
+  describe('cancelling one API child of an RLM run', () => {
+    it('cancels only the child the root deletes, and neither the root nor its sibling', async () => {
+      let deleted: Promise<unknown> = Promise.resolve()
+      const f = await heldRlmRun((request) => {
+        // Not awaited by the root: a cell that cancels the root as well would never answer, which the assertions report.
+        deleted = callRlmTool(request, 'held-delete', 'const kids = await rlm.listSubagents(); await rlm.deleteSubagent(kids.find(kid => kid.name === "A")); "deleted"')
+        deleted.catch(() => undefined)
+        return Promise.resolve()
+      })
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+      expect(f.worker.requests).toHaveLength(3)
+
+      // The sibling still settles, and a late result of the deleted child cannot bring it back.
+      const rootSession = (await f.runtime.list()).find(value => value.parentSessionId === undefined)!.sessionId
+      const lifecycles = async () => Object.fromEntries(
+        (await f.runtime.inspect(rootSession)).children.map(value => [value.name, value.lifecycle]),
+      )
+      f.call('B').gate.resolve(undefined)
+      await eventually(lifecycles, value => value.B === 'settled')
+      expect((await lifecycles()).A).toBe('deleted')
+      f.call('A').gate.resolve(undefined)
+      await eventually(
+        () => f.runtime.readEvents({ sessionId: rootSession, limit: 400 }),
+        value => value.some(event => event.type === 'rlm.child.late_result_ignored'),
+      )
+      expect((await lifecycles()).A).toBe('deleted')
+      await expect(deleted).resolves.toBeDefined()
+      f.call('root').gate.resolve(undefined)
+      const settled = await eventually(() => f.client.inspect(String(f.run.runId)), value => value.state === 'completed')
+      expect(settled.nodes[0]?.state).toBe('passed')
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+      expect(f.worker.requests).toHaveLength(3)
+    })
+
+    it('does not start a worker call for a deleted child when a message was already queued for it', async () => {
+      const f = await heldRlmRun((request) => {
+        // The queued message waits behind A's open call; the root then deletes A. It does not await the cell, so a cell that
+        // cancels the root as well would show up in the assertions.
+        const cell = callRlmTool(request, 'held-queue-delete', [
+          'await agentMessage.send("queued for A", { receiverRole: "child", receiverName: "A", mode: "follow_up" });',
+          'const kids = await rlm.listSubagents();',
+          'await rlm.deleteSubagent(kids.find(kid => kid.name === "A"));',
+          '"deleted"',
+        ].join('\n'))
+        cell.catch(() => undefined)
+        return Promise.resolve()
+      })
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      // A's open call ends, which is the moment its queued message used to be delivered.
+      f.call('A').gate.resolve(undefined)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(f.worker.requests.map(request => request.commandId.endsWith(':deliver'))).not.toContain(true)
+      expect(f.worker.requests).toHaveLength(3)
+      f.call('B').gate.resolve(undefined)
+      f.call('root').gate.resolve(undefined)
+      const settled = await eventually(() => f.client.inspect(String(f.run.runId)), value => ['completed', 'failed'].includes(value.state))
+      expect(settled.state).toBe('completed')
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+    })
+
+    it('does not start a worker call for a deleted child when its heartbeat falls due', async () => {
+      const f = await heldRlmRun((request) => {
+        const cell = callRlmTool(request, 'held-delete-heartbeat', [
+          'const kids = await rlm.listSubagents();',
+          'await rlm.deleteSubagent(kids.find(kid => kid.name === "A"));',
+          '"deleted"',
+        ].join('\n'))
+        cell.catch(() => undefined)
+        return Promise.resolve()
+      }, async (name, request) => {
+        if (name === 'A') await callRlmTool(request, 'held-heartbeat', 'await rlm_heartbeat.create("check progress", { interval: "1s" }); "scheduled"')
+      })
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      f.call('A').gate.resolve(undefined)
+      // The heartbeat is due one second after it was created; the scheduler ticks every 10 ms.
+      await new Promise(resolve => setTimeout(resolve, 1_600))
+      expect(f.worker.requests).toHaveLength(3)
+      f.call('B').gate.resolve(undefined)
+      f.call('root').gate.resolve(undefined)
+      await eventually(() => f.client.inspect(String(f.run.runId)), value => ['completed', 'failed'].includes(value.state))
+    })
+
+    it('cancels only the interrupted child through the runtime service', async () => {
+      const f = await heldRlmRun()
+      const children = await f.runtime.list()
+      const a = children.find(value => value.task.includes('child A'))
+      expect(a).toBeDefined()
+      await f.runtime.interrupt(a!.sessionId)
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+      for (const name of ['B', 'A', 'root']) f.call(name).gate.resolve(undefined)
+      await eventually(() => f.client.inspect(String(f.run.runId)), value => ['completed', 'failed'].includes(value.state))
+      expect(f.worker.requests).toHaveLength(3)
+    })
+
+    it('cancels the root and both children, each once, when the run is cancelled', async () => {
+      const f = await heldRlmRun()
+      const current = await f.client.inspect(String(f.run.runId))
+      await f.client.control({
+        commandId: 'held-cancel', runId: f.run.runId, expectedRevision: current.revision, action: 'cancel', reason: 'test',
+      })
+      await eventually(async () => ['root', 'A', 'B'].map(name => f.call(name).aborts), value => value.every(count => count === 1))
+      for (const name of ['root', 'A', 'B']) f.call(name).gate.resolve(undefined)
+      await eventually(() => f.client.inspect(String(f.run.runId)), value => value.state === 'cancelled')
+      expect(['root', 'A', 'B'].map(name => f.call(name).aborts)).toEqual([1, 1, 1])
+      expect(f.worker.requests).toHaveLength(3)
     })
   })
 

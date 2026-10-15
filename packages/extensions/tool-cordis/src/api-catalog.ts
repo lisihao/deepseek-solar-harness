@@ -1762,7 +1762,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract trackExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<() => void>',
-        description: 'Register an admitted native execution so family messages queue behind it.',
+        description: 'Register an admitted native execution so family messages queue behind it. A session closed by a delete refuses the execution: it is interrupted, never registered, and the call rejects with `RLM_UNAVAILABLE`.',
         parameters: [{ name: 'sessionId', description: 'owning session.' }, { name: 'execution', description: 'accepted native execution.' }],
         returns: 'disposer for the tracking association.',
       },
@@ -1786,9 +1786,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract deleteChild(parentSessionId: RlmRuntimeSessionId, childId: RlmChildId, commandId: RlmCommandId): Promise<void>',
-        description: 'Stop and remove one child from the active registry.',
-        parameters: [{ name: 'parentSessionId', description: 'parent session identity.' }, { name: 'childId', description: 'child identity.' }, { name: 'commandId', description: 'idempotent delete command.' }],
-        returns: 'after persistence.',
+        description: 'Permanently delete one child and everything below it. Before the first await the subtree is closed and the command is recorded: no message delivery, heartbeat, spawn, cell, or send is admitted for it afterwards, a restart keeps it closed, and a dispatch that finishes later is interrupted instead of registered. Then every active execution in the subtree is interrupted. A rejected interrupt fails the command with the first error; the subtree stays closed, the same command id returns the stored failure, and a new delete command interrupts again.',
+        parameters: [{ name: 'parentSessionId', description: 'parent session identity.' }, { name: 'childId', description: 'child identity.' }, { name: 'commandId', description: 'delete command; a repeated id returns the stored outcome.' }],
+        returns: 'after every interrupt request settled, which is not proof that the executions stopped.',
       },
       {
         signature: 'abstract sendMessage(request: RlmMessageSendRequest): Promise<RlmMessageV1>',
@@ -1816,7 +1816,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract drain(sessionId: RlmRuntimeSessionId, maxWaitMs: number): Promise<RlmDrainResultV1>',
-        description: 'Wait for descendant work and messages to drain.',
+        description: 'Wait for descendant work and messages to drain. Executions of deleted descendants that are still stopping count as active; messages queued for a deleted session do not count.',
         parameters: [{ name: 'sessionId', description: 'subtree root.' }, { name: 'maxWaitMs', description: 'bounded wait.' }],
         returns: 'final activity counts.',
       },
@@ -1894,9 +1894,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract interrupt(sessionId: RlmRuntimeSessionId): Promise<void>',
-        description: 'Interrupt active executions in one subtree.',
+        description: 'Interrupt active executions in one subtree, including those of deleted descendants that are still stopping. It does not close the subtree: a later message or heartbeat admits a new execution, unlike a delete.',
         parameters: [{ name: 'sessionId', description: 'subtree root.' }],
-        returns: 'after interrupt requests settle.',
+        returns: 'after interrupt requests settle, which is not proof that the executions stopped.',
       },
       {
         signature: 'abstract reset( sessionId: RlmRuntimeSessionId, commandId: RlmCommandId, expectedStateRevision: number, ): Promise<RlmRuntimeSessionSnapshotV1>',
@@ -6082,7 +6082,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmChildExecutionResult',
-    declaration: 'export interface RlmChildExecutionResult {\n    readonly status: \'settled\' | \'failed\' | \'indeterminate\';\n    readonly output?: readonly ContentBlock[];\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly messages?: readonly Omit<RlmMessageSendRequest, \'commandId\' | \'fromSessionId\'>[];\n    readonly usage?: {\n        readonly provider: string;\n        readonly model: string;\n        readonly authMode: \'subscription\' | \'api\' | \'local\';\n        readonly inputTokens?: number;\n        readonly outputTokens?: number;\n        readonly cacheReadInputTokens?: number;\n        readonly cacheWriteInputTokens?: number;\n        readonly costUsd?: number;\n    };\n}',
+    declaration: 'export interface RlmChildExecutionResult {\n    readonly status: \'settled\' | \'failed\' | \'indeterminate\';\n    readonly stopReason?: RlmStopReason;\n    readonly output?: readonly ContentBlock[];\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly messages?: readonly Omit<RlmMessageSendRequest, \'commandId\' | \'fromSessionId\'>[];\n    readonly usage?: {\n        readonly provider: string;\n        readonly model: string;\n        readonly authMode: \'subscription\' | \'api\' | \'local\';\n        readonly inputTokens?: number;\n        readonly outputTokens?: number;\n        readonly cacheReadInputTokens?: number;\n        readonly cacheWriteInputTokens?: number;\n        readonly costUsd?: number;\n    };\n}',
   },
   {
     name: 'RlmChildHandleV1',
@@ -6295,6 +6295,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RlmRuntimeSessionSnapshotV1',
     declaration: 'export interface RlmRuntimeSessionSnapshotV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly executionId: string;\n    readonly parentSessionId?: RlmRuntimeSessionId;\n    readonly parentChildId?: RlmChildId;\n    readonly workspace: string;\n    readonly sessionDir: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly childModelPolicy?: RlmChildModelPolicyV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly depth: number;\n    readonly lifecycle: \'idle\' | \'running\' | \'degraded\' | \'stopped\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n    readonly children: readonly RlmChildSnapshotV1[];\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n    readonly goal?: RlmGoalV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'RlmStopReason',
+    declaration: 'export type RlmStopReason = \'completed\' | \'aborted\' | \'error\' | \'max-tokens\' | \'refusal\';',
   },
   {
     name: 'RlmStrategyRequest',
