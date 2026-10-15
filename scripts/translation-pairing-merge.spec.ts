@@ -107,13 +107,21 @@ function createFixture(attributes = true): Fixture {
   return fixture
 }
 
-function record(root: string, path: string, source: string, zh: string): string {
+// Records merged directly store their owner blobs; commit fixtures only hash
+// them because `git add` stores the same blobs without two extra spawns each.
+function record(
+  root: string,
+  path: string,
+  source: string,
+  zh: string,
+  hash: (content: Buffer) => string = content => storeGitBlob(root, content),
+): string {
   const paths = translationPairPaths(path)
   write(root, paths.source, source)
   write(root, paths.zh, zh)
   const content = renderTranslationPairingRecord(paths, {
-    sourceHash: storeGitBlob(root, Buffer.from(source)),
-    zhHash: storeGitBlob(root, Buffer.from(zh)),
+    sourceHash: hash(Buffer.from(source)),
+    zhHash: hash(Buffer.from(zh)),
   })
   write(root, paths.meta, content)
   return content
@@ -141,14 +149,14 @@ const manualOtherSource = manualBaseSource.replace('Alpha base.', 'Alpha other.'
 const manualOtherZh = manualBaseZh.replace('甲基础。', '甲对侧。')
 
 function commitPair(fixture: Fixture, source: string, zh: string, message: string): string {
-  const sidecar = record(fixture.root, 'docs/guide.md', source, zh)
+  const sidecar = record(fixture.root, 'docs/guide.md', source, zh, gitBlobHash)
   git(fixture, ['add', '.'])
   git(fixture, ['commit', '-m', message])
   return sidecar
 }
 
 function commitTextCleanPair(fixture: Fixture, source: string, zh: string, message: string): void {
-  const sidecar = record(fixture.root, 'docs/guide.md', source, zh)
+  const sidecar = record(fixture.root, 'docs/guide.md', source, zh, gitBlobHash)
   write(
     fixture.root,
     'docs/guide.i18n.yaml',
@@ -193,8 +201,8 @@ function commitMixedPairs(
   manual: { source: string; zh: string },
   message: string,
 ): void {
-  record(fixture.root, 'docs/guide.md', guide.source, guide.zh)
-  record(fixture.root, 'docs/manual.md', manual.source, manual.zh)
+  record(fixture.root, 'docs/guide.md', guide.source, guide.zh, gitBlobHash)
+  record(fixture.root, 'docs/manual.md', manual.source, manual.zh, gitBlobHash)
   git(fixture, ['add', '.'])
   git(fixture, ['commit', '-m', message])
 }
@@ -239,7 +247,11 @@ function expectMergedPair(fixture: Fixture): void {
   )
 }
 
-describe('translation pairing merge composition', { timeout: 15_000 }, () => {
+// Each test runs up to about 50 synchronous Git subprocesses. Native Windows
+// coverage measured about 120 ms per spawn with one 15 s stall on the shared
+// fork pool. A synchronous test cannot be interrupted, so this timeout bounds
+// elapsed time after the test returns; it does not detect hung subprocesses.
+describe('translation pairing merge composition', { timeout: 30_000 }, () => {
   it('rejects a pairing-record path outside the repository', () => {
     const fixture = createFixture(false)
 
