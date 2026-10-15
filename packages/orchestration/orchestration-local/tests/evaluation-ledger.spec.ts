@@ -365,6 +365,23 @@ describe('one owner at a time', () => {
   })
 })
 
+describe('after close', () => {
+  it('writes nothing, because the owner lock is gone and another process may own the file', () => {
+    const ledger = open()
+    const settling = ledger.admission('a')(request({ bodyBytes: 100 }))
+    const abandoning = ledger.admission('b')(request({ bodyBytes: 100 }))
+    ledger.close()
+    const before = readFileSync(join(directory, 'ledger.json'), 'utf8')
+    settling.settle({ inputTokens: 5, outputTokens: 1 })
+    abandoning.abandon()
+    expect(refusal(() => ledger.admission('c')(request()))).toContain('closed')
+    expect(() => { ledger.reconcile('scope-a-000001', { inputTokens: 5, outputTokens: 1 }) }).toThrow(/ledger is closed/u)
+    expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).toBe(before)
+    // The next owner finds both requests unknown and keeps them counted.
+    expect(open().snapshot().state.attempts.map(attempt => attempt.state)).toEqual(['unknown', 'unknown'])
+  })
+})
+
 describe('a ledger file that is not trustworthy', () => {
   /** A valid ledger with one settled and one refused attempt, as plain data a test can damage. */
   function valid(): Record<string, unknown> {

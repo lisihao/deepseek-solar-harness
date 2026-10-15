@@ -78,6 +78,7 @@ Each attempt receives one sealed Context Packet. Later graph, capsule, or capabi
 
 ## Known Limitations and Deferred Work
 
+- Under an evaluation scope the wire model is the scope's, but the run's `model.allocated` events and the usage events (`rlm.usage`) still name the model the allocation chose. Compute cost from the ledger, not from those events.
 - No production code reconciles an `unknown` request yet, so one that ended without usage keeps its reservation and its concurrency slot until the home is replaced; with `concurrentRequests = 1` that blocks every later request.
 - An evaluation scope bounds the requests of the API worker. It does not isolate network access or credentials, so it does not stop code in the REPL from reaching the network on its own; it sets no wall-clock limit; and its input reservation is the request body's byte length, audited after the fact, not a bound proven before sending.
 

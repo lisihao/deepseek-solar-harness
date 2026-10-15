@@ -34,7 +34,7 @@ RLM 运行是一棵树：root、child、孙代、它们各自的 continuation，
 
 ## 后果
 
-字节预留比真实 token 数大数倍，并持有到结算，所以并行的 child 可能被提前拒绝，每个 unknown 请求都持有其完整预留。保证恰好是这些：受计量的 API 路径上的请求，在离开之前被计数、预留并写盘，且使用 scope 指定的生成参数。它不是被证明的 token 上限，不是网络或凭据隔离（REPL 中的代码仍可自行访问网络），也不是墙钟限制。目前没有生产代码核对 unknown 请求。
+字节预留比真实 token 数大数倍，并持有到结算，所以并行的 child 可能被提前拒绝，每个 unknown 请求都持有其完整预留。保证恰好是这些：受计量的 API 路径上的请求，在离开之前被计数、预留并写盘，且使用 scope 指定的生成参数。它不是被证明的 token 上限，不是网络或凭据隔离（REPL 中的代码仍可自行访问网络），也不是墙钟限制。目前没有生产代码核对 unknown 请求。`model.allocated` 和 `rlm.usage` 事件仍显示分配所选的模型，所以成本必须从账本计算。
 
 三个结论要分开。（1）生成参数逐个物理请求贯通：scope 的模型、`max_tokens`、effort 和 thinking 模式出现在每次普通调用和工具循环的每一轮的线上请求里，fake 端点收到的请求体可以印证。（2）准入可核验：收到的每个请求体都按 sha256 对应到唯一一个已准入的尝试，账本记录每个尝试预留了什么、用了什么。（3）针对真实 provider 的严格 token 总上限**没有**被证实。官方 Chat Completions 页面把 `max_tokens` 定义为可生成 token 的最大数，并把 `reasoning_tokens` 列在 completion 明细之内，这支持把 reasoning 看作 completion 的一部分，但没有说上限包含它（只有 Responses API 对 `max_output_tokens` 这样明说，而本代码不使用那个 endpoint）。token 用量页面提供文本的离线分词器，并说明不同模型分词不同、以 usage 为准；没有找到对完整 messages、工具 schema 与结果、聊天模板和服务端包装的发送前计数或上界。请求字节数、文本 token 数和上下文容量是不同的事实。所以 `request-bytes-audited` 是被审计的预留，而需要那份证明的 `proven-token-count` 会拒绝所有请求；这只验证安全拒绝，并不意味着可以运行正式评测。不切换 endpoint，不降低 reasoning，也不提高预算来绕过这一点。
 

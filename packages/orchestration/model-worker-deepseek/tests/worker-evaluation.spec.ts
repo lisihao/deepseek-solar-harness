@@ -135,7 +135,7 @@ describe('DeepSeekModelWorker under an evaluation scope', () => {
         evaluation: evaluation(() => 250, labels), signal: new AbortController().signal,
       })
       expect(result.stopReason).toBe('completed')
-      expect(labels).toEqual(['cmd#round0', 'cmd#round1'])
+      expect(labels).toEqual(['cmd#round0@s', 'cmd#round1@s'])
       expect(adapter.requests.map(request => [request.model, request.maxTokens, request.reasoningEffort])).toEqual([
         ['deepseek-v4-flash', 100, 'high'], ['deepseek-v4-flash', 100, 'high'],
       ])

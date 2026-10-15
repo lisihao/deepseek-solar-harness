@@ -78,6 +78,7 @@ scope 只计量 API worker 的请求。在它之下，daemon 拒绝任何其他 
 
 ## Known Limitations and Deferred Work
 
+- 在评测 scope 之下，线上的模型是 scope 指定的，但运行的 `model.allocated` 事件和 usage 事件（`rlm.usage`）仍显示分配所选的模型。成本应从账本计算，而不是从这些事件。
 - 目前没有生产代码核对 `unknown` 请求，所以没有 usage 就结束的请求会一直保留其预留和并发名额，直到 home 被替换；`concurrentRequests = 1` 时这会阻塞之后的所有请求。
 - 评测 scope 约束 API worker 的请求。它不隔离网络或凭据，所以不能阻止 REPL 中的代码自行访问网络；它没有墙钟限制；它的输入预留是请求体字节数并在事后核对，不是发送前证明的上界。
 

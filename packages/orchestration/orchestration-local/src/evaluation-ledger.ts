@@ -194,6 +194,10 @@ function writeDurably(path: string, text: string): void {
     closeSync(descriptor)
   }
   renameSync(temporary, path)
+  // Windows cannot open a directory handle, and NTFS journals directory entries; elsewhere the entry is synced so the
+  // renamed file survives a crash. The same peer handling is used by the storage and attachment packages.
+  /* v8 ignore next -- the Windows branch cannot run on the POSIX coverage lane. */
+  if (process.platform === 'win32') return
   const directory = openSync(dirname(path), 'r')
   try {
     fsyncSync(directory)
@@ -379,6 +383,9 @@ function takeOwnerLock(lockPath: string): { release(): void } {
  * its request is sent. One process owns the ledger at a time: opening it takes an owner lock before the file is read or written.
  */
 export class EvaluationLedger {
+  /** Set by `close()`: from then on the owner lock is released and this object writes nothing. */
+  private closed = false
+
   private constructor(
     private readonly path: string,
     readonly scope: EvaluationScopeV1,
@@ -429,8 +436,12 @@ export class EvaluationLedger {
     }
   }
 
-  /** Release the owner lock. The ledger file is kept. */
+  /**
+   * Release the owner lock. The ledger file is kept. A request still in flight can no longer write its settlement: its usage is
+   * lost and its reservation stays as it is, which the next owner turns into unknown.
+   */
   close(): void {
+    this.closed = true
     this.lock.release()
   }
 
@@ -466,6 +477,7 @@ export class EvaluationLedger {
    * @param usage - the usage the provider reported.
    */
   reconcile(attemptId: string, usage: TokenUsage): void {
+    if (this.closed) throw new EvaluationLedgerError('the ledger is closed; a receipt cannot be written without its owner lock', 'EVALUATION_LEDGER_LOCKED')
     this.settle(attemptId, usage)
   }
 
@@ -510,6 +522,7 @@ export class EvaluationLedger {
   }
 
   private admit(label: string, request: RequestAdmissionInput): RequestAdmissionTicket {
+    if (this.closed) throw new LlmError(`evaluation scope ${this.scope.scopeId} is closed; no request is admitted`, ADMISSION_REFUSED_CODE)
     const refusal = this.refusal(request)
     const seq = this.state.nextSeq
     this.state.nextSeq += 1
@@ -533,8 +546,8 @@ export class EvaluationLedger {
       throw new LlmError(`evaluation scope ${this.scope.scopeId} refused request ${attempt.id} (${label}): ${refusal}`, ADMISSION_REFUSED_CODE)
     }
     return {
-      settle: (usage) => { this.settle(attempt.id, usage) },
-      abandon: () => { this.abandon(attempt.id) },
+      settle: (usage) => { if (!this.closed) this.settle(attempt.id, usage) },
+      abandon: () => { if (!this.closed) this.abandon(attempt.id) },
     }
   }
 

@@ -2680,12 +2680,33 @@ describe('orchestration daemon', () => {
     const ledgerOf = (f: Fixture): EvaluationLedgerState => JSON.parse(readFileSync(join(f.root, 'evaluation-ledger.json'), 'utf8')) as EvaluationLedgerState
     const admitted = (state: EvaluationLedgerState) => state.attempts.filter(attempt => attempt.state !== 'refused')
 
+    /** The sessions of a run with their depth and parent, read from the runtime after the run. */
+    async function sessionTree(
+      daemon: OrchestrationDaemon,
+    ): Promise<{ sessionId: string; parentSessionId: string | null; depth: number }[]> {
+      interface Listing { list(): Promise<readonly { sessionId: string; parentSessionId?: string; depth: number }[]> }
+      const runtime = (daemon as unknown as { ctx: { rlmRuntime: Listing } }).ctx.rlmRuntime
+      return (await runtime.list()).map(session => ({
+        sessionId: session.sessionId, parentSessionId: session.parentSessionId ?? null, depth: session.depth,
+      }))
+    }
+
+    /** The session an attempt's label names (`...@<session>`) and that session's depth in the run's tree. */
+    function attemptSession(
+      label: string | undefined,
+      tree: readonly { sessionId: string; depth: number }[],
+    ): { session?: string; depth?: number } {
+      const session = label?.split('@').at(1)
+      const found = session === undefined ? undefined : tree.find(entry => entry.sessionId === session)
+      return found === undefined ? {} : { session: found.sessionId, depth: found.depth }
+    }
+
     /**
      * When `DSH_EVALUATION_EVIDENCE_DIR` is set, write what an auditor can reconcile by hand: each request the endpoint received
      * with the ledger attempt it joins to and that attempt's state when the request arrived, the final ledger, and the outbound
      * counts. Without the variable nothing is written.
      */
-    async function exportEvidence(name: string, f: Fixture): Promise<void> {
+    async function exportEvidence(name: string, f: Fixture, daemon?: OrchestrationDaemon): Promise<void> {
       const directory = process.env.DSH_EVALUATION_EVIDENCE_DIR
       if (directory === undefined) return
       const state = ledgerOf(f)
@@ -2702,8 +2723,11 @@ describe('orchestration daemon', () => {
         reasoning_effort: request.parsed.reasoning_effort,
         ledgerAtReceipt: f.atReceipt[index],
         ledgerAttemptId: state.attempts.find(attempt => attempt.bodySha256 === request.sha256)?.id,
+        ...attemptSession(state.attempts.find(attempt => attempt.bodySha256 === request.sha256)?.label, tree),
       }))
+      const tree = daemon === undefined ? [] : await sessionTree(daemon)
       const settled = state.attempts.filter(attempt => attempt.state === 'settled')
+      await writeFile(join(target, 'sessions.json'), `${JSON.stringify(tree, null, 2)}\n`)
       await writeFile(join(target, 'received-requests.json'), `${JSON.stringify(requests, null, 2)}\n`)
       await writeFile(join(target, 'ledger-final.json'), `${JSON.stringify(state, null, 2)}\n`)
       await writeFile(join(target, 'outbound.json'), `${JSON.stringify({
@@ -2727,7 +2751,7 @@ describe('orchestration daemon', () => {
 
     it('meters every physical request of a root, child, grandchild, and continuation, and joins each received body to one attempt', async () => {
       const f = await fixture(treeHandler())
-      const { settled } = await run(f, ROOT)
+      const { settled, daemon } = await run(f, ROOT)
       expect(settled.state).toBe('completed')
       const state = ledgerOf(f)
       // What left the process equals what the ledger admitted, one to one by the sha256 of the exact body.
@@ -2745,17 +2769,24 @@ describe('orchestration daemon', () => {
         expect(request.parsed.model).toBe('deepseek-v4-flash')
         expect(attempt.state).toBe('settled')
       }
-      // The whole tree shares the one ledger: root rounds, continuation rounds, and the children's rounds all appear in it.
-      const labels = admitted(state).map(attempt => attempt.label)
-      expect(labels.filter(label => label.includes(':rlm:root#round'))).toHaveLength(2)
-      expect(labels.filter(label => label.includes(':deliver#round')).length).toBeGreaterThanOrEqual(3)
-      expect(labels.filter(label => !label.includes(':rlm:root#') && !label.includes(':deliver#')).length).toBeGreaterThanOrEqual(4)
+      // The whole tree shares the one ledger. Each attempt names the session that sent it, and the runtime says how deep that
+      // session is: the root is depth 0, its child 1, its grandchild 2, and a continuation runs in the session it wakes.
+      const tree = await sessionTree(daemon)
+      expect(Math.max(...tree.map(entry => entry.depth))).toBe(2)
+      const depths = admitted(state).map(attempt => attemptSession(attempt.label, tree).depth)
+      expect(depths.every(depth => depth !== undefined)).toBe(true)
+      const perDepth = (depth: number): number => depths.filter(value => value === depth).length
+      expect(perDepth(0)).toBeGreaterThanOrEqual(3)
+      expect(perDepth(1)).toBeGreaterThanOrEqual(3)
+      expect(perDepth(2)).toBeGreaterThanOrEqual(2)
+      const continuations = admitted(state).filter(attempt => attempt.label.includes(':deliver#'))
+      expect(new Set(continuations.map(attempt => attemptSession(attempt.label, tree).depth))).toEqual(new Set([0, 1]))
       expect(f.guard.refused).toBe(0)
       expect(new Set(f.guard.origins)).toEqual(new Set([new URL(f.fake.baseURL).origin]))
       // Reservation came before sending: when each request reached the endpoint its attempt was already reserved on disk.
       expect(f.atReceipt).toHaveLength(received.length)
       expect(f.atReceipt.every(entry => entry.state === 'reserved' && entry.attemptId !== undefined)).toBe(true)
-      await exportEvidence('tree-run', f)
+      await exportEvidence('tree-run', f, daemon)
     })
 
     it('puts the scope ceiling in every request body and lowers it to what is left, never to a provider default', async () => {

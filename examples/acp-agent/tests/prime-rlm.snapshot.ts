@@ -57,6 +57,8 @@ it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overw
   expect(stdout).toBe(await readFile(expected, 'utf8'))
 }, 140_000)
 
+const evidenceDirectory = process.env.DSH_EVALUATION_EVIDENCE_DIR
+
 it('snapshot: prime-rlm-evaluation admits every physical request of an RLM tree into one ledger and sends nothing past its limit', async () => {
   const driver = fileURLToPath(new URL('./fixtures/prime-rlm-evaluation/driver.ts', import.meta.url))
   const expected = new URL('./fixtures/prime-rlm-evaluation/expected.json', import.meta.url)
@@ -70,6 +72,8 @@ it('snapshot: prime-rlm-evaluation admits every physical request of an RLM tree 
     // The driver's waits sum to 3 + 12 + 12 + 15 s plus 5 s per request, and its cleanup to 3 + 8 + 8 + 2 s; a normal run takes
     // about 8 s. The limit lets it fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it.
     processTimeoutMs: 90_000,
+    // Set only to collect the driver's reconcilable files; the snapshot itself does not depend on it.
+    env: evidenceDirectory === undefined ? {} : { DSH_EVALUATION_EVIDENCE_DIR: evidenceDirectory },
   })
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expected, stdout)
   expect(stdout).toBe(await readFile(expected, 'utf8'))

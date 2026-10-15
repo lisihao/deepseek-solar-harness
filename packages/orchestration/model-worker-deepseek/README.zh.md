@@ -6,7 +6,7 @@
 
 ## Evaluation scope
 
-请求带有 evaluation block 时，worker 的每一次 `ctx.llm.stream` 调用（普通调用和工具循环的每一轮）都使用 scope 指定的模型，把 `maxTokens` 设为 scope 的上限并降到仍可用的输出 token 数（不低于 1，所以耗尽的 scope 由 admission 拒绝，任何请求都不会回落到 adapter 默认的 256000），设置 scope 的推理 effort，并携带一份新的 admission，标签为逻辑命令加轮次（`<command>#round<N>`，或 `#plain`）。工具循环历史里保存的 assistant 消息使用 scope 的模型。没有 evaluation block 时不增加任何内容。
+请求带有 evaluation block 时，worker 的每一次 `ctx.llm.stream` 调用（普通调用和工具循环的每一轮）都使用 scope 指定的模型，把 `maxTokens` 设为 scope 的上限并降到仍可用的输出 token 数（不低于 1，所以耗尽的 scope 由 admission 拒绝，任何请求都不会回落到 adapter 默认的 256000），设置 scope 的推理 effort，并携带一份新的 admission，标签为逻辑命令、轮次和发送它的会话（`<command>#round<N>@<session>`，或 `<command>#plain`）。工具循环历史里保存的 assistant 消息使用 scope 的模型。没有 evaluation block 时不增加任何内容。
 
 ## 模型体验
 

@@ -106,7 +106,7 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
         messages,
         tools: bridge.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: { ...tool.inputSchema } })),
         signal: request.signal,
-        ...evaluationOptions(request, `${request.commandId}#round${String(round)}`),
+        ...evaluationOptions(request, `${request.commandId}#round${String(round)}@${bridge.sessionId}`),
       })) assembler.push(chunk)
       usage = mergeUsage(usage, assembler.usage)
       const blocks = assembler.blocks()

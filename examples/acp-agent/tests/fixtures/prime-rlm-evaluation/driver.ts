@@ -148,6 +148,7 @@ async function stopOwnDaemon(pidFile: string): Promise<boolean> {
 }
 
 interface Attempt {
+  readonly id?: string
   readonly state: string
   readonly label: string
   readonly bodySha256: string
@@ -214,6 +215,39 @@ try {
     reasoning_effort: string
   } }))
   const hashes = admitted.map(attempt => attempt.bodySha256).sort()
+  // When asked, write what an auditor can reconcile by hand: each received request with the ledger attempt it joins to and the
+  // session that sent it, the final ledger, the sessions of the run, and the outbound counts. The transcript below stays
+  // order-insensitive; these files are not part of the snapshot.
+  const evidenceDirectory = process.env.DSH_EVALUATION_EVIDENCE_DIR
+  if (evidenceDirectory !== undefined) {
+    const runtime = JSON.parse(await readFile(join(root, 'rlm-runtime', 'state.json'), 'utf8')) as {
+      sessions: { snapshot: { sessionId: string; parentSessionId?: string; depth: number } }[]
+    }
+    const tree = runtime.sessions.map(entry => ({
+      sessionId: entry.snapshot.sessionId, parentSessionId: entry.snapshot.parentSessionId ?? null, depth: entry.snapshot.depth,
+    }))
+    await mkdir(evidenceDirectory, { recursive: true })
+    const rows = received.map((request, index) => {
+      const attempt = admitted.find(value => value.bodySha256 === request.sha256)
+      const session = attempt?.label.split('@').at(1)
+      return {
+        index, sha256: request.sha256, bytes: request.bytes, ...request.parsed,
+        ledgerAttemptId: (attempt as unknown as { id?: string } | undefined)?.id, label: attempt?.label,
+        session, depth: tree.find(entry => entry.sessionId === session)?.depth,
+      }
+    })
+    await writeFile(join(evidenceDirectory, 'received-requests.json'), `${JSON.stringify(rows, null, 2)}\n`)
+    await writeFile(join(evidenceDirectory, 'ledger-final.json'), `${JSON.stringify(ledger, null, 2)}\n`)
+    await writeFile(join(evidenceDirectory, 'sessions.json'), `${JSON.stringify(tree, null, 2)}\n`)
+    await writeFile(join(evidenceDirectory, 'outbound.json'), `${JSON.stringify({
+      endpointOrigin: new URL(fake.baseURL).origin,
+      requestsReceivedByEndpoint: received.length,
+      admittedAttempts: admitted.length,
+      refusedAttempts: ledger.attempts.length - admitted.length,
+      refusals: ledger.attempts.filter(attempt => attempt.state === 'refused').map(attempt => ({ label: attempt.label, reason: attempt.refusal })),
+      note: 'Production daemon process started by the Loader client; its only endpoint is the loopback server and its credential is a fixture value. This process cannot see the daemon\'s own fetches.',
+    }, null, 2)}\n`)
+  }
   // Order-insensitive: the concurrent requests of a tree do not arrive in a fixed sequence.
   const unique = <T>(values: readonly T[]): T[] => [...new Set(values)].sort()
   transcript = {
