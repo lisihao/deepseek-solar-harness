@@ -31,5 +31,34 @@
       "later turn": 0
     }
   },
+  "context": {
+    "run": "completed",
+    "node": "passed",
+    "stopReasons": [
+      "completed"
+    ],
+    "continuations": [
+      "rlm.message.continuation.settled",
+      "rlm.message.continuation.settled",
+      "rlm.message.continuation.settled"
+    ],
+    "requests": {
+      "root": 1,
+      "child": 2,
+      "deliver": 3,
+      "goal continuation": 0,
+      "later turn": 0
+    },
+    "outputs": [
+      "last continuation output"
+    ],
+    "rootContinuationPrompts": [
+      "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\nalpha figure is 1\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nRun scenario context-prompts. Final rule: reply with only {\"verdict\": \"<text>\"}.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: handles.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- child \"alpha\": <running or idle>\n- child \"beta\": idle\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe message above is delivered in full; do not call agentMessage.read to fetch it again.\nProcess the queued family message using follow_up ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.",
+      "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\nbeta figure is 2\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nRun scenario context-prompts. Final rule: reply with only {\"verdict\": \"<text>\"}.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: handles.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- child \"alpha\": idle\n- child \"beta\": <running or idle>\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe message above is delivered in full; do not call agentMessage.read to fetch it again.\nProcess the queued family message using follow_up ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result."
+    ],
+    "childContinuationPrompts": [
+      "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\ncheck the figure again\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nAlpha task: report the alpha figure to your parent.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: none.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- parent \"root\": <running or idle>\n- sibling \"beta\": idle\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe message above is delivered in full; do not call agentMessage.read to fetch it again.\nProcess the queued family message using follow_up ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result."
+    ]
+  },
   "daemonsStopped": true
 }

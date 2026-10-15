@@ -222,6 +222,12 @@ export interface RlmRuntimeHostBindings {
     readonly commandId: RlmCommandId
     readonly instruction: string
     readonly source: 'goal' | 'heartbeat' | 'message' | 'autonomous'
+    /**
+     * Who sent a `message` continuation, set by the runtime from its own record of the message: `controller` for input accepted
+     * through an attached control lease, `agent` for a message from another session. Absent for every other source. The text of
+     * a message never decides it.
+     */
+    readonly messageOrigin?: 'controller' | 'agent'
     readonly deliveryMode: 'steer' | 'follow_up'
     readonly model: RlmModelSelectionV1
     /** Optional for legacy host continuations; LocalRlmRuntime supplies the sealed value. */
@@ -515,7 +521,9 @@ export interface RlmModelToolBridgeV1 {
 /** Canonical model-visible TypeScript REPL schema shared by all RLM consumers. */
 export const RLM_TYPESCRIPT_REPL_TOOL_SCHEMA = {
   name: 'typescript_repl',
-  description: 'Execute one TypeScript cell in the persistent RLM namespace. Use context as programmable state; await rlm(task, { name, model }) to admit asynchronous child agents. rlm returns only a handle. Results arrive through agentMessage or artifacts.',
+  description: 'Execute one TypeScript cell in the persistent RLM namespace. Use context as programmable state; await rlm(task, { name, model }) to admit asynchronous child agents. rlm returns only a handle. Results arrive through agentMessage or artifacts. '
+    + 'Top-level const and let names persist between cells, so do not declare the same name at the top level twice: reuse the existing binding, choose a new name, or keep temporary values inside a block or function. '
+    + 'agentMessage.read(afterCount, limit) skips the first afterCount messages received and returns an array of messages; each has a string text field that is not necessarily JSON.',
   parameters: {
     type: 'object',
     properties: {

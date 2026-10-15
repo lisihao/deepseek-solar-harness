@@ -1,6 +1,6 @@
-/** What an RLM execution ends in after its last continuation. */
+/** What an RLM execution ends in after its last continuation, and the prompt of each continuation. */
 import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
-import type { RlmChildExecutionResult } from '@deepseek-ai/dsh-rlm-runtime'
+import type { RlmChildExecutionResult, RlmFamilyRosterV1, RlmRuntimeSessionSnapshotV1 } from '@deepseek-ai/dsh-rlm-runtime'
 
 /**
  * The operator result an RLM execution ends in after its last continuation. A continuation that did not settle keeps
@@ -31,4 +31,96 @@ export function rlmContinuationResult(
  */
 export function rlmResultSucceeded(result: PhysicalOperatorResult): boolean {
   return result.stopReason === 'completed'
+}
+
+/**
+ * Most variable names each list of a message continuation names; the rest are counted, not named. This is a fixed bound on how
+ * much of a list one prompt carries, not a setting that varies by deployment, so it is not a `Config` field.
+ */
+export const MAX_CONTINUATION_VARIABLE_NAMES = 64
+
+const GENERIC_INSPECTION = 'Use typescript_repl to inspect the preserved context, variables, child registry, explicit messages, '
+  + 'Continuous Harness, and goal state.'
+
+/**
+ * The prompt of one continuation of a persistent RLM session.
+ * @param request - why the session continues, the instruction it received, and how a queued message is ordered.
+ * @param inspection - the sentences that tell the model what state it can use. Omit it for the generic instruction to inspect the
+ *   preserved state; a message continuation passes {@link rlmMessageContinuationFacts}.
+ * @returns the prompt text. Without `inspection` it is the same text for every `source` as before message continuations restated
+ *   their task.
+ */
+export function rlmContinuationPrompt(
+  request: {
+    readonly source: 'goal' | 'heartbeat' | 'message' | 'autonomous'
+    readonly instruction: string
+    readonly deliveryMode: 'steer' | 'follow_up'
+  },
+  inspection: string = GENERIC_INSPECTION,
+): string {
+  return [
+    `Continue the persistent Prime RLM session for this ${request.source}.`,
+    request.instruction,
+    inspection,
+    request.source === 'goal'
+      ? 'Audit the objective. Call await goal.complete() only when every requirement is actually achieved; otherwise make concrete progress within this continuation.'
+      : request.source === 'heartbeat'
+        ? 'Treat this heartbeat as scheduled new work. Use explicit family messages for any recursive results.'
+        : request.source === 'autonomous'
+          ? 'This follow-up was injected by the host Autonomous policy. Do not claim completion from prose; make concrete progress and let the host quality gates decide.'
+          : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
+  ].join('\n')
+}
+
+function namedList(names: readonly string[]): string {
+  if (names.length === 0) return 'none'
+  const shown = names.slice(0, MAX_CONTINUATION_VARIABLE_NAMES).join(', ')
+  return names.length > MAX_CONTINUATION_VARIABLE_NAMES
+    ? `${shown} (${String(names.length - MAX_CONTINUATION_VARIABLE_NAMES)} more not listed)`
+    : shown
+}
+
+/**
+ * What the host knows about a session that a message continuation would otherwise have to rediscover. The text restates only the
+ * session's own task (whole, as the session received it), its saved variable names, and the agents it can already see; it never
+ * copies a variable value, another agent's task, or a message. It does not widen who may instruct the session: only controller
+ * input, as the runtime recorded it, may change the task, and a message from another agent stays data. Controller input of an
+ * earlier turn is not restated.
+ * @param session - the session's snapshot; its task, and the names saved by its last successful cell.
+ * @param roster - the parent, siblings, and direct children the session can already message. It is listed whole: it holds at most
+ *   the parent plus the sealed `maxChildren` of the session and of its parent.
+ * @param origin - who sent the message, as the runtime recorded it (`messageOrigin`), never read from the message text. A controller's
+ *   input may change the task or its output format; a message from another agent may not.
+ * @returns the sentences to pass to {@link rlmContinuationPrompt} as `inspection`.
+ */
+export function rlmMessageContinuationFacts(
+  session: Pick<RlmRuntimeSessionSnapshotV1, 'task' | 'restorableVariables' | 'degradedVariables'>,
+  roster: Pick<RlmFamilyRosterV1, 'entries'>,
+  origin: 'controller' | 'agent',
+): string {
+  return [
+    'Use typescript_repl for any state you still need. The host read the facts below just before this turn.',
+    "This agent's own task (it is not necessarily the first prompt this agent received):",
+    '--- task ---',
+    session.task,
+    '--- end of task ---',
+    origin === 'controller'
+      ? 'The message above is Controller input from the controller attached to this agent. The task above is what this agent was first asked; '
+      + "if the input changes the task or its output format, follow the input, and otherwise the task still applies. If this turn is the last one, your reply is recorded as this agent's result."
+      : "If this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output "
+      + 'format the task requires, so give the reply in that format, with no commentary around a required format.',
+    `Names saved by the last successful cell, as of that cell: ${namedList(session.restorableVariables)}.`,
+    ...session.degradedVariables.length === 0
+      ? []
+      : [`Names whose save degraded in that cell (they may not survive a restart): ${namedList(session.degradedVariables)}.`],
+    'Names declared by cells that failed, and properties set on globalThis, are not in these lists.',
+    roster.entries.length === 0
+      ? 'No parent, sibling, or direct child is visible to this agent.'
+      : 'Agents visible to this agent. The state is only that agent\'s REPL: "running" means a cell is running, "idle" means none is, '
+      + '"inactive" means degraded or stopped. It does not say whether that agent finished its task or has reported:',
+    ...roster.entries.map(member => `- ${member.relationship} ${JSON.stringify(member.name)}: ${member.status}`),
+    'Top-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: '
+    + 'reuse the existing binding, choose a new name, or keep temporary values inside a block or function.',
+    'The message above is delivered in full; do not call agentMessage.read to fetch it again.',
+  ].join('\n')
 }

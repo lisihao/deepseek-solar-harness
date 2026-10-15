@@ -55,10 +55,12 @@ describe('LocalRlmRuntime', () => {
   it('provides an exclusive persistent Agents View control lease and routes input through continuations', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-control-lease-'))
     const continuationRequests: string[] = []
+    const origins: (string | undefined)[] = []
     const bindings: RlmRuntimeHostBindings = {
       dispatchChild: () => { throw new Error('not used') },
       dispatchContinuation: async (request) => {
         continuationRequests.push(request.instruction)
+        origins.push(request.messageOrigin)
         return {
           nativeSessionId: 'native-control-session',
           nativeTurnId: String(request.commandId),
@@ -98,6 +100,7 @@ describe('LocalRlmRuntime', () => {
     await expect(first.service.input(input)).resolves.toEqual(accepted)
     expect(accepted).toMatchObject({ version: 1, deliveryStatus: 'delivered', effectiveMode: 'follow_up' })
     expect(continuationRequests).toHaveLength(1)
+    expect(origins).toEqual(['controller'])
     await expect(first.service.input({ ...input, text: 'different command' })).rejects.toMatchObject({ code: 'RLM_COMMAND_CONFLICT' })
 
     const detached = await first.service.detach({
@@ -799,7 +802,7 @@ describe('LocalRlmRuntime', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-message-queue-'))
     const rootExecution = deferred<RlmChildExecutionResult>()
     const continuationResults: Array<ReturnType<typeof deferred<RlmChildExecutionResult>>> = []
-    const continuationRequests: Array<{ deliveryMode: string; instruction: string }> = []
+    const continuationRequests: Array<{ deliveryMode: string; instruction: string; messageOrigin?: string | undefined }> = []
     const bindings: RlmRuntimeHostBindings = {
       dispatchChild: async request => ({
         nativeSessionId: `child:${request.childSessionId}`,
@@ -808,7 +811,9 @@ describe('LocalRlmRuntime', () => {
         interrupt: () => Promise.resolve(),
       }),
       dispatchContinuation: async (request) => {
-        continuationRequests.push({ deliveryMode: request.deliveryMode, instruction: request.instruction })
+        continuationRequests.push({
+          deliveryMode: request.deliveryMode, instruction: request.instruction, messageOrigin: request.messageOrigin,
+        })
         const result = deferred<RlmChildExecutionResult>()
         continuationResults.push(result)
         return {
@@ -842,7 +847,7 @@ describe('LocalRlmRuntime', () => {
 
     rootExecution.resolve({ status: 'settled' })
     await waitUntil(() => continuationRequests.length === 1)
-    expect(continuationRequests[0]).toMatchObject({ deliveryMode: 'steer' })
+    expect(continuationRequests[0]).toMatchObject({ deliveryMode: 'steer', messageOrigin: 'agent' })
     expect(continuationRequests[0]!.instruction).toContain('steering evidence')
     continuationResults[0]!.resolve({ status: 'settled', output: [{ type: 'text', text: 'steer applied' }] })
     await waitUntil(() => continuationRequests.length === 2)
