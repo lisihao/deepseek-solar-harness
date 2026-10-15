@@ -1957,7 +1957,7 @@ describe('orchestration daemon', () => {
     const stopReasons = ['error', 'aborted', 'max-tokens', 'refusal'] as const
 
     /** The root completes, then a child's parent message makes the daemon dispatch a `:deliver` continuation. */
-    async function deliveredRun(continuation: ModelWorkerResult | Error | undefined, childFails = false, interrupt = false) {
+    async function deliveredRun(continuation: ModelWorkerResult | Error | undefined, childFails = false, interrupt = false, goal = false) {
       const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-terminal-'))
       const root = join(home, 'orchestrations')
       const resident = new FakeResidentClient()
@@ -1968,6 +1968,10 @@ describe('orchestration daemon', () => {
       worker.onExecute = async (request) => {
         if (request.commandId.endsWith(':rlm:root')) {
           await callRlmTool(request, 'terminal-spawn', 'await rlm("child evidence", { name: "evidence" }); "spawned"')
+          if (goal) await callRlmTool(request, 'terminal-goal', 'await goal.create("finish the objective", { continuationBudget: 2 }); "goal active"')
+        } else if (request.commandId.includes(':goal-continuation:')) {
+          // A later goal turn that would succeed; the tests below assert it is never started after a failure.
+          await callRlmTool(request, 'terminal-goal-complete', 'await goal.complete(); "goal complete"')
         } else if (request.commandId.endsWith(':deliver')) {
           // An interrupted call ends the way a real API worker does: with an error once its signal aborts.
           const aborted = new Promise<never>((_resolve, reject) => {
@@ -2082,6 +2086,95 @@ describe('orchestration daemon', () => {
       const run = await startCompilation(client, compilation.compilationId)
       const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
       const events = (await client.readEvents({ runId: run.runId, limit: 400 })).events
+      expect(events.filter(event => event.type === 'rlm.execution.settled').map(event => event.data.stopReason)).toEqual([stopReason])
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(settled.state).toBe('failed')
+    })
+
+    const goalRequests = (f: Awaited<ReturnType<typeof deliveredRun>>) => f.worker.requests
+      .filter(request => request.commandId.includes(':goal-continuation:'))
+
+    it.each(stopReasons)('does not let an active goal start another turn after a message continuation ended with %s', async (stopReason) => {
+      const f = await deliveredRun({ output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason }, false, false, true)
+      expect(goalRequests(f)).toEqual([])
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual([stopReason])
+      const [continuation] = await f.events('rlm.message.continuation.failed')
+      expect(JSON.stringify(f.daemon.store.readArtifact(OrchestrationArtifactRef(String(continuation?.data.artifactRef)))))
+        .toContain(`partial ${stopReason}`)
+      expect(f.settled.nodes[0]?.state).toBe('failed')
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('does not let an active goal start another turn after a message continuation that threw', async () => {
+      const f = await deliveredRun(new Error('worker down'), false, false, true)
+      expect(goalRequests(f)).toEqual([])
+      expect((await f.events('rlm.execution.settled')).map(event => event.data.stopReason)).toEqual(['error'])
+      expect(f.settled.state).toBe('failed')
+    })
+
+    it('still continues an active goal after a message continuation that succeeded', async () => {
+      const f = await deliveredRun({ output: [{ type: 'text', text: 'delivered' }], stopReason: 'completed' }, false, false, true)
+      expect(goalRequests(f)).toHaveLength(1)
+      expect(f.settled.state).toBe('completed')
+      expect(f.settled.nodes[0]?.state).toBe('passed')
+    })
+
+    it.each(['max-tokens', 'refusal'] as const)('does not let Autonomous Mode continue a root that stopped with %s', async (stopReason) => {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-autonomous-stop-'))
+      const resident = new FakeResidentClient()
+      resident.available = false
+      const worker = new KeylessModelWorker()
+      // Only the root stops early; a later Autonomous turn would succeed and satisfy the end condition.
+      worker.resultFor = request => request.commandId.endsWith(':rlm:root')
+        ? { output: [{ type: 'text', text: `partial ${stopReason}` }], stopReason }
+        : undefined
+      const daemon = new OrchestrationDaemon({
+        root: join(home, 'orchestrations'),
+        dshHome: home,
+        residentClient: resident as unknown as ResidentDaemonClient,
+        modelWorkerProviders: [worker],
+        schedulerIntervalMs: 10,
+        autonomousEndConditionEvaluators: { quality: () => 'pass' as const },
+      })
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root: join(home, 'orchestrations'), dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Autonomous work whose root stops early.' },
+        admission: {
+          policy: 'codex', route: 'taskgraph', sourceSessionId: 'autonomous-stop-fixture', rlm: 'enabled',
+          continualHarness: 'off', optimization: 'balanced',
+        },
+        graph: {
+          ...fixture,
+          nodes: [{
+            ...baseNode,
+            role: 'recursive synthesis',
+            writeScopes: [],
+            rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+            autonomous: {
+              mode: 'enabled',
+              maxContinuations: 2,
+              endCondition: {
+                version: 1,
+                operator: 'all',
+                checks: [
+                  { id: 'completed', kind: 'acceptance', ref: 'done' },
+                  { id: 'quality', kind: 'evaluator', ref: 'quality' },
+                ],
+              },
+            },
+          }],
+        },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      const events = (await client.readEvents({ runId: run.runId, limit: 400 })).events
+      expect(worker.requests.filter(request => request.commandId.includes(':autonomous-continuation:'))).toEqual([])
       expect(events.filter(event => event.type === 'rlm.execution.settled').map(event => event.data.stopReason)).toEqual([stopReason])
       expect(settled.nodes[0]?.state).toBe('failed')
       expect(settled.state).toBe('failed')
