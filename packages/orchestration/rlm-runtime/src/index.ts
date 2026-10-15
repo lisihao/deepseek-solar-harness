@@ -222,6 +222,12 @@ export interface RlmRuntimeHostBindings {
     readonly commandId: RlmCommandId
     readonly instruction: string
     readonly source: 'goal' | 'heartbeat' | 'message' | 'autonomous'
+    /**
+     * Who sent a `message` continuation, set by the runtime from its own record of the message: `controller` for input accepted
+     * through an attached control lease, `agent` for a message from another session. Absent for every other source. The text of
+     * a message never decides it.
+     */
+    readonly messageOrigin?: 'controller' | 'agent'
     readonly deliveryMode: 'steer' | 'follow_up'
     readonly model: RlmModelSelectionV1
     /** Optional for legacy host continuations; LocalRlmRuntime supplies the sealed value. */

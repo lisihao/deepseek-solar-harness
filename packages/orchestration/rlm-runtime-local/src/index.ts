@@ -1980,6 +1980,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
               : [`Artifact references: ${message.artifactRefs.join(', ')}`],
           ].join('\n'),
           source: 'message',
+          messageOrigin: message.source === 'control' ? 'controller' : 'agent',
           deliveryMode: message.effectiveMode,
           model: session.snapshot.model,
           executionOptions: session.snapshot.executionOptions ?? { version: 1 },

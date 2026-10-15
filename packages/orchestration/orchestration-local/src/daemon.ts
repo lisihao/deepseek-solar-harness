@@ -3959,6 +3959,7 @@ export class OrchestrationDaemon {
       ? rlmMessageContinuationFacts(
         await this.ctx.rlmRuntime.inspect(request.sessionId),
         await this.ctx.rlmRuntime.familyRoster(request.sessionId),
+        request.messageOrigin === 'controller' ? 'controller' : 'agent',
       )
       : undefined
     const prompt: ContentBlock[] = [{ type: 'text', text: rlmContinuationPrompt(request, inspection) }]

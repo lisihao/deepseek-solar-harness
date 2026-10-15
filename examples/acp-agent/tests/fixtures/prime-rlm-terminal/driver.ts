@@ -54,9 +54,16 @@ const ROOT_TASK = 'Run scenario context-prompts. Final rule: reply with only {"v
 const ALPHA_TASK = 'Alpha task: report the alpha figure to your parent.'
 const BETA_TASK = 'Beta task: report the beta figure to your parent.'
 
-/** What the `context-prompts` scenario captured from the requests the daemon's model worker sent. */
-const captured: { rootContinuation?: string; childContinuation?: string; rootContinuations: number } = { rootContinuations: 0 }
+/** The prompts the `context-prompts` scenario captured from the requests the daemon's model worker sent, by who received them. */
+const captured: { rootContinuations: string[]; childContinuations: string[] } = { rootContinuations: [], childContinuations: [] }
 const betaMayReport = Promise.withResolvers<undefined>()
+
+// The bodies of the messages the scenario sends. They route the replies and tell who a continuation was for: a message to the
+// root carries a child's figure, and the only message to a child carries the root's follow-up. The routing never reads the part
+// of the prompt that is under test (the task, the names, and the roster).
+const ALPHA_FIGURE = 'alpha figure is 1'
+const BETA_FIGURE = 'beta figure is 2'
+const FOLLOW_UP = 'check the figure again'
 
 /** The task text a request carries: the daemon wraps every API prompt in a JSON envelope, and the model reads its `task`. */
 function taskText(message: FakeMessage): string {
@@ -66,16 +73,25 @@ function taskText(message: FakeMessage): string {
 }
 
 /**
- * Session ids differ in every run, and whether a session's cell has returned when it is told of a message depends on timing: the
- * message is delivered while the cell that sent it is still returning. Only those two things are replaced.
+ * Session ids differ in every run, and whether the cell that sent a message has returned when its receiver is told of it depends
+ * on timing. So the session ids are replaced, and so is the state of exactly the agent that sent the message the prompt is for;
+ * every other state in the roster is steady and stays.
+ * @param prompt - the prompt as the worker received it.
+ * @param sender - the roster entry of the agent whose message woke the session, as the roster prints it.
  */
-function normalized(prompt: string): string {
+function normalized(prompt: string, sender: string): string {
   return prompt
     .replaceAll(/rlm-session-[0-9a-f-]{36}|rlm:orch:run-[0-9a-f-]{36}:rlm:1/gu, '<session id>')
-    .replaceAll(/^- (child "alpha"|parent "root"): (running|idle)$/gmu, '- $1: <running or idle>')
+    .replace(new RegExp(`^- ${sender}: (running|idle)$`, 'mu'), `- ${sender}: <running or idle>`)
 }
 
-/** Answers the requests of the `context-prompts` scenario from their content, and keeps the two prompts it reports. */
+/** The body of the message a continuation was woken by: what follows its sender line, up to the statement of the facts. */
+function messageBody(prompt: string): string {
+  const start = prompt.indexOf('\n', prompt.indexOf('Agent message from')) + 1
+  return prompt.slice(start, prompt.indexOf('\nUse typescript_repl for any state')).trim()
+}
+
+/** Answers the requests of the `context-prompts` scenario from their content, and keeps the prompts it reports. */
 async function contextReply(messages: readonly FakeMessage[]): Promise<FakeReply> {
   const first = messages[0]
   if (first === undefined) throw new Error('fake DeepSeek received a request without messages')
@@ -84,32 +100,32 @@ async function contextReply(messages: readonly FakeMessage[]): Promise<FakeReply
   const repl = (code: string): FakeReply => ({ kind: 'tool', name: 'typescript_repl', arguments: JSON.stringify({ code }) })
   const answer = (output: string): FakeReply => ({ kind: 'text', text: output, finish: 'stop' })
   if (text.includes('Agent message from')) {
-    if (text.includes(ALPHA_TASK)) {
+    // A continuation. The follow-up goes to alpha; each child's figure goes to the root.
+    if (messageBody(text) === FOLLOW_UP) {
       counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
-      captured.childContinuation = normalized(text)
+      captured.childContinuations.push(normalized(text, 'parent "root"'))
       return answer('child continuation output')
     }
     if (!afterTool) {
-      captured.rootContinuations += 1
       counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
-      if (captured.rootContinuations === 1) captured.rootContinuation = normalized(text)
+      captured.rootContinuations.push(normalized(text, captured.rootContinuations.length === 0 ? 'child "alpha"' : 'child "beta"'))
+      if (captured.rootContinuations.length === 1) betaMayReport.resolve(undefined)
     }
-    if (captured.rootContinuations === 1) {
-      betaMayReport.resolve(undefined)
-      return answer('first continuation output')
-    }
+    if (captured.rootContinuations.length === 1) return answer('first continuation output')
     return afterTool
       ? answer('last continuation output')
-      : repl('await agentMessage.send("check the figure again", { receiverRole: "child", receiverName: "alpha", mode: "follow_up" }); "asked"')
+      : repl(`await agentMessage.send(${JSON.stringify(FOLLOW_UP)}, { receiverRole: "child", receiverName: "alpha", mode: "follow_up" }); "asked"`)
   }
   if (afterTool) return answer('done')
   if (text.includes(ROOT_TASK)) {
     counts.set('root', (counts.get('root') ?? 0) + 1)
     return repl(`const handles = [await rlm(${JSON.stringify(ALPHA_TASK)}, { name: "alpha" }), await rlm(${JSON.stringify(BETA_TASK)}, { name: "beta" })]; "spawned"`)
   }
+  // The first turn of a child: what it was spawned to do is its task.
   counts.set('child', (counts.get('child') ?? 0) + 1)
-  if (text.includes(BETA_TASK)) await betaMayReport.promise
-  return repl('await agentMessage.send("a figure", { receiverRole: "parent", mode: "auto" }); "sent"')
+  const isBeta = text.includes(BETA_TASK)
+  if (isBeta) await betaMayReport.promise
+  return repl(`await agentMessage.send(${JSON.stringify(isBeta ? BETA_FIGURE : ALPHA_FIGURE)}, { receiverRole: "parent", mode: "auto" }); "sent"`)
 }
 
 // Timer budget, with every limit used: the body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + three
@@ -400,8 +416,8 @@ async function run(scenario: Scenario) {
     ...scenario.context === true
       ? {
         outputs: events.filter(event => event.type === 'node.evidence.accepted').map(event => event.data.outputPreview),
-        firstRootContinuationPrompt: captured.rootContinuation,
-        childContinuationPrompt: captured.childContinuation,
+        rootContinuationPrompts: captured.rootContinuations,
+        childContinuationPrompts: captured.childContinuations,
       }
       : {},
   }

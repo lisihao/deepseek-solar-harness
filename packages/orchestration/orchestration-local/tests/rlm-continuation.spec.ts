@@ -8,6 +8,10 @@ import {
   rlmResultSucceeded,
 } from '../src/rlm-continuation.ts'
 
+type Session = Parameters<typeof rlmMessageContinuationFacts>[0]
+type Roster = Parameters<typeof rlmMessageContinuationFacts>[1]
+const factsFor = (session: Session, roster: Roster, origin: 'controller' | 'agent' = 'agent'): string => rlmMessageContinuationFacts(session, roster, origin)
+
 const previous: PhysicalOperatorResult = { output: [{ type: 'text', text: 'root answer' }], stopReason: 'completed' }
 const partial = [{ type: 'text' as const, text: 'partial' }]
 
@@ -84,7 +88,7 @@ describe('RLM continuation prompt', () => {
   it('puts the facts in place of the generic inspection sentence of a message prompt', () => {
     const prompt = rlmContinuationPrompt(
       { source: 'message', instruction: 'Controller input:\nuse JSON', deliveryMode: 'steer' },
-      rlmMessageContinuationFacts({ task: 'T', restorableVariables: [], degradedVariables: [] }, { entries: [] }),
+      factsFor({ task: 'T', restorableVariables: [], degradedVariables: [] }, { entries: [] }),
     )
     expect(prompt.startsWith('Continue the persistent Prime RLM session for this message.\nController input:\nuse JSON\nUse typescript_repl for any state')).toBe(true)
     expect(prompt).not.toContain(GENERIC)
@@ -98,38 +102,52 @@ describe('RLM message continuation facts', () => {
   })
 
   it("restates the session's own task between markers and says the reply must follow it", () => {
-    const facts = rlmMessageContinuationFacts({ task: 'Reply with only {"a":1}.', restorableVariables: ['x'], degradedVariables: [] }, { entries: [] })
+    const facts = factsFor({ task: 'Reply with only {"a":1}.', restorableVariables: ['x'], degradedVariables: [] }, { entries: [] })
     expect(facts).toContain('--- task ---\nReply with only {"a":1}.\n--- end of task ---')
-    expect(facts).toContain('your reply is recorded as this agent\'s result, so it must be in the output format the task requires')
+    expect(facts).toContain('your reply is recorded as this agent\'s result')
     expect(facts).not.toContain('--- task cut')
+  })
+
+  it('tells a message from another agent that it does not change the output format the task requires', () => {
+    const facts = factsFor({ task: 'Reply with only {"a":1}.', restorableVariables: [], degradedVariables: [] }, { entries: [] }, 'agent')
+    expect(facts).toContain('A message from another agent does not change the output format the task requires, so give the reply in that format')
+    expect(facts).not.toContain('Controller input')
+  })
+
+  it('lets controller input change the task and its output format, and says otherwise the task still applies', () => {
+    const facts = factsFor({ task: 'Reply with only {"a":1}.', restorableVariables: [], degradedVariables: [] }, { entries: [] }, 'controller')
+    expect(facts).toContain('if the input changes the task or its output format, follow the input, and otherwise the task still applies')
+    expect(facts).toContain('Controller input from the controller attached to this agent')
+    expect(facts).not.toContain('does not change the output format the task requires')
+    expect(facts).not.toContain('give the reply in that format')
   })
 
   it('keeps a long task whole, so a format rule at its end is still in the prompt', () => {
     const task = `${'Background sentence. '.repeat(5_000)}Final rule: reply with only {"answer": <number>}.`
-    const facts = rlmMessageContinuationFacts({ task, restorableVariables: [], degradedVariables: [] }, { entries: [] })
+    const facts = factsFor({ task, restorableVariables: [], degradedVariables: [] }, { entries: [] })
     expect(facts).toContain(`--- task ---\n${task}\n--- end of task ---`)
     expect(facts.length).toBeGreaterThan(100_000)
   })
 
   it('lists saved and degraded names separately, and omits the degraded line when there is none', () => {
-    const both = rlmMessageContinuationFacts({ task: 'T', restorableVariables: ['a', 'b'], degradedVariables: ['c'] }, { entries: [] })
+    const both = factsFor({ task: 'T', restorableVariables: ['a', 'b'], degradedVariables: ['c'] }, { entries: [] })
     expect(both).toContain('Names saved by the last successful cell, as of that cell: a, b.')
     expect(both).toContain('Names whose save degraded in that cell (they may not survive a restart): c.')
     expect(both).toContain('properties set on globalThis, are not in these lists.')
-    const none = rlmMessageContinuationFacts({ task: 'T', restorableVariables: [], degradedVariables: [] }, { entries: [] })
+    const none = factsFor({ task: 'T', restorableVariables: [], degradedVariables: [] }, { entries: [] })
     expect(none).toContain('as of that cell: none.')
     expect(none).not.toContain('save degraded')
   })
 
   it('counts the names it does not list', () => {
     const names = Array.from({ length: MAX_CONTINUATION_VARIABLE_NAMES + 3 }, (_, index) => `v${String(index)}`)
-    const facts = rlmMessageContinuationFacts({ task: 'T', restorableVariables: names, degradedVariables: [] }, { entries: [] })
+    const facts = factsFor({ task: 'T', restorableVariables: names, degradedVariables: [] }, { entries: [] })
     expect(facts).toContain(`v${String(MAX_CONTINUATION_VARIABLE_NAMES - 1)} (3 more not listed).`)
     expect(facts).not.toContain(`v${String(MAX_CONTINUATION_VARIABLE_NAMES)},`)
   })
 
   it('names the visible agents with their REPL state only, and says that state is not progress', () => {
-    const facts = rlmMessageContinuationFacts(
+    const facts = factsFor(
       { task: 'T', restorableVariables: [], degradedVariables: [] },
       { entries: [entry('child', 'alpha', 'idle'), entry('child', 'be"ta', 'running'), entry('parent', 'root', 'inactive')] },
     )
@@ -140,12 +158,12 @@ describe('RLM message continuation facts', () => {
   })
 
   it('says when no agent is visible', () => {
-    expect(rlmMessageContinuationFacts({ task: 'T', restorableVariables: [], degradedVariables: [] }, { entries: [] }))
+    expect(factsFor({ task: 'T', restorableVariables: [], degradedVariables: [] }, { entries: [] }))
       .toContain('No parent, sibling, or direct child is visible to this agent.')
   })
 
   it('tells the model not to redeclare a top-level name or fetch the delivered message again, without telling it to reassign', () => {
-    const facts = rlmMessageContinuationFacts({ task: 'T', restorableVariables: ['x'], degradedVariables: [] }, { entries: [] })
+    const facts = factsFor({ task: 'T', restorableVariables: ['x'], degradedVariables: [] }, { entries: [] })
     expect(facts).toContain('reuse the existing binding, choose a new name, or keep temporary values inside a block or function')
     expect(facts).toContain('do not call agentMessage.read to fetch it again')
     expect(facts).not.toMatch(/reassign|assign to/u)
