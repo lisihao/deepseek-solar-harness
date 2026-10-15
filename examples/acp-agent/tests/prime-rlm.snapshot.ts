@@ -1,7 +1,8 @@
 /** Keyless snapshot of the runnable Prime/RLM Loader example. */
 
+import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 import { runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
@@ -55,13 +56,23 @@ it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overw
   expect(stdout).toBe(await readFile(expected, 'utf8'))
 })
 
+const execFileAsync = promisify(execFile)
+
+/** Processes whose command line names this run's unique temporary directory, as `pid command` lines. */
+async function processesIn(directory: string): Promise<string[]> {
+  const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,command='], { timeout: 5_000 })
+  return stdout.split('\n').filter(line => line.includes(directory))
+}
+
 /**
  * Run the terminal driver with one injected fault and require what the driver promises on failure: a non-zero exit, no
- * transcript, a named reason, every cleanup step attempted, and no daemon of its own left running.
+ * transcript, a named reason, every cleanup step reported, and no process of the run left behind. Leftovers are found by the
+ * run's unique temporary directory in the command line, not by pid files, and are looked for over four seconds because a
+ * daemon whose start was abandoned writes its pid file only after the driver has exited. Any leftover is stopped here.
  */
 async function terminalFault(fault: string, reason: RegExp, cleanup: readonly string[]): Promise<void> {
   const driver = fileURLToPath(new URL('./fixtures/prime-rlm-terminal/driver.ts', import.meta.url))
-  let leftover: string[] = []
+  const leftover: string[] = []
   const { stdout, stderr } = await runLoaderSmoke({
     label: `prime-rlm-terminal keyless example with fault ${fault}`,
     tempDirPrefix: 'dsh-prime-rlm-terminal-fault-',
@@ -74,15 +85,13 @@ async function terminalFault(fault: string, reason: RegExp, cleanup: readonly st
     // The faults end the driver in well under this; an unbounded wait would hit it instead of passing.
     processTimeoutMs: 40_000,
     inspect: async (cwd) => {
-      for (const pidFile of [join(cwd, '.dsh', 'orchestrations', 'daemon.pid'), join(cwd, '.dsh', 'resident-operators', 'daemon.pid')]) {
-        const pid = Number(await readFile(pidFile, 'utf8').catch(() => '0'))
-        if (pid <= 0) continue
-        try {
-          process.kill(pid, 0)
-          leftover.push(`${pidFile}: ${String(pid)} still running`)
-        } catch {
-          // Signal 0 fails with ESRCH once the process is gone, which is what the driver must have caused.
+      for (let second = 0; second < 5; second += 1) {
+        for (const line of await processesIn(cwd)) {
+          if (!leftover.includes(line)) leftover.push(line)
+          const pid = Number(line.trim().split(/\s+/u)[0])
+          if (Number.isSafeInteger(pid) && pid > 0) process.kill(pid, 'SIGTERM')
         }
+        if (second < 4) await new Promise(resolve => setTimeout(resolve, 1_000))
       }
     },
   })
@@ -90,7 +99,6 @@ async function terminalFault(fault: string, reason: RegExp, cleanup: readonly st
   expect(stderr).toMatch(reason)
   for (const line of cleanup) expect(stderr).toContain(line)
   expect(leftover).toEqual([])
-  leftover = []
 }
 
 it('snapshot: prime-rlm-terminal bounds a client request that never returns and still stops its daemons (start)', async () => {
