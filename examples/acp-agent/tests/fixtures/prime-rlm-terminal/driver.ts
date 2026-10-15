@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { OrchestrationDaemon } from '@deepseek-ai/dsh-orchestration-local'
-import type { LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
+import type { LogicalTaskGraphV1, OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 
@@ -146,12 +146,14 @@ async function run(scenario: Scenario) {
   const requestIds = (): string => JSON.stringify(mine().map(request => request.commandId.replace(/^.*?:rlm:/u, 'rlm:')))
   // The scenario deadline starts before the run does, so a stage that never happens cannot outlast it.
   const scenarioLimit = Date.now() + SCENARIO_MS
-  let lastState = 'run not started'
+  const progress: { runId?: OrchestrationRunId } = {}
   const stage: Stage = async (name, ready, observed) => {
     const limit = Math.min(Date.now() + STAGE_MS, scenarioLimit)
     while (!await ready()) {
       if (Date.now() >= limit) {
-        throw new Error(`${scenario.name}: stage "${name}" did not happen in time; observed ${observed()}; run ${lastState}`)
+        const snapshot = progress.runId === undefined ? undefined : await orchestration.inspect(progress.runId)
+        const runState = snapshot === undefined ? 'not started' : `${snapshot.state}, node ${String(snapshot.nodes[0]?.state)}`
+        throw new Error(`${scenario.name}: stage "${name}" did not happen in time; worker requests ${observed()}; run ${runState}`)
       }
       await new Promise(resolve => setTimeout(resolve, 10))
     }
@@ -164,11 +166,11 @@ async function run(scenario: Scenario) {
     graph: graph(workspace, scenario.autonomous),
   })
   const started = await orchestration.start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId })
+  progress.runId = started.runId
   await scenario.trigger?.(stage, worker, gates)
   let state = await orchestration.inspect(started.runId)
   await stage('settle', async () => {
     state = await orchestration.inspect(started.runId)
-    lastState = JSON.stringify({ run: state.state, node: state.nodes[0]?.state, requests: requestIds() })
     return ['completed', 'failed'].includes(state.state)
   }, requestIds)
   const events = (await orchestration.readEvents({ runId: started.runId, limit: 400 })).events
