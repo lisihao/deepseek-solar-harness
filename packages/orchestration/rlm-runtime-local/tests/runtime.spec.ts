@@ -1813,6 +1813,18 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     })
   })
 
+  it('keeps a rejected interrupt and a pending result visible until the result settles', async () => {
+    const t = await tree('dsh-rlm-closed-rejected-interrupt-pending-', { held: ['a1'], failInterrupt: ['a1'] })
+    await expect(t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))).rejects.toThrow('a1 cannot be interrupted')
+    await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
+    const before = t.interrupted.filter(name => name === 'a1').length
+    await t.service.interrupt(t.sessionId)
+    expect(t.interrupted.filter(name => name === 'a1').length).toBe(before + 1)
+    t.results.get('a1')!.resolve({ status: 'settled' })
+    await expect(t.service.drain(t.sessionId, 500)).resolves.toMatchObject({ activeExecutions: 0 })
+    await t.ctx.root.fiber.dispose()
+  })
+
   it('does not report the root drained while an execution of a deleted descendant is still running', async () => {
     const t = await tree('dsh-rlm-closed-drain-', { held: ['a1'], stuck: ['a1'] })
     await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
