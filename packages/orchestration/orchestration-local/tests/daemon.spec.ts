@@ -459,7 +459,10 @@ interface HeldCall {
  * the test releases them, so the test can see which of them a cancellation reaches. The root spawns A and B through the
  * real REPL, waits until both calls are in flight, runs `afterSpawn`, and then waits for its own release.
  */
-async function heldRlmRun(afterSpawn?: (request: ModelWorkerExecuteRequest) => Promise<void>) {
+async function heldRlmRun(
+  afterSpawn?: (request: ModelWorkerExecuteRequest) => Promise<void>,
+  inChild?: (name: string, request: ModelWorkerExecuteRequest) => Promise<void>,
+) {
   const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-held-'))
   const root = join(home, 'orchestrations')
   const resident = new FakeResidentClient()
@@ -488,6 +491,7 @@ async function heldRlmRun(afterSpawn?: (request: ModelWorkerExecuteRequest) => P
     const held = call(nameOf(request))
     request.signal.addEventListener('abort', () => { held.aborts += 1 })
     held.started.resolve(undefined)
+    if (nameOf(request) !== 'root') await inChild?.(nameOf(request), request)
     if (nameOf(request) === 'root') {
       await callRlmTool(request, 'held-spawn', [
         'await rlm("child A", { name: "A" });',
@@ -2126,6 +2130,54 @@ describe('orchestration daemon', () => {
       expect(settled.nodes[0]?.state).toBe('passed')
       expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
       expect(f.worker.requests).toHaveLength(3)
+    })
+
+    it('does not start a worker call for a deleted child when a message was already queued for it', async () => {
+      const f = await heldRlmRun((request) => {
+        // The queued message waits behind A's open call; the root then deletes A. It does not await the cell, so a cell that
+        // cancels the root as well would show up in the assertions.
+        const cell = callRlmTool(request, 'held-queue-delete', [
+          'await agentMessage.send("queued for A", { receiverRole: "child", receiverName: "A", mode: "follow_up" });',
+          'const kids = await rlm.listSubagents();',
+          'await rlm.deleteSubagent(kids.find(kid => kid.name === "A"));',
+          '"deleted"',
+        ].join('\n'))
+        cell.catch(() => undefined)
+        return Promise.resolve()
+      })
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      // A's open call ends, which is the moment its queued message used to be delivered.
+      f.call('A').gate.resolve(undefined)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(f.worker.requests.map(request => request.commandId.endsWith(':deliver'))).not.toContain(true)
+      expect(f.worker.requests).toHaveLength(3)
+      f.call('B').gate.resolve(undefined)
+      f.call('root').gate.resolve(undefined)
+      const settled = await eventually(() => f.client.inspect(String(f.run.runId)), value => ['completed', 'failed'].includes(value.state))
+      expect(settled.state).toBe('completed')
+      expect([f.call('root').aborts, f.call('B').aborts]).toEqual([0, 0])
+    })
+
+    it('does not start a worker call for a deleted child when its heartbeat falls due', async () => {
+      const f = await heldRlmRun((request) => {
+        const cell = callRlmTool(request, 'held-delete-heartbeat', [
+          'const kids = await rlm.listSubagents();',
+          'await rlm.deleteSubagent(kids.find(kid => kid.name === "A"));',
+          '"deleted"',
+        ].join('\n'))
+        cell.catch(() => undefined)
+        return Promise.resolve()
+      }, async (name, request) => {
+        if (name === 'A') await callRlmTool(request, 'held-heartbeat', 'await rlm_heartbeat.create("check progress", { interval: "1s" }); "scheduled"')
+      })
+      await eventually(async () => f.call('A').aborts, value => value === 1)
+      f.call('A').gate.resolve(undefined)
+      // The heartbeat is due one second after it was created; the scheduler ticks every 10 ms.
+      await new Promise(resolve => setTimeout(resolve, 1_600))
+      expect(f.worker.requests).toHaveLength(3)
+      f.call('B').gate.resolve(undefined)
+      f.call('root').gate.resolve(undefined)
+      await eventually(() => f.client.inspect(String(f.run.runId)), value => ['completed', 'failed'].includes(value.state))
     })
 
     it('cancels only the interrupted child through the runtime service', async () => {
