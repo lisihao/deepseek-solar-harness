@@ -78,7 +78,10 @@ export interface EvaluationAttempt {
   readonly model: string
   readonly bodyBytes: number
   readonly bodySha256: string
-  /** Input tokens held for the request: the body's byte length, a bound. Zero for a refusal. */
+  /**
+   * Input tokens held for the request: the body's byte length. It is a reservation that is audited afterwards, not a proven
+   * bound on the provider's input tokens. Zero for a refusal.
+   */
   readonly reservedInput: number
   /** Output tokens held for the request: its `max_tokens`. Zero for a refusal. */
   readonly reservedOutput: number
@@ -314,21 +317,36 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+/** Steps of {@link takeEvaluationOwnerLock} at which a test can run the step of another process. */
+export interface OwnerLockInterleave {
+  /** Runs after a stale lock was read and before the takeover guard is taken. */
+  readonly afterStaleRead?: () => void
+  /** Runs after the stale lock was removed and before the new one is published. */
+  readonly afterStaleRemoved?: () => void
+}
+
 /**
- * Take the ledger's own exclusive owner lock. The lock file is published complete in one step (written to a temporary file and
- * hard-linked into place), so there is no moment at which it exists without naming its owner. A lock whose owner is alive, or
- * that cannot be read, is never taken over; one whose owner has exited is replaced only after the lock that was moved aside
- * proves to be the stale one that was read.
+ * Take the ledger's own exclusive owner lock. A lock file is published complete in one step (written to a temporary file and
+ * hard-linked into place; the link fails if the name exists), so there is no moment at which it exists without naming its owner,
+ * and of any number of publishers exactly one succeeds. A lock whose owner is alive, or that cannot be read, is never taken over.
+ *
+ * A lock whose owner has exited is replaced under a second exclusive file, the takeover guard, published the same way. Only the
+ * process that holds the guard may remove the stale lock, and it removes it only after reading it again under the guard and
+ * finding the same owner token. Nothing moves a lock by renaming a path that another process may have refilled: the guard keeps
+ * a second taker out, a fresh owner cannot publish while the stale file still exists, and if the guard holder is beaten to the
+ * new lock by a fresh publisher, its own publish fails and it stays out. A guard left behind by a process that died in the middle
+ * of a takeover is not taken over: the takeover fails closed until the guard file is removed by hand.
  * @param lockPath - the lock file next to the ledger.
- * @returns the owner token and the function that releases the lock if it is still ours.
+ * @param interleave - lets a test run another process's step at a named point; absent in production.
+ * @returns the function that releases the lock if it is still ours.
  */
-function takeOwnerLock(lockPath: string): { release(): void } {
+export function takeEvaluationOwnerLock(lockPath: string, interleave: OwnerLockInterleave = {}): { release(): void } {
   const token = randomUUID()
-  const publish = (): boolean => {
-    const temporary = `${lockPath}.${token}.tmp`
+  const publish = (target: string): boolean => {
+    const temporary = `${target}.${token}.tmp`
     writeDurably(temporary, `${JSON.stringify({ pid: process.pid, token })}\n`)
     try {
-      linkSync(temporary, lockPath)
+      linkSync(temporary, target)
       return true
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
@@ -341,40 +359,40 @@ function takeOwnerLock(lockPath: string): { release(): void } {
   const locked = (why: string): never => {
     throw new EvaluationLedgerError(`the ledger lock ${lockPath} is held (${why}); only one process may own a scope's ledger`, 'EVALUATION_LEDGER_LOCKED')
   }
-  if (!publish()) {
-    let held: { pid?: unknown; token?: unknown }
+  const read = (path: string): { pid?: unknown; token?: unknown } | undefined => {
     try {
-      held = JSON.parse(readFileSync(lockPath, 'utf8')) as { pid?: unknown; token?: unknown }
+      return JSON.parse(readFileSync(path, 'utf8')) as { pid?: unknown; token?: unknown }
     } catch {
-      return locked('its owner cannot be read')
+      return undefined
     }
-    if (typeof held.pid !== 'number' || typeof held.token !== 'string') return locked('its owner cannot be read')
+  }
+  const release = (path: string): void => {
+    try {
+      if (read(path)?.token === token) unlinkSync(path)
+    } catch (error) {
+      /* v8 ignore next -- only a file that is already gone is expected here; any other error is rethrown as it is. */
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  if (!publish(lockPath)) {
+    const held = read(lockPath)
+    if (typeof held?.pid !== 'number' || typeof held.token !== 'string') return locked('its owner cannot be read')
     if (processIsAlive(held.pid)) return locked(`owner pid ${String(held.pid)} is running`)
-    const aside = `${lockPath}.stale-${token}`
-    renameSync(lockPath, aside)
-    const moved = JSON.parse(readFileSync(aside, 'utf8')) as { token?: unknown }
-    /* v8 ignore start -- these outcomes need another process to take the lock between reading the stale lock and publishing a new
-       one; one test process cannot drive them. */
-    if (moved.token !== held.token) {
-      // What was moved is another owner's fresh lock, not the stale one that was read: put it back and stay out.
-      try { linkSync(aside, lockPath) } finally { unlinkSync(aside) }
-      return locked('its owner changed while it was being replaced')
+    interleave.afterStaleRead?.()
+    const guardPath = `${lockPath}.takeover`
+    if (!publish(guardPath)) return locked('another process is taking it over')
+    try {
+      // Under the guard no other taker can act. The lock must still be the stale one that was read; anything else is another
+      // owner's, and is left exactly as it is.
+      if (read(lockPath)?.token !== held.token) return locked('its owner changed while it was being replaced')
+      unlinkSync(lockPath)
+      interleave.afterStaleRemoved?.()
+      if (!publish(lockPath)) return locked('another process took it first')
+    } finally {
+      release(guardPath)
     }
-    unlinkSync(aside)
-    if (!publish()) return locked('another process took it first')
-    /* v8 ignore stop */
   }
-  return {
-    release: () => {
-      try {
-        const held = JSON.parse(readFileSync(lockPath, 'utf8')) as { token?: unknown }
-        if (held.token === token) unlinkSync(lockPath)
-      } catch (error) {
-        /* v8 ignore next -- only a lock that is already gone is expected here; any other error is rethrown as it is. */
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-    },
-  }
+  return { release: () => { release(lockPath) } }
 }
 
 /**
@@ -405,7 +423,7 @@ export class EvaluationLedger {
    */
   static open(path: string, scope: EvaluationScopeV1, scopeSha256: string): EvaluationLedger {
     mkdirSync(dirname(path), { recursive: true })
-    const lock = takeOwnerLock(`${path}.lock`)
+    const lock = takeEvaluationOwnerLock(`${path}.lock`)
     try {
       if (!existsSync(path)) {
         const fresh: EvaluationLedgerState = { version: 1, scopeId: scope.scopeId, scopeSha256, nextSeq: 1, attempts: [] }
@@ -420,6 +438,9 @@ export class EvaluationLedger {
       }
       const state = validateLedgerState(parsed, path, scope, scopeSha256)
       const ledger = new EvaluationLedger(path, scope, state, lock)
+      // The totals are counted before anything is rewritten: a ledger whose sums pass the largest exact integer is refused with
+      // its original bytes, whether its in-flight requests are reserved or unknown (both count at their reserved size).
+      ledger.totals()
       let changed = false
       for (const attempt of state.attempts) {
         if (attempt.state === 'reserved') {
@@ -428,7 +449,6 @@ export class EvaluationLedger {
         }
       }
       if (changed) ledger.persist()
-      ledger.totals()
       return ledger
     } catch (error) {
       lock.release()
@@ -585,7 +605,7 @@ export class EvaluationLedger {
     }
     attempt.usage = usage
     attempt.state = 'settled'
-    // Usage above the reservation is charged as it is, never cut, and ends admission: the bound or the cap did not hold.
+    // Usage above the reservation is charged as it is, never cut, and ends admission: the reservation or the cap did not hold.
     if (usage.input > attempt.reservedInput && this.state.boundViolation === undefined) {
       this.state.boundViolation = { attemptId, what: 'input' }
     }
@@ -596,6 +616,9 @@ export class EvaluationLedger {
   }
 
   private persist(): void {
+    // Defense in depth: every public path already checks `closed`, but a closed object must never write, because another process
+    // may own the file and this object's copy of it is stale.
+    if (this.closed) throw new EvaluationLedgerError('the ledger is closed and no longer owns its file', 'EVALUATION_LEDGER_LOCKED')
     writeDurably(this.path, `${JSON.stringify(this.state, null, 2)}\n`)
   }
 }

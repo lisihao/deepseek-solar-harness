@@ -69,9 +69,11 @@ it('snapshot: prime-rlm-evaluation admits every physical request of an RLM tree 
     libBinScript: driver,
     configPath: fileURLToPath(new URL('./fixtures/prime-rlm-evaluation/cordis.yml', import.meta.url)),
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
-    // The driver's waits sum to 3 + 12 + 12 + 15 s plus 5 s per request, and its cleanup to 3 + 8 + 8 + 2 s; a normal run takes
-    // about 8 s. The limit lets it fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it.
-    processTimeoutMs: 90_000,
+    // The driver's body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + run 15 s = 42 s, and its cleanup
+    // takes abandoned requests 5 s + dispose 3 s + two daemon stops of 8 s + fake close 2 s + late-sweep pause 0.7 s + two more
+    // stops of 8 s = 42.7 s; a normal run takes about 8 s. The limit leaves room for loading and scheduling, and lets the driver
+    // fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it.
+    processTimeoutMs: 100_000,
     // Set only to collect the driver's reconcilable files; the snapshot itself does not depend on it.
     env: evidenceDirectory === undefined ? {} : { DSH_EVALUATION_EVIDENCE_DIR: evidenceDirectory },
   })
@@ -94,16 +96,21 @@ async function processesIn(directory: string): Promise<string[]> {
  * daemon whose start was abandoned writes its pid file only after the driver has exited. Any leftover is stopped here.
  */
 async function terminalFault(fault: string, reason: RegExp, cleanup: readonly string[]): Promise<void> {
-  const driver = fileURLToPath(new URL('./fixtures/prime-rlm-terminal/driver.ts', import.meta.url))
+  await fixtureFault('prime-rlm-terminal', 'DSH_TERMINAL_FIXTURE_FAULT', fault, reason, cleanup)
+}
+
+/** The same check for any fixture whose driver reads an injected fault from an environment variable. */
+async function fixtureFault(fixture: string, variable: string, fault: string, reason: RegExp, cleanup: readonly string[]): Promise<void> {
+  const driver = fileURLToPath(new URL(`./fixtures/${fixture}/driver.ts`, import.meta.url))
   const leftover: string[] = []
   const { stdout, stderr } = await runLoaderSmoke({
-    label: `prime-rlm-terminal keyless example with fault ${fault}`,
-    tempDirPrefix: 'dsh-prime-rlm-terminal-fault-',
+    label: `${fixture} keyless example with fault ${fault}`,
+    tempDirPrefix: `dsh-${fixture}-fault-`,
     binScript: driver,
     libBinScript: driver,
-    configPath: fileURLToPath(new URL('./fixtures/prime-rlm-terminal/cordis.yml', import.meta.url)),
+    configPath: fileURLToPath(new URL(`./fixtures/${fixture}/cordis.yml`, import.meta.url)),
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
-    env: { DSH_TERMINAL_FIXTURE_FAULT: fault },
+    env: { [variable]: fault },
     expectedExitCode: 1,
     // The faults end the driver in about 30 s even under load (a hung request adds the 5 s wait for abandoned requests); an
     // unbounded wait would hit this limit instead of passing.
@@ -162,5 +169,14 @@ it('snapshot: prime-rlm-terminal reports a pid file it cannot read instead of tr
   await terminalFault('bad-pid-file', /cleanup stop orchestration daemon: FAILED EISDIR/u, [
     'cleanup stop Resident daemon: ok', 'cleanup close fake DeepSeek: ok',
     'cleanup stop orchestration daemon (late sweep): FAILED EISDIR',
+  ])
+})
+
+it('snapshot: prime-rlm-evaluation stops a daemon whose start was abandoned and finished starting afterwards', async () => {
+  await fixtureFault('prime-rlm-evaluation', 'DSH_EVALUATION_FIXTURE_FAULT', 'slow-start', /request list did not return within/u, [
+    // Whether the abandoned start settles within its 5 s depends on how fast the machine starts a daemon, so the line for that step
+    // is not required; what is required is that nothing of the run is left behind (checked by `fixtureFault`).
+    'cleanup dispose Loader context: ok', 'cleanup stop orchestration daemon: ok',
+    'cleanup stop Resident daemon: ok', 'cleanup close fake DeepSeek: ok',
   ])
 })

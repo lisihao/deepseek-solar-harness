@@ -185,7 +185,7 @@ export function httpErrorCode(status: number, error?: WireError['error']): strin
   return `HTTP_${status}`
 }
 
-/** Block types whose size the serialized request body bounds in tokens; anything else is refused under an admission. */
+/** Block types the request body carries as text; any other block type is reported to an admission as non-text content. */
 const TEXT_BLOCK_TYPES: ReadonlySet<string> = new Set(['text', 'reasoning', 'tool-call', 'tool-result'])
 
 /**
@@ -471,6 +471,9 @@ export class DeepSeekAdapter extends LlmAdapter {
         headers,
         body: payload,
         signal,
+        // One admission is one physical request. A 307 or 308 would make `fetch` send the POST again to another URL without a new
+        // admission, so a call that carries an admission fails on any redirect instead of following it. Other calls are unchanged.
+        ...options.admission === undefined ? {} : { redirect: 'error' as const },
       })
     } catch (error: unknown) {
       // The outer stream distinguishes caller cancellation and watchdog expiry.

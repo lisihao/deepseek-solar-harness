@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,7 @@ import {
   EvaluationLedgerError,
   evaluationUsageOf,
   parseEvaluationScope,
+  takeEvaluationOwnerLock,
   type EvaluationScopeV1,
 } from '../src/evaluation-ledger.ts'
 
@@ -365,6 +367,77 @@ describe('one owner at a time', () => {
   })
 })
 
+describe('taking over the lock of an owner that has exited', () => {
+  const lockPath = (): string => join(directory, 'ledger.json.lock')
+  const guardPath = (): string => `${lockPath()}.takeover`
+  const exitedPid = (): number => spawnSync(process.execPath, ['-e', ''], { encoding: 'utf8' }).pid
+  const writeLock = (pid: number, token: string): void => { writeFileSync(lockPath(), `${JSON.stringify({ pid, token })}\n`) }
+
+  it('leaves another owner’s fresh lock exactly as it is when that owner took over first', () => {
+    writeLock(exitedPid(), 'stale-owner')
+    const fresh = `${JSON.stringify({ pid: process.pid, token: 'fresh-owner' })}\n`
+    // Between this process reading the stale lock and taking the takeover guard, another process finished its own takeover.
+    expect(() => takeEvaluationOwnerLock(lockPath(), {
+      afterStaleRead: () => { writeFileSync(lockPath(), fresh) },
+    })).toThrow(/owner changed while it was being replaced/u)
+    expect(readFileSync(lockPath(), 'utf8')).toBe(fresh)
+    // The failed taker gave its guard back, so a later takeover is not blocked by it.
+    expect(existsSync(guardPath())).toBe(false)
+  })
+
+  it('stays out when another process holds the takeover guard, without touching the stale lock', () => {
+    writeLock(exitedPid(), 'stale-owner')
+    const before = readFileSync(lockPath(), 'utf8')
+    writeFileSync(guardPath(), `${JSON.stringify({ pid: process.pid, token: 'other-taker' })}\n`)
+    expect(() => takeEvaluationOwnerLock(lockPath())).toThrow(/another process is taking it over/u)
+    expect(readFileSync(lockPath(), 'utf8')).toBe(before)
+    expect(existsSync(guardPath())).toBe(true)
+  })
+
+  it('does not take a lock published by a fresh owner in the moment after the stale lock was removed', () => {
+    writeLock(exitedPid(), 'stale-owner')
+    const fresh = `${JSON.stringify({ pid: process.pid, token: 'fresh-owner' })}\n`
+    expect(() => takeEvaluationOwnerLock(lockPath(), {
+      afterStaleRemoved: () => { writeFileSync(lockPath(), fresh) },
+    })).toThrow(/another process took it first/u)
+    expect(readFileSync(lockPath(), 'utf8')).toBe(fresh)
+    expect(existsSync(guardPath())).toBe(false)
+  })
+
+  it('replaces a stale lock when nobody interferes, and gives the guard back', () => {
+    writeLock(exitedPid(), 'stale-owner')
+    const lock = takeEvaluationOwnerLock(lockPath())
+    expect(JSON.parse(readFileSync(lockPath(), 'utf8')) as { pid: number }).toMatchObject({ pid: process.pid })
+    expect(existsSync(guardPath())).toBe(false)
+    lock.release()
+    expect(existsSync(lockPath())).toBe(false)
+  })
+
+  it('lets at most one process own the lock at a time when many take over the same stale lock at once', async () => {
+    const contender = fileURLToPath(new URL('./fixtures/evaluation-lock-contender.ts', import.meta.url))
+    for (let round = 0; round < 4; round += 1) {
+      writeLock(exitedPid(), `stale-${String(round)}`)
+      const marker = join(directory, `critical-${String(round)}`)
+      const startAt = String(Date.now() + 1_500)
+      const outcomes = await Promise.all(Array.from({ length: 6 }, () => new Promise<string>((resolve, reject) => {
+        const child = spawn(process.execPath, ['--import', 'tsx/esm', contender, lockPath(), marker, startAt], { stdio: ['ignore', 'pipe', 'inherit'] })
+        let out = ''
+        child.stdout.on('data', (chunk: Buffer) => { out += chunk.toString('utf8') })
+        child.on('error', reject)
+        child.on('close', (code) => {
+          if (code === 0) resolve(out.trim())
+          else reject(new Error(`contender exited ${String(code)}`))
+        })
+      })))
+      expect(outcomes).not.toContain('overlap')
+      expect(outcomes.filter(value => value === 'won').length).toBeGreaterThanOrEqual(1)
+      expect(outcomes.every(value => value === 'won' || value === 'locked')).toBe(true)
+      expect(existsSync(lockPath())).toBe(false)
+      expect(existsSync(guardPath())).toBe(false)
+    }
+  }, 60_000)
+})
+
 describe('after close', () => {
   it('writes nothing, because the owner lock is gone and another process may own the file', () => {
     const ledger = open()
@@ -379,6 +452,29 @@ describe('after close', () => {
     expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).toBe(before)
     // The next owner finds both requests unknown and keeps them counted.
     expect(open().snapshot().state.attempts.map(attempt => attempt.state)).toEqual(['unknown', 'unknown'])
+  })
+})
+
+describe('an old ledger object after another process owns the file', () => {
+  it('cannot change the new owner’s ledger through an old ticket, an old admission, or a late receipt', () => {
+    const wide = { ...SCOPE, limits: { ...SCOPE.limits, concurrentRequests: 5 } }
+    const wideText = scopeText({ limits: wide.limits })
+    const old = open(wide, wideText)
+    const oldTicket = old.admission('old-a')(request({ bodyBytes: 100 }))
+    const oldOther = old.admission('old-b')(request({ bodyBytes: 100 }))
+    const lateAdmission = old.admission('old-late')
+    old.close()
+    const fresh = open(wide, wideText)
+    fresh.admission('new-a')(request({ bodyBytes: 100 }))
+    const after = readFileSync(join(directory, 'ledger.json'), 'utf8')
+    oldTicket.settle({ inputTokens: 7, outputTokens: 1 })
+    oldOther.abandon()
+    expect(refusal(() => lateAdmission(request()))).toContain('closed')
+    expect(() => { old.reconcile('scope-a-000001', { inputTokens: 7, outputTokens: 1 }) }).toThrow(/ledger is closed/u)
+    expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).toBe(after)
+    // The new owner's attempt is still there and its numbering was not reused.
+    expect(fresh.snapshot().state.attempts.map(attempt => attempt.label)).toEqual(['old-a', 'old-b', 'new-a'])
+    expect(fresh.snapshot().state.attempts.map(attempt => attempt.state)).toEqual(['unknown', 'unknown', 'reserved'])
   })
 })
 
@@ -454,6 +550,23 @@ describe('a ledger file that is not trustworthy', () => {
     state.nextSeq = 4
     writeFileSync(join(directory, 'ledger.json'), `${JSON.stringify(state)}\n`)
     expect(() => open()).toThrow(expect.objectContaining({ code: 'EVALUATION_COUNT_OVERFLOW' }) as Error)
+    expect(existsSync(join(directory, 'ledger.json.lock'))).toBe(false)
+  })
+
+  it('refuses a ledger with reserved requests whose totals pass the largest exact integer, and leaves its bytes exactly as they were', () => {
+    const state = valid()
+    const first = attemptsOf(state)[0]!
+    first.state = 'reserved'
+    delete first.usage
+    first.reservedInput = Number.MAX_SAFE_INTEGER
+    first.bodyBytes = Number.MAX_SAFE_INTEGER
+    const second = { ...first, id: 'scope-a-000003', seq: 3 }
+    state.attempts = [first, attemptsOf(state)[1], second]
+    state.nextSeq = 4
+    const text = `${JSON.stringify(state)}\n`
+    writeFileSync(join(directory, 'ledger.json'), text)
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'EVALUATION_COUNT_OVERFLOW' }) as Error)
+    expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).toBe(text)
     expect(existsSync(join(directory, 'ledger.json.lock'))).toBe(false)
   })
 

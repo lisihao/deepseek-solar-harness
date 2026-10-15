@@ -170,6 +170,33 @@ describe('request admission at the DeepSeek adapter', () => {
   })
 })
 
+describe('a redirect under an admission', () => {
+  it.each([307, 308])('is not followed on a %i: the POST is not sent again to the other endpoint, and the reservation stays held', async (status) => {
+    const target = await mockServer([{ kind: 'sse', events: textEvents }])
+    const origin = await mockServer([{
+      kind: 'http-error', status, body: '', headers: { location: `${target.url}/chat/completions` },
+    }])
+    const ctx = await harness(origin.url)
+    const { admission, trace } = admissionTrace()
+    const chunks = await drain(ctx, { admission, maxTokens: 50 })
+    expect(origin.requests).toHaveLength(1)
+    expect(target.requests).toHaveLength(0)
+    expect(trace.events).toEqual(['admit', 'abandon'])
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'TRANSPORT' } } })
+  })
+
+  it('is still followed by a call that carries no admission, as before', async () => {
+    const target = await mockServer([{ kind: 'sse', events: textEvents }])
+    const origin = await mockServer([{
+      kind: 'http-error', status: 307, body: '', headers: { location: `${target.url}/chat/completions` },
+    }])
+    const ctx = await harness(origin.url)
+    await drain(ctx, { maxTokens: 50 })
+    expect(origin.requests).toHaveLength(1)
+    expect(target.requests).toHaveLength(1)
+  })
+})
+
 describe('an adapter that cannot enforce admission', () => {
   class Unmetered extends LlmAdapter {
     called = 0

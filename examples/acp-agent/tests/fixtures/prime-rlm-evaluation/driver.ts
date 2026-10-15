@@ -11,7 +11,11 @@
  * only endpoint the daemon is given is the loopback server.
  *
  * Every wait is bounded here, and each cleanup step is attempted on its own: the daemons are detached, so a run that is
- * abandoned without cleanup would leave them running. Only daemons whose pid file names this home are stopped.
+ * abandoned without cleanup would leave them running. A request whose wait was abandoned keeps running inside the client and
+ * may still be starting a daemon, so the driver keeps those requests, refuses new ones once cleanup starts, waits a bounded time
+ * for them, stops the daemons it started, and looks once more after a short pause for one that finished starting late. Only
+ * daemons whose pid file names this home are stopped. `DSH_EVALUATION_FIXTURE_FAULT=slow-start` is read only by the fault test
+ * of this fixture: the first request reaches the client just before the stage limit, as a late daemon start would.
  */
 
 import { execFile } from 'node:child_process'
@@ -46,6 +50,10 @@ const DISPOSE_MS = 3_000
 const DAEMON_STOP_MS = 8_000
 const FAKE_CLOSE_MS = 2_000
 const PS_MS = 2_000
+const INFLIGHT_MS = 5_000
+const LATE_SWEEP_PAUSE_MS = 700
+
+const fault = process.env.DSH_EVALUATION_FIXTURE_FAULT
 
 /** A wait that ran out of time, as opposed to the awaited work failing. */
 class DeadlineError extends Error {}
@@ -158,7 +166,31 @@ interface Attempt {
 }
 
 type Booted = Awaited<ReturnType<typeof boot>>
-const owned: { fake?: Promise<FakeDeepSeek>; booted?: Promise<Booted> } = {}
+const owned: { fake?: Promise<FakeDeepSeek>; booted?: Promise<Booted>; service?: Booted['orchestrations'] } = {}
+
+// Requests whose wait was abandoned keep running inside the client; one of them may still be starting a daemon.
+const inflight = new Set<Promise<unknown>>()
+function track<T>(work: Promise<T>): Promise<T> {
+  inflight.add(work)
+  const forget = (): void => { inflight.delete(work) }
+  work.then(forget, forget)
+  return work
+}
+
+// Set when cleanup starts: abandoned code that wakes up later cannot start a new request, so nothing can begin after the
+// in-flight set was read.
+let closing = false
+
+function service(): Booted['orchestrations'] {
+  if (closing) throw new Error('the driver is cleaning up; no new request may start')
+  if (owned.service === undefined) throw new Error('the orchestration service is not booted')
+  return owned.service
+}
+
+/** One client request, bounded by `limitMs` (RPC_MS unless the caller says otherwise) and by the end of the caller's stage. */
+function rpc<T>(label: string, work: Promise<T>, until: number, limitMs = RPC_MS): Promise<T> {
+  return within(`request ${label}`, track(work), Math.min(limitMs, until - Date.now()))
+}
 const failures: string[] = []
 let bodyError: unknown
 let transcript: unknown
@@ -177,12 +209,19 @@ try {
   const fake = await within('fake DeepSeek start', owned.fake, FAKE_MS)
   process.env.DEEPSEEK_BASE_URL = fake.baseURL
   owned.booted = boot('prime-rlm-evaluation-keyless', resolveConfigPath(configPath, undefined))
-  const service = (await within('boot', owned.booted, BOOT_MS)).orchestrations
+  owned.service = (await within('boot', owned.booted, BOOT_MS)).orchestrations
 
   const until = Date.now() + DAEMON_MS
+  let slowStarted = false
   for (;;) {
     try {
-      await within('list', service.list(), RPC_MS)
+      // slow-start: the first request reaches the client just before the stage limit, as a late start would.
+      if (fault === 'slow-start' && !slowStarted) {
+        slowStarted = true
+        await new Promise(resolve => setTimeout(resolve, DAEMON_MS - 100))
+      }
+      // The first request starts the daemon, so it may take the whole stage; later requests are bounded by RPC_MS.
+      await rpc('list', service().list(), until, DAEMON_MS)
       break
     } catch (error) {
       if (error instanceof DeadlineError || Date.now() >= until) throw error
@@ -192,15 +231,18 @@ try {
 
   const workspace = join(isolatedHome, 'workspace')
   await mkdir(workspace, { recursive: true })
-  const compilation = await within('compile', service.compile({
+  const runUntil = Date.now() + RUN_MS
+  const compilation = await rpc('compile', service().compile({
     intent: { request: 'evaluation scope' },
     admission: { policy: 'codex', route: 'taskgraph', sourceSessionId: 'evaluation', rlm: 'enabled', continualHarness: 'off', optimization: 'balanced' },
     graph: graph(workspace),
-  }), RPC_MS)
-  const started = await within('start', service.start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId }), RPC_MS)
-  const limit = Date.now() + RUN_MS
+  }), runUntil)
+  const started = await rpc(
+    'start', service().start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId }), runUntil,
+  )
+  const limit = runUntil
   for (;;) {
-    const snapshot = await within('inspect', service.inspect(started.runId), RPC_MS)
+    const snapshot = await rpc('inspect', service().inspect(started.runId), runUntil)
     if (['completed', 'failed'].includes(snapshot.state)) break
     if (Date.now() >= limit) throw new Error(`the run did not settle within ${String(RUN_MS)} ms (state ${snapshot.state})`)
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -276,6 +318,7 @@ try {
 } catch (error) {
   bodyError = error
 } finally {
+  closing = true
   const step = async (name: string, work: () => Promise<unknown>, limitMs: number): Promise<void> => {
     try {
       await within(`cleanup ${name}`, work(), limitMs)
@@ -286,13 +329,21 @@ try {
       process.stderr.write(`${message}\n`)
     }
   }
+  // Abandoned requests may still be starting a daemon; give them a bounded chance to finish so its pid file exists.
+  await step('settle abandoned requests', async () => { await Promise.allSettled([...inflight]) }, INFLIGHT_MS)
   await step('dispose Loader context', async () => {
     const booted = owned.booted === undefined ? undefined : await owned.booted.then(context => context, () => undefined)
     await booted?.fiber.dispose()
   }, DISPOSE_MS)
-  await step('stop orchestration daemon', async () => { await stopOwnDaemon(join(isolatedHome, 'orchestrations', 'daemon.pid')) }, DAEMON_STOP_MS)
-  await step('stop Resident daemon', async () => { await stopOwnDaemon(join(isolatedHome, 'resident-operators', 'daemon.pid')) }, DAEMON_STOP_MS)
+  const stopBoth = async (suffix: string): Promise<void> => {
+    await step(`stop orchestration daemon${suffix}`, async () => { await stopOwnDaemon(join(isolatedHome, 'orchestrations', 'daemon.pid')) }, DAEMON_STOP_MS)
+    await step(`stop Resident daemon${suffix}`, async () => { await stopOwnDaemon(join(isolatedHome, 'resident-operators', 'daemon.pid')) }, DAEMON_STOP_MS)
+  }
+  await stopBoth('')
   await step('close fake DeepSeek', async () => { await (await owned.fake)?.close() }, FAKE_CLOSE_MS)
+  // The orchestration daemon may have started the Resident daemon just before it was stopped; look once more.
+  await new Promise(resolve => setTimeout(resolve, LATE_SWEEP_PAUSE_MS))
+  await stopBoth(' (late sweep)')
 }
 
 if (bodyError !== undefined || failures.length > 0 || transcript === undefined) {

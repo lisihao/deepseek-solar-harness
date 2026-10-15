@@ -364,7 +364,10 @@ export interface GenerateOptions {
 /** The facts of one serialized provider request, as an admission sees them. */
 export interface RequestAdmissionInput {
   readonly model: string
-  /** UTF-8 byte length of the serialized request body: the input bound a byte-level tokenizer cannot exceed. */
+  /**
+   * UTF-8 byte length of the serialized request body. An admission may reserve it as input; it is not proven to bound the
+   * provider's input tokens, so an admission that uses it must audit it against the usage the provider reports.
+   */
   readonly bodyBytes: number
   /** sha256 (hex) of the serialized request body, to join a received request to its admission. */
   readonly bodySha256: string
