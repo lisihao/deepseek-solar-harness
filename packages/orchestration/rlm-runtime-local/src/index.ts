@@ -862,6 +862,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const requestHash = sha256({ sessionId: request.sessionId, code, expectedStateRevision: request.expectedStateRevision })
     const duplicate = this.receipt<RlmCellResultV1>(String(request.commandId), requestHash)
     if (duplicate !== undefined) return duplicate
+    this.requireOpen(request.sessionId, 'run a cell')
     if (session.snapshot.lifecycle === 'running') throw new RlmRuntimeError('RLM session already has an active cell', 'RLM_SESSION_BUSY')
     this.acceptReceipt(String(request.commandId), requestHash, request.sessionId, 'cell.execute')
     this.updateSession(session, { lifecycle: 'running' })
@@ -878,7 +879,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       if (result.context !== undefined) session.context = result.context
       session.variables = result.variables
       this.updateSession(session, {
-        lifecycle: 'idle',
+        lifecycle: this.isClosed(request.sessionId) ? 'stopped' : 'idle',
         stateRevision: session.snapshot.stateRevision + 1,
         restorableVariables: result.variables
           .filter(value => value.error === undefined && (value.valueBase64 !== undefined || value.source !== undefined))
@@ -908,7 +909,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       this.kernels.get(String(request.sessionId))?.dispose()
       this.kernels.delete(String(request.sessionId))
       this.kernelCommands.delete(String(request.sessionId))
-      this.updateSession(session, { lifecycle: 'idle' })
+      this.updateSession(session, { lifecycle: this.isClosed(request.sessionId) ? 'stopped' : 'idle' })
       this.failReceipt(String(request.commandId), requestHash, normalized)
       this.appendEvent(request.sessionId, 'rlm.cell.failed', { commandId: String(request.commandId), error: normalized.message })
       this.persist()
@@ -998,6 +999,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   trackExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<() => void> {
     this.requireSession(sessionId)
+    if (this.isClosed(sessionId)) return this.refuseClosedExecution(sessionId, execution)
     const key = String(sessionId)
     if (this.activeExecutions.has(key)) throw new RlmRuntimeError(`RLM session already has an active native execution: ${key}`, 'RLM_SESSION_BUSY')
     this.activeExecutions.set(key, execution)
@@ -1023,6 +1025,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   async spawn(request: RlmChildSpawnRequest): Promise<RlmChildHandleV1> {
     const parent = this.requireSession(request.parentSessionId)
+    this.requireOpen(request.parentSessionId, 'spawn a child')
     const name = nonBlank(request.name, 'child name')
     const task = nonBlank(request.task, 'child task')
     const requestHash = sha256({ ...request, name, task })
@@ -1078,7 +1081,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         ...request, name, task, childId, childSessionId, depth, model, modelOrigin, executionOptions,
       })
       await this.trackExecution(childSessionId, execution)
-      this.replaceChild(parent.snapshot.sessionId, childId, {
+      this.replaceOpenChild(parent.snapshot.sessionId, childId, {
         lifecycle: 'running', nativeSessionId: execution.nativeSessionId, nativeTurnId: execution.nativeTurnId, updatedAt: now(),
       })
       this.runningReceipt(String(request.commandId))
@@ -1101,7 +1104,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       )
       return handle
     } catch (error) {
-      this.replaceChild(parent.snapshot.sessionId, childId, { lifecycle: 'failed', error: error instanceof Error ? error.message : String(error), updatedAt: now() })
+      this.replaceOpenChild(parent.snapshot.sessionId, childId, { lifecycle: 'failed', error: error instanceof Error ? error.message : String(error), updatedAt: now() })
       this.failReceipt(String(request.commandId), requestHash, error)
       this.appendEvent(parent.snapshot.sessionId, 'rlm.child.failed', { childId: String(childId), error: error instanceof Error ? error.message : String(error) }, childId)
       this.persist()
@@ -1125,18 +1128,28 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     if (child === undefined) throw new RlmRuntimeError(`RLM child not found: ${String(childId)}`, 'RLM_SESSION_NOT_FOUND')
     const requestHash = sha256({ parentSessionId, childId })
     if (this.receipt<true>(String(commandId), requestHash) !== undefined) return
-    // The child and everything it spawned stop together, as for `interrupt`; nothing above or beside it does.
-    const active = this.subtreeSessions(child.sessionId)
+    // Commit point: the subtree is closed and the command recorded before the first await, so no pump, heartbeat claim, or
+    // dispatch that finishes later can admit work for it. A repeated delete of a deleted child closes and interrupts again.
+    this.acceptReceipt(String(commandId), requestHash, parentSessionId, 'child.delete')
+    const subtree = this.treeSessions(child.sessionId)
+    if (child.lifecycle !== 'deleted') {
+      this.replaceChild(parentSessionId, childId, { lifecycle: 'deleted', updatedAt: now() })
+      this.appendEvent(parentSessionId, 'rlm.child.deleted', { childId: String(childId) }, childId)
+    }
+    for (const session of subtree) this.updateSession(session, { lifecycle: 'stopped' })
+    this.persist()
+    const interrupts = await Promise.allSettled(subtree
       .map(value => this.activeExecutions.get(String(value.snapshot.sessionId)))
       .filter((value): value is RlmChildExecution => value !== undefined)
-    // Every interrupt is attempted; a failed one leaves the child undeleted and its receipt open so the same command can retry.
-    const interrupts = await Promise.allSettled(active.map(value => value.interrupt()))
+      .map(value => value.interrupt()))
+    // Every interrupt was attempted. A failure keeps the subtree closed and is recorded on the command; whatever is still
+    // running stays visible to `drain`, and a new delete command interrupts it again.
     const failed = interrupts.find((value): value is PromiseRejectedResult => value.status === 'rejected')
-    if (failed !== undefined) throw failed.reason
-    this.replaceChild(parentSessionId, childId, { lifecycle: 'deleted', updatedAt: now() })
-    const childSession = this.requireSession(child.sessionId)
-    this.updateSession(childSession, { lifecycle: 'stopped' })
-    this.appendEvent(parentSessionId, 'rlm.child.deleted', { childId: String(childId) }, childId)
+    if (failed !== undefined) {
+      this.failReceipt(String(commandId), requestHash, failed.reason)
+      this.persist()
+      throw failed.reason
+    }
     this.settleReceipt(String(commandId), requestHash, true)
     this.persist()
   }
@@ -1144,6 +1157,8 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   async sendMessage(request: RlmMessageSendRequest): Promise<RlmMessageV1> {
     const from = this.requireSession(request.fromSessionId)
     const to = this.requireSession(request.toSessionId)
+    this.requireOpen(request.fromSessionId, 'send a message')
+    this.requireOpen(request.toSessionId, 'receive a message')
     if (from.snapshot.sessionId === to.snapshot.sessionId) throw new RlmRuntimeError('RLM messaging cannot target the sending session', 'RLM_FAMILY_VIOLATION')
     if (!this.family(from.snapshot, to.snapshot)) throw new RlmRuntimeError('RLM messages are limited to parent, sibling, or direct-child sessions', 'RLM_FAMILY_VIOLATION')
     const text = nonBlank(request.text, 'message text')
@@ -1213,10 +1228,12 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const deadline = Date.now() + maxWaitMs
     for (;;) {
       await this.pumpMessages()
-      const subtree = this.subtreeSessions(sessionId)
-      const ids = new Set(subtree.map(value => String(value.snapshot.sessionId)))
-      const activeExecutions = [...this.activeExecutions.keys()].filter(value => ids.has(value)).length
-      const queuedMessages = this.document.messages.filter(value => ids.has(String(value.toSessionId)) && value.deliveryStatus === 'queued').length
+      // A deleted session cannot start work again, but one that is still stopping is still running under this root.
+      const everyId = new Set(this.treeSessions(sessionId).map(value => String(value.snapshot.sessionId)))
+      const openIds = new Set(this.subtreeSessions(sessionId).filter(value => !this.isClosed(value.snapshot.sessionId))
+        .map(value => String(value.snapshot.sessionId)))
+      const activeExecutions = [...this.activeExecutions.keys()].filter(value => everyId.has(value)).length
+      const queuedMessages = this.document.messages.filter(value => openIds.has(String(value.toSessionId)) && value.deliveryStatus === 'queued').length
       if (activeExecutions === 0 && queuedMessages === 0) {
         const lastContinuation = this.lastContinuations.get(String(sessionId))
         return {
@@ -1428,6 +1445,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   async createHeartbeat(request: RlmHeartbeatCreateRequest): Promise<RlmHeartbeatV1> {
     this.requireSession(request.sessionId)
+    this.requireOpen(request.sessionId, 'schedule a heartbeat')
     const instruction = nonBlank(request.instruction, 'heartbeat instruction')
     const interval = parseInterval(request.interval)
     const requestHash = sha256({ ...request, instruction, interval })
@@ -1537,7 +1555,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         || current.inFlightCommandId !== undefined
         || current.nextRunAt === undefined
         || Date.parse(current.nextRunAt) > dueAt) continue
-      if (!this.bindings.has(String(current.sessionId))) continue
+      if (!this.bindings.has(String(current.sessionId)) || this.isClosed(current.sessionId)) continue
       if (this.activeExecutions.has(String(current.sessionId))) continue
       const commandId = RlmCommandId(`${current.heartbeatId}:run:${String(current.runCount + 1)}`)
       const { nextRunAt: _nextRunAt, ...base } = current
@@ -1611,6 +1629,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
           model: session.snapshot.model,
           executionOptions: session.snapshot.executionOptions ?? { version: 1 },
         })
+        if (this.isClosed(claim.heartbeat.sessionId)) await this.refuseClosedExecution(claim.heartbeat.sessionId, execution)
         admitted += 1
         this.appendEvent(claim.heartbeat.sessionId, 'rlm.heartbeat.running', {
           heartbeatId: claim.heartbeat.heartbeatId, commandId: String(claim.commandId),
@@ -1650,7 +1669,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   async interrupt(sessionId: RlmRuntimeSessionId): Promise<void> {
     this.requireSession(sessionId)
-    const active = this.subtreeSessions(sessionId)
+    const active = this.treeSessions(sessionId)
       .map(value => this.activeExecutions.get(String(value.snapshot.sessionId)))
       .filter((value): value is RlmChildExecution => value !== undefined)
     await Promise.allSettled(active.map(value => value.interrupt()))
@@ -1937,7 +1956,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     this.activeMessagePumps.add(key)
     try {
       const session = this.requireSession(sessionId)
-      if (this.activeExecutions.has(key) || session.snapshot.lifecycle === 'running') return 0
+      if (this.isClosed(sessionId) || this.activeExecutions.has(key) || session.snapshot.lifecycle === 'running') return 0
       const bindings = this.bindings.get(key)
       if (bindings?.dispatchContinuation === undefined) return 0
       const message = this.document.messages
@@ -1966,6 +1985,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
           model: session.snapshot.model,
           executionOptions: session.snapshot.executionOptions ?? { version: 1 },
         })
+        if (this.isClosed(sessionId)) await this.refuseClosedExecution(sessionId, execution)
         const { deliveryError: _deliveryError, ...messageWithoutError } = message
         const delivered: RlmMessageV1 = {
           ...messageWithoutError, deliveryStatus: 'delivered', deliveredAt: now(),
@@ -2104,6 +2124,59 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     }
     visit(root)
     return result
+  }
+
+  /** Every session below `sessionId`, including children a delete already removed from the live tree. */
+  private treeSessions(sessionId: RlmRuntimeSessionId): StoredSession[] {
+    const result: StoredSession[] = []
+    const visit = (session: StoredSession): void => {
+      result.push(session)
+      for (const child of session.snapshot.children) visit(this.requireSession(child.sessionId))
+    }
+    visit(this.requireSession(sessionId))
+    return result
+  }
+
+  /**
+   * Whether a delete closed this session: the session is stopped, or an ancestor removed the chain that leads to it. The
+   * state is persisted, so it holds across a Provider restart, and only a delete sets it; an interrupt does not.
+   */
+  private isClosed(sessionId: RlmRuntimeSessionId): boolean {
+    for (let session = this.findSession(sessionId, false); session !== undefined;) {
+      if (session.snapshot.lifecycle === 'stopped') return true
+      const parentId = session.snapshot.parentSessionId
+      if (parentId === undefined) return false
+      const parent = this.requireSession(parentId)
+      if (parent.snapshot.children.find(value => value.sessionId === session?.snapshot.sessionId)?.lifecycle === 'deleted') return true
+      session = parent
+    }
+    return false
+  }
+
+  private requireOpen(sessionId: RlmRuntimeSessionId, action: string): void {
+    if (this.isClosed(sessionId)) throw new RlmRuntimeError(`RLM session was deleted and cannot ${action}: ${String(sessionId)}`, 'RLM_UNAVAILABLE')
+  }
+
+  /**
+   * Stop an execution whose dispatch finished after its session was deleted, and report the refusal. The execution is never
+   * registered, so nothing waits for it; a failed interrupt is named in the error because no later command can reach it.
+   */
+  private async refuseClosedExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<never> {
+    execution.result.catch(() => undefined)
+    const interruptFailure = await execution.interrupt().then(
+      () => '',
+      (error: unknown) => `; interrupting it also failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+    throw new RlmRuntimeError(
+      `RLM session was deleted before its execution was registered: ${String(sessionId)}${interruptFailure}`,
+      'RLM_UNAVAILABLE',
+    )
+  }
+
+  /** Apply a child state change unless a delete already removed the child. */
+  private replaceOpenChild(parentSessionId: RlmRuntimeSessionId, childId: RlmChildId, patch: Partial<RlmChildSnapshotV1>): void {
+    const current = this.requireSession(parentSessionId).snapshot.children.find(value => value.rlmChildId === childId)
+    if (current?.lifecycle !== 'deleted') this.replaceChild(parentSessionId, childId, patch)
   }
 
   private rootSession(sessionId: RlmRuntimeSessionId): StoredSession {
