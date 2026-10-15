@@ -18,7 +18,7 @@
 
 Provider 在 `state.json` 中保存版本 5 状态。构造时会迁移版本 1 至 4，并在注册 runtime owner 前原子重写该文件。迁移后的 Child 标记为 `modelOrigin: legacy`；缺少结果的已结算 Child Receipt 会变为 `indeterminate`，绝不会自动再次派发。替换旧 Provider 时保留私有的升级前状态副本：回退旧二进制时也必须恢复兼容的状态文件。
 
-`interrupt(sessionId)` 和 `deleteChild` 会停止该会话及其派生的每个会话当前活动的执行，不会停止其他会话；`deleteChild` 会尝试每一个中断，然后以第一个失败拒绝，同时保持该 child 未删除、回执仍未结算，因此同一个命令可以重试。删除之后到达的结果会被忽略。`drain` 返回最后一个 continuation 结果，带有它自己的 `status`、`stopReason` 和部分 `output`，不会把失败或不确定的 continuation 改写成成功。
+`interrupt(sessionId)` 请求该会话及其下方每个会话当前活动的执行停止，包括已删除 child 中仍在停止的执行，并在这些请求结算时返回，不是在执行停止时返回。它不关闭任何东西：之后的消息或到期的 heartbeat 仍会准入新的执行。`deleteChild` 是永久的。它在第一个 await 之前就关闭该 child 的子树并记录命令。已关闭的会话不再准入消息投递、到期 heartbeat、spawn、cell、heartbeat 创建，也不再收发消息；`trackExecution` 会中断随后才完成的 dispatch，而不是登记它。该状态已持久化，重启后仍然关闭。随后 `deleteChild` 中断该 child 下方每个活动的执行。如果某个中断被拒绝，命令以第一个拒绝失败：子树保持关闭，回执为 `failed`，相同命令 id 返回该失败，新的删除命令会再次中断。已完成的部分中断不会回滚，运行时也不证明被中断的执行已经停止。`drain` 会统计已删除后代中仍在运行的执行，因此根不会在它们停止前被报告为已排空；排给已删除会话的消息不计入，也永远不会投递。删除之后到达的结果会被忽略。`drain` 返回最后一个 continuation 结果，带有它自己的 `status`、`stopReason` 和部分 `output`，不会把失败或不确定的 continuation 改写成成功。
 
 ## Model Experience
 
@@ -32,4 +32,5 @@ Provider 不直接组装模型上下文。Tool schema 和有界 Cell result 由 
 
 - **不是操作系统安全沙箱** — TypeScript namespace 具有 owner daemon 的操作系统权限；TaskGraph scope/effect 准入必须在派发前完成。
 - **源码恢复边界** — 声明源码恢复可保留直接 function/class/import 以及它们对其他已恢复顶层 binding 的引用；它重新创建声明代码，不会保留工厂 closure 捕获或已变更 class 静态字段等可变运行时状态。
+- **已删除会话中正在运行的 cell** — 删除不会中断子树里已经在运行的 cell；它的 spawn、发送和 heartbeat 调用会被拒绝，cell 在 `maxCellMs` 内结束。
 - **兼容子集** — 原生 Provider tool 与 Continuous Harness 持有剩余 Prime 端到端兼容项。

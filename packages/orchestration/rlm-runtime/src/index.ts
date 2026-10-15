@@ -744,7 +744,8 @@ export abstract class RlmRuntimeService extends Service {
    */
   abstract modelToolBridge(sessionId: RlmRuntimeSessionId): Promise<RlmModelToolBridgeV1>
   /**
-   * Register an admitted native execution so family messages queue behind it.
+   * Register an admitted native execution so family messages queue behind it. A session closed by a delete refuses the
+   * execution: it is interrupted, never registered, and the call rejects with `RLM_UNAVAILABLE`.
    * @param sessionId - owning session.
    * @param execution - accepted native execution.
    * @returns disposer for the tracking association.
@@ -770,11 +771,15 @@ export abstract class RlmRuntimeService extends Service {
    */
   abstract inspectChild(parentSessionId: RlmRuntimeSessionId, childId: RlmChildId): Promise<RlmChildSnapshotV1>
   /**
-   * Stop and remove one child from the active registry.
+   * Permanently delete one child and everything below it. Before the first await the subtree is closed and the command is
+   * recorded: no message delivery, heartbeat, spawn, cell, or send is admitted for it afterwards, a restart keeps it closed,
+   * and a dispatch that finishes later is interrupted instead of registered. Then every active execution in the subtree is
+   * interrupted. A rejected interrupt fails the command with the first error; the subtree stays closed, the same command id
+   * returns the stored failure, and a new delete command interrupts again.
    * @param parentSessionId - parent session identity.
    * @param childId - child identity.
-   * @param commandId - idempotent delete command.
-   * @returns after persistence.
+   * @param commandId - delete command; a repeated id returns the stored outcome.
+   * @returns after every interrupt request settled, which is not proof that the executions stopped.
    */
   abstract deleteChild(parentSessionId: RlmRuntimeSessionId, childId: RlmChildId, commandId: RlmCommandId): Promise<void>
   /**
@@ -802,7 +807,8 @@ export abstract class RlmRuntimeService extends Service {
    */
   abstract pumpMessages(sessionId?: RlmRuntimeSessionId): Promise<number>
   /**
-   * Wait for descendant work and messages to drain.
+   * Wait for descendant work and messages to drain. Executions of deleted descendants that are still stopping count as
+   * active; messages queued for a deleted session do not count.
    * @param sessionId - subtree root.
    * @param maxWaitMs - bounded wait.
    * @returns final activity counts.
@@ -893,9 +899,10 @@ export abstract class RlmRuntimeService extends Service {
    */
   abstract readEvents(request: RlmEventReadRequest): Promise<readonly RlmRuntimeEventV1[]>
   /**
-   * Interrupt active executions in one subtree.
+   * Interrupt active executions in one subtree, including those of deleted descendants that are still stopping. It does not
+   * close the subtree: a later message or heartbeat admits a new execution, unlike a delete.
    * @param sessionId - subtree root.
-   * @returns after interrupt requests settle.
+   * @returns after interrupt requests settle, which is not proof that the executions stopped.
    */
   abstract interrupt(sessionId: RlmRuntimeSessionId): Promise<void>
   /**
