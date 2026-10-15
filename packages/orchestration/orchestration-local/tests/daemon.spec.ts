@@ -2719,7 +2719,8 @@ describe('orchestration daemon', () => {
         settledAttempts: settled.length,
         reservedInputAtEnd: state.attempts.reduce((sum, attempt) => sum + (attempt.state === 'refused' ? 0 : attempt.usage?.input ?? attempt.reservedInput), 0),
         reservedOutputAtEnd: state.attempts.reduce((sum, attempt) => sum + (attempt.state === 'refused' ? 0 : attempt.usage?.output ?? attempt.reservedOutput), 0),
-        scopeLimits: SCOPE.limits,
+        // The scope file the daemon actually read for this test, not the default of the suite.
+        scope: JSON.parse(readFileSync(join(f.root, 'evaluation-scope.json'), 'utf8')) as unknown,
         note: 'Scoped to this test process: the only endpoint given to the daemon is the loopback server, and any fetch to another host throws.',
       }, null, 2)}\n`)
     }
