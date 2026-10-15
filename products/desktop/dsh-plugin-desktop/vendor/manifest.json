@@ -310,6 +310,11 @@
       "name": "ui-workspace sealed so ui-gouzi can keep kennel threads out of the workspace lists (ctx.sessionListFilters)",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "756c377a10"
+    },
+    {
+      "name": "RLM cancellation scope, permanent delete, and non-success terminal state (orchestration-local, rlm-runtime, rlm-runtime-local sealed together)",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "b9e45eaffbe2f173cef92d56b1ae704f28230818"
     }
   ],
   "sourcePackages": {
@@ -491,7 +496,7 @@
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "2abb1112a13d28db66203cbbaefc2d5c833937e392fa01b3088fe32f96d1b770",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "47cff98eb94dfcbc9273cee79a2d55b76ac782d6eef802e5cc03c145f30bd42b",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "ae7f77c743f1664388595ac06cf3c53d2ee17484d3791ae4ef79f32c411a0fba",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "d1b425bfd841763cd32ae8df04dd11c12d34dc0a0b79aa124fbba60ae95e0e5c",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "551d93408d72e3985544dbdaab2b57b2b734e6039f0cb170791e09ddd2a5baee",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "2ef397368e994f1f5fb22958ff64f110e696e77bcdd2702c3d2f58e13821f36b",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "ff739e592e964c0af34c4b13b9598d61aeba26090e6b41ccabaaee4296a0da2b",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "70c32494b88d6ad6cbc68dfca97cb9644f92bd69c66b3a1ec28a4ee5b8fff11d",
@@ -501,8 +506,8 @@
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "e9e32d36f3386e551b5f45f8ec6a67ef1a535b6b54e1dc0a971fc52ee2aafed0",
     "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "d7aba82d1c635e67bd3e3363aa3a030e82ab04e59b83e4e592bbff9adc596bb0",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "d474b00f2333f9397a37b22e14163ffbc60aa4e91626f82d222d66037ffa7236",
-    "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "79597afe17fe1c162da4f45dd0727c7bbe7143612ebd58ce6d5c0cfff578df2f",
-    "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "bb963af6972c50c774c6822d6e8be1c55fec233eeb7ea571c39ad7f760f7c3bf",
+    "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "45a865455ea72326256377bf9b03808b80fb90bbcabe125fcb3a2236633542b4",
+    "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "a49c3e39f0a7aef29c3b2f561424ccdc410ad4ded1fc84eb3d8288f8f619f5f5",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-0.1.0-rc.5.tgz": "517e1df4d11fc9ae7b5d55bd28819dc0b29509009abd75a5b67f12d2c359457f",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-local-0.1.0-rc.5.tgz": "a94aa3b9f07eeb2f24fbb3890c2381ee4ef443feded2889c1a1270c37bfbd4a1",
     "dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz": "21ca32d1e2d4f9418b65bf61070adad22f56ff852419fbe207d459d102e53e08",

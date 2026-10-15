@@ -2300,6 +2300,57 @@ describe('orchestration daemon', () => {
     })
   })
 
+  describe('a Resident child that finishes starting after the root deleted it', () => {
+    it('keeps the root from reporting its children finished while that child is still running', async () => {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-late-resident-'))
+      const root = join(home, 'orchestrations')
+      const fake = new FakeResidentClient()
+      const started = Promise.withResolvers<undefined>()
+      const startGate = Promise.withResolvers<undefined>()
+      fake.onExecute = async (request) => {
+        if (request.modelToolBridge === undefined) return
+        if (request.commandId.endsWith(':rlm:root')) {
+          // The spawn waits for the child's Resident start, which the test holds; the delete lands in that window.
+          await callRlmTool(request, 'late-spawn', 'await rlm("child A", { name: "A" }); "spawned"').catch(() => undefined)
+          fake.defer = false
+        } else {
+          started.resolve(undefined)
+          await startGate.promise
+          // The child's turn does not end until the test resolves it, like a native turn that has not stopped yet.
+          fake.defer = true
+        }
+      }
+      const daemon = createDaemon(root, home, fake, 10)
+      await daemon.start()
+      cleanup.push(async () => { fake.resolveAllDeferred(); await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Delete a child while it is starting.' },
+        graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Spawn one child.', timeoutMs: 1_500 }] },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      await started.promise
+      interface RuntimeEntry {
+        list(): Promise<readonly { sessionId: string; parentSessionId?: string }[]>
+        listChildren(sessionId: string): Promise<readonly { rlmChildId: string }[]>
+        deleteChild(parent: string, child: string, commandId: string): Promise<void>
+      }
+      const runtime = (daemon as unknown as { ctx: { rlmRuntime: RuntimeEntry } }).ctx.rlmRuntime
+      const rootSession = (await runtime.list()).find(value => value.parentSessionId === undefined)!.sessionId
+      const [child] = await runtime.listChildren(rootSession)
+      await runtime.deleteChild(rootSession, child!.rlmChildId, 'late-resident-delete')
+      startGate.resolve(undefined)
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      // The child's turn is still pending, so the node must not have passed.
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(settled.state).toBe('failed')
+    })
+  })
+
   it('compiles, seals, dispatches Resident nodes, records Evidence, and completes a graph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')

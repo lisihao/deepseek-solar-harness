@@ -10,8 +10,7 @@ import { mkdir } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
-import { OrchestrationDaemonClient } from '@deepseek-ai/dsh-orchestration-local'
-import { OrchestrationDaemon } from '@deepseek-ai/dsh-orchestration-local/src/daemon.ts'
+import { OrchestrationDaemon, OrchestrationDaemonClient } from '@deepseek-ai/dsh-orchestration-local'
 import type { LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
@@ -44,7 +43,11 @@ async function callTool(request: ModelWorkerExecuteRequest, commandId: string, c
 class KeylessWorker implements ModelWorkerProvider {
   readonly id = 'deepseek-keyless-fixture'
   readonly requests: ModelWorkerExecuteRequest[] = []
-  constructor(private readonly script: (request: ModelWorkerExecuteRequest) => Promise<ModelWorkerResult | undefined>) {}
+  readonly script: (request: ModelWorkerExecuteRequest) => Promise<ModelWorkerResult | undefined>
+
+  constructor(script: (request: ModelWorkerExecuteRequest) => Promise<ModelWorkerResult | undefined>) {
+    this.script = script
+  }
 
   offers() {
     const common = {

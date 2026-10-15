@@ -647,6 +647,9 @@ importers:
       '@deepseek-ai/dsh-sdk-jsonrpc-server':
         specifier: workspace:*
         version: link:../packages/sdk/server
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:*
+        version: link:../packages/sdk/protocol
       '@deepseek-ai/dsh-session':
         specifier: workspace:*
         version: link:../packages/core/session

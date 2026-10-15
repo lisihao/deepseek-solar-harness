@@ -745,7 +745,8 @@ export abstract class RlmRuntimeService extends Service {
   abstract modelToolBridge(sessionId: RlmRuntimeSessionId): Promise<RlmModelToolBridgeV1>
   /**
    * Register an admitted native execution so family messages queue behind it. A session closed by a delete refuses the
-   * execution: it is interrupted, never registered, and the call rejects with `RLM_UNAVAILABLE`.
+   * execution: it is interrupted and not registered to the session, the call rejects with `RLM_UNAVAILABLE`, and the execution stays
+   * counted by `drain` and reachable by `interrupt` and later delete commands until its result settles.
    * @param sessionId - owning session.
    * @param execution - accepted native execution.
    * @returns disposer for the tracking association.
@@ -773,7 +774,7 @@ export abstract class RlmRuntimeService extends Service {
   /**
    * Permanently delete one child and everything below it. Before the first await the subtree is closed and the command is
    * recorded: no message delivery, heartbeat, spawn, cell, or send is admitted for it afterwards, a restart keeps it closed,
-   * and a dispatch that finishes later is interrupted instead of registered. Then every active execution in the subtree is
+   * and a dispatch that finishes later is interrupted and kept counted until it ends. Then every active execution in the subtree is
    * interrupted. A rejected interrupt fails the command with the first error; the subtree stays closed, the same command id
    * returns the stored failure, and a new delete command interrupts again.
    * @param parentSessionId - parent session identity.
@@ -807,8 +808,9 @@ export abstract class RlmRuntimeService extends Service {
    */
   abstract pumpMessages(sessionId?: RlmRuntimeSessionId): Promise<number>
   /**
-   * Wait for descendant work and messages to drain. Executions of deleted descendants that are still stopping count as
-   * active; messages queued for a deleted session do not count.
+   * Wait for descendant work and messages to drain. Executions of deleted descendants that are still stopping, and
+   * executions refused after a delete that have not ended, count as active; messages queued for a deleted session do not
+   * count.
    * @param sessionId - subtree root.
    * @param maxWaitMs - bounded wait.
    * @returns final activity counts.

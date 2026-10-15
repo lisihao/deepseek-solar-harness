@@ -5,6 +5,8 @@
     "dispatch child a1",
     "-- delete a",
     "interrupt a1",
+    "dispatch child late",
+    "interrupt late",
     "dispatch continuation for b"
   ],
   "heartbeatsAdmitted": 0,
@@ -14,13 +16,20 @@
     "cellInDeleted": "RLM_UNAVAILABLE: RLM session was deleted and cannot run a cell: <session>",
     "drainWhileStopping": "RLM_SESSION_BUSY: RLM session did not become idle before the drain deadline (1 active, 0 queued)"
   },
+  "lateDispatch": {
+    "spawn": "RLM_UNAVAILABLE: RLM session was deleted before its execution was registered: <session>",
+    "drainWithLateAndStopping": "RLM_SESSION_BUSY: RLM session did not become idle before the drain deadline (2 active, 0 queued)",
+    "afterLateEnds": "RLM_SESSION_BUSY: RLM session did not become idle before the drain deadline (1 active, 0 queued)",
+    "afterAllEnd": "{\"activeExecutions\":0,\"queuedMessages\":0}"
+  },
   "children": {
     "root": [
       "a: deleted",
-      "b: settled"
+      "b: settled",
+      "late: deleted"
     ],
     "a": [
-      "a1: running"
+      "a1: settled"
     ]
   }
 }
