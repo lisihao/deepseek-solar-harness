@@ -1,0 +1,22 @@
+{
+  "goal": {
+    "run": "failed",
+    "node": "failed",
+    "stopReasons": [
+      "max-tokens"
+    ],
+    "continuations": [
+      "rlm.message.continuation.failed"
+    ],
+    "laterTurnsStarted": []
+  },
+  "autonomous": {
+    "run": "failed",
+    "node": "failed",
+    "stopReasons": [
+      "refusal"
+    ],
+    "continuations": [],
+    "laterTurnsStarted": []
+  }
+}

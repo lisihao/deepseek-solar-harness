@@ -1,0 +1,26 @@
+{
+  "calls": [
+    "dispatch child a",
+    "dispatch child b",
+    "dispatch child a1",
+    "-- delete a",
+    "interrupt a1",
+    "dispatch continuation for b"
+  ],
+  "heartbeatsAdmitted": 0,
+  "refusals": {
+    "spawnUnderDeleted": "RLM_UNAVAILABLE: RLM session was deleted and cannot spawn a child: <session>",
+    "messageToDeleted": "RLM_UNAVAILABLE: RLM session was deleted and cannot send a message: <session>",
+    "cellInDeleted": "RLM_UNAVAILABLE: RLM session was deleted and cannot run a cell: <session>",
+    "drainWhileStopping": "RLM_SESSION_BUSY: RLM session did not become idle before the drain deadline (1 active, 0 queued)"
+  },
+  "children": {
+    "root": [
+      "a: deleted",
+      "b: settled"
+    ],
+    "a": [
+      "a1: running"
+    ]
+  }
+}
