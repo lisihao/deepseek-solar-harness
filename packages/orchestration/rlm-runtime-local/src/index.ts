@@ -879,7 +879,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       if (result.context !== undefined) session.context = result.context
       session.variables = result.variables
       this.updateSession(session, {
-        lifecycle: this.isClosed(request.sessionId) ? 'stopped' : 'idle',
+        lifecycle: 'idle',
         stateRevision: session.snapshot.stateRevision + 1,
         restorableVariables: result.variables
           .filter(value => value.error === undefined && (value.valueBase64 !== undefined || value.source !== undefined))
@@ -909,7 +909,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       this.kernels.get(String(request.sessionId))?.dispose()
       this.kernels.delete(String(request.sessionId))
       this.kernelCommands.delete(String(request.sessionId))
-      this.updateSession(session, { lifecycle: this.isClosed(request.sessionId) ? 'stopped' : 'idle' })
+      this.updateSession(session, { lifecycle: 'idle' })
       this.failReceipt(String(request.commandId), requestHash, normalized)
       this.appendEvent(request.sessionId, 'rlm.cell.failed', { commandId: String(request.commandId), error: normalized.message })
       this.persist()

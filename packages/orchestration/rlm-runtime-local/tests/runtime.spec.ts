@@ -1649,6 +1649,24 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     await sent.catch(() => undefined)
     await t.settle()
     expect(t.interrupted).toContain(`continuation:${String(t.a1.sessionId)}`)
+    await expect(t.service.readMessages({ sessionId: t.a1.sessionId })).resolves.toMatchObject([{ deliveryStatus: 'queued' }])
+    await expect(t.service.drain(t.sessionId, 200)).resolves.toMatchObject({ activeExecutions: 0 })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('interrupts a heartbeat execution that is dispatched while its subtree is being deleted, and does not count it', async () => {
+    const t = await tree('dsh-rlm-closed-late-heartbeat-')
+    const heartbeat = await t.service.createHeartbeat({
+      sessionId: t.a1.sessionId, commandId: RlmCommandId('late-heartbeat'), instruction: 'check progress', interval: '1s',
+    })
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const pumped = t.service.pumpHeartbeats(new Date(Date.parse(heartbeat.nextRunAt!) + 1).toISOString())
+    await waitUntil(() => t.continuations.length === 1)
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    opened.resolve(undefined)
+    await expect(pumped).resolves.toBe(0)
+    expect(t.interrupted).toContain(`continuation:${String(t.a1.sessionId)}`)
     await expect(t.service.drain(t.sessionId, 200)).resolves.toMatchObject({ activeExecutions: 0 })
     await t.ctx.root.fiber.dispose()
   })
@@ -1675,6 +1693,31 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     await recoveredContext.root.fiber.dispose()
   })
 
+  it('treats a session as closed when only an ancestor was marked deleted, as a state written before this change has it', async () => {
+    const t = await tree('dsh-rlm-closed-legacy-', { held: ['a1'], stuck: ['a1'] })
+    await t.service.sendMessage(message('queued-a1', t.a.sessionId, t.a1.sessionId))
+    await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
+    await t.ctx.root.fiber.dispose()
+    // The earlier delete marked the child deleted and its own session stopped, and left the sessions below it open.
+    const statePath = join(t.root, 'state.json')
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as { sessions: Array<{ snapshot: { sessionId: string; lifecycle: string } }> }
+    for (const session of state.sessions) {
+      if (session.snapshot.sessionId === String(t.a1.sessionId)) session.snapshot.lifecycle = 'idle'
+    }
+    await writeFile(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 })
+    const recoveredContext = new Context()
+    const recovered = new LocalRlmRuntime(recoveredContext, t.root)
+    const before = t.continuations.length
+    await recovered.bindHost(t.a1.sessionId, t.bindings)
+    await recovered.pumpMessages()
+    await t.settle()
+    expect(t.continuations.length).toBe(before)
+    await expect(recovered.executeCell({
+      sessionId: t.a1.sessionId, commandId: RlmCommandId('legacy-cell'), code: '1 + 1',
+    })).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    await recoveredContext.root.fiber.dispose()
+  })
+
   it('refuses to spawn under, message, or run a cell in a session of a deleted subtree', async () => {
     const t = await tree('dsh-rlm-closed-refusals-')
     await t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))
@@ -1682,6 +1725,9 @@ describe('LocalRlmRuntime after a permanent delete', () => {
       commandId: RlmCommandId('closed-spawn'), parentSessionId: t.a1.sessionId, name: 'late', task: 'must not start',
     })).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
     await expect(t.service.sendMessage(message('closed-send', t.a.sessionId, t.a1.sessionId))).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    // Only the sender is closed (A to its open sibling B), then only the receiver is closed (the root to A).
+    await expect(t.service.sendMessage(message('closed-sender', t.a.sessionId, t.b.sessionId))).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    await expect(t.service.sendMessage(message('closed-receiver', t.sessionId, t.a.sessionId))).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
     await expect(t.service.executeCell({
       sessionId: t.a1.sessionId, commandId: RlmCommandId('closed-cell'), code: '1 + 1',
     })).rejects.toMatchObject({ code: 'RLM_UNAVAILABLE' })
