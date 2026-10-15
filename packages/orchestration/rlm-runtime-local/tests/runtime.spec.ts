@@ -1551,7 +1551,7 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     const interrupted: string[] = []
     const continuations: string[] = []
     const gate = { dispatch: undefined as Promise<void> | undefined }
-    const race: { service?: LocalRlmRuntime; deletion?: Promise<void> } = {}
+    const race: { service?: LocalRlmRuntime; deletion?: Promise<void> | undefined } = {}
     const execution = (name: string, nativeTurnId: string, settleOnInterrupt: boolean) => {
       const result = deferred<RlmChildExecutionResult>()
       if (!held.has(name)) result.resolve({ status: 'settled' })
