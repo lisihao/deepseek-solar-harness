@@ -139,7 +139,7 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
-import { rlmContinuationResult, rlmResultSucceeded } from './rlm-continuation.ts'
+import { rlmContinuationPrompt, rlmContinuationResult, rlmMessageContinuationFacts, rlmResultSucceeded } from './rlm-continuation.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
@@ -3955,21 +3955,13 @@ export class OrchestrationDaemon {
     const executionId = PhysicalOperatorExecutionId(String(request.commandId))
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
     assertRlmBridgeAllowed(request.executionOptions ?? { version: 1 }, bridge)
-    const prompt: ContentBlock[] = [{
-      type: 'text',
-      text: [
-        `Continue the persistent Prime RLM session for this ${request.source}.`,
-        request.instruction,
-        'Use typescript_repl to inspect the preserved context, variables, child registry, explicit messages, Continuous Harness, and goal state.',
-        request.source === 'goal'
-          ? 'Audit the objective. Call await goal.complete() only when every requirement is actually achieved; otherwise make concrete progress within this continuation.'
-          : request.source === 'heartbeat'
-            ? 'Treat this heartbeat as scheduled new work. Use explicit family messages for any recursive results.'
-            : request.source === 'autonomous'
-              ? 'This follow-up was injected by the host Autonomous policy. Do not claim completion from prose; make concrete progress and let the host quality gates decide.'
-              : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
-      ].join('\n'),
-    }]
+    const inspection = request.source === 'message'
+      ? rlmMessageContinuationFacts(
+        await this.ctx.rlmRuntime.inspect(request.sessionId),
+        await this.ctx.rlmRuntime.familyRoster(request.sessionId),
+      )
+      : undefined
+    const prompt: ContentBlock[] = [{ type: 'text', text: rlmContinuationPrompt(request, inspection) }]
     const settle = async (
       result: PhysicalOperatorResult,
       workerResult?: ModelWorkerResult,

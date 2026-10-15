@@ -26,6 +26,8 @@ TaskGraph 节点提示词将上下文路径标为 `Sender workspace`，并指示
 
 对于 Resident RLM，已封存的 ExecutionPlan 同时包含高阶根模型分配和套餐优先的低阶默认 child 分配。根模型通过持久 `typescript_repl` namespace 检查可编程上下文、准入异步递归 child、接收显式 family message，并续接持久 Goal 或 Heartbeat。child 拓扑由模型在运行时决定；DSH 只机械执行 `maxDepth`、`maxChildren`、`maxTurns`、Graph 并行上限和 Provider 容量。每个 child 与 continuation 都有稳定 Receipt 和内容寻址结果 Artifact。该复合执行只占一个全局 Scheduler 槽，因此节点内递归不会成为另一套 TaskGraph，也不会与并发 DAG 工作共同超卖容量。一次尝试里每个 API（model-worker）child 或 continuation 都在自己的取消控制之下运行。child 的首次执行跟随派生它的会话的执行；会话的后续回合（continuation）只跟随整次尝试，因此被中断的上一轮不会取消它。中断一个会话只会停止该会话及其派生者当前活动的执行，不会停止根或兄弟。删除一个 child 还会永久关闭它的子树（见 [rlm-runtime-local](../rlm-runtime-local/README.md)），而取消整个 run 或根仍会让每个执行至少被取消一次；删除之后被拒绝的执行已经被中断过一次，并通过它启动时收到的 attempt signal 再次被取消，Resident turn 的这条路径还没有动态测试。运行时最后排空的 continuation 保留自己的停止原因（`error`、`aborted`、`max-tokens`、`refusal`）和已有的部分输出：失败或不确定的 continuation 会让节点和 run 失败，而不会被报告为 `completed`，无论它有没有返回输出。没有运行 continuation 时，根自己的结果就是最后排空的结果，因此以 `max-tokens` 或 `refusal` 结束的根会让节点和 run 失败。不是 `completed` 的结果会结束这次执行：活动 goal 不会在它之后启动下一轮，Autonomous Mode 不会在以 `max-tokens` 或 `refusal` 停止的根之后启动新一轮；`error` 和 `aborted` 仍通过抛出让节点失败。goal 保持活动，也没有恢复策略，因此是否恢复由显式决定。仅仅失败的 child 在根的 continuation 没有失败时不会让整个图失败。中断 child 的后续回合还没有动态测试。
 
+RLM 会话的 message continuation 无论运行在 API（model-worker）还是 Resident 算子上，都会发起一个不含该会话任何早先 turn 的新模型请求，因此它的提示（`rlm-continuation.ts`）重述主机已知的信息：排队的消息；该会话自己的完整任务（创建会话时给它的任务文本，不一定是它收到的第一条提示）；上一个成功 cell 保存的变量名和该 cell 中保存降级的变量名，分为两张表，每张最多 64 个名字，其余只给出数量；该会话已能发消息的父、兄弟和直接子 agent，各附其 REPL 状态（`running`、`idle` 或 `inactive`），该状态不表示对方已完成任务或已汇报；以及复用已有顶层名字而不是重新声明、不要再读取已送达消息的规则。它不复制变量值、其他 agent 的任务或消息。节点结果仍是运行时最后排空的 continuation 的输出：文本说明最后一条回复应符合任务的输出格式，但不决定采用哪份输出，`Controller input:` 消息的含义不变。Goal、heartbeat 和 Autonomous continuation 的提示不变。
+
 与 Prime 兼容的 Autonomous Mode 是围绕同一条已封存 RLM lane 的可选策略。每个 root 或 continuation turn 结算后，daemon 会持久统计非缓存输入、输出与 cache-write token，先执行宿主质量门禁，再检查限制；随后复用同一个原生 Session 做一次有界 continuation，或者以显式原因停止。配置了门禁时，只有门禁通过才是成功终态；continuation、turn、token、耗时或门禁重试耗尽都不能伪装成成功。工作区未变化的失败会继续消耗一次重试，但不会重复执行命令。门禁子进程使用仓库统一的凭据清理环境；超时或取消会终止整棵进程树，并在 Attempt 继续前达到完全停稳。该循环持久化在编排数据库中，并始终从属于唯一 TaskGraph Scheduler。
 
 与 Prime 兼容的自动 refinement 只作用于根会话，并在真实 Turn 边界按 25 个 assistant turn 或已记录的 compact checkpoint 触发，冷却时间为 20 分钟。原生订阅模型先审查是否存在可复用的持久经验，确认后才规划可逐项应用的 Harness 编辑。失败或崩溃不确定的审查阶段不会自动重放，后台路径也不会静默回退到按量 API。可执行 TypeScript Skill 从受管 alias 解析到可信 `skillProviderModules`；模型提交的包路径永远不会被 import。
@@ -60,10 +62,11 @@ daemon 在每次远程算子刷新时向每个已注册且已启用成员的 Ser
 
 #### KV Cache effect
 
-每个 Attempt 接收一个已封存 Context Packet。后续 Graph、胶囊或能力 generation 会产生新数据包，不会修改已经缓存的请求。
+每个 Attempt 接收一个已封存 Context Packet。后续 Graph、胶囊或能力 generation 会产生新数据包，不会修改已经缓存的请求。message continuation 是独立的请求。它的提示在排队消息之外增加该会话的完整任务、最多 64 个已保存和 64 个降级的变量名，以及每个可见 agent 一行，所以输入随任务长度增长；除共同的系统前缀外，这段文本不与根会话的 turn 共享 KV Cache。增加的输入能否被减少的 cell 抵消，由实验衡量，不由单元测试和快照证明。
 
 ## Known Limitations and Deferred Work
 
+- message continuation 提示中的变量名和 agent 状态是主机快照：不含失败 cell 声明的名字和设置在 `globalThis` 上的属性，agent 的 REPL 状态也不说明其进度。该提示不保证模型遵守输出格式；测试证明的是模型被给了什么、节点保留哪份输出。
 - TaskGraph 准入会在写入编译产物前拒绝 `rlm=disabled` 与 `autonomous=enabled` 的组合。旧的持久化偏好仍可读取，只会在用于新的准入时失败。
 
 - 基础胶囊绑定支持指令和只读 resource/data 引用。Tool、MCP、secret 和可执行 Guard 绑定在提供方实现其强制机制前均会失败关闭。

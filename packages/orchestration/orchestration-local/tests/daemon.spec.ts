@@ -2351,6 +2351,198 @@ describe('orchestration daemon', () => {
     })
   })
 
+  describe('the prompt of an RLM message continuation', () => {
+    const ROOT_TASK = 'Combine the child results. Final rule: reply with only {"verdict": "<text>"}.'
+    const ALPHA_TASK = 'Alpha task: report the alpha figure to your parent.'
+    const BETA_TASK = 'Beta task: report the beta figure to your parent.'
+    /** The task text the model receives: the envelope the daemon wraps around every API prompt, unwrapped. */
+    const promptOf = (request: ModelWorkerExecuteRequest): string => {
+      const text = request.prompt.map(block => block.type === 'text' ? block.text : '').join('\n')
+      const envelope = (JSON.parse(text) as { dshOperatorContextEnvelope: { task: { content: { type: string; text?: string }[] } } })
+        .dshOperatorContextEnvelope
+      return envelope.task.content.map(block => block.text ?? '').join('\n')
+    }
+    const taskBlock = (task: string): string => `--- task ---\n${task}\n--- end of task ---`
+
+    interface Runtime {
+      list(): Promise<readonly { sessionId: string; parentSessionId?: string }[]>
+      attach(request: unknown): Promise<{ lease: { leaseId: string } }>
+      input(request: unknown): Promise<unknown>
+    }
+
+    /**
+     * The root starts two children; alpha reports at once and beta only after the first root continuation began, so the root gets
+     * two message continuations. The second one messages alpha, which gives alpha a continuation of its own. With `controller`,
+     * a controller steer reaches the root while its first turn is still running.
+     */
+    async function messageRun(controller?: string) {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-message-prompt-'))
+      const root = join(home, 'orchestrations')
+      const resident = new FakeResidentClient()
+      resident.available = false
+      const worker = new KeylessModelWorker()
+      const rootTurn = Promise.withResolvers<undefined>()
+      const betaMayReport = Promise.withResolvers<undefined>()
+      let rootContinuations = 0
+      const kindOf = (request: ModelWorkerExecuteRequest): 'root' | 'root continuation' | 'alpha' | 'alpha continuation' | 'beta' | 'controller' => {
+        const text = promptOf(request)
+        if (request.commandId.endsWith(':rlm:root')) return 'root'
+        if (!request.commandId.endsWith(':deliver')) return text.includes(ALPHA_TASK) ? 'alpha' : 'beta'
+        if (text.includes('Controller input:')) return 'controller'
+        return text.includes(ALPHA_TASK) ? 'alpha continuation' : 'root continuation'
+      }
+      worker.onExecute = async (request) => {
+        switch (kindOf(request)) {
+          case 'root':
+            await callRlmTool(request, 'spawn', `const handles = [await rlm(${JSON.stringify(ALPHA_TASK)}, { name: "alpha" }), await rlm(${JSON.stringify(BETA_TASK)}, { name: "beta" })]; "spawned"`)
+            if (controller !== undefined) await rootTurn.promise
+            break
+          case 'alpha':
+            await callRlmTool(request, 'alpha-report', 'await agentMessage.send("alpha figure is 1", { receiverRole: "parent", mode: "auto" }); "sent"')
+            break
+          case 'beta':
+            await betaMayReport.promise
+            await callRlmTool(request, 'beta-report', 'await agentMessage.send("beta figure is 2", { receiverRole: "parent", mode: "auto" }); "sent"')
+            break
+          case 'root continuation':
+            rootContinuations += 1
+            if (rootContinuations === 1) betaMayReport.resolve(undefined)
+            else await callRlmTool(request, 'follow-up', 'await agentMessage.send("check the figure again", { receiverRole: "child", receiverName: "alpha", mode: "follow_up" }); "asked"')
+            break
+          case 'alpha continuation':
+          case 'controller':
+            break
+        }
+      }
+      worker.resultFor = (request) => {
+        const kind = kindOf(request)
+        if (kind === 'root continuation') {
+          return { output: [{ type: 'text', text: rootContinuations === 1 ? 'first continuation output' : 'last continuation output' }], stopReason: 'completed' }
+        }
+        if (kind === 'alpha continuation') return { output: [{ type: 'text', text: 'child continuation output' }], stopReason: 'completed' }
+        if (kind === 'controller') return { output: [{ type: 'text', text: 'controller continuation output' }], stopReason: 'completed' }
+        return undefined
+      }
+      const daemon = createDaemon(root, home, resident, 10, [worker])
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Combine two children.' },
+        admission: {
+          policy: 'codex', route: 'taskgraph', sourceSessionId: 'message-prompt-fixture', rlm: 'enabled',
+          continualHarness: 'off', optimization: 'balanced',
+        },
+        graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: ROOT_TASK, writeScopes: [] }] },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      if (controller !== undefined) {
+        await eventually(async () => worker.requests, value => value.some(request => kindOf(request) === 'root'))
+        const runtime = (daemon as unknown as { ctx: { rlmRuntime: Runtime } }).ctx.rlmRuntime
+        const sessions = await eventually(() => runtime.list(), value => value.some(session => session.parentSessionId === undefined))
+        const sessionId = sessions.find(session => session.parentSessionId === undefined)!.sessionId
+        const { lease } = await runtime.attach({ version: 1, sessionId, commandId: 'steer-attach', callerId: 'steer-caller' })
+        await runtime.input({ version: 1, sessionId, leaseId: lease.leaseId, commandId: 'steer-input', text: controller, mode: 'steer' })
+        betaMayReport.resolve(undefined)
+        rootTurn.resolve(undefined)
+      }
+      const settled = await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      const events = (await client.readEvents({ runId: run.runId, limit: 400 })).events
+      const prompts = (kind: ReturnType<typeof kindOf>): string[] => worker.requests
+        .filter(request => kindOf(request) === kind).map(promptOf)
+      return { settled, events, prompts }
+    }
+
+    it('restates the root task whole in both root continuations, and the child task, not the root task, in the child one', async () => {
+      const f = await messageRun()
+      expect(f.settled.state).toBe('completed')
+      const rootPrompts = f.prompts('root continuation')
+      expect(rootPrompts).toHaveLength(2)
+      for (const prompt of rootPrompts) {
+        expect(prompt).toContain(taskBlock(ROOT_TASK))
+        expect(prompt).not.toContain(ALPHA_TASK)
+        expect(prompt).not.toContain(BETA_TASK)
+        expect(prompt).not.toContain('Use typescript_repl to inspect the preserved context')
+      }
+      const [childPrompt] = f.prompts('alpha continuation')
+      expect(f.prompts('alpha continuation')).toHaveLength(1)
+      expect(childPrompt).toContain(taskBlock(ALPHA_TASK))
+      expect(childPrompt).not.toContain(ROOT_TASK)
+      expect(childPrompt).toContain('- parent ')
+    })
+
+    it('lists the names the last cell saved and the visible agents with their cell state, and nothing they hold', async () => {
+      const f = await messageRun()
+      const [first] = f.prompts('root continuation')
+      expect(first).toContain('Names saved by the last successful cell, as of that cell: handles.')
+      // Alpha's message is delivered while the cell that sent it is still running, so alpha may be running or idle; beta is idle
+      // because its worker has not started a cell. Neither state says anything about the work.
+      expect(first).toMatch(/- child "alpha": (running|idle)\n/u)
+      expect(first).toContain('- child "beta": idle')
+      expect(first).toContain('It does not say whether that agent finished its task or has reported')
+      // The message's own sender line names a session; the facts after it name no session id and carry no message text.
+      const facts = first!.slice(first!.indexOf('The host read the facts below'))
+      expect(facts).not.toMatch(/rlm-session-|rlm:orch|alpha figure|beta figure/u)
+    })
+
+    it('ends the node in the output of the last continuation, not an earlier turn or another session', async () => {
+      const f = await messageRun()
+      const accepted = f.events.filter(event => event.type === 'node.evidence.accepted')
+      expect(accepted).toHaveLength(1)
+      const preview = String(accepted[0]?.data.outputPreview)
+      expect(preview).toContain('last continuation output')
+      expect(preview).not.toContain('first continuation output')
+      expect(preview).not.toContain('child continuation output')
+    })
+
+    it('gives a Resident root the same task and facts, since its continuation prompt is built in the same place', async () => {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-resident-message-prompt-'))
+      const root = join(home, 'orchestrations')
+      const fake = new FakeResidentClient()
+      fake.onExecute = async (request) => {
+        if (request.modelToolBridge === undefined || request.commandId.endsWith(':deliver')) return
+        if (request.commandId.endsWith(':rlm:root')) {
+          await callRlmTool(request, 'spawn', 'const kept = await rlm("child A", { name: "A" }); "spawned"')
+        } else {
+          await callRlmTool(request, 'send', 'await agentMessage.send("evidence", { receiverRole: "parent", mode: "auto" }); "sent"')
+        }
+      }
+      const daemon = createDaemon(root, home, fake, 10)
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+      const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(home, 'workspace')
+      await mkdir(workspace)
+      const fixture = graph(workspace)
+      const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Resident root with one child.' },
+        graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: ROOT_TASK, writeScopes: [] }] },
+      })
+      const run = await startCompilation(client, compilation.compilationId)
+      await eventually(() => client.inspect(String(run.runId)), value => ['completed', 'failed'].includes(value.state))
+      const [deliver] = fake.requests.filter(request => request.commandId.endsWith(':deliver'))
+      const prompt = (deliver?.prompt ?? []).map(block => block.text ?? '').join('\n')
+      expect(prompt).toContain(taskBlock(ROOT_TASK))
+      expect(prompt).toContain('Names saved by the last successful cell, as of that cell: kept.')
+      expect(prompt).toContain('- child "A": ')
+    })
+
+    it('leaves the words of a controller steer as they were sent, ahead of the facts, with the same task restated', async () => {
+      const steer = 'Controller wants a plain sentence instead of JSON.'
+      const f = await messageRun(steer)
+      const [prompt] = f.prompts('controller')
+      expect(prompt).toContain(`for this message.\nController input:\n${steer}\nUse typescript_repl for any state you still need.`)
+      expect(prompt).toContain(taskBlock(ROOT_TASK))
+      expect(prompt).not.toContain('Agent message from')
+      expect(prompt).not.toMatch(/override|takes precedence|regardless/u)
+    })
+  })
+
   it('compiles, seals, dispatches Resident nodes, records Evidence, and completes a graph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')

@@ -10,7 +10,7 @@
 
 Prime Agents View 的控制面按版本化的 `attach → input → detach` 提供。`attach` 使用 caller id 与 command id 建立一个排他的 lease，并返回当前 Session snapshot 和 event cursor；第二个仍存活的控制者会以 `RLM_CONTROL_BUSY` 失败。`input` 必须持有 lease，并进入已有的 message/continuation 路径，不会创建另一套 Scheduler；重复 command id 返回同一 Receipt，冲突 payload 会失败。`detach` 幂等。Lease 通过属主进程隔离，因此 Provider 重启后可以回收死进程遗留的 lease，而持久 RLM Session 仍可用。
 
-`RLM_TYPESCRIPT_REPL_TOOL_SCHEMA` 是 `typescript_repl` bridge 的 canonical `ToolSchema`；Consumer 应复用它，不要维护第二份描述或 JSON Schema。
+`RLM_TYPESCRIPT_REPL_TOOL_SCHEMA` 是 `typescript_repl` bridge 的 canonical `ToolSchema`；Consumer 应复用它，不要维护第二份描述或 JSON Schema。它的描述告诉模型：顶层 `const` 和 `let` 名字在 cell 之间持续存在，不得重复声明；`agentMessage.read(afterCount, limit)` 返回的消息中 `text` 是字符串，不一定是 JSON。该工具的所有 Consumer（单 Agent REPL、child、API 与 Resident 的 continuation）显示同一段文本；它在构建 model-tool bridge 时读取，所以更早创建的会话也会拿到当前文本。
 
 变更调用使用调用方生成的 command identity。`rlm(...)` 准入返回 `RlmChildHandleV1`；Child answer 随后通过消息或 Artifact reference 到达。可编程 `skills.list()` 返回 Host 签发的 `RlmManagedSkillDescriptorV1.alias`，`skills.call(name, args)` 只接收这些 alias。Alias 使用公共 kebab-case Skill 语法，最长 128 字符。Host 把每个 alias 映射到受管条目及其 TypeScript import/callable；Kernel 不能提交 title 或 `reference.import`。两个操作的成功和失败都返回 `RlmManagedSkillResultV1`。恢复出的不确定命令保持 `indeterminate`，直到可信调用方记录 `abandon`；重放不会猜测原生执行结果。
 

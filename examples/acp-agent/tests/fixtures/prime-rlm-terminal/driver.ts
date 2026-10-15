@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Emit a keyless transcript of the terminal state of an RLM run whose message continuation or root did not succeed.
+ * Emit a keyless transcript of the terminal state of an RLM run whose message continuation or root did not succeed, and of what
+ * the model is given in each message continuation of a successful one.
  *
  * Composition: the production app boot and YAML Loader assemble the orchestration client (`autoStart: true`), and the client
  * starts the production daemon entry (`startup`) and the Resident daemon it needs, exactly as the Desktop does. Only the
@@ -44,13 +45,78 @@ const KINDS: readonly Kind[] = ['root', 'child', 'deliver', 'goal continuation',
 interface Scenario {
   readonly name: string
   readonly autonomous: boolean
+  /** The `context-prompts` scenario: it captures the raw requests of the root's and a child's message continuations. */
+  readonly context?: boolean
 }
 
-// Timer budget, with every limit used: the body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + two
-// scenarios of 12 s = 51 s, plus the diagnostic read of the failing stage, 2 s; the cleanup then takes abandoned requests 5 s +
+// The tasks of the `context-prompts` scenario. The root's last sentence is the only statement of its output format.
+const ROOT_TASK = 'Run scenario context-prompts. Final rule: reply with only {"verdict": "<text>"}.'
+const ALPHA_TASK = 'Alpha task: report the alpha figure to your parent.'
+const BETA_TASK = 'Beta task: report the beta figure to your parent.'
+
+/** What the `context-prompts` scenario captured from the requests the daemon's model worker sent. */
+const captured: { rootContinuation?: string; childContinuation?: string; rootContinuations: number } = { rootContinuations: 0 }
+const betaMayReport = Promise.withResolvers<undefined>()
+
+/** The task text a request carries: the daemon wraps every API prompt in a JSON envelope, and the model reads its `task`. */
+function taskText(message: FakeMessage): string {
+  const text = messageText(message)
+  type Envelope = { readonly dshOperatorContextEnvelope: { readonly task: { readonly content: readonly { readonly text?: string }[] } } }
+  return (JSON.parse(text) as Envelope).dshOperatorContextEnvelope.task.content.map(block => block.text ?? '').join('\n')
+}
+
+/**
+ * Session ids differ in every run, and whether a session's cell has returned when it is told of a message depends on timing: the
+ * message is delivered while the cell that sent it is still returning. Only those two things are replaced.
+ */
+function normalized(prompt: string): string {
+  return prompt
+    .replaceAll(/rlm-session-[0-9a-f-]{36}|rlm:orch:run-[0-9a-f-]{36}:rlm:1/gu, '<session id>')
+    .replaceAll(/^- (child "alpha"|parent "root"): (running|idle)$/gmu, '- $1: <running or idle>')
+}
+
+/** Answers the requests of the `context-prompts` scenario from their content, and keeps the two prompts it reports. */
+async function contextReply(messages: readonly FakeMessage[]): Promise<FakeReply> {
+  const first = messages[0]
+  if (first === undefined) throw new Error('fake DeepSeek received a request without messages')
+  const text = taskText(first)
+  const afterTool = messages.at(-1)?.role === 'tool'
+  const repl = (code: string): FakeReply => ({ kind: 'tool', name: 'typescript_repl', arguments: JSON.stringify({ code }) })
+  const answer = (output: string): FakeReply => ({ kind: 'text', text: output, finish: 'stop' })
+  if (text.includes('Agent message from')) {
+    if (text.includes(ALPHA_TASK)) {
+      counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
+      captured.childContinuation = normalized(text)
+      return answer('child continuation output')
+    }
+    if (!afterTool) {
+      captured.rootContinuations += 1
+      counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
+      if (captured.rootContinuations === 1) captured.rootContinuation = normalized(text)
+    }
+    if (captured.rootContinuations === 1) {
+      betaMayReport.resolve(undefined)
+      return answer('first continuation output')
+    }
+    return afterTool
+      ? answer('last continuation output')
+      : repl('await agentMessage.send("check the figure again", { receiverRole: "child", receiverName: "alpha", mode: "follow_up" }); "asked"')
+  }
+  if (afterTool) return answer('done')
+  if (text.includes(ROOT_TASK)) {
+    counts.set('root', (counts.get('root') ?? 0) + 1)
+    return repl(`const handles = [await rlm(${JSON.stringify(ALPHA_TASK)}, { name: "alpha" }), await rlm(${JSON.stringify(BETA_TASK)}, { name: "beta" })]; "spawned"`)
+  }
+  counts.set('child', (counts.get('child') ?? 0) + 1)
+  if (text.includes(BETA_TASK)) await betaMayReport.promise
+  return repl('await agentMessage.send("a figure", { receiverRole: "parent", mode: "auto" }); "sent"')
+}
+
+// Timer budget, with every limit used: the body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + three
+// scenarios of 12 s = 63 s, plus the diagnostic read of the failing stage, 2 s; the cleanup then takes abandoned requests 5 s +
 // dispose 3 s + two daemon stops of 8 s + fake close 2 s + late-sweep pause 0.7 s + two more stops of 8 s = 42.7 s. That is
-// 95.7 s of timers. It is a sum of limits, not an absolute bound: creating directories, loading modules, and scheduling are not
-// in it. The test passes a 110 s process limit, which leaves room for them, and below the suite's 120 s per-test limit; a normal
+// 107.7 s of timers. It is a sum of limits, not an absolute bound: creating directories, loading modules, and scheduling are not
+// in it. The test passes a 125 s process limit, which leaves room for them, and a 140 s per-test limit above it; a normal
 // failure needs about 10 s of cleanup. A stage waits at most STAGE_MS and one request at most RPC_MS.
 const FAKE_MS = 3_000
 const BOOT_MS = 12_000
@@ -133,9 +199,10 @@ function reply(kind: Kind, scenario: Scenario): FakeReply {
   }
 }
 
-function handle(messages: readonly FakeMessage[]): FakeReply {
+function handle(messages: readonly FakeMessage[]): FakeReply | Promise<FakeReply> {
   const last = messages.at(-1)
   if (last === undefined) throw new Error('fake DeepSeek received a request without messages')
+  if (current?.context === true) return contextReply(messages)
   // The round after a tool call ends the turn.
   if (last.role === 'tool') return { kind: 'text', text: 'done', finish: 'stop' }
   if (current === undefined) throw new Error('fake DeepSeek received a request between scenarios')
@@ -153,16 +220,16 @@ function graph(workspace: string, scenario: Scenario): LogicalTaskGraphV1 {
   return {
     version: 1, title: 'keyless terminal graph', workspace, maxParallel: 1, risk: 'low',
     nodes: [{
-      id: 'rlm', title: 'Recursive node', task: `Run scenario ${scenario.name}.`, role: 'recursive synthesis', dependsOn: [],
+      id: 'rlm', title: 'Recursive node', task: scenario.context === true ? ROOT_TASK : `Run scenario ${scenario.name}.`, role: 'recursive synthesis', dependsOn: [],
       requiredForCompletion: true, capabilityRequirements: [], capabilityBudget: [],
       contextPolicy: { maxTokens: 4_096, allowedSourceKinds: ['intent', 'artifact', 'capsule'], unavailableSource: 'block' },
       effectBudget: { read: [], write: [], execute: [], network: [], cost: [], risk: [] },
       approvedSecretRefs: [], readScopes: ['src'], writeScopes: [],
       acceptance: [{ id: 'done', description: 'operator completes', kind: 'operator-completed' }],
       retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
+      ...scenario.autonomous || scenario.context === true ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } } : {},
       ...scenario.autonomous
         ? {
-          rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
           // Only the built-in acceptance check: the production daemon takes no custom evaluators.
           autonomous: {
             mode: 'enabled', maxContinuations: 2,
@@ -330,13 +397,20 @@ async function run(scenario: Scenario) {
     continuations: events.filter(event => event.type.startsWith('rlm.message.continuation.')).map(event => event.type),
     // Counts, not an order: the concurrent root, child, and continuation calls do not arrive in a fixed sequence.
     requests: Object.fromEntries(KINDS.map(kind => [kind, counts.get(kind) ?? 0])),
+    ...scenario.context === true
+      ? {
+        outputs: events.filter(event => event.type === 'node.evidence.accepted').map(event => event.data.outputPreview),
+        firstRootContinuationPrompt: captured.rootContinuation,
+        childContinuationPrompt: captured.childContinuation,
+      }
+      : {},
   }
 }
 
 const failures: string[] = []
 let slowStarted = false
 let bodyError: unknown
-let transcript: { readonly goal: unknown; readonly autonomous: unknown } | undefined
+let transcript: { readonly goal: unknown; readonly autonomous: unknown; readonly context: unknown } | undefined
 
 try {
   owned.fake = startFakeDeepSeek(handle)
@@ -369,7 +443,12 @@ try {
 
   // Autonomous Mode with an end condition that a later round would satisfy, after a root that stopped at its token limit.
   const autonomous = await run({ name: 'autonomous-after-token-limit', autonomous: true })
-  transcript = { goal, autonomous }
+
+  // A root with two children that report in turn gets two message continuations, and then messages one child, which gets one.
+  // The transcript holds what the model was given in the root's first continuation and in the child's, taken from the requests
+  // the shipping worker sent, and what the node ended in.
+  const context = await run({ name: 'context-prompts', autonomous: false, context: true })
+  transcript = { goal, autonomous, context }
 } catch (error) {
   bodyError = error
 } finally {

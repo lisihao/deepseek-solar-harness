@@ -1,0 +1,37 @@
+# Agent Note: What an RLM message continuation is told
+
+Status: implemented
+
+English | [中文](2026-10-15-rlm-message-continuation-context.zh.md)
+
+## Problem
+
+A message continuation wakes an RLM session when another agent or the controller sends it a message. On the DeepSeek API worker it is a new model request: `generateWithTools` starts every execution with one user message and no earlier turn. Before this change that message was the queued text, a fixed instruction to inspect the preserved state, and a line about message ordering. It did not restate the session's task, so a task whose only output rule is a final sentence ("reply with only this JSON") was not in front of the model when the last continuation wrote the node result; the model could read `context.task` through the REPL, but nothing told it to. It did not name the variables the session had saved, so a continuation that declared a name the first turn had already declared failed with `Identifier '…' has already been declared`. In the 18-trial efficacy run of 2026-10-13, every one of the 5 such errors came from a continuation, and continuations ran 99 of the 129 cells of the six two-child trials. The old logs do not keep the cell source, so they show the sequence, not that the missing text caused the errors or the format failures.
+
+## Decision
+
+**One prompt builder for every continuation source.** `rlmContinuationPrompt` builds the prompt of goal, heartbeat, Autonomous, and message continuations in `orchestration-local/src/rlm-continuation.ts`. Without extra text it returns the exact earlier prompt for every source; tests pin the goal, heartbeat, and Autonomous texts as literals copied from the earlier release. `dispatchRlmContinuation` calls it before the API and Resident branches, so a Resident continuation receives the same message prompt.
+
+**A message continuation states what the host knows.** `rlmMessageContinuationFacts` replaces the fixed inspection sentence of a message continuation with: the session's own task from `inspect(sessionId).task`, whole (a child's spawn task for a child, never the root's); the names in `restorableVariables` and, separately, in `degradedVariables`, each as of the last successful cell and each capped at 64 names with the rest counted; the roster of the parent, siblings, and direct children the session can already message, with the state of each REPL, which the text says is not progress; and two rules: reuse an existing top-level name instead of declaring it again, and do not read the delivered message again. It copies no variable value, no other agent's task, and no message text. The roster is listed whole because the sealed `maxChildren` of the session and its parent already bound it. A `Controller input:` instruction and a message from another agent stay as they were: the text neither lets the task outrank a controller nor lets another agent's message outrank the task.
+
+**The result is still the last drained continuation's output.** `rlmContinuationResult` is unchanged. The prompt asks that the last reply follow the task's output format; the runtime does not choose among outputs, so no valid answer is picked from an earlier turn, and a non-success stop reason and partial output stay as before.
+
+**The shared tool description says the same two things.** `RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.description` adds that top-level `const` and `let` names persist between cells and must not be declared twice (reuse the binding, choose a new name, or keep temporaries in a block or function), and that `agentMessage.read(afterCount, limit)` skips `afterCount` received messages and returns messages with a string `text` that is not necessarily JSON. The description is read each time a bridge is built; the sealed `executionOptions.tools` only compare tool names, so sessions created before this change are not rejected and receive the new text.
+
+## Alternatives considered
+
+**Replay the earlier turns of the session into the continuation.** Rejected: it changes what a continuation costs for every session and needs a bounded transcript store that the runtime does not have.
+
+**Choose the answer from the outputs of all turns.** Rejected: it would select a valid-looking answer after the fact. The node keeps the output of the last drained continuation.
+
+**Cut a long task or cap the roster.** Rejected: the task is the session's only output rule and already enters the root's first request whole; the roster is already bounded by `maxChildren`. Only the variable-name lists carry a fixed bound, which is a presentation limit and not a setting that varies by deployment, so it is not a `Config` field.
+
+**Add a wait primitive or cancel a running cell when the attempt aborts.** Not part of this change. Cancelling a cell needs a cancellation owner in the tool-call path (`tool.call` to `executeCell` has no scope; the client signal of the model worker only ends the client's wait), a rule for an abort that races a completed cell, and a decision about saved state and effects already sent to the host.
+
+## Consequences
+
+Each message continuation request is larger by the task, the two name lists, and one line per visible agent, and a Resident continuation gets the same text. The change is measured by an experiment, not by the tests: unit and snapshot tests prove what the model is given and which output the node keeps; whether the model then follows the output format with fewer cells is not established here. The tool description also reaches the single-agent REPL and the continuations of goal, heartbeat, and Autonomous sessions, whose prompts are unchanged but whose tool list text is not.
+
+## Testing
+
+`rlm-continuation.spec.ts` covers the builder (whole long task with its last-line format rule, both name lists, omission counts, roster states, the unchanged non-message prompts as literals, last-output selection). `daemon.spec.ts` runs the real daemon, REPL bridge, and model-worker path with two children and a controller steer, and a Resident root, and reads the requests the worker received. The `prime-rlm-terminal` snapshot adds a `context-prompts` scenario through the production Loader and daemons with only the provider replaced, and records the prompts of the root's first continuation and a child's continuation as the DeepSeek adapter sent them; `prime-rlm` records the tool description. Negative controls change one source file each from saved bytes and require the named test to fail.

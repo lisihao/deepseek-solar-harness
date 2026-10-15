@@ -37,7 +37,7 @@ it('snapshot: prime-rlm-delete keeps a permanently deleted subtree closed to new
   expect(stdout).toBe(await readFile(expected, 'utf8'))
 })
 
-it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overwritten by a later turn', async () => {
+it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overwritten by a later turn and tells each message continuation its own task', async () => {
   const driver = fileURLToPath(new URL('./fixtures/prime-rlm-terminal/driver.ts', import.meta.url))
   const expected = new URL('./fixtures/prime-rlm-terminal/expected.json', import.meta.url)
   const { stdout } = await runLoaderSmoke({
@@ -47,15 +47,15 @@ it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overw
     libBinScript: driver,
     configPath: fileURLToPath(new URL('./fixtures/prime-rlm-terminal/cordis.yml', import.meta.url)),
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
-    // The driver starts the production orchestration and Resident daemons and runs two scenarios. Its timer limits are listed in
-    // its header and sum to 95.7 s (not counting directory creation, module loading, and scheduling); a normal run takes about
-    // 10 s. This limit lets it fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it. The
-    // suite's per-test limit is 120 s.
-    processTimeoutMs: 110_000,
+    // The driver starts the production orchestration and Resident daemons and runs three scenarios. Its timer limits are listed
+    // in its header and sum to 107.7 s (not counting directory creation, module loading, and scheduling); a normal run takes
+    // about 12 s. This limit lets it fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it. The
+    // test's own limit, below, is 15 s longer.
+    processTimeoutMs: 125_000,
   })
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expected, stdout)
   expect(stdout).toBe(await readFile(expected, 'utf8'))
-})
+}, 140_000)
 
 const execFileAsync = promisify(execFile)
 
