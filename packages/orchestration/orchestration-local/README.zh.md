@@ -56,6 +56,18 @@ daemon 在每次远程算子刷新时向每个已注册且已启用成员的 Ser
 
 验证节点的 `model-verdict` 要求严格 JSON，包含 `accepted`、非空 `reason` 以及非空字符串 `evidence` 条目。否定或缺失的结论、字段格式错误及无证据都会阻止原目录应用。通用文件测试检查权限与修改机制，不能证明验证者的语义判断质量。最终应用在修改文件前对照检查点核验受影响的源路径及其父目录。交付在原目录修改前持久化 `applying`，并在这一关键阶段拒绝暂停／取消；此前已接受的取消会阻止应用。未知交付转为 indeterminate，要求核对原 effect。
 
+## Evaluation scope
+
+daemon 根目录（在其 DSH home 之内，绝不在全局配置里）中的 `evaluation-scope.json` 把该 home 封存给一次评测。它在 daemon 启动时读取并校验，任何字段都没有默认值，无法使用的文件会让 daemon 停止启动。它给出 scope id、唯一允许的模型、`inputBound` 模式、各项限额（累计输入 token 含缓存读取、累计计费输出 token 含 reasoning、物理 HTTP 尝试数、并发请求数、单个请求的 `max_tokens` 上限），以及 `thinking: enabled` 和推理 effort。一个 home 就是一个 scope，所以 root、所有后代、所有 continuation、所有工具轮次和所有 node 重试都使用同一份账本 `evaluation-ledger.json`；重试不会得到新的预算，在不同 scope 文件下写出的账本会被拒绝。
+
+在 scope 之下，daemon 对每个 API worker 请求都发送 scope 指定的模型、上限和 effort，每个物理请求在其请求体序列化之后、发送之前由账本准入。准入是一个同步步骤：检查余额，把预留写到磁盘（写入、fsync、rename），然后才放行请求。它预留请求体的字节数作为输入、请求体的 `max_tokens` 作为输出、一个尝试名额和一个并发名额；线上 `max_tokens`、thinking 模式、effort 或模型与 scope 不一致、含非文本内容、或放不下的请求都会被拒绝。provider 的 usage 到达时结算（缓存读取计入输入；`completion_tokens` 已包含 reasoning），它替换预留，结算幂等，冲突的第二次结算会停止所有准入。没有 usage 就结束的请求（中止、错误、`[DONE]` 之前断流、消费者停止读取、崩溃、重启）保持 `unknown`：其预留和并发名额继续占用，绝不释放也不重新发送，只有已核对的回执才能结束它。超出预留的 usage 按报告值计入，不截断，并停止之后的所有准入。graph 尝试、worker 的工具轮次、以及已准入和被拒绝的 HTTP 尝试是分开的计数：账本为每个 HTTP 尝试记录其命令和轮次标签。
+
+账本只有一个所有者。打开它时先取得一把一次发布完整的所有者锁，所以锁文件不会在没有记录所有者的状态下存在；已被持有或读不出的锁绝不接管，所有者已退出的锁只有在移开的文件证实就是读到的那把过期锁之后才替换。账本只会在 daemon 锁已持有之后创建、恢复或写入。账本文件在任何改写之前先校验（版本、键、状态、计数、跟随序号的唯一 id、与 usage 一致的状态）；校验失败的账本原样保留且不发送任何请求，合计超过最大精确整数时拒绝。
+
+scope 只计量 API worker 的请求。在它之下，daemon 拒绝任何其他 worker 以及所有 Resident 或远程算子的派发，所以没有模型请求能绕过账本离开 daemon。scope 指定的模型会发送到线上，不论分配选了哪个层级；运行的 `model.allocated` 事件仍显示分配结果。
+
+`inputBound` 说明发送前如何约束输入 token。`request-bytes-audited` 预留请求体字节数，并在之后用 provider 报告的 usage 核对。它不是证明：只有分词器是字节级的、且聊天模板增加的内容不超过 JSON 结构时，字节数才是 token 数的上界；超出预留的请求只能在发送之后才被发现。`proven-token-count` 要求发送前就被证明的上界，本构建没有，所以要求它的 scope 不准入任何请求。该拒绝作为安全拒绝被测试；它并不意味着可以运行正式评测。官方 Chat Completions 页面把 `max_tokens` 定义为生成 token 的最大数，并把 reasoning token 列在 completion 明细之内，但没有说明上限包含它，也没有找到对整个请求的发送前计数。
+
 ## Model Experience
 
 通过消费上述密封 TaskGraph 节点提示词的 `@deepseek-ai/dsh-tool-orchestration` 与物理算子间接影响模型。
@@ -65,6 +77,9 @@ daemon 在每次远程算子刷新时向每个已注册且已启用成员的 Ser
 每个 Attempt 接收一个已封存 Context Packet。后续 Graph、胶囊或能力 generation 会产生新数据包，不会修改已经缓存的请求。message continuation 是独立的请求。它的提示在排队消息之外增加该会话的完整任务、最多 64 个已保存和 64 个降级的变量名，以及每个可见 agent 一行，所以输入随任务长度增长。Provider 缓存能复用其中多少，以及增加的输入能否被减少的 cell 抵消，由实验衡量，不由单元测试和快照证明。
 
 ## Known Limitations and Deferred Work
+
+- 目前没有生产代码核对 `unknown` 请求，所以没有 usage 就结束的请求会一直保留其预留和并发名额，直到 home 被替换；`concurrentRequests = 1` 时这会阻塞之后的所有请求。
+- 评测 scope 约束 API worker 的请求。它不隔离网络或凭据，所以不能阻止 REPL 中的代码自行访问网络；它没有墙钟限制；它的输入预留是请求体字节数并在事后核对，不是发送前证明的上界。
 
 - message continuation 提示中的变量名和 agent 状态是主机快照：不含失败 cell 声明的名字和设置在 `globalThis` 上的属性，agent 的 REPL 状态也不说明其进度。该提示不保证模型遵守输出格式；测试证明的是模型被给了什么、节点保留哪份输出。
 - TaskGraph 准入会在写入编译产物前拒绝 `rlm=disabled` 与 `autonomous=enabled` 的组合。旧的持久化偏好仍可读取，只会在用于新的准入时失败。

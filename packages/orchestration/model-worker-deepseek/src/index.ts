@@ -7,6 +7,8 @@ import {
   createAssistantMessage,
   createToolResultMessage,
   createUserMessage,
+  ReasoningEffortId,
+  type GenerateOptions,
   type Message,
   type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
@@ -69,9 +71,10 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
     const assembler = new BlockAssembler()
     for await (const chunk of this.ctx.llm.stream({
       provider: 'deepseek-official',
-      model: request.model,
+      model: request.evaluation?.model ?? request.model,
       messages,
       signal: request.signal,
+      ...evaluationOptions(request, `${request.commandId}#plain`),
     })) assembler.push(chunk)
     const finish = assembler.finish
     const stopReason = finish.kind === 'stop' ? 'completed' as const
@@ -99,10 +102,11 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
       const assembler = new BlockAssembler()
       for await (const chunk of this.ctx.llm.stream({
         provider: 'deepseek-official',
-        model: request.model,
+        model: request.evaluation?.model ?? request.model,
         messages,
         tools: bridge.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: { ...tool.inputSchema } })),
         signal: request.signal,
+        ...evaluationOptions(request, `${request.commandId}#round${String(round)}`),
       })) assembler.push(chunk)
       usage = mergeUsage(usage, assembler.usage)
       const blocks = assembler.blocks()
@@ -117,7 +121,7 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
       messages.push(createAssistantMessage({
         content: blocks,
         source: {
-          provider: 'deepseek-official', model: request.model,
+          provider: 'deepseek-official', model: request.evaluation?.model ?? request.model,
           ...assembler.replayState === undefined ? {} : { replayState: assembler.replayState },
         },
       }))
@@ -149,6 +153,19 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
       }
     }
     throw new ModelWorkerError('DeepSeek RLM tool loop terminated unexpectedly', 'MODEL_WORKER_INVALID')
+  }
+}
+
+/** The per-request generation fields of an evaluation scope; empty outside one, so the ordinary request is unchanged. */
+function evaluationOptions(request: ModelWorkerExecuteRequest, label: string): Pick<GenerateOptions, 'admission' | 'maxTokens' | 'reasoningEffort'> {
+  const evaluation = request.evaluation
+  if (evaluation === undefined) return {}
+  return {
+    admission: evaluation.admission(label),
+    // The scope's ceiling, lowered to what is left but never below 1: an exhausted scope is refused by admission, and no request
+    // falls back to a provider default.
+    maxTokens: Math.min(evaluation.maxOutputTokens, Math.max(1, evaluation.remainingOutputTokens())),
+    reasoningEffort: ReasoningEffortId(evaluation.reasoningEffort),
   }
 }
 

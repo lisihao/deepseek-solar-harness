@@ -81,6 +81,10 @@ DeepSeek request identity is separate from app attribution. After credential res
 
 Non-2xx chat-completions responses throw `LlmError` with stable codes: `AUTH` (401/403), `INSUFFICIENT_BALANCE` ([DeepSeek HTTP 402](https://api-docs.deepseek.com/quick_start/error_codes/) or explicit `insufficient_balance`, `Insufficient Balance`, or `余额不足` provider details), `QUOTA` (other exhausted quota, balance, credit, or usage-limit details), `RATE_LIMIT` (other 429s), `CONTEXT_WINDOW_EXCEEDED` (a 400 whose provider code, type, or message identifies context overflow), `INVALID_REQUEST` (other 400s), `SERVER` (5xx), `HTTP_<status>` otherwise. Authentication, HTTP 413/408, and server statuses take precedence over provider balance text. Its serializable `failure` retains the HTTP status plus a valid positive `Retry-After` seconds/date delay and `x-request-id` / `x-deepseek-request-id` when present. A pre-response transport failure (DNS, refused connection, TLS, proxy) throws `TRANSPORT` naming the configured endpoint and chaining the original rejection as `cause`; caller aborts throw `ABORTED`, and the loop's cancellation signal remains authoritative. Protocol violations throw `STREAM_CLOSED` (no `[DONE]`) or `MALFORMED_RESPONSE` (bad JSON payload). Unknown wire `finish_reason`s (e.g. `content_filter`, `insufficient_system_resource`) become `finish {kind: 'error', failure}` chunks, and a completed stream whose `stop` (or absent) finish opened no content blocks becomes a `finish {kind: 'error'}` with code `EMPTY_RESPONSE` (retried by default policy).
 
+## Request admission
+
+The adapter enforces `GenerateOptions.admission`: it serializes the body, calls the admission with the body's UTF-8 byte length and sha256 and the wire `model`, `max_tokens`, `thinking` and `reasoning_effort`, and only then calls `fetch`. A refusal throws before any network activity. The returned ticket is settled with the usage of the `usage` chunk, which `translate` emits only at `[DONE]`, and it is settled before the chunk is yielded, so a consumer that stops reading right after it loses nothing. Every other ending (an HTTP error status of any class, an abort, an idle timeout, a transport error, a stream cut before `[DONE]`, `[DONE]` without usage, a consumer that stops reading) abandons the ticket and leaves its reservation held. The adapter has no retry loop: one stream is one `fetch`.
+
 ## Model Experience
 
 ### DeepSeek request
@@ -112,6 +116,8 @@ Generated tokens follow the request's logged reasoning effort and `maxTokens`; o
 Loop-retained response blocks append to the next request and preserve its earlier reusable prefix; dropped blocks have no later cache effect. Changing the provider or model selects a different cache domain.
 
 ## Known Limitations and Deferred Work
+
+- The byte length passed to an admission is the size of the HTTP body, not a token count. It bounds the input tokens only if the tokenizer is byte-level and the chat template adds no more than the JSON structure does; neither is established, so a hard input cap is not claimed.
 
 - **A settings `models` list replaces the composition list wholesale** — settings-layer merging is per-field, and arrays are one field; per-entry catalog merging would need a keyed shape.
 - **`tool_choice` is not mapped** — not part of the core vocabulary (MVP cut, shared with the pi-ai twin).

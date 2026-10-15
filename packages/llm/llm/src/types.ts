@@ -353,4 +353,46 @@ export interface GenerateOptions {
    * generation policy. Ordinary conversation requests leave it unset.
    */
   purpose?: 'compaction' | 'session-title'
+  /**
+   * Admission of every physical request this call sends. An adapter that supports it calls the closure once per HTTP request,
+   * after the request body is built and before anything is sent, and settles the returned ticket when the provider reports
+   * usage. A refusal is thrown before any network activity. A call that sets it on an adapter that does not support it fails.
+   */
+  admission?: RequestAdmission
 }
+
+/** The facts of one serialized provider request, as an admission sees them. */
+export interface RequestAdmissionInput {
+  readonly model: string
+  /** UTF-8 byte length of the serialized request body: the input bound a byte-level tokenizer cannot exceed. */
+  readonly bodyBytes: number
+  /** sha256 (hex) of the serialized request body, to join a received request to its admission. */
+  readonly bodySha256: string
+  /** The `max_tokens` sent on the wire; `undefined` when the request carries none. */
+  readonly maxOutputTokens: number | undefined
+  /** The thinking mode sent on the wire, when one is sent. */
+  readonly thinking: string | undefined
+  /** The reasoning effort sent on the wire, when one is sent. */
+  readonly reasoningEffort: string | undefined
+  /** Whether any message carries content other than text, whose size the byte bound does not cover. */
+  readonly hasNonTextContent: boolean
+}
+
+/** A reservation held for one physical request until its usage is reported. */
+export interface RequestAdmissionTicket {
+  /**
+   * Record the usage the provider reported for this request, durably, before the caller sees it. A repeat with the same usage
+   * changes nothing; a different one is an error. A request that never reaches this call stays reserved as unknown.
+   * @param usage - disjoint token counts as reported at the end of the response.
+   */
+  settle(usage: TokenUsage): void
+  /** Mark the request finished without usage (aborted, failed, or stopped early). Its reservation stays held as unknown. */
+  abandon(): void
+}
+
+/**
+ * Admit one physical request: reserve its resources or throw an {@link LlmError} with code `ADMISSION_REFUSED`.
+ * @param request - the facts of the serialized request.
+ * @returns the ticket to settle or abandon.
+ */
+export type RequestAdmission = (request: RequestAdmissionInput) => RequestAdmissionTicket

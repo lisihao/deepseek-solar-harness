@@ -81,6 +81,10 @@ DeepSeek 请求身份独立于应用归因。凭据解析成功后，每个提�
 
 chat-completions 的非 2xx 响应会抛出稳定 code 的 `LlmError`：`AUTH`（401/403）、`INSUFFICIENT_BALANCE`（[DeepSeek HTTP 402](https://api-docs.deepseek.com/quick_start/error_codes/) 或提供方详细信息明确包含 `insufficient_balance`、`Insufficient Balance` 或“余额不足”）、`QUOTA`（其他配额、余额、点数或用量上限耗尽信息）、`RATE_LIMIT`（其他 429）、`CONTEXT_WINDOW_EXCEEDED`（提供方 code、type 或 message 标识上下文溢出的 400）、`INVALID_REQUEST`（其他 400）、`SERVER`（5xx），其他情况为 `HTTP_<status>`。认证、HTTP 413/408 和服务器状态的分类优先于提供方余额错误文本。其可序列化 `failure` 保留 HTTP 状态，以及有效的正 `Retry-After` 秒数／日期延迟和存在时的 `x-request-id` / `x-deepseek-request-id`。响应前传输失败（DNS、连接被拒绝、TLS、proxy）会抛出命名已配置端点的 `TRANSPORT`，并将原始拒绝作为 `cause`；调用方 abort 抛出 `ABORTED`，仍以 loop 的取消信号为准。协议违例抛出 `STREAM_CLOSED`（没有 `[DONE]`）或 `MALFORMED_RESPONSE`（JSON payload 格式错误）。未知协议 `finish_reason`（例如 `content_filter`、`insufficient_system_resource`）会变为 `finish {kind: 'error', failure}` 分片；已完成流如果使用 `stop`（或缺失）finish 但没有开启内容块，就会变为 `finish {kind: 'error'}`，code 为 `EMPTY_RESPONSE`（默认策略会重试）。
 
+## 请求准入
+
+adapter 强制执行 `GenerateOptions.admission`：序列化请求体后，用请求体的 UTF-8 字节数和 sha256 以及线上的 `model`、`max_tokens`、`thinking`、`reasoning_effort` 调用 admission，然后才调用 `fetch`。被拒绝时在任何网络活动之前抛出。返回的票据用 `usage` chunk 的 usage 结算（`translate` 只在 `[DONE]` 时发出它），并在该 chunk 交给消费者之前结算，所以消费者读到它后立即停止读取也不会丢失。其他任何结束方式（任何类别的 HTTP 错误状态、中止、空闲超时、传输错误、`[DONE]` 之前断流、没有 usage 的 `[DONE]`、消费者停止读取）都会放弃票据，并保持其预留不释放。adapter 没有重试循环：一次 stream 对应一次 `fetch`。
+
 ## 模型体验
 
 ### DeepSeek 请求
@@ -112,6 +116,8 @@ chat-completions 的非 2xx 响应会抛出稳定 code 的 `LlmError`：`AUTH`�
 loop 保留的响应块会追加到下一个请求，并保留其较早可复用前缀；已丢弃块不会影响后续 cache。更改提供方或模型会选择不同 cache 域。
 
 ## 已知限制与暂缓事项
+
+- 传给 admission 的字节数是 HTTP 请求体的大小，不是 token 数。只有分词器是字节级、且聊天模板增加的内容不超过 JSON 结构时，它才是输入 token 的上界；这两点都没有被证实，所以不声称硬性的输入上限。
 
 - **settings 的 `models` 列表会整体替换组合列表**：settings 层按字段合并，而数组是单个字段；按条目合并 catalog 需要带键的形状。
 - **未映射 `tool_choice`**：它不属于核心词汇（MVP 取舍，与 pi-ai twin 共享）。
