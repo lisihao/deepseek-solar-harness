@@ -7,6 +7,7 @@
  * model provider is replaced: `DEEPSEEK_BASE_URL` points the shipping DeepSeek adapter and model worker at a loopback server
  * that answers from the request, so the real client protocol, daemon, model-tool bridge, and RLM runtime run without a network
  * or an API key. The daemons are detached; this driver stops only the two it started and checks their identity first.
+ * It relies on `ps` and POSIX signals and is run on macOS and Linux; CI runs the snapshot suite only in its Linux job.
  */
 
 import { execFile } from 'node:child_process'
