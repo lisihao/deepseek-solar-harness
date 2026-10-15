@@ -64,7 +64,7 @@ daemon 根目录（在其 DSH home 之内，绝不在全局配置里）中的 `e
 
 账本只有一个所有者。打开它时先取得一把一次发布完整的所有者锁，所以锁文件不会在没有记录所有者的状态下存在；已被持有或读不出的锁绝不接管，所有者已退出的锁只有在移开的文件证实就是读到的那把过期锁之后才替换。账本只会在 daemon 锁已持有之后创建、恢复或写入。账本文件在任何改写之前先校验（版本、键、状态、计数、跟随序号的唯一 id、与 usage 一致的状态）；校验失败的账本原样保留且不发送任何请求，合计超过最大精确整数时拒绝。
 
-scope 只计量 API worker 的请求。在它之下，daemon 拒绝任何其他 worker 以及所有 Resident 或远程算子的派发，所以没有模型请求能绕过账本离开 daemon。scope 指定的模型会发送到线上，不论分配选了哪个层级；运行的 `model.allocated` 事件仍显示分配结果。
+scope 只计量 API worker 的请求。在它之下，daemon 拒绝任何其他 worker 以及所有 Resident 或远程算子的派发，所以 API worker 的模型请求都不能绕过账本离开 daemon。加载进 daemon 的任何其他插件（Skill 或 Browser Provider 模块）通过 daemon 上下文发起的模型调用，如果没有携带 admission，会被 `llm/stream` 上的监听器拒绝。scope 指定的模型会发送到线上，不论分配选了哪个层级；运行的 `model.allocated` 事件仍显示分配结果。
 
 `inputBound` 说明发送前如何约束输入 token。`request-bytes-audited` 预留请求体字节数，并在之后用 provider 报告的 usage 核对。它不是证明：只有分词器是字节级的、且聊天模板增加的内容不超过 JSON 结构时，字节数才是 token 数的上界；超出预留的请求只能在发送之后才被发现。`proven-token-count` 要求发送前就被证明的上界，本构建没有，所以要求它的 scope 不准入任何请求。该拒绝作为安全拒绝被测试；它并不意味着可以运行正式评测。官方 Chat Completions 页面把 `max_tokens` 定义为生成 token 的最大数，并把 reasoning token 列在 completion 明细之内，但没有说明上限包含它，也没有找到对整个请求的发送前计数。
 

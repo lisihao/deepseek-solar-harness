@@ -29,7 +29,14 @@ import type {
 } from '@deepseek-ai/dsh-continual-harness'
 import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
-import LlmRuntime, { type ContentBlock, type ContextSnapshotSection, type ResolvedRetryPolicy, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, {
+  ADMISSION_REFUSED_CODE,
+  type ContentBlock,
+  type ContextSnapshotSection,
+  type ResolvedRetryPolicy,
+  type StreamChunk,
+  type TokenUsage,
+} from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   ContinualHarnessMode,
@@ -402,6 +409,18 @@ function assertRlmBridgeAllowed(
       `RLM model-tool bridge requested unsealed parent tool: ${unsealedTool.name}`,
       'GRAPH_INVALID',
     )
+  }
+}
+
+/** The stream of a model call that carried no admission under an evaluation scope: one error finish, nothing sent. */
+async function * withoutAdmission(scopeId: string): AsyncGenerator<StreamChunk> {
+  await Promise.resolve()
+  yield {
+    type: 'finish',
+    reason: {
+      kind: 'error',
+      failure: { message: `evaluation scope ${scopeId} admits only calls that carry an admission; this one did not`, code: ADMISSION_REFUSED_CODE },
+    },
   }
 }
 
@@ -1312,6 +1331,14 @@ export class OrchestrationDaemon {
     await this.ctx.plugin(PhysicalOperatorRuntime)
     await this.ctx.plugin(FileTaskTemplateProvider, { dshHome: this.options.dshHome })
     await this.ctx.plugin(LlmRuntime)
+    const sealedScope = this.evaluation?.scope.scopeId
+    if (sealedScope !== undefined) {
+      // Under a scope every model call made through this daemon's context must carry an admission. The worker's calls do; a call
+      // from any other plugin loaded into the daemon does not, and is refused here without reaching an adapter.
+      this.ctx.on('llm/stream', (options, next): AsyncIterable<StreamChunk> => options.admission === undefined
+        ? withoutAdmission(sealedScope)
+        : next())
+    }
     await this.ctx.plugin(ModelWorkerRuntime)
     if (this.options.modelWorkerProviders === undefined) {
       await this.ctx.plugin(LocalCredentialProvider, { dshHome: this.options.dshHome, watch: true })

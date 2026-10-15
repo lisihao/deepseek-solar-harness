@@ -3007,6 +3007,23 @@ describe('orchestration daemon', () => {
       expect(ledgerOf(f).attempts.map(attempt => attempt.refusal)).toContain('input-bound-unproven')
     })
 
+    it('refuses a model call from any other plugin of the daemon that carries no admission, without reaching the endpoint', async () => {
+      const f = await fixture(treeHandler())
+      const daemon = new OrchestrationDaemon(optionsOf(f))
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close() })
+      type Reason = { kind: string; failure?: { code?: string } } | undefined
+      interface Llm { llm: { stream(options: object): AsyncIterable<{ type: string; reason?: Reason }> } }
+      const { llm } = (daemon as unknown as { ctx: Llm }).ctx
+      const message = { role: 'user', content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'other' } }
+      const reasons: Reason[] = []
+      for await (const chunk of llm.stream({ provider: 'deepseek-official', model: 'deepseek-v4-flash', messages: [message] })) {
+        if (chunk.type === 'finish') reasons.push(chunk.reason)
+      }
+      expect(reasons.map(reason => [reason?.kind, reason?.failure?.code])).toEqual([['error', 'ADMISSION_REFUSED']])
+      expect(f.fake.received).toHaveLength(0)
+    })
+
     it('refuses a worker other than the DeepSeek API worker, and Resident dispatch of a node that is not recursive', async () => {
       const f = await fixture(treeHandler())
       const worker = new KeylessModelWorker()
