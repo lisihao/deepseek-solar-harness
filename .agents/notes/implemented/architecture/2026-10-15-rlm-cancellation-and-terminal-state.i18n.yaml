@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-15-rlm-cancellation-and-terminal-state.md
-2026-10-15-rlm-cancellation-and-terminal-state.md: 950ff771e1c15832499d97e9d82a642f2bc2b40f
-2026-10-15-rlm-cancellation-and-terminal-state.zh.md: b3d7cff69f19c6d15f121e70e75ebd7bb0245d14
+2026-10-15-rlm-cancellation-and-terminal-state.md: fb08ecdf56be24f3fd09283c5898dce44e296b19
+2026-10-15-rlm-cancellation-and-terminal-state.zh.md: 91c70c23f185c2d31e92b254c25805f666f4e858
