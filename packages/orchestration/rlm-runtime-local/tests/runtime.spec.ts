@@ -1537,6 +1537,8 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     readonly failInterruptPlain?: readonly string[]
     /** Executions whose result rejects once an interrupt was requested, even if the request itself failed. */
     readonly rejectResult?: readonly string[]
+    /** Continuations survive their interrupt request, as a Resident turn that has not stopped yet does. */
+    readonly stuckContinuations?: boolean
     /** The child of this name is deleted at the moment the runtime first reads its result, right after it registered it. */
     readonly deleteOnRegistration?: string
   }
@@ -1589,7 +1591,7 @@ describe('LocalRlmRuntime after a permanent delete', () => {
       dispatchContinuation: async (request) => {
         continuations.push(String(request.sessionId))
         await gate.dispatch
-        return execution(`continuation:${String(request.sessionId)}`, String(request.commandId), true)
+        return execution(`continuation:${String(request.sessionId)}`, String(request.commandId), options.stuckContinuations !== true)
       },
     }
     const { ctx, service, sessionId } = await runtime(root, bindings)
@@ -1743,6 +1745,72 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     await t.service.interrupt(t.sessionId)
     expect(t.interrupted.filter(name => name === 'a1')).toHaveLength(2)
     await t.ctx.root.fiber.dispose()
+  })
+
+  describe('an execution that is dispatched while its subtree is being deleted and survives its interrupt', () => {
+    /** Each late path hands the runtime an execution after the delete; the execution ignores the interrupt request. */
+    const paths = [
+      ['child dispatch', 'c', { held: ['c'], stuck: ['c'] }],
+      ['message continuation', 'continuation', { stuckContinuations: true }],
+      ['heartbeat', 'continuation', { stuckContinuations: true }],
+    ] as const
+
+    async function lateExecution(label: (typeof paths)[number][0], options: TreeOptions) {
+      const t = await tree('dsh-rlm-closed-late-tracked-', options)
+      const opened = deferred<undefined>()
+      t.gate.dispatch = opened.promise
+      let admitted: Promise<unknown>
+      if (label === 'child dispatch') {
+        admitted = t.service.spawn({ commandId: RlmCommandId('late-c'), parentSessionId: t.sessionId, name: 'c', task: 'dispatched while deleting' })
+        await waitUntil(async () => (await t.service.listChildren(t.sessionId)).some(child => child.name === 'c'))
+      } else if (label === 'message continuation') {
+        admitted = t.service.sendMessage(message('late-message', t.a.sessionId, t.a1.sessionId))
+        await waitUntil(() => t.continuations.length === 1)
+      } else {
+        const heartbeat = await t.service.createHeartbeat({
+          sessionId: t.a1.sessionId, commandId: RlmCommandId('late-heartbeat'), instruction: 'check progress', interval: '1s',
+        })
+        admitted = t.service.pumpHeartbeats(new Date(Date.parse(heartbeat.nextRunAt!) + 1).toISOString())
+        await waitUntil(() => t.continuations.length === 1)
+      }
+      const target = label === 'child dispatch'
+        ? (await t.service.listChildren(t.sessionId)).find(child => child.name === 'c')!
+        : t.a
+      await t.service.deleteChild(t.sessionId, target.rlmChildId, RlmCommandId('delete-target'))
+      opened.resolve(undefined)
+      await admitted.catch(() => undefined)
+      const name = label === 'child dispatch' ? 'c' : `continuation:${String(t.a1.sessionId)}`
+      return { t, name }
+    }
+
+    it.each(paths)('keeps the refused %s tracked, so the root is not reported drained until it ends', async (label, _name, options) => {
+      const { t, name } = await lateExecution(label, options)
+      expect(t.interrupted).toContain(name)
+      await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
+      t.results.get(name)!.resolve({ status: 'settled' })
+      await expect(t.service.drain(t.sessionId, 500)).resolves.toMatchObject({ activeExecutions: 0 })
+      await t.ctx.root.fiber.dispose()
+    })
+
+    it('releases a refused execution whose result rejects', async () => {
+      const { t, name } = await lateExecution('child dispatch', { held: ['c'], stuck: ['c'] })
+      await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
+      t.results.get(name)!.reject(new Error('stopped late'))
+      await expect(t.service.drain(t.sessionId, 500)).resolves.toMatchObject({ activeExecutions: 0 })
+      await t.ctx.root.fiber.dispose()
+    })
+
+    it('interrupts a refused execution again when the root is interrupted or the delete is repeated', async () => {
+      const { t, name } = await lateExecution('child dispatch', { held: ['c'], stuck: ['c'] })
+      const count = () => t.interrupted.filter(value => value === name).length
+      const first = count()
+      await t.service.interrupt(t.sessionId)
+      expect(count()).toBe(first + 1)
+      const c = (await t.service.listChildren(t.sessionId)).find(child => child.name === 'c')!
+      await t.service.deleteChild(t.sessionId, c.rlmChildId, RlmCommandId('delete-c-again'))
+      expect(count()).toBe(first + 2)
+      await t.ctx.root.fiber.dispose()
+    })
   })
 
   it('does not report the root drained while an execution of a deleted descendant is still running', async () => {
