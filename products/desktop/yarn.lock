@@ -3384,7 +3384,7 @@ __metadata:
 
 "@deepseek-ai/dsh-rlm-runtime-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-rlm-runtime-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz::hash=bfbede&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-rlm-runtime-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz::hash=155492&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     typescript: "npm:^6.0.3"
   peerDependencies:
@@ -3394,7 +3394,7 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-rlm-runtime": ^0.1.0-rc.5
     "@deepseek-ai/dsh-sdk-protocol": ^0.1.0-rc.5
-  checksum: 10c0/7c5d311e45694e48265be9d71e13e926a0e1c33861014d20a530db73da2b2e56777854dd34ca04e881879009a1a15fd440719b9d46638a348955bee44f22e85e
+  checksum: 10c0/4972e46271752a76982916d0e6552109703d1fb2fd458a82ee9050d65a3c45e07c676011771e99bd70bc41e366ff738fe5d024c59516aff8ebb7ab85245215ca
   languageName: node
   linkType: hard
 
