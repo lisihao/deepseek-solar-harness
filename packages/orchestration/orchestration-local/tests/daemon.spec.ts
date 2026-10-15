@@ -2713,6 +2713,7 @@ describe('orchestration daemon', () => {
       const target = join(directory, name)
       await mkdir(target, { recursive: true })
       const origin = new URL(f.fake.baseURL).origin
+      const tree = daemon === undefined ? [] : await sessionTree(daemon)
       const requests = f.fake.received.map((request, index) => ({
         index,
         sha256: request.sha256,
@@ -2725,7 +2726,6 @@ describe('orchestration daemon', () => {
         ledgerAttemptId: state.attempts.find(attempt => attempt.bodySha256 === request.sha256)?.id,
         ...attemptSession(state.attempts.find(attempt => attempt.bodySha256 === request.sha256)?.label, tree),
       }))
-      const tree = daemon === undefined ? [] : await sessionTree(daemon)
       const settled = state.attempts.filter(attempt => attempt.state === 'settled')
       await writeFile(join(target, 'sessions.json'), `${JSON.stringify(tree, null, 2)}\n`)
       await writeFile(join(target, 'received-requests.json'), `${JSON.stringify(requests, null, 2)}\n`)
