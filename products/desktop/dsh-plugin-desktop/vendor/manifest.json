@@ -315,6 +315,11 @@
       "name": "RLM cancellation scope, permanent delete, and non-success terminal state (orchestration-local, rlm-runtime, rlm-runtime-local sealed together)",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "b9e45eaffbe2f173cef92d56b1ae704f28230818"
+    },
+    {
+      "name": "rlm-runtime-local README states what a delete persists, what it ignores, and what a restart loses (sealed alone; no behavior change)",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "35998600f1"
     }
   ],
   "sourcePackages": {
@@ -507,7 +512,7 @@
     "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "d7aba82d1c635e67bd3e3363aa3a030e82ab04e59b83e4e592bbff9adc596bb0",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "d474b00f2333f9397a37b22e14163ffbc60aa4e91626f82d222d66037ffa7236",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "45a865455ea72326256377bf9b03808b80fb90bbcabe125fcb3a2236633542b4",
-    "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "a49c3e39f0a7aef29c3b2f561424ccdc410ad4ded1fc84eb3d8288f8f619f5f5",
+    "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "6cac343e288ed0c310f319f2e74d6fce1c340a5115e5ada245d2c9526c795605",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-0.1.0-rc.5.tgz": "517e1df4d11fc9ae7b5d55bd28819dc0b29509009abd75a5b67f12d2c359457f",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-local-0.1.0-rc.5.tgz": "a94aa3b9f07eeb2f24fbb3890c2381ee4ef443feded2889c1a1270c37bfbd4a1",
     "dsh-packages/deepseek-ai-dsh-scheduling-evidence-0.1.0-rc.5.tgz": "21ca32d1e2d4f9418b65bf61070adad22f56ff852419fbe207d459d102e53e08",

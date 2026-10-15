@@ -1778,9 +1778,9 @@ describe('LocalRlmRuntime after a permanent delete', () => {
         : t.a
       await t.service.deleteChild(t.sessionId, target.rlmChildId, RlmCommandId('delete-target'))
       opened.resolve(undefined)
-      await admitted.catch(() => undefined)
+      const admission = await admitted.then(() => 'registered', (error: unknown) => (error instanceof Error ? error.message : String(error)))
       const name = label === 'child dispatch' ? 'c' : `continuation:${String(t.a1.sessionId)}`
-      return { t, name }
+      return { t, name, admission }
     }
 
     it.each(paths)('keeps the refused %s tracked, so the root is not reported drained until it ends', async (label, _name, options) => {
@@ -1800,6 +1800,22 @@ describe('LocalRlmRuntime after a permanent delete', () => {
       await t.ctx.root.fiber.dispose()
     })
 
+    it('names a rejected interrupt of a refused execution whose result stays pending, and keeps it reachable until it settles', async () => {
+      const { t, name, admission } = await lateExecution('child dispatch', { held: ['c'], stuck: ['c'], failInterrupt: ['c'] })
+      expect(admission).toContain('interrupting it also failed: c cannot be interrupted')
+      await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
+      const count = () => t.interrupted.filter(value => value === name).length
+      const first = count()
+      await t.service.interrupt(t.sessionId)
+      expect(count()).toBe(first + 1)
+      const c = (await t.service.listChildren(t.sessionId)).find(child => child.name === 'c')!
+      await expect(t.service.deleteChild(t.sessionId, c.rlmChildId, RlmCommandId('delete-c-again'))).rejects.toThrow('c cannot be interrupted')
+      expect(count()).toBe(first + 2)
+      t.results.get(name)!.resolve({ status: 'settled' })
+      await expect(t.service.drain(t.sessionId, 500)).resolves.toMatchObject({ activeExecutions: 0 })
+      await t.ctx.root.fiber.dispose()
+    })
+
     it('interrupts a refused execution again when the root is interrupted or the delete is repeated', async () => {
       const { t, name } = await lateExecution('child dispatch', { held: ['c'], stuck: ['c'] })
       const count = () => t.interrupted.filter(value => value === name).length
@@ -1811,6 +1827,18 @@ describe('LocalRlmRuntime after a permanent delete', () => {
       expect(count()).toBe(first + 2)
       await t.ctx.root.fiber.dispose()
     })
+  })
+
+  it('keeps a rejected interrupt and a pending result visible until the result settles', async () => {
+    const t = await tree('dsh-rlm-closed-rejected-interrupt-pending-', { held: ['a1'], failInterrupt: ['a1'] })
+    await expect(t.service.deleteChild(t.sessionId, t.a.rlmChildId, RlmCommandId('delete-a'))).rejects.toThrow('a1 cannot be interrupted')
+    await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
+    const before = t.interrupted.filter(name => name === 'a1').length
+    await t.service.interrupt(t.sessionId)
+    expect(t.interrupted.filter(name => name === 'a1').length).toBe(before + 1)
+    t.results.get('a1')!.resolve({ status: 'settled' })
+    await expect(t.service.drain(t.sessionId, 500)).resolves.toMatchObject({ activeExecutions: 0 })
+    await t.ctx.root.fiber.dispose()
   })
 
   it('does not report the root drained while an execution of a deleted descendant is still running', async () => {
