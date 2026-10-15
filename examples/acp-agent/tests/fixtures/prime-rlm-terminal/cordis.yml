@@ -1,4 +1,6 @@
-# All durable state belongs to the isolated smoke home.
-- id: prime-rlm-terminal-runtime
-  name: '@deepseek-ai/dsh-rlm-runtime-local'
-  config: !!js process.env.DSH_HOME
+# The Loader assembles the orchestration client service. The driver supplies the keyless daemon it talks to.
+- id: orchestration
+  name: '@deepseek-ai/dsh-orchestration-local'
+  config:
+    autoStart: false
+    dshHome: !!js process.env.DSH_HOME
