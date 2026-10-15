@@ -38,4 +38,4 @@ Status: implemented
 
 ## Testing
 
-`rlm-runtime-local` 和 `orchestration-local` 的测试用 keyless fake 驱动真实的 daemon、REPL bridge 和 model-worker 路径，覆盖删除的各种情形（排队消息、到期 heartbeat、晚到的 dispatch、重启、中断失败、drain），以及失败回合之后的 goal 和 Autonomous Mode。keyless 的 `prime-rlm-delete` 和 `prime-rlm-terminal` 快照固定了装配后的完整记录。动态覆盖缺口：中断 child 的后续回合、Resident 失败路径，以及失败的消息 continuation 之后的 Autonomous 轮次。
+`rlm-runtime-local` 和 `orchestration-local` 的测试用 keyless fake 驱动真实的 daemon、REPL bridge 和 model-worker 路径，覆盖删除的各种情形（排队消息、到期 heartbeat、晚到的 dispatch、重启、中断失败、drain），以及失败回合之后的 goal 和 Autonomous Mode。keyless 的 `prime-rlm-delete` 快照通过生产环境的 app boot 和 YAML Loader 启动运行时。keyless 的 `prime-rlm-terminal` 快照从 Loader 得到 orchestration 客户端服务，并通过它驱动每次 run，但 daemon 由驱动自己构造并带一个 keyless worker，因为生产 daemon 的 model worker 来自 DeepSeek 凭据，没有替换它的接口。动态覆盖缺口：中断 child 的后续回合、Resident 失败路径，以及失败的消息 continuation 之后的 Autonomous 轮次。
