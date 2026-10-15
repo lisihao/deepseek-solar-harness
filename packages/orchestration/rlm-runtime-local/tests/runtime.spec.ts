@@ -1533,12 +1533,15 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     readonly held?: readonly string[]
     readonly stuck?: readonly string[]
     readonly failInterrupt?: readonly string[]
+    /** Executions whose interrupt rejects with a value that is not an Error. */
+    readonly failInterruptPlain?: readonly string[]
   }
   async function tree(prefix: string, options: TreeOptions = {}) {
     const root = await mkdtemp(join(tmpdir(), prefix))
     const held = new Set(options.held ?? [])
     const stuck = new Set(options.stuck ?? [])
     const failInterrupt = new Set(options.failInterrupt ?? [])
+    const failInterruptPlain = new Set(options.failInterruptPlain ?? [])
     const results = new Map<string, ReturnType<typeof deferred<RlmChildExecutionResult>>>()
     const interrupted: string[] = []
     const continuations: string[] = []
@@ -1554,6 +1557,8 @@ describe('LocalRlmRuntime after a permanent delete', () => {
         interrupt: (): Promise<void> => {
           interrupted.push(name)
           if (failInterrupt.has(name)) return Promise.reject(new Error(`${name} cannot be interrupted`))
+          // oxlint-disable-next-line prefer-promise-reject-errors -- the service contract accepts any rejection value
+          if (failInterruptPlain.has(name)) return Promise.reject(`${name} refused`)
           if (settleOnInterrupt) result.resolve({ status: 'failed', stopReason: 'aborted', error: 'interrupted' })
           return Promise.resolve()
         },
@@ -1635,6 +1640,37 @@ describe('LocalRlmRuntime after a permanent delete', () => {
     expect(t.interrupted).toContain('c')
     expect((await t.service.listChildren(t.sessionId)).find(child => child.name === 'c')?.lifecycle).toBe('deleted')
     await expect(t.service.drain(t.sessionId, 200)).resolves.toMatchObject({ activeExecutions: 0 })
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it.each([
+    ['c', { failInterrupt: ['c'] }, 'interrupting it also failed: c cannot be interrupted'],
+    ['d', { failInterruptPlain: ['d'] }, 'interrupting it also failed: d refused'],
+  ] as const)('names a failed interrupt of the late execution %s in the refusal', async (name, options, expected) => {
+    const t = await tree('dsh-rlm-closed-late-failed-interrupt-', options)
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const spawned = t.service.spawn({ commandId: RlmCommandId(`late-${name}`), parentSessionId: t.sessionId, name, task: 'dispatched while deleting' })
+    const settled = spawned.then(() => 'registered', (error: unknown) => (error instanceof Error ? error.message : String(error)))
+    await waitUntil(async () => (await t.service.listChildren(t.sessionId)).some(child => child.name === name))
+    const child = (await t.service.listChildren(t.sessionId)).find(value => value.name === name)!
+    await t.service.deleteChild(t.sessionId, child.rlmChildId, RlmCommandId(`delete-${name}`))
+    opened.resolve(undefined)
+    await expect(settled).resolves.toContain(expected)
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('records a child whose dispatch failed with a value that is not an Error', async () => {
+    const t = await tree('dsh-rlm-closed-plain-dispatch-failure-')
+    const opened = deferred<undefined>()
+    t.gate.dispatch = opened.promise
+    const spawned = t.service.spawn({ commandId: RlmCommandId('plain-failure'), parentSessionId: t.sessionId, name: 'e', task: 'dispatch rejects' })
+    const settled = spawned.then(() => 'registered', (error: unknown) => error)
+    await waitUntil(async () => (await t.service.listChildren(t.sessionId)).some(child => child.name === 'e'))
+    opened.reject('dispatch refused')
+    await expect(settled).resolves.toBe('dispatch refused')
+    const children = await t.service.listChildren(t.sessionId)
+    expect(children.find(child => child.name === 'e')).toMatchObject({ lifecycle: 'failed', error: 'dispatch refused' })
     await t.ctx.root.fiber.dispose()
   })
 
