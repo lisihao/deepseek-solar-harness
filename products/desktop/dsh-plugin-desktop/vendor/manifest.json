@@ -334,7 +334,7 @@
     {
       "name": "Evaluation scope ledger: admission at the physical request, scope generation limits, and the owner-locked request ledger (llm, llm-deepseek, model-worker, model-worker-deepseek and orchestration-local sealed together; no version change)",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "3d193447aa"
+      "commit": "3bb78b6ce6"
     }
   ],
   "sourcePackages": {
@@ -516,7 +516,7 @@
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "87bebe7ffe31501a109b9f5d172fdf839a311347b0a8a4e6f0cf793880aea92b",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "71b91e5233f218e5d31c56724b1eb885ff73e367bc54499af83a4e082e69a06f",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "ae7f77c743f1664388595ac06cf3c53d2ee17484d3791ae4ef79f32c411a0fba",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "fd9722f021b75686364464ab0b87f4ec86076b6875f9dd442d26317e57c849be",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "af6f15649edb3ef916bf7cfa5fd22c8df5cbc79a8a50514f9cfd2390555f4001",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "2ef397368e994f1f5fb22958ff64f110e696e77bcdd2702c3d2f58e13821f36b",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "ff739e592e964c0af34c4b13b9598d61aeba26090e6b41ccabaaee4296a0da2b",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "70c32494b88d6ad6cbc68dfca97cb9644f92bd69c66b3a1ec28a4ee5b8fff11d",
