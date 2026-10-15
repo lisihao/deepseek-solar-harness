@@ -18,7 +18,7 @@
 
 Provider 在 `state.json` 中保存版本 5 状态。构造时会迁移版本 1 至 4，并在注册 runtime owner 前原子重写该文件。迁移后的 Child 标记为 `modelOrigin: legacy`；缺少结果的已结算 Child Receipt 会变为 `indeterminate`，绝不会自动再次派发。替换旧 Provider 时保留私有的升级前状态副本：回退旧二进制时也必须恢复兼容的状态文件。
 
-`interrupt(sessionId)` 请求该会话及其下方每个会话当前活动的执行停止，包括已删除 child 中仍在停止的执行，并在这些请求结算时返回，不是在执行停止时返回。它不关闭任何东西：之后的消息或到期的 heartbeat 仍会准入新的执行。`deleteChild` 是永久的。它在第一个 await 之前就关闭该 child 的子树并记录命令。已关闭的会话不再准入消息投递、到期 heartbeat、spawn、cell、heartbeat 创建，也不再收发消息；`trackExecution` 会中断随后才完成的 dispatch，而不是登记它。该状态已持久化，重启后仍然关闭。随后 `deleteChild` 中断该 child 下方每个活动的执行。如果某个中断被拒绝，命令以第一个拒绝失败：子树保持关闭，回执为 `failed`，相同命令 id 返回该失败，新的删除命令会再次中断。已完成的部分中断不会回滚，运行时也不证明被中断的执行已经停止。`drain` 会统计已删除后代中仍在运行的执行，因此根不会在它们停止前被报告为已排空；排给已删除会话的消息不计入，也永远不会投递。删除之后到达的结果会被忽略。`drain` 返回最后一个 continuation 结果，带有它自己的 `status`、`stopReason` 和部分 `output`，不会把失败或不确定的 continuation 改写成成功。
+`interrupt(sessionId)` 请求该会话及其下方每个会话当前活动的执行停止，包括已删除 child 中仍在停止的执行和尚未结束的被拒绝执行，并在这些请求结算时返回，不是在执行停止时返回。它不关闭任何东西：之后的消息或到期的 heartbeat 仍会准入新的执行。`deleteChild` 是永久的。它在第一个 await 之前就关闭该 child 的子树并记录命令。已关闭的会话不再准入消息投递、到期 heartbeat、spawn、cell、heartbeat 创建，也不再收发消息；`trackExecution` 会中断随后才完成的 dispatch、拒绝它，并在它结束前继续把它计入。被拒绝的执行和已登记的执行一样只存在于内存，重启后会丢失。该状态已持久化，重启后仍然关闭。随后 `deleteChild` 中断该 child 下方每个活动的执行。如果某个中断被拒绝，命令以第一个拒绝失败：子树保持关闭，回执为 `failed`，相同命令 id 返回该失败，新的删除命令会再次中断。已完成的部分中断不会回滚，运行时也不证明被中断的执行已经停止。`drain` 会统计已删除后代中仍在运行的执行，以及尚未结束的被拒绝执行，因此根不会在它们停止前被报告为已排空；排给已删除会话的消息不计入，也永远不会投递。删除之后到达的结果会被忽略。`drain` 返回最后一个 continuation 结果，带有它自己的 `status`、`stopReason` 和部分 `output`，不会把失败或不确定的 continuation 改写成成功。
 
 ## Model Experience
 

@@ -1762,7 +1762,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract trackExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<() => void>',
-        description: 'Register an admitted native execution so family messages queue behind it. A session closed by a delete refuses the execution: it is interrupted, never registered, and the call rejects with `RLM_UNAVAILABLE`.',
+        description: 'Register an admitted native execution so family messages queue behind it. A session closed by a delete refuses the execution: it is interrupted and not registered to the session, the call rejects with `RLM_UNAVAILABLE`, and the execution stays counted by `drain` and reachable by `interrupt` and later delete commands until its result settles.',
         parameters: [{ name: 'sessionId', description: 'owning session.' }, { name: 'execution', description: 'accepted native execution.' }],
         returns: 'disposer for the tracking association.',
       },
@@ -1786,7 +1786,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract deleteChild(parentSessionId: RlmRuntimeSessionId, childId: RlmChildId, commandId: RlmCommandId): Promise<void>',
-        description: 'Permanently delete one child and everything below it. Before the first await the subtree is closed and the command is recorded: no message delivery, heartbeat, spawn, cell, or send is admitted for it afterwards, a restart keeps it closed, and a dispatch that finishes later is interrupted instead of registered. Then every active execution in the subtree is interrupted. A rejected interrupt fails the command with the first error; the subtree stays closed, the same command id returns the stored failure, and a new delete command interrupts again.',
+        description: 'Permanently delete one child and everything below it. Before the first await the subtree is closed and the command is recorded: no message delivery, heartbeat, spawn, cell, or send is admitted for it afterwards, a restart keeps it closed, and a dispatch that finishes later is interrupted and kept counted until it ends. Then every active execution in the subtree is interrupted. A rejected interrupt fails the command with the first error; the subtree stays closed, the same command id returns the stored failure, and a new delete command interrupts again.',
         parameters: [{ name: 'parentSessionId', description: 'parent session identity.' }, { name: 'childId', description: 'child identity.' }, { name: 'commandId', description: 'delete command; a repeated id returns the stored outcome.' }],
         returns: 'after every interrupt request settled, which is not proof that the executions stopped.',
       },
@@ -1816,7 +1816,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract drain(sessionId: RlmRuntimeSessionId, maxWaitMs: number): Promise<RlmDrainResultV1>',
-        description: 'Wait for descendant work and messages to drain. Executions of deleted descendants that are still stopping count as active; messages queued for a deleted session do not count.',
+        description: 'Wait for descendant work and messages to drain. Executions of deleted descendants that are still stopping, and executions refused after a delete that have not ended, count as active; messages queued for a deleted session do not count.',
         parameters: [{ name: 'sessionId', description: 'subtree root.' }, { name: 'maxWaitMs', description: 'bounded wait.' }],
         returns: 'final activity counts.',
       },
