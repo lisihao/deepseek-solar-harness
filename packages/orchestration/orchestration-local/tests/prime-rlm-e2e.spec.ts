@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
@@ -651,4 +652,83 @@ describe('Prime-compatible orchestration offline E2E', () => {
     expect(events.events.filter(event => event.type === 'node.dispatched')).toHaveLength(4)
     expect(events.events.at(-1)?.type).toBe('run.completed')
   }, 15_000)
+})
+
+describe('what a Resident root and a Resident child are given', () => {
+  const CANARY = 'CANARY-ONLY-IN-THE-ROOT-TASK-7731'
+  const ROOT_TASK = `Run the capture scenario. Private note for the root only: ${CANARY}. Final rule: reply with only {"verdict": "<text>"}. ROOT-TAIL-RULE`
+  const CHILD_TAIL = 'Final rule: end the report with the exact token CHILD-TAIL-RULE.'
+  // Long enough to cross any small cap on a task; the only statement of the output rule is its last line.
+  const CHILD_TASK = `Inspector task: read your context and report. ${'Detail line of the inspector task. '.repeat(160)}${CHILD_TAIL}`
+
+  function normalized(text: string): string {
+    return text
+      .replaceAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu, '<uuid>')
+      .replaceAll(/[0-9a-f]{64}/gu, '<sha256>')
+      .replaceAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, '<time>')
+      // The temporary home, named afresh each run, appears in the workspace path the prompt states.
+      .replaceAll(/[^\s"\\]*dsh-prime-capture-[A-Za-z0-9]+/gu, '<home>')
+  }
+
+  /** Runs one explicit RLM node whose root spawns one child; returns what the provider was asked and what the child's REPL showed. */
+  async function capture() {
+    const fixture = await e2eHarness('dsh-prime-capture-')
+    const childContext: { value: string | undefined } = { value: undefined }
+    fixture.resident.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined) return
+      if (request.commandId.endsWith(':rlm:root')) {
+        const result = await callTypescriptRepl(request, `${request.commandId}:program`, `await rlm(${JSON.stringify(CHILD_TASK)}, { name: "inspector" }); "spawned"`)
+        fixture.resident.cellResults.set(request.commandId, result)
+      } else if (request.commandId.includes(':rlm:rlm-child-')) {
+        const result = await callTypescriptRepl(request, `${request.commandId}:program`, 'JSON.stringify(context)')
+        childContext.value = typeof result.value === 'string' ? result.value : undefined
+        fixture.resident.cellResults.set(request.commandId, result)
+      }
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: ROOT_TASK },
+      admission: admission({ sourceSessionId: 'capture-rlm', rlm: 'enabled' }),
+      graph: taskGraph(fixture.workspace, [node('capture', ROOT_TASK, { operatorId: 'codex' })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    await eventually(() => Promise.resolve(childContext.value), value => value !== undefined)
+    const requests = fixture.resident.requests.filter(request => request.modelToolBridge !== undefined).map((request) => {
+      const who = request.commandId.endsWith(':rlm:root') ? 'root' : 'child'
+      const prompt = normalized(request.prompt?.map(block => block.text ?? '').join('\n') ?? '')
+      return {
+        who, prompt, tools: request.modelToolBridge?.tools.map(tool => tool.name) ?? [], nativeToolPolicy: request.nativeToolPolicy,
+        promptSha256: createHash('sha256').update(prompt).digest('hex'),
+      }
+    }).sort((left, right) => left.who.localeCompare(right.who))
+    const context = JSON.parse(normalized(childContext.value ?? 'null')) as Record<string, unknown> | null
+    const directory = process.env.DSH_REQUEST_CAPTURE_DIR
+    if (directory !== undefined) {
+      await mkdir(directory, { recursive: true })
+      await writeFile(join(directory, 'resident-capture.json'), `${JSON.stringify({ requests, childContext: context }, null, 2)}\n`)
+    }
+    return { requests, context }
+  }
+
+  it('gives the child its own whole task and its last line, and nothing of the root\'s private note, in the request', async () => {
+    const { requests } = await capture()
+    const root = requests.find(request => request.who === 'root')
+    const child = requests.find(request => request.who === 'child')
+    expect(root?.prompt).toContain(CANARY)
+    expect(root?.prompt).toContain('ROOT-TAIL-RULE')
+    expect(root?.tools).toEqual(['typescript_repl'])
+    expect(child?.prompt).toContain(CHILD_TASK)
+    expect(child?.prompt).toContain(CHILD_TAIL)
+    expect(child?.prompt).not.toContain(CANARY)
+    expect(child?.tools).toEqual(['typescript_repl'])
+    expect(child?.nativeToolPolicy).toBe('disabled')
+  })
+
+  // The child's REPL shows a clone of the root's context, whose `task` is the root's whole task. Fixed by the next commit; until
+  // then this test is expected to fail, and the failure is the before evidence.
+  it.fails('shows the child\'s REPL its own task and none of the root\'s private note', async () => {
+    const { context } = await capture()
+    expect(context?.task).toBe(CHILD_TASK)
+    expect(JSON.stringify(context)).not.toContain(CANARY)
+  })
 })

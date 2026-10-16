@@ -26,13 +26,23 @@ export type FakeReply =
   | { readonly kind: 'tool'; readonly name: string; readonly arguments: string; readonly usage?: FakeUsage }
   | { readonly kind: 'text'; readonly text: string; readonly finish: 'stop' | 'length'; readonly usage?: FakeUsage }
 
+/** One chat-completions request body as the adapter sent it. */
+export interface FakeBody {
+  readonly model?: string
+  readonly messages?: readonly FakeMessage[]
+  readonly tools?: readonly unknown[]
+  readonly [key: string]: unknown
+}
+
 /** Decides the reply for one request; it may wait, for example for a gate the driver opens later. */
-export type FakeHandler = (messages: readonly FakeMessage[]) => FakeReply | Promise<FakeReply>
+export type FakeHandler = (messages: readonly FakeMessage[], body: FakeBody) => FakeReply | Promise<FakeReply>
 
 /** A running fake and what it was asked. */
 export interface FakeDeepSeek {
   readonly baseURL: string
   readonly requests: readonly (readonly FakeMessage[])[]
+  /** The whole body of every request, in arrival order: model, messages, and the tools offered. */
+  readonly bodies: readonly FakeBody[]
   close(): Promise<void>
 }
 
@@ -53,6 +63,8 @@ function sse(response: ServerResponse, payload: unknown): void {
   response.write(`data: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}\n\n`)
 }
 
+let toolCallCounter = 0
+
 function writeReply(response: ServerResponse, reply: FakeReply): void {
   const usage = reply.usage === undefined
     ? { prompt_tokens: 3, completion_tokens: 2 }
@@ -64,7 +76,9 @@ function writeReply(response: ServerResponse, reply: FakeReply): void {
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
   if (reply.kind === 'tool') {
     const midpoint = Math.max(1, Math.floor(reply.arguments.length / 2))
-    const first = { index: 0, id: 'fake-call', type: 'function', function: { name: reply.name, arguments: reply.arguments.slice(0, midpoint) } }
+    // Each call has its own id: the runtime treats a repeated tool call id of one session as a conflicting repeat of the first cell.
+    toolCallCounter += 1
+    const first = { index: 0, id: `fake-call-${String(toolCallCounter)}`, type: 'function', function: { name: reply.name, arguments: reply.arguments.slice(0, midpoint) } }
     const second = { index: 0, function: { arguments: reply.arguments.slice(midpoint) } }
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [first] }, finish_reason: null }] })
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [second] }, finish_reason: null }] })
@@ -90,6 +104,7 @@ async function body(request: IncomingMessage): Promise<string> {
  */
 export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepSeek> {
   const requests: (readonly FakeMessage[])[] = []
+  const bodies: FakeBody[] = []
   const open = new Set<ServerResponse>()
   const server: Server = createServer((request, response) => {
     open.add(response)
@@ -102,10 +117,11 @@ export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepS
         return
       }
       if (request.method === 'POST' && /\/chat\/completions$/u.test(url)) {
-        const parsed = JSON.parse(await body(request)) as { messages?: FakeMessage[] }
+        const parsed = JSON.parse(await body(request)) as FakeBody
         const messages = parsed.messages ?? []
         requests.push(messages)
-        writeReply(response, await handler(messages))
+        bodies.push(parsed)
+        writeReply(response, await handler(messages, parsed))
         return
       }
       response.writeHead(404, { 'content-type': 'application/json' })
@@ -120,6 +136,7 @@ export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepS
   return {
     baseURL: `http://127.0.0.1:${String(port)}`,
     requests,
+    bodies,
     close: async () => {
       for (const response of open) response.destroy()
       await new Promise<void>((resolve) => { server.close(() => { resolve() }) })

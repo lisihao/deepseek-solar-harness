@@ -250,5 +250,109 @@
       "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\nepsilon figure is 5\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nRun scenario batched-messages. Final rule: reply with only {\"verdict\": \"<text>\"}.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: handles.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- child \"delta\": <running or idle>\n- child \"epsilon\": idle\n- child \"gamma\": <running or idle>\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe message above is delivered in full; do not call agentMessage.read to fetch it again.\nProcess the queued family message using steer ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result."
     ]
   },
+  "captured": {
+    "run": "completed",
+    "node": "passed",
+    "stopReasons": [
+      "completed"
+    ],
+    "continuations": [
+      "rlm.message.continuation.settled"
+    ],
+    "requests": [
+      {
+        "who": "root",
+        "round": 0,
+        "roles": [
+          "user"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": false,
+        "bodySha256": "28c0e694f7414e3cc856a134fee25e2d79e4e7b6afc5b447956843d610e12864"
+      },
+      {
+        "who": "root",
+        "round": 1,
+        "roles": [
+          "user",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": true,
+        "bodySha256": "5bf1125a0906856959bb8844630566b07a3000dc11f253497a0b5339542184b4"
+      },
+      {
+        "who": "child",
+        "round": 0,
+        "roles": [
+          "user"
+        ],
+        "tools": 1,
+        "containsRootMarker": false,
+        "containsRootTail": false,
+        "containsChildTail": true,
+        "bodySha256": "80d6eb6d926077a3c7f6bf3bbaf6000defab6b34cb62e50315e02f56a7dbfe0d"
+      },
+      {
+        "who": "child",
+        "round": 1,
+        "roles": [
+          "user",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": true,
+        "bodySha256": "ae70c71185bd74b8f539fc4fa56d83ffa612e323b129f403c148147f3a3add43"
+      },
+      {
+        "who": "child",
+        "round": 2,
+        "roles": [
+          "user",
+          "assistant",
+          "tool",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": true,
+        "bodySha256": "04d0f1c820ee5477feb906519f15c9f1d84a6c45f3fe4d7934b7a5926c3de041"
+      },
+      {
+        "who": "continuation",
+        "round": 0,
+        "roles": [
+          "user"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": false,
+        "bodySha256": "966da1030d5fae609a225f4e0703904c2ddd1599d1cf43bebaca27edbd4f41f1"
+      }
+    ],
+    "childContext": {
+      "keys": [
+        "capabilityPlanRef",
+        "contextPacketRef",
+        "graphCertificateHash",
+        "nodeId",
+        "runId",
+        "task"
+      ],
+      "taskIsTheChildsOwn": false,
+      "containsRootMarker": true
+    }
+  },
   "daemonsStopped": true
 }

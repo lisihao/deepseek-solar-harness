@@ -19,16 +19,22 @@
  * ends, so the root is continued once, for both messages, under one worker command. The transcript holds the prompt that
  * continuation was given, the delivered and terminal events of both messages, and the usage the run recorded for that command.
  *
+ * The `context-capture` scenario records every request the shipping worker sent for a root, one child, and the root's message
+ * continuation: what each was given, whether a marker that only the root's task carries reaches the child (in its request and in
+ * the `context` its REPL shows), and whether the last line of each task reaches the model. With `DSH_REQUEST_CAPTURE_DIR` set it
+ * also writes the normalized bodies there, for a before and after comparison; nothing else reads that variable.
+ *
  * `DSH_TERMINAL_FIXTURE_FAULT` is read only by the fault tests of this fixture; it is ignored when unset.
  */
 
+import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { OrchestrationArtifactRef, type LogicalTaskGraphV1, type OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
-import { messageText, startFakeDeepSeek, type FakeDeepSeek, type FakeMessage, type FakeReply, type FakeUsage } from './fake-deepseek.ts'
+import { messageText, startFakeDeepSeek, type FakeBody, type FakeDeepSeek, type FakeMessage, type FakeReply, type FakeUsage } from './fake-deepseek.ts'
 
 const configPath = process.argv[2]
 const home = process.env.DSH_HOME
@@ -53,6 +59,8 @@ interface Scenario {
   readonly context?: boolean
   /** The `batched-messages` scenario: two children report while the root's turn is still open. */
   readonly batch?: boolean
+  /** The `context-capture` scenario: a root, one child, and a continuation, with every request recorded. */
+  readonly capture?: boolean
 }
 
 // The tasks of the `context-prompts` scenario. The root's last sentence is the only statement of its output format.
@@ -94,6 +102,20 @@ const BATCH_ROUNDS: Record<'batch' | 'single', readonly FakeUsage[]> = {
 const servedRounds: Array<{ readonly continuation: string; readonly round: number; readonly usage: FakeUsage }> = []
 /** The raw prompts of the root's message continuations in the `batched-messages` scenario. */
 const batchPrompts: string[] = []
+
+// The `context-capture` scenario. A marker only the root's task carries, and a last line in each task that the model must see.
+const CANARY = 'CANARY-ONLY-IN-THE-ROOT-TASK-7731'
+const CAPTURE_ROOT_TAIL = 'Final rule: reply with only {"verdict": "<text>"}. ROOT-TAIL-RULE'
+const CAPTURE_ROOT_TASK = `Run scenario context-capture. Private note for the root only: ${CANARY}. ${CAPTURE_ROOT_TAIL}`
+const CHILD_TAIL = 'Final rule: end the report with the exact token CHILD-TAIL-RULE.'
+// Long enough to cross any small cap on a task, with the only statement of the output rule on its last line.
+const CAPTURE_CHILD_TASK = `Inspector task: read your context and report what it says. ${'Detail line of the inspector task. '.repeat(160)}${CHILD_TAIL}`
+const CAPTURE_FIGURE = 'inspector figure is 6'
+/** Opens when the child has sent its message, so the root's turn ends with that message waiting. */
+const captureChildDone = Promise.withResolvers<undefined>()
+type CaptureWho = 'root' | 'child' | 'continuation'
+/** Every request body of the `context-capture` scenario, with who it was for and the index of its tool round. */
+const capturedRequests: Array<{ readonly who: CaptureWho; readonly round: number; readonly body: FakeBody }> = []
 
 /** The prompts the `context-prompts` scenario captured from the requests the daemon's model worker sent, by who received them. */
 const captured: { rootContinuations: string[]; childContinuations: string[] } = { rootContinuations: [], childContinuations: [] }
@@ -189,6 +211,44 @@ async function batchReply(messages: readonly FakeMessage[]): Promise<FakeReply> 
   return repl(`await agentMessage.send(${JSON.stringify(figure)}, { receiverRole: "parent", mode: "auto" }); "sent"`)
 }
 
+/**
+ * Answers the requests of the `context-capture` scenario and records each body. The child's first round reads its own `context`;
+ * the next request carries that value back as a tool result, which is how the scenario sees what the child's REPL showed.
+ */
+async function captureReply(messages: readonly FakeMessage[], body: FakeBody): Promise<FakeReply> {
+  const first = messages[0]
+  if (first === undefined) throw new Error('fake DeepSeek received a request without messages')
+  const text = taskText(first)
+  const round = messages.filter(message => message.role === 'tool').length
+  const repl = (code: string): FakeReply => ({ kind: 'tool', name: 'typescript_repl', arguments: JSON.stringify({ code }) })
+  const answer = (output: string): FakeReply => ({ kind: 'text', text: output, finish: 'stop' })
+  const record = (who: CaptureWho): void => { capturedRequests.push({ who, round, body }) }
+  if (text.includes('Agent message from')) {
+    record('continuation')
+    counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
+    return answer('capture continuation output')
+  }
+  if (text.includes(CAPTURE_ROOT_TASK)) {
+    record('root')
+    if (round > 0) {
+      await captureChildDone.promise
+      return answer('root turn ended')
+    }
+    counts.set('root', (counts.get('root') ?? 0) + 1)
+    return repl(`const handle = await rlm(${JSON.stringify(CAPTURE_CHILD_TASK)}, { name: "inspector" }); "spawned"`)
+  }
+  record('child')
+  if (round === 0) {
+    counts.set('child', (counts.get('child') ?? 0) + 1)
+    return repl('JSON.stringify(context)')
+  }
+  if (round === 1) {
+    return repl(`await agentMessage.send(${JSON.stringify(CAPTURE_FIGURE)}, { receiverRole: "parent", mode: "auto" }); "sent"`)
+  }
+  captureChildDone.resolve(undefined)
+  return answer('child done')
+}
+
 /** Answers the requests of the `context-prompts` scenario from their content, and keeps the prompts it reports. */
 async function contextReply(messages: readonly FakeMessage[]): Promise<FakeReply> {
   const first = messages[0]
@@ -226,11 +286,11 @@ async function contextReply(messages: readonly FakeMessage[]): Promise<FakeReply
   return repl(`await agentMessage.send(${JSON.stringify(isBeta ? BETA_FIGURE : ALPHA_FIGURE)}, { receiverRole: "parent", mode: "auto" }); "sent"`)
 }
 
-// Timer budget, with every limit used: the body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + four
-// scenarios of 12 s = 75 s, plus the diagnostic read of the failing stage, 2 s; the cleanup then takes abandoned requests 5 s +
+// Timer budget, with every limit used: the body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + five
+// scenarios of 12 s = 87 s, plus the diagnostic read of the failing stage, 2 s; the cleanup then takes abandoned requests 5 s +
 // dispose 3 s + two daemon stops of 8 s + fake close 2 s + late-sweep pause 0.7 s + two more stops of 8 s = 42.7 s. That is
-// 119.7 s of timers. It is a sum of limits, not an absolute bound: creating directories, loading modules, and scheduling are not
-// in it. The test passes a 140 s process limit, which leaves room for them, and a 155 s per-test limit above it; a normal
+// 131.7 s of timers. It is a sum of limits, not an absolute bound: creating directories, loading modules, and scheduling are not
+// in it. The test passes a 155 s process limit, which leaves room for them, and a 170 s per-test limit above it; a normal
 // failure needs about 10 s of cleanup. A stage waits at most STAGE_MS and one request at most RPC_MS.
 const FAKE_MS = 3_000
 const BOOT_MS = 12_000
@@ -313,11 +373,12 @@ function reply(kind: Kind, scenario: Scenario): FakeReply {
   }
 }
 
-function handle(messages: readonly FakeMessage[]): FakeReply | Promise<FakeReply> {
+function handle(messages: readonly FakeMessage[], body: FakeBody): FakeReply | Promise<FakeReply> {
   const last = messages.at(-1)
   if (last === undefined) throw new Error('fake DeepSeek received a request without messages')
   if (current?.context === true) return contextReply(messages)
   if (current?.batch === true) return batchReply(messages)
+  if (current?.capture === true) return captureReply(messages, body)
   // The round after a tool call ends the turn.
   if (last.role === 'tool') return { kind: 'text', text: 'done', finish: 'stop' }
   if (current === undefined) throw new Error('fake DeepSeek received a request between scenarios')
@@ -335,7 +396,7 @@ function graph(workspace: string, scenario: Scenario): LogicalTaskGraphV1 {
   return {
     version: 1, title: 'keyless terminal graph', workspace, maxParallel: 1, risk: 'low',
     nodes: [{
-      id: 'rlm', title: 'Recursive node', task: scenario.context === true ? ROOT_TASK : scenario.batch === true ? BATCH_ROOT_TASK : `Run scenario ${scenario.name}.`, role: 'recursive synthesis', dependsOn: [],
+      id: 'rlm', title: 'Recursive node', task: scenario.context === true ? ROOT_TASK : scenario.batch === true ? BATCH_ROOT_TASK : scenario.capture === true ? CAPTURE_ROOT_TASK : `Run scenario ${scenario.name}.`, role: 'recursive synthesis', dependsOn: [],
       requiredForCompletion: true, capabilityRequirements: [], capabilityBudget: [],
       contextPolicy: { maxTokens: 4_096, allowedSourceKinds: ['intent', 'artifact', 'capsule'], unavailableSource: 'block' },
       effectBudget: { read: [], write: [], execute: [], network: [], cost: [], risk: [] },
@@ -344,7 +405,9 @@ function graph(workspace: string, scenario: Scenario): LogicalTaskGraphV1 {
       retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
       ...scenario.batch === true
         ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 3, maxTurns: 12 } }
-        : scenario.autonomous || scenario.context === true ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } } : {},
+        : scenario.capture === true
+          ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 1, maxTurns: 8 } }
+          : scenario.autonomous || scenario.context === true ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } } : {},
       ...scenario.autonomous
         ? {
           // Only the built-in acceptance check: the production daemon takes no custom evaluators.
@@ -470,6 +533,65 @@ async function waitFor(
 }
 
 type RunEvents = Awaited<ReturnType<Booted['orchestrations']['readEvents']>>['events']
+
+/** The body with the parts that differ in every run (ids, hashes, times) replaced, as stable text. */
+function normalizedBody(body: FakeBody): string {
+  return JSON.stringify(body)
+    .replaceAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu, '<uuid>')
+    .replaceAll(/[0-9a-f]{64}/gu, '<sha256>')
+    .replaceAll(/fake-call-\d+/gu, 'fake-call-<n>')
+    // The isolated home, which the launcher names afresh each run, appears in the workspace path the prompt states.
+    .replaceAll(/[^\s"\\]*dsh-prime-rlm-terminal-snapshot-[A-Za-z0-9]+/gu, '<home>')
+    .replaceAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, '<time>')
+}
+
+/** The `context` value a child's REPL printed, read back from the tool result of its next request. */
+function childContextSeen(): Record<string, unknown> | undefined {
+  const next = capturedRequests.find(request => request.who === 'child' && request.round === 1)
+  const tool = next?.body.messages?.filter(message => message.role === 'tool').at(-1)
+  if (tool === undefined) return undefined
+  const text = messageText(tool)
+  // The tool result is the cell result as JSON text; the cell returned the context as a JSON string.
+  const parsed = JSON.parse(text) as { readonly value?: unknown }
+  return typeof parsed.value === 'string' ? JSON.parse(parsed.value) as Record<string, unknown> : undefined
+}
+
+/**
+ * What the `context-capture` scenario shows: per request, who it was for, what it carried, and where the marker and the last line
+ * of each task are; the context the child saw; and, when asked, the normalized bodies written to a directory.
+ */
+async function captureTranscript() {
+  const order: readonly CaptureWho[] = ['root', 'child', 'continuation']
+  const sorted = [...capturedRequests].sort((left, right) => order.indexOf(left.who) - order.indexOf(right.who) || left.round - right.round)
+  const rows = sorted.map((request) => {
+    const text = normalizedBody(request.body)
+    return {
+      who: request.who, round: request.round,
+      roles: (request.body.messages ?? []).map(message => message.role),
+      tools: (request.body.tools ?? []).length,
+      containsRootMarker: text.includes(CANARY),
+      containsRootTail: text.includes('ROOT-TAIL-RULE'),
+      containsChildTail: text.includes('CHILD-TAIL-RULE'),
+      bodySha256: createHash('sha256').update(text).digest('hex'),
+    }
+  })
+  const context = childContextSeen()
+  const directory = process.env.DSH_REQUEST_CAPTURE_DIR
+  if (directory !== undefined) {
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'api-capture.json'), `${JSON.stringify(sorted.map(request => ({
+      who: request.who, round: request.round, body: JSON.parse(normalizedBody(request.body)) as unknown,
+    })), null, 2)}\n`)
+  }
+  return {
+    requests: rows,
+    childContext: context === undefined ? null : {
+      keys: Object.keys(context).sort(),
+      taskIsTheChildsOwn: context.task === CAPTURE_CHILD_TASK,
+      containsRootMarker: JSON.stringify(context).includes(CANARY),
+    },
+  }
+}
 
 /**
  * What the `batched-messages` scenario shows. Message and command ids are random, so they are replaced by their position: the
@@ -597,13 +719,14 @@ async function run(scenario: Scenario) {
       }
       : {},
     ...scenario.batch === true ? await batchTranscript(started.runId, events, until) : {},
+    ...scenario.capture === true ? await captureTranscript() : {},
   }
 }
 
 const failures: string[] = []
 let slowStarted = false
 let bodyError: unknown
-let transcript: { readonly goal: unknown; readonly autonomous: unknown; readonly context: unknown; readonly batched: unknown } | undefined
+let transcript: Readonly<Record<'goal' | 'autonomous' | 'context' | 'batched' | 'captured', unknown>> | undefined
 
 try {
   owned.fake = startFakeDeepSeek(handle)
@@ -643,7 +766,9 @@ try {
   const context = await run({ name: 'context-prompts', autonomous: false, context: true })
   // Two children report before the root's turn ends: the root is continued once, for both messages.
   const batched = await run({ name: 'batched-messages', autonomous: false, batch: true })
-  transcript = { goal, autonomous, context, batched }
+  // A root, one child with a long task, and a continuation, with every request recorded.
+  const captured = await run({ name: 'context-capture', autonomous: false, capture: true })
+  transcript = { goal, autonomous, context, batched, captured }
 } catch (error) {
   bodyError = error
 } finally {
