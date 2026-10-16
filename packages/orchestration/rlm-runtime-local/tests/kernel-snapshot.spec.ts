@@ -10,6 +10,8 @@ function hooks(): KernelHooks {
   return {
     spawn: notUsed,
     listChildren: notUsed,
+    childSummaries: notUsed,
+    readChildResult: notUsed,
     deleteChild: notUsed,
     sendMessage: notUsed,
     broadcastMessage: notUsed,

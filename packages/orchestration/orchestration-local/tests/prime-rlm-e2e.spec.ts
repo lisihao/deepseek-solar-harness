@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
@@ -7,6 +8,10 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LogicalTaskGraphV1, OrchestrationAdmissionTraceV1, OrchestrationNodeSpecV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
+import {
+  assertRestores, correlateResident, dispatchFacts, projectResident, serializeRequest, Tokens,
+  type SerializedRequest,
+} from '../../../../examples/acp-agent/tests/fixtures/prime-rlm-terminal/capture.ts'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
@@ -651,4 +656,213 @@ describe('Prime-compatible orchestration offline E2E', () => {
     expect(events.events.filter(event => event.type === 'node.dispatched')).toHaveLength(4)
     expect(events.events.at(-1)?.type).toBe('run.completed')
   }, 15_000)
+})
+
+describe('what a Resident root and a Resident child are given', () => {
+  const CANARY = 'CANARY-ONLY-IN-THE-ROOT-TASK-7731'
+  const ROOT_TASK = `Run the capture scenario. Private note for the root only: ${CANARY}. Final rule: reply with only {"verdict": "<text>"}. ROOT-TAIL-RULE`
+  const CHILD_TAIL = 'Final rule: end the report with the exact token CHILD-TAIL-RULE.'
+  // Long enough to cross any small cap on a task; the only statement of the output rule is its last line.
+  const CHILD_TASK = `Inspector task: read your context and report. ${'Detail line of the inspector task. '.repeat(160)}${CHILD_TAIL}`
+
+  /**
+   * Runs one explicit RLM node whose root spawns one child, the child messages the root, and the root is continued. Returns what
+   * the Resident provider seam (the daemon's call into the ResidentClient) was asked, each request tied to its dispatch by the
+   * events the daemon and the runtime recorded, and what the child's REPL showed. The native driver's own model requests and tool
+   * rounds happen behind this seam and are not captured.
+   */
+  async function capture() {
+    const fixture = await e2eHarness('dsh-prime-capture-')
+    const childContext: { value: string | undefined } = { value: undefined }
+    // Every request is serialized the moment it arrives, before the fixture touches it.
+    const seam: Array<{ ordinal: number; serialized: SerializedRequest; keys: string[] }> = []
+    fixture.resident.onExecute = async (request) => {
+      seam.push({ ordinal: fixture.resident.requests.length - 1, serialized: serializeRequest(request), keys: Object.keys(request) })
+      if (request.modelToolBridge === undefined) return
+      if (request.commandId.endsWith(':rlm:root')) {
+        const result = await callTypescriptRepl(request, `${request.commandId}:program`, `await rlm(${JSON.stringify(CHILD_TASK)}, { name: "inspector" }); "spawned"`)
+        fixture.resident.cellResults.set(request.commandId, result)
+      } else if (request.commandId.includes(':rlm:rlm-child-')) {
+        const result = await callTypescriptRepl(request, `${request.commandId}:program`, 'JSON.stringify(context)')
+        childContext.value = typeof result.value === 'string' ? result.value : undefined
+        await callTypescriptRepl(request, `${request.commandId}:report`, 'await agentMessage.send("inspector figure is 6", { receiverRole: "parent", mode: "auto" }); "sent"')
+        fixture.resident.cellResults.set(request.commandId, result)
+      } else if (request.commandId.endsWith(':deliver')) {
+        const result = await callTypescriptRepl(request, `${request.commandId}:read`, '({ received: (await agentMessage.read()).length })')
+        fixture.resident.cellResults.set(request.commandId, result)
+      }
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: ROOT_TASK },
+      admission: admission({ sourceSessionId: 'capture-rlm', rlm: 'enabled' }),
+      graph: taskGraph(fixture.workspace, [node('capture', ROOT_TASK, { operatorId: 'codex' })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    await eventually(() => Promise.resolve(childContext.value), value => value !== undefined)
+    await eventually(
+      () => Promise.resolve(fixture.resident.requests.filter(request => request.commandId.endsWith(':deliver'))),
+      continuations => continuations.length > 0 && continuations.every(request => fixture.resident.cellResults.has(request.commandId)),
+    )
+    const events = (await fixture.client.readEvents({ runId: run.runId, limit: 400 })).events
+    const runtime = JSON.parse(await readFile(join(fixture.root, 'rlm-runtime', 'state.json'), 'utf8')) as {
+      events: Array<{ type: string; sessionId: string; data: { commandId?: string } }>
+    }
+    const facts = dispatchFacts(events, runtime.events)
+    const withBridge = seam.filter(entry => fixture.resident.requests[entry.ordinal]?.modelToolBridge !== undefined)
+    const correlated = correlateResident(withBridge.map(entry => ({
+      ordinal: entry.ordinal,
+      commandId: String(entry.serialized.value.commandId),
+      bridgeSessionId: (entry.serialized.value.modelToolBridge as { sessionId?: string } | undefined)?.sessionId,
+    })), facts)
+    const tokens = new Tokens()
+    const requests = correlated.map((entry) => {
+      const { serialized, keys } = withBridge.find(candidate => candidate.ordinal === entry.ordinal) as (typeof withBridge)[number]
+      // Nothing is dropped without a name: every field of the request is saved or excluded with a reason.
+      const accounted = [...Object.keys(serialized.value).filter(key => !key.endsWith('Aborted')), ...serialized.excluded.map(item => item.field)]
+      expect([...new Set(accounted)].sort()).toEqual([...keys].sort())
+      const projection = projectResident(serialized.value, tokens)
+      assertRestores(`Resident request ${String(entry.ordinal)}`, serialized.value, projection, tokens)
+      const prompt = (serialized.value.prompt as Array<{ text?: string }> | undefined)?.map(block => block.text ?? '').join('\n') ?? ''
+      return {
+        ordinal: entry.ordinal, who: entry.who, value: serialized.value, excluded: serialized.excluded, projection, prompt,
+        sha256: createHash('sha256').update(JSON.stringify(serialized.value)).digest('hex'),
+        tools: (serialized.value.modelToolBridge as { tools?: Array<{ name: string }> } | undefined)?.tools?.map(tool => tool.name) ?? [],
+        nativeToolPolicy: serialized.value.nativeToolPolicy,
+      }
+    })
+    const context = JSON.parse(childContext.value ?? 'null') as Record<string, unknown> | null
+    const directory = process.env.DSH_REQUEST_CAPTURE_DIR
+    if (directory !== undefined) {
+      await mkdir(directory, { recursive: true })
+      const write = (name: string, value: unknown): Promise<void> => writeFile(join(directory, name), `${JSON.stringify(value, null, 2)}\n`)
+      await write('resident-raw.json', {
+        covers: 'the call from the orchestration daemon into the ResidentClient; not the native driver\'s own model requests or tool rounds',
+        requests: seam.map(entry => ({
+          ordinal: entry.ordinal, sha256: createHash('sha256').update(JSON.stringify(entry.serialized.value)).digest('hex'),
+          request: entry.serialized.value, excluded: entry.serialized.excluded,
+        })),
+      })
+      await write('resident-correlation.json', {
+        facts, requests: correlated.map(({ ordinal, who, commandId, bridgeSessionId }) => ({ ordinal, who, commandId, bridgeSessionId })),
+      })
+      await write('resident-projection.json', {
+        tokens: tokens.table(), requests: requests.map(({ ordinal, who, projection }) => ({ ordinal, who, projection })),
+        childContext: context,
+      })
+    }
+    return { requests, context }
+  }
+
+  it('gives the root, the child and the root\'s message continuation what they should be given, each tied to its recorded dispatch', async () => {
+    const { requests } = await capture()
+    expect(requests.map(request => request.who)).toEqual(['root', 'child', 'continuation'])
+    const [root, child, continuation] = requests as [(typeof requests)[number], (typeof requests)[number], (typeof requests)[number]]
+    expect(root.prompt).toContain(CANARY)
+    expect(root.prompt).toContain('ROOT-TAIL-RULE')
+    expect(child.prompt).toContain(CHILD_TASK)
+    expect(child.prompt).toContain(CHILD_TAIL)
+    expect(child.prompt).not.toContain(CANARY)
+    expect(continuation.prompt).toContain('Agent message from')
+    expect(continuation.prompt).toContain('inspector figure is 6')
+    expect(continuation.prompt).toContain(ROOT_TASK)
+    for (const request of requests) {
+      expect(request.tools).toEqual(['typescript_repl'])
+      expect(request.excluded).toEqual([expect.objectContaining({ field: 'signal' })])
+    }
+    expect(child.nativeToolPolicy).toBe('disabled')
+    // The command, session and workspace are what the daemon sent, not a projection of them.
+    expect(new Set(requests.map(request => request.sha256)).size).toBe(3)
+  })
+
+  it('lets the root read its child\'s stored result in segments through the real daemon, and returns the same text as the store holds', async () => {
+    const fixture = await e2eHarness('dsh-prime-read-result-')
+    interface Read {
+      readonly text: string
+      readonly fullSha256: string
+      readonly count: number
+      readonly ref: string
+      readonly status: string
+      readonly parts: ReadonlyArray<{ readonly text: string; readonly segmentSha256: string; readonly offset: number }>
+    }
+    const read: { value: Read | undefined } = { value: undefined }
+    fixture.resident.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined || !request.commandId.endsWith(':rlm:root')) return
+      const id = request.commandId
+      await callTypescriptRepl(request, `${id}:spawn`, 'await rlm("Reader task.", { name: "reader" }); "spawned"')
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const summaries = await callTypescriptRepl(request, `${id}:poll-${String(attempt)}`, 'await rlm.childSummaries()')
+        const first = (summaries.value as Array<{ lifecycle?: string }> | undefined)?.[0]
+        if (first?.lifecycle === 'settled') break
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const result = await callTypescriptRepl(request, `${id}:read`, [
+        'const kid = (await rlm.listSubagents())[0];',
+        'let offset = 0, text = "", count = 0, fullSha256 = "", ref = "", status = ""; const parts = [];',
+        'for (;;) {',
+        '  const part = await rlm.readChildResult(kid, { offset, limit: 40 });',
+        '  status = part.status;',
+        '  if (status !== "settled") break;',
+        '  text += part.text; count += 1; fullSha256 = part.fullSha256; ref = part.resultRef;',
+        '  parts.push({ text: part.text, segmentSha256: part.segmentSha256, offset: part.offset });',
+        '  if (part.nextOffset === null) break;',
+        '  offset = part.nextOffset;',
+        '}',
+        '({ text, count, fullSha256, ref, status, parts })',
+      ].join('\n'))
+      read.value = result.value as Read
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: 'Read a child result.' },
+      admission: admission({ sourceSessionId: 'read-result-rlm', rlm: 'enabled' }),
+      graph: taskGraph(fixture.workspace, [node('reader-node', 'Read a child result.', { operatorId: 'codex' })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    await eventually(() => Promise.resolve(read.value), value => value !== undefined)
+    const events = await fixture.client.readEvents({ runId: run.runId, limit: 300 })
+    const settled = events.events.find(event => event.type === 'rlm.child.settled')
+    const ref = String(settled?.data.artifactRef) as Parameters<typeof fixture.client.readArtifact>[0]
+    const stored = await fixture.client.readArtifact(ref) as { output: Array<{ text: string }>; executionId: string }
+    const whole = stored.output.map(block => block.text).join('\n')
+    expect(read.value?.status).toBe('settled')
+    expect(read.value?.text).toBe(whole)
+    expect(read.value?.text).toMatch(/^offline completed .*:rlm:rlm-child-/u)
+    expect(read.value?.count).toBeGreaterThan(1)
+    expect(read.value?.fullSha256).toBe(createHash('sha256').update(whole, 'utf8').digest('hex'))
+    expect(read.value?.ref).toBe(settled?.data.artifactRef)
+    // Each segment carries the hash of its own text, and the segments start where the one before ended.
+    let expectedOffset = 0
+    for (const part of read.value?.parts ?? []) {
+      expect(part.segmentSha256).toBe(createHash('sha256').update(part.text, 'utf8').digest('hex'))
+      expect(part.offset).toBe(expectedOffset)
+      expectedOffset += part.text.length
+    }
+    expect(expectedOffset).toBe(whole.length)
+  })
+
+  it('completes an explicit RLM node whose root creates no child, with no child dispatched and a child count of zero', async () => {
+    const fixture = await e2eHarness('dsh-prime-zero-child-')
+    fixture.resident.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined || !request.commandId.endsWith(':rlm:root')) return
+      await callTypescriptRepl(request, `${request.commandId}:program`, '({ answer: "solved directly", children: (await rlm.listSubagents()).length })')
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: 'A small task that needs no helpers.' },
+      admission: admission({ sourceSessionId: 'zero-child-rlm', rlm: 'enabled' }),
+      graph: taskGraph(fixture.workspace, [node('zero', 'A small task that needs no helpers.', { operatorId: 'codex' })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    const complete = await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(complete.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled' })
+    const events = (await fixture.client.readEvents({ runId: run.runId, limit: 300 })).events
+    expect(events.filter(event => event.type === 'rlm.child.dispatched')).toEqual([])
+    expect(events.find(event => event.type === 'rlm.execution.settled')?.data).toMatchObject({ childCount: 0 })
+  })
+
+  it('shows the child\'s REPL its own task and none of the root\'s private note', async () => {
+    const { context } = await capture()
+    expect(context?.task).toBe(CHILD_TASK)
+    expect(JSON.stringify(context)).not.toContain(CANARY)
+  })
 })

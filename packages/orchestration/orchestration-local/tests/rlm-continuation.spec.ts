@@ -1,7 +1,9 @@
 import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
+import { RlmRuntimeError } from '@deepseek-ai/dsh-rlm-runtime'
 import { describe, expect, it } from 'vitest'
 import {
   assertMessageContinuationNamesMessages,
+  childResultFromArtifact,
   MAX_CONTINUATION_VARIABLE_NAMES,
   refusalBeforeAdmission,
   rlmContinuationPrompt,
@@ -202,5 +204,68 @@ describe('the facts of a continuation that delivers several messages', () => {
     expect(rlmMessageContinuationFacts(session, roster, 'agent', 2)).toContain('The messages above are delivered in full; do not call agentMessage.read to fetch them again.')
     expect(rlmMessageContinuationFacts(session, roster, 'agent')).toContain('The message above is delivered in full; do not call agentMessage.read to fetch it again.')
     expect(rlmMessageContinuationFacts(session, roster, 'agent', 1)).toBe(rlmMessageContinuationFacts(session, roster, 'agent'))
+  })
+})
+
+describe('the item a child result reference names', () => {
+  const expected = { runId: 'run-1', nodeId: 'node-1', childSessionId: 'rlm-session-child' }
+  const stored = {
+    kind: 'prime-rlm-child-result', runId: 'run-1', nodeId: 'node-1', childSessionId: 'rlm-session-child', executionId: 'exec-1',
+    stopReason: 'completed', output: [{ type: 'text', text: 'answer' }],
+  }
+
+  it('is read as a result when it is a child result of this run, node, and child session', () => {
+    expect(childResultFromArtifact(stored, expected)).toEqual({
+      kind: 'prime-rlm-child-result', commandId: 'exec-1', stopReason: 'completed', output: [{ type: 'text', text: 'answer' }],
+    })
+  })
+
+  it.each([
+    ['another kind of item', { ...stored, kind: 'prime-rlm-message-continuation' }],
+    ['a result of another run', { ...stored, runId: 'run-2' }],
+    ['a result of another node', { ...stored, nodeId: 'node-2' }],
+    ['a result of another child session', { ...stored, childSessionId: 'rlm-session-other' }],
+    ['a value that is not an object', 'sha256:abc'],
+    ['nothing', null],
+  ])('is not a result: %s', (_name, item) => {
+    expect(childResultFromArtifact(item, expected)).toBeUndefined()
+  })
+
+  const textBlock = { type: 'text', text: 'answer' }
+  it.each([
+    ['no execution id', { ...stored, executionId: undefined }, 'names no execution'],
+    ['an empty execution id', { ...stored, executionId: '' }, 'names no execution'],
+    ['an execution id that is not a string', { ...stored, executionId: 7 }, 'names no execution'],
+    ['no stop reason', { ...stored, stopReason: undefined }, 'stop reason is missing'],
+    ['an unknown stop reason', { ...stored, stopReason: 'finished' }, 'stop reason "finished"'],
+    ['an inherited property name as stop reason', { ...stored, stopReason: 'toString' }, 'stop reason "toString"'],
+    ['an output that is not a list', { ...stored, output: 'answer' }, 'output is not a list'],
+    ['a block that is null', { ...stored, output: [null] }, 'output[0] is not an object'],
+    ['a block without a type', { ...stored, output: [{ text: 'x' }] }, 'output[0] has no type'],
+    ['a text block whose text is not a string', { ...stored, output: [textBlock, { type: 'text', text: 123 }] }, 'output[1] is a text block whose text is not a string'],
+    ['a reasoning block without text', { ...stored, output: [{ type: 'reasoning' }] }, 'reasoning block whose text is not a string'],
+    ['a tool-call block without arguments', { ...stored, output: [{ type: 'tool-call', id: 'c', name: 'n' }] }, 'tool-call block'],
+    ['a tool-result block without content', { ...stored, output: [{ type: 'tool-result', toolCallId: 'c' }] }, 'tool-result block'],
+    ['a tool-result block with a damaged inner block', { ...stored, output: [{ type: 'tool-result', toolCallId: 'c', content: [{ type: 'text', text: 5 }] }] }, 'output[0].content[0] is a text block'],
+    ['a tool-result block whose isError is not a boolean', { ...stored, output: [{ type: 'tool-result', toolCallId: 'c', content: [], isError: 'yes' }] }, 'isError'],
+    ['an image block without an attachment', { ...stored, output: [{ type: 'image' }] }, 'image block without an attachment'],
+  ])('throws, and does not read as a missing result, for a result of this child with %s', (_name, item, reason) => {
+    let thrown: unknown
+    try { childResultFromArtifact(item, expected) } catch (error) { thrown = error }
+    expect(thrown).toBeInstanceOf(RlmRuntimeError)
+    expect((thrown as RlmRuntimeError).code).toBe('RLM_UNAVAILABLE')
+    expect((thrown as RlmRuntimeError).message).toContain(reason)
+  })
+
+  it('reads every supported stop reason, and keeps a block of a type this build does not know', () => {
+    for (const stopReason of ['completed', 'aborted', 'error', 'max-tokens', 'refusal']) {
+      expect(childResultFromArtifact({ ...stored, stopReason }, expected)?.stopReason).toBe(stopReason)
+    }
+    const unknown = { type: 'citation', source: 'x' }
+    expect(childResultFromArtifact({ ...stored, output: [textBlock, unknown] }, expected)?.output).toEqual([textBlock, unknown])
+  })
+
+  it('does not look at the fields of an item that is not this child\'s result', () => {
+    expect(childResultFromArtifact({ ...stored, runId: 'run-2', executionId: undefined, stopReason: 'bad', output: 'x' }, expected)).toBeUndefined()
   })
 })

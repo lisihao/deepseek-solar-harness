@@ -250,5 +250,136 @@
       "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\nepsilon figure is 5\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nRun scenario batched-messages. Final rule: reply with only {\"verdict\": \"<text>\"}.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: handles.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- child \"delta\": <running or idle>\n- child \"epsilon\": idle\n- child \"gamma\": <running or idle>\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe message above is delivered in full; do not call agentMessage.read to fetch it again.\nProcess the queued family message using steer ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result."
     ]
   },
+  "captured": {
+    "run": "completed",
+    "node": "passed",
+    "stopReasons": [
+      "completed"
+    ],
+    "continuations": [
+      "rlm.message.continuation.settled"
+    ],
+    "requests": [
+      {
+        "who": "root",
+        "round": 0,
+        "roles": [
+          "user"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": false,
+        "bodySha256": "4aba472ca6d769ffa9ed71b1bb4e0ca678c6fa4b973eac0287be598cd2fa2f79"
+      },
+      {
+        "who": "root",
+        "round": 1,
+        "roles": [
+          "user",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": true,
+        "bodySha256": "e98ad844e06ce1055c64707704a541fbb560b20b336dd27a3d8a76e61136b970"
+      },
+      {
+        "who": "child",
+        "round": 0,
+        "roles": [
+          "user"
+        ],
+        "tools": 1,
+        "containsRootMarker": false,
+        "containsRootTail": false,
+        "containsChildTail": true,
+        "bodySha256": "d6cb0db5eb9ce8945034e16bb36bd24013cfda7dbe67ee2b87458a846c24a15d"
+      },
+      {
+        "who": "child",
+        "round": 1,
+        "roles": [
+          "user",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": false,
+        "containsRootTail": false,
+        "containsChildTail": true,
+        "bodySha256": "d5a6196536e1e706f57539a8b68e84701719571d8a70663ef61979e6bceb4269"
+      },
+      {
+        "who": "child",
+        "round": 2,
+        "roles": [
+          "user",
+          "assistant",
+          "tool",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": false,
+        "containsRootTail": false,
+        "containsChildTail": true,
+        "bodySha256": "3c420e32ca03aae9ab8ee19bdd78165b886f8e0608b37b60fe73e1e031b5ef4a"
+      },
+      {
+        "who": "continuation",
+        "round": 0,
+        "roles": [
+          "user"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": false,
+        "bodySha256": "c78f64f6497688940e71030f79f2bf960d4f014a24862ccebe28d1eb6c1b2033"
+      },
+      {
+        "who": "continuation",
+        "round": 1,
+        "roles": [
+          "user",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": false,
+        "bodySha256": "71796321c6d350c6402e626f285a383b94d468209438c6f067d50879ec5a6cc2"
+      }
+    ],
+    "requestsOfOtherRuns": 0,
+    "resultRead": {
+      "segments": 4,
+      "lengths": [
+        300,
+        300,
+        300,
+        35
+      ],
+      "textEqualsStored": true,
+      "tailKept": true,
+      "fullSha256MatchesStored": true
+    },
+    "childContext": {
+      "keys": [
+        "capabilityPlanRef",
+        "contextPacketRef",
+        "graphCertificateHash",
+        "nodeId",
+        "runId",
+        "task"
+      ],
+      "taskIsTheChildsOwn": true,
+      "containsRootMarker": false
+    }
+  },
   "daemonsStopped": true
 }

@@ -12,6 +12,8 @@
 
 `rlm(task, { name })` 通过 Consumer 提供的 Host binding 准入 Child，并在 Child result settle 前返回 handle。`skills.list()` 投影父执行已经密封的 Skill catalog；`skills.call(name, args)` 只通过 Consumer 持有的 Host binding 转发该 catalog 中可用且由 Host 签发的 alias，因此 Runtime 代码既不能提交 import path，也不能在同一 Attempt 中观察到目录更新。Cell 串行执行，已准入的 Child execution 可以并发推进。显式消息和 Artifact reference 才是答案通道。Local Provider 还实现了版本化的 Agents View `attach → input → detach` 控制面：一个存活 caller 只能持有一个 lease，控制输入通过现有 message/continuation pump 排队，进程重启后可回收死进程遗留的 lease。
 
+新 child 的 `context` 是其 parent 拥有的协议键加上设为该 child 自身完整 task 的 `task`；parent 的其余 `context` 不被复制。在此行为之前接纳的 child 保留其持久化时的 `context`：旧 child 的 `context` 不迁移也不改写。状态文件的其他内容仍照常写入；在此改动之前创建的 child，其 `context` 里仍然带有 parent 的任务。重启测试在同一个状态文件上创建新的 runtime 并重新绑定 host，不检验 daemon 或 Resident 的恢复。`rlm.childSummaries()` 与 `rlm.readChildResult()` 独立于 `listSubagents()`，后者去掉 `outputPreview` 并保留其他字段。`readChildResult` 在调用会话持久化的 children 中查找该 child，因此另一个会话的 child 的引用或 id 会以 `RLM_FAMILY_VIOLATION` 被拒绝；不是该 child 记录里那一个的 `resultRef` 同样被拒绝；已删除或已关闭的 child 为 `RLM_UNAVAILABLE`。它向 host 索取记录所指向的已存结果，把文本块用一个换行连接后渲染，最多返回一个片段，其 JSON 不超过该会话 `limits.maxOutputBytes` 的三分之一（cell 记录的输出同时计入返回值及其渲染文本）。超出末尾或落在代理对内部的 offset 为 `RLM_INVALID`。返回片段的读取会追加一条 `rlm.child.result.read` 事件，含 child、command、引用、offset、长度、标志位和两个哈希；`not_settled`、`indeterminate`、`not_found` 的结果和错误不追加事件。
+
 持久 Root 同时记录 Child model rule。`parent-inherit` 下，省略 Child model 必定使用当前 Parent 的完整选择；意外携带的 allocator default 会被拒绝。`allocator-default` 下，省略 model 只能使用 Scheduler 已密封的 default child selection。每个 Child 都持久化其 `modelOrigin`，每一次 child dispatch 都携带 Parent 已密封的 tools、Skills、retry policy 和 capability context。Kernel 会拒绝 `name`、`model`、`thinking` 以外的全部 `rlm()` option；显式选择会原样交给 Consumer 的 catalog validation，而不是静默 fallback。
 
 状态原子写入配置的 owner-local root。重启恢复会分别恢复可序列化变量，把未完成 Receipt 变为 `indeterminate`，并要求显式放弃，绝不重放无法证明的原生 effect。`compact.run()` 只记录 Receipt 绑定的 Host 调度决定；真实原生历史压缩必须由 Host 在 turn boundary 执行，TypeScript namespace 不会被重置。
@@ -26,11 +28,11 @@ Provider 在 `state.json` 中保存版本 6 状态，其中必须有 `messageBat
 
 ## Model Experience
 
-Indirectly, through a Consumer that exposes the Provider as the `typescript_repl` model tool.
+Indirectly, through a Consumer that exposes the Provider as the `typescript_repl` model tool. The tool description names `rlm.childSummaries()` and `rlm.readChildResult()`, and a child's REPL `context` holds its own task and the protocol keys instead of a copy of its parent's `context`.
 
 #### KV Cache effect
 
-Provider 不直接组装模型上下文。Tool schema 和有界 Cell result 由 Consumer 持有，不改变已经可复用的 Prompt prefix。
+Provider 不直接组装模型上下文。Tool schema 和有界 Cell result 由 Consumer 持有，不改变已经可复用的 Prompt prefix。 `typescript_repl` 工具描述的字节发生了变化（新增两句，说明新增的 helper）；对缓存命中和 token 用量的影响未测量。对于此改动之后创建的 child，打印或返回 `context` 的 cell 看到的是该 child 自己的 task 和协议键，该工具结果也不再把 parent 的 task 带入 child 之后的请求。
 
 ## Known Limitations and Deferred Work
 

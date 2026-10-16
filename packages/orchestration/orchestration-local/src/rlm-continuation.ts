@@ -1,7 +1,14 @@
 /** What an RLM execution ends in after its last continuation, and the prompt of each continuation. */
 import { OrchestrationError } from '@deepseek-ai/dsh-orchestration'
 import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
-import { RlmRuntimeError, type RlmChildExecutionResult, type RlmFamilyRosterV1, type RlmRuntimeSessionSnapshotV1 } from '@deepseek-ai/dsh-rlm-runtime'
+import {
+  RlmRuntimeError,
+  type RlmChildExecutionResult,
+  type RlmChildResultContentV1,
+  type RlmFamilyRosterV1,
+  type RlmRuntimeSessionSnapshotV1,
+  type RlmStopReason,
+} from '@deepseek-ai/dsh-rlm-runtime'
 
 /**
  * The operator result an RLM execution ends in after its last continuation. A continuation that did not settle keeps
@@ -158,4 +165,75 @@ export function assertMessageContinuationNamesMessages(
 export function refusalBeforeAdmission(source: string, error: unknown): unknown {
   if (source !== 'message') return error
   return new RlmRuntimeError(error instanceof Error ? error.message : String(error), 'RLM_DISPATCH_NOT_ADMITTED')
+}
+
+/** Every stop reason a stored child result may carry; a new `RlmStopReason` member fails to compile until it is listed here. */
+const STORED_STOP_REASONS: Readonly<Record<RlmStopReason, true>> = {
+  'completed': true, 'aborted': true, 'error': true, 'max-tokens': true, 'refusal': true,
+}
+
+function malformed(what: string): never {
+  throw new RlmRuntimeError(`The stored child result is damaged: ${what}`, 'RLM_UNAVAILABLE')
+}
+
+/**
+ * Checks one stored output block. Blocks of the types the model API produces must have their fields (a text block has a string
+ * `text`); a block whose `type` is a string this build does not know is kept, because the union is merge-extensible and the reader
+ * counts every block that is not text as omitted.
+ */
+function checkStoredBlock(block: unknown, where: string): void {
+  if (block === null || typeof block !== 'object' || Array.isArray(block)) malformed(`${where} is not an object`)
+  const item = block as Record<string, unknown>
+  if (typeof item.type !== 'string') malformed(`${where} has no type`)
+  switch (item.type) {
+    case 'text':
+    case 'reasoning':
+      if (typeof item.text !== 'string') malformed(`${where} is a ${item.type} block whose text is not a string`)
+      return
+    case 'tool-call':
+      if (typeof item.id !== 'string' || typeof item.name !== 'string' || typeof item.arguments !== 'string') {
+        malformed(`${where} is a tool-call block without a string id, name and arguments`)
+      }
+      return
+    case 'tool-result':
+      if (typeof item.toolCallId !== 'string' || !Array.isArray(item.content)) malformed(`${where} is a tool-result block without a toolCallId and content list`)
+      if (item.isError !== undefined && typeof item.isError !== 'boolean') malformed(`${where} is a tool-result block whose isError is not a boolean`)
+      for (const [index, inner] of (item.content as unknown[]).entries()) checkStoredBlock(inner, `${where}.content[${String(index)}]`)
+      return
+    case 'image':
+      if (item.attachment === null || typeof item.attachment !== 'object') malformed(`${where} is an image block without an attachment`)
+      return
+    default:
+      return
+  }
+}
+
+/**
+ * The child result a stored artifact holds, if it is one. The artifact store is shared by every run, so a reference alone does not
+ * say what it names: the item must be a child result of this run, this node, and this child session. The store checks that the
+ * content matches its reference, not that its fields are valid, so an item that is this child's result is also checked field by
+ * field here, and a damaged one throws instead of reading as a missing or empty result.
+ * @param stored - what the store returned for the reference.
+ * @param expected - the run, node, and child session the caller was authorized for.
+ * @returns the result content, or `undefined` when the item is not a child result of that run, node and child session.
+ * @throws RlmRuntimeError `RLM_UNAVAILABLE` when the item is that child's result and its stop reason, execution id or output is damaged.
+ */
+export function childResultFromArtifact(
+  stored: unknown,
+  expected: { readonly runId: string; readonly nodeId: string; readonly childSessionId: string },
+): RlmChildResultContentV1 | undefined {
+  if (stored === null || typeof stored !== 'object') return undefined
+  const item = stored as Partial<Record<'kind' | 'runId' | 'nodeId' | 'childSessionId' | 'executionId' | 'stopReason' | 'output', unknown>>
+  if (item.kind !== 'prime-rlm-child-result' || item.runId !== expected.runId || item.nodeId !== expected.nodeId
+    || item.childSessionId !== expected.childSessionId) return undefined
+  if (typeof item.executionId !== 'string' || item.executionId.length === 0) malformed('it names no execution')
+  if (typeof item.stopReason !== 'string' || !Object.hasOwn(STORED_STOP_REASONS, item.stopReason)) {
+    malformed(`its stop reason ${typeof item.stopReason === 'string' ? JSON.stringify(item.stopReason) : 'is missing'} is not a known one`)
+  }
+  if (!Array.isArray(item.output)) malformed('its output is not a list')
+  for (const [index, block] of item.output.entries()) checkStoredBlock(block, `output[${String(index)}]`)
+  return {
+    kind: item.kind, commandId: item.executionId,
+    stopReason: item.stopReason as RlmStopReason, output: item.output as RlmChildResultContentV1['output'],
+  }
 }
