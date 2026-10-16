@@ -83,7 +83,7 @@ chat-completions 的非 2xx 响应会抛出稳定 code 的 `LlmError`：`AUTH`�
 
 ## 请求准入
 
-adapter 强制执行 `GenerateOptions.admission`：序列化请求体后，用请求体的 UTF-8 字节数和 sha256 以及线上的 `model`、`max_tokens`、`thinking`、`reasoning_effort` 调用 admission，然后才调用 `fetch`。被拒绝时在任何网络活动之前抛出。返回的票据用 `usage` chunk 的 usage 结算（`translate` 只在 `[DONE]` 时发出它），并在该 chunk 交给消费者之前结算，所以消费者读到它后立即停止读取也不会丢失。其他任何结束方式（任何类别的 HTTP 错误状态、中止、空闲超时、传输错误、`[DONE]` 之前断流、没有 usage 的 `[DONE]`、消费者停止读取）都会放弃票据，并保持其预留不释放。adapter 没有重试循环：一次 stream 对应一次 `fetch`。
+adapter 强制执行 `GenerateOptions.admission`：序列化请求体后，用请求体的 UTF-8 字节数和 sha256 以及线上的 `model`、`max_tokens`、`thinking`、`reasoning_effort` 调用 admission，然后才调用 `fetch`。被拒绝时在任何网络活动之前抛出。返回的票据用 `usage` chunk 的 usage 结算（`translate` 只在 `[DONE]` 时发出它），并在该 chunk 交给消费者之前结算，所以消费者读到它后立即停止读取也不会丢失。其他任何结束方式（任何类别的 HTTP 错误状态、中止、空闲超时、传输错误、`[DONE]` 之前断流、没有 usage 的 `[DONE]`、消费者停止读取）都会放弃票据，并保持其预留不释放。adapter 没有重试循环：一次 stream 对应一次 `fetch`。携带 admission 的调用不跟随重定向（`redirect: 'error'`），因为 307 或 308 会让 `fetch` 在一次准入下再把 POST 发往另一个 URL；它会作为传输错误失败，其预留保持占用。没有 admission 的调用仍像以前一样跟随重定向。
 
 ## 模型体验
 
