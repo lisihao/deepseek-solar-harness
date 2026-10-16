@@ -12,6 +12,8 @@ Snapshot limits match Prime v0.8 defaults: 16 MiB per binding and 256 MiB for th
 
 `rlm(task, { name })` admits a child through Consumer-provided host bindings and returns a handle before the child result settles. `skills.list()` projects the parent execution's sealed Skill catalog, and `skills.call(name, args)` forwards only an available Host-issued alias from that catalog through the Consumer-owned binding, so runtime code cannot submit an import path or observe a directory update mid-attempt. Cells execute serially while admitted child executions may proceed concurrently. Explicit messages and artifact references are the answer channel. The local Provider also implements the versioned Agents View `attach → input → detach` control surface: one live caller owns one lease, controller input is queued through the existing message/continuation pump, and a dead process lease is reclaimable after restart.
 
+A new child's `context` is the protocol keys its parent has plus `task` set to the child's own whole task; the rest of the parent's `context` is not copied. Children admitted before this behavior keep the `context` they were persisted with, and a persisted session is never rewritten. `rlm.childSummaries()` and `rlm.readChildResult()` are separate from `listSubagents()`, which drops `outputPreview` and keeps its other fields. `readChildResult` finds the child in the calling session's persisted children, so a reference or id of another session's child is refused with `RLM_FAMILY_VIOLATION`; a `resultRef` that is not the one recorded for that child is refused the same way; a deleted or closed child is `RLM_UNAVAILABLE`. It asks the host for the stored result named by the record, renders the text blocks joined by one newline, and returns at most one segment whose JSON stays within a third of the session's `limits.maxOutputBytes` (the cell's recorded output counts both the returned value and its rendering). An offset past the end, or inside a surrogate pair, is `RLM_INVALID`. Each read appends an `rlm.child.result.read` event with the child, command, reference, offset, length, flags and both hashes.
+
 The durable root also records its child-model rule. Under `parent-inherit`, an omitted child model always uses the exact current parent selection; an accidental allocator default is rejected. Under `allocator-default`, an omitted model uses only the Scheduler-sealed default child selection. Each child persists its `modelOrigin`, and every child dispatch receives the parent's sealed tools, Skills, retry policy, and capability context. The kernel rejects every `rlm()` option other than `name`, `model`, and `thinking`; explicit selections are forwarded unchanged for Consumer-side catalog validation rather than silently falling back.
 
 State is written atomically below the configured owner-local root. Restart recovery restores independently serializable variables, changes unfinished receipts to `indeterminate`, and requires explicit abandonment instead of replaying an unproven native effect. `compact.run()` only records a receipt-bound Host scheduling decision; the Host must perform native history compaction at a real turn boundary, while the TypeScript namespace remains untouched.
@@ -26,11 +28,11 @@ The batch is written to `messageBatchDispatches` before the host is called. Only
 
 ## Model Experience
 
-Indirectly, through a Consumer that exposes the Provider as the `typescript_repl` model tool.
+Indirectly, through a Consumer that exposes the Provider as the `typescript_repl` model tool. The tool description names `rlm.childSummaries()` and `rlm.readChildResult()`, and a child's REPL `context` holds its own task and the protocol keys instead of a copy of its parent's `context`.
 
 #### KV Cache effect
 
-The Provider does not directly assemble model context. Tool schemas and bounded cell results are Consumer-owned and independent of an already reusable prompt prefix.
+The Provider does not directly assemble model context. Tool schemas and bounded cell results are Consumer-owned and independent of an already reusable prompt prefix. The `typescript_repl` tool description gained two sentences naming the new helpers, so a prompt prefix that included the previous description is not reused for it; the effect on cache hits and token use is not measured. A child's REPL `context` no longer repeats its parent's task, which changes what a cell that prints or returns `context` shows.
 
 ## Known Limitations and Deferred Work
 

@@ -962,7 +962,7 @@ abstract reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSna
 abstract resolveIndeterminate(request: RlmIndeterminateResolutionRequest): Promise<RlmCommandReceiptSnapshotV1>
 ```
 
-Source: [`packages/orchestration/rlm-runtime/src/index.ts:684`](../../packages/orchestration/rlm-runtime/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime/src/index.ts:706`](../../packages/orchestration/rlm-runtime/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 
