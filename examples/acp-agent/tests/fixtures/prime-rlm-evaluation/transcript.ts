@@ -49,6 +49,8 @@ export interface TranscriptInput {
   readonly ledger: { readonly attempts: readonly LedgerAttempt[] } | undefined
   readonly reservedWhenReceived: ReadonlyMap<number, boolean>
   readonly messageStatuses: readonly string[]
+  /** The types of the runtime's persisted events. */
+  readonly runtimeEventTypes: readonly string[]
 }
 
 type Who = 'root' | 'gamma' | 'delta' | 'continuation'
@@ -177,6 +179,9 @@ export function scenarioTranscript(input: TranscriptInput) {
     continuationEvents: continuationEvents.map(event => ({ type: event.type, members: event.members })),
     continuationCommands,
     messageStatuses: unique(input.messageStatuses),
+    runtimeOutcomeEvents: Object.fromEntries(unique(input.runtimeEventTypes.filter(
+      type => /^rlm\.(child\.(settled|failed|indeterminate)|message\.continuation\.)/u.test(type),
+    )).map(type => [type, input.runtimeEventTypes.filter(other => other === type).length])),
     retryScheduled: events.filter(event => event.type === 'node.retry_scheduled').length,
     namesDispatchNotAdmitted: everything.includes('RLM_DISPATCH_NOT_ADMITTED'),
     namesOperatorBusy: everything.includes('OPERATOR_BUSY'),

@@ -71,6 +71,8 @@ const EVALUATION_SCENARIOS: ReadonlyArray<readonly [ScenarioName, string]> = [
   ['missing-usage', 'withholds the usage of a command when a request reports none, and records the missing request apart from the outcome'],
   ['unknown-no-replay', 'does not replay a node whose failed command left a request of unknown outcome, although its retry policy lists the error code'],
   ['unknown-error-finish', 'reports a command whose request ended in an HTTP error with an unknown outcome and does not retry the node'],
+  ['unknown-child', 'marks a child whose request ended with an unknown outcome indeterminate while the other child reports'],
+  ['unknown-continuation', 'marks the messages of a continuation whose request ended with an unknown outcome indeterminate and sends nothing again'],
   ['known-retry', 'meters the second attempt of a node apart from the first when a known failure is retried'],
   ['zero-child', 'meters a root that creates no child'],
   ['ordinary', 'sends the same root in a home without a scope with no ledger, no scope fields and the usage it always published'],

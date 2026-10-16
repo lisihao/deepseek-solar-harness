@@ -336,7 +336,10 @@ try {
     await new Promise(resolve => setTimeout(resolve, 400))
     const final = await rpc('inspect', service().inspect(started.runId), runUntil)
     const events = (await rpc('readEvents', service().readEvents({ runId: started.runId, limit: 500 }), runUntil)).events
-    const runtime = JSON.parse(await readFile(join(root, 'rlm-runtime', 'state.json'), 'utf8')) as { messages: Array<{ deliveryStatus: string }> }
+    const runtime = JSON.parse(await readFile(join(root, 'rlm-runtime', 'state.json'), 'utf8')) as {
+      messages: Array<{ deliveryStatus: string }>
+      events: Array<{ type: string }>
+    }
     transcript = scenarioTranscript({
       scenario,
       snapshot: final,
@@ -345,6 +348,7 @@ try {
       ledger: scenario.scoped ? JSON.parse(await readFile(ledgerPath, 'utf8')) as { attempts: Attempt[] } : undefined,
       reservedWhenReceived,
       messageStatuses: runtime.messages.map(message => message.deliveryStatus),
+      runtimeEventTypes: runtime.events.map(entry => entry.type),
     })
   }
 } catch (error) {

@@ -9,7 +9,7 @@
 import { messageText, type FakeHandler, type FakeMessage, type FakeReply } from '../prime-rlm-terminal/fake-deepseek.ts'
 
 export const SCENARIO_NAMES = [
-  'tree', 'integration', 'refuse-first', 'refuse-later', 'missing-usage', 'unknown-no-replay', 'unknown-error-finish', 'known-retry', 'zero-child',
+  'tree', 'integration', 'refuse-first', 'refuse-later', 'missing-usage', 'unknown-no-replay', 'unknown-error-finish', 'unknown-child', 'unknown-continuation', 'known-retry', 'zero-child',
   'ordinary',
 ] as const
 
@@ -55,24 +55,31 @@ const answer = (text: string): FakeReply => ({ kind: 'text', text, finish: 'stop
  * A root with two children that both report before the root's turn ends, so the root is continued once for both messages. The
  * continuation reads a child's stored result in its first round and answers in its second.
  */
-function integrationHandler(): FakeHandler {
+function integrationHandler(failFirstRequestOf?: 'gamma' | 'continuation'): FakeHandler {
   const gate = Promise.withResolvers<undefined>()
-  let childrenReported = 0
+  let childrenDone = 0
+  const failure: FakeReply = { kind: 'http-error', status: 500 }
   return async (messages) => {
     const first = messages[0]
     if (first === undefined) throw new Error('fake DeepSeek received a request without messages')
     const task = taskText(first)
     const afterTool = messages.at(-1)?.role === 'tool'
     if (task.includes('Agent message from')) {
+      if (failFirstRequestOf === 'continuation' && !afterTool) return failure
       return afterTool
         ? answer('continued after reading a child result')
         : repl('const kid = (await rlm.listSubagents())[0]; const part = await rlm.readChildResult(kid, { offset: 0, limit: 60 }); part.length')
     }
     const name = task.includes(GAMMA) ? 'gamma' : task.includes(DELTA) ? 'delta' : undefined
     if (name !== undefined) {
+      if (failFirstRequestOf === name && !afterTool) {
+        childrenDone += 1
+        if (childrenDone === 2) gate.resolve(undefined)
+        return failure
+      }
       if (!afterTool) return repl(`await agentMessage.send("${name} figure", { receiverRole: "parent", mode: "auto" }); "sent"`)
-      childrenReported += 1
-      if (childrenReported === 2) gate.resolve(undefined)
+      childrenDone += 1
+      if (childrenDone === 2) gate.resolve(undefined)
       return answer(`${name} result line. ${'The child result is long enough to need more than one segment. '.repeat(4)}`)
     }
     if (!afterTool) return repl(`await rlm(${JSON.stringify(GAMMA)}, { name: "gamma" }); await rlm(${JSON.stringify(DELTA)}, { name: "delta" }); "spawned"`)
@@ -123,6 +130,12 @@ export function scenarioOf(name: ScenarioName): Scenario {
       return scenario(name, (messages, body, raw) => (raw.ordinal === 0 ? { kind: 'http-error', status: 500 } : single(messages, body, raw)), {
         retry: { maxAttempts: 2, retryableCodes: ['MODEL_WORKER_INVALID', 'OPERATOR_STOPPED', 'SERVER'] },
       })
+    case 'unknown-child':
+      // The first request of one child gets an HTTP 500: that child's outcome is unknown, and the other child still reports.
+      return scenario(name, integrationHandler('gamma'))
+    case 'unknown-continuation':
+      // The continuation's first request gets an HTTP 500: its two messages end with an unknown outcome and are not sent again.
+      return scenario(name, integrationHandler('continuation'))
     case 'known-retry':
       // The first request settles with usage and the worker then rejects it (code MODEL_WORKER_INVALID); the second attempt succeeds.
       return scenario(name, (messages, body, raw) => (raw.ordinal === 0 ? { kind: 'empty-tool-calls' } : single(messages, body, raw)), {

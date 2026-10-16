@@ -217,6 +217,10 @@
   "messageStatuses": [
     "delivered"
   ],
+  "runtimeOutcomeEvents": {
+    "rlm.child.settled": 2,
+    "rlm.message.continuation.failed": 2
+  },
   "retryScheduled": 0,
   "namesDispatchNotAdmitted": false,
   "namesOperatorBusy": false,

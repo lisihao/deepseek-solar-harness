@@ -79,6 +79,7 @@
   "continuationEvents": [],
   "continuationCommands": 0,
   "messageStatuses": [],
+  "runtimeOutcomeEvents": {},
   "retryScheduled": 0,
   "namesDispatchNotAdmitted": false,
   "namesOperatorBusy": false,
