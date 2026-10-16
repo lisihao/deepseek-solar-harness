@@ -192,7 +192,8 @@ describe('the attempts of one command', () => {
   })
 
   it('counts the requests of one session that are reserved or unknown, and no others', () => {
-    const ledger = open()
+    const limits = { ...SCOPE.limits, httpAttempts: 10, concurrentRequests: 10, inputTokens: 100_000, outputTokens: 100_000 }
+    const ledger = open({ ...SCOPE, limits }, scopeText({ limits }))
     ledger.admission('cmd:1#round0@s1')(request({ bodySha256: 'b'.repeat(64) })).settle(usage)
     ledger.admission('cmd:1#round1@s1')(request({ bodySha256: 'c'.repeat(64) })).abandon()
     ledger.admission('cmd:2#round0@s1')(request({ bodySha256: 'd'.repeat(64) }))
