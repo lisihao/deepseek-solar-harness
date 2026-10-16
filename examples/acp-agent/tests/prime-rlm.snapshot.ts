@@ -59,6 +59,31 @@ it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overw
   expect(stdout).toBe(await readFile(expected, 'utf8'))
 }, 170_000)
 
+const evidenceDirectory = process.env.DSH_EVALUATION_EVIDENCE_DIR
+
+it('snapshot: prime-rlm-evaluation admits every physical request of an RLM tree into one ledger and sends nothing past its limit', async () => {
+  const driver = fileURLToPath(new URL('./fixtures/prime-rlm-evaluation/driver.ts', import.meta.url))
+  const expected = new URL('./fixtures/prime-rlm-evaluation/expected.json', import.meta.url)
+  const { stdout } = await runLoaderSmoke({
+    label: 'prime-rlm-evaluation keyless example',
+    tempDirPrefix: 'dsh-prime-rlm-evaluation-snapshot-',
+    binScript: driver,
+    libBinScript: driver,
+    configPath: fileURLToPath(new URL('./fixtures/prime-rlm-evaluation/cordis.yml', import.meta.url)),
+    tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
+    // The driver's explicit waits for its body are fake server 3 s + boot 12 s + daemons ready 12 s + run 15 s = 42 s, and for
+    // its cleanup abandoned requests 5 s + dispose 3 s + two daemon stops of 8 s + fake close 2 s + late-sweep pause 0.7 s + two
+    // more stops of 8 s = 42.7 s; these are waiting budgets, not a measured total, and exclude unmeasured I/O, loading and
+    // scheduling. A normal run takes about 8 s. The limit leaves room beyond the budgets so the driver can fail by stage and
+    // finish its cleanup before the launcher's SIGKILL, which would skip it.
+    processTimeoutMs: 100_000,
+    // Set only to collect the driver's reconcilable files; the snapshot itself does not depend on it.
+    env: evidenceDirectory === undefined ? {} : { DSH_EVALUATION_EVIDENCE_DIR: evidenceDirectory },
+  })
+  if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expected, stdout)
+  expect(stdout).toBe(await readFile(expected, 'utf8'))
+})
+
 const execFileAsync = promisify(execFile)
 
 /** Processes whose command line names this run's unique temporary directory, as `pid command` lines. */
@@ -74,16 +99,21 @@ async function processesIn(directory: string): Promise<string[]> {
  * daemon whose start was abandoned writes its pid file only after the driver has exited. Any leftover is stopped here.
  */
 async function terminalFault(fault: string, reason: RegExp, cleanup: readonly string[]): Promise<void> {
-  const driver = fileURLToPath(new URL('./fixtures/prime-rlm-terminal/driver.ts', import.meta.url))
+  await fixtureFault('prime-rlm-terminal', 'DSH_TERMINAL_FIXTURE_FAULT', fault, reason, cleanup)
+}
+
+/** The same check for any fixture whose driver reads an injected fault from an environment variable. */
+async function fixtureFault(fixture: string, variable: string, fault: string, reason: RegExp, cleanup: readonly string[]): Promise<void> {
+  const driver = fileURLToPath(new URL(`./fixtures/${fixture}/driver.ts`, import.meta.url))
   const leftover: string[] = []
   const { stdout, stderr } = await runLoaderSmoke({
-    label: `prime-rlm-terminal keyless example with fault ${fault}`,
-    tempDirPrefix: 'dsh-prime-rlm-terminal-fault-',
+    label: `${fixture} keyless example with fault ${fault}`,
+    tempDirPrefix: `dsh-${fixture}-fault-`,
     binScript: driver,
     libBinScript: driver,
-    configPath: fileURLToPath(new URL('./fixtures/prime-rlm-terminal/cordis.yml', import.meta.url)),
+    configPath: fileURLToPath(new URL(`./fixtures/${fixture}/cordis.yml`, import.meta.url)),
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
-    env: { DSH_TERMINAL_FIXTURE_FAULT: fault },
+    env: { [variable]: fault },
     expectedExitCode: 1,
     // The faults end the driver in about 30 s even under load (a hung request adds the 5 s wait for abandoned requests); an
     // unbounded wait would hit this limit instead of passing.
@@ -142,5 +172,14 @@ it('snapshot: prime-rlm-terminal reports a pid file it cannot read instead of tr
   await terminalFault('bad-pid-file', /cleanup stop orchestration daemon: FAILED EISDIR/u, [
     'cleanup stop Resident daemon: ok', 'cleanup close fake DeepSeek: ok',
     'cleanup stop orchestration daemon (late sweep): FAILED EISDIR',
+  ])
+})
+
+it('snapshot: prime-rlm-evaluation stops a daemon whose start was abandoned and finished starting afterwards', async () => {
+  await fixtureFault('prime-rlm-evaluation', 'DSH_EVALUATION_FIXTURE_FAULT', 'slow-start', /request list did not return within/u, [
+    // Whether the abandoned start settles within its 5 s depends on how fast the machine starts a daemon, so the line for that step
+    // is not required; what is required is that nothing of the run is left behind (checked by `fixtureFault`).
+    'cleanup dispose Loader context: ok', 'cleanup stop orchestration daemon: ok',
+    'cleanup stop Resident daemon: ok', 'cleanup close fake DeepSeek: ok',
   ])
 })

@@ -31,6 +31,12 @@ export const QUOTA_EXCEEDED_CODE = 'QUOTA'
 export const INSUFFICIENT_BALANCE_CODE = 'INSUFFICIENT_BALANCE'
 
 /**
+ * Code of a request that an admission refused before anything was sent: a budget, a parameter, or the scope itself did not
+ * allow it. The request did not leave the process, and retrying it cannot succeed without a change to the scope.
+ */
+export const ADMISSION_REFUSED_CODE = 'ADMISSION_REFUSED'
+
+/**
  * Canonical provider-neutral code for a response that completed normally but
  * carried no content blocks at all. Providers occasionally emit a degenerate
  * completion (a terminal stop with zero output); adapters classify it as this

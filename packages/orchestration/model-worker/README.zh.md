@@ -6,6 +6,10 @@
 
 执行请求可携带编排 parent Agent，供需要启动物理算子的 Provider 使用；进程内 Provider 可以忽略它。
 
+## Evaluation block
+
+`ModelWorkerExecuteRequest.evaluation`（`ModelWorkerEvaluationV1`）只由持有评测 scope 的编排层设置。它给出线上 `model`、单个物理请求的 `maxOutputTokens` 上限、推理 effort、剩余输出 token 的读取器，以及每个请求的 admission 工厂。收到它的 worker 必须在每个物理请求上恰好发送这些生成参数，不得回落到 provider 默认值。没有它的请求保持 worker 的原有行为。
+
 ## 模型体验
 
 无直接影响，因为本注册 seam 不直接贡献模型可见内容。

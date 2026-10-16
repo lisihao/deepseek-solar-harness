@@ -507,6 +507,12 @@ interface GenerateOptions {
    * generation policy. Ordinary conversation requests leave it unset.
    */
   purpose?: 'compaction' | 'session-title'
+  /**
+   * Admission of every physical request this call sends. An adapter that supports it calls the closure once per HTTP request,
+   * after the request body is built and before anything is sent, and settles the returned ticket when the provider reports
+   * usage. A refusal is thrown before any network activity. A call that sets it on an adapter that does not support it fails.
+   */
+  admission?: RequestAdmission
 }
 ```
 
@@ -669,6 +675,11 @@ interface PreparedLlmCall {
  * DeepSeek and library-backed pi-ai adapters meet this contract through different internals.
  */
 declare abstract class LlmAdapter {
+  /**
+   * Whether this adapter calls {@link GenerateOptions.admission} for every physical request it sends. A call that sets an
+   * admission on an adapter where this is false fails before dispatch instead of sending the request unmetered.
+   */
+  readonly enforcesAdmission: boolean;
   /**
    * Describe one provider route owned by this adapter.
    * @param provider - a route passed to `registerAdapter()` for this instance.
@@ -851,7 +862,7 @@ async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<Prepared
 stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 ```
 
-Source: [`packages/llm/llm/src/index.ts:288`](../../packages/llm/llm/src/index.ts)
+Source: [`packages/llm/llm/src/index.ts:294`](../../packages/llm/llm/src/index.ts)
 
 <a id="ctxmodelcatalogs--modelcatalogs"></a>
 

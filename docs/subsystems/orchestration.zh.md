@@ -521,7 +521,7 @@ async offers(): Promise<ModelExecutionOffer[]>
 execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 ```
 
-Source: [`packages/orchestration/model-worker/src/index.ts:61`](../../packages/orchestration/model-worker/src/index.ts)
+Source: [`packages/orchestration/model-worker/src/index.ts:85`](../../packages/orchestration/model-worker/src/index.ts)
 
 <a id="ctxorchestrationrecipients--orchestrationrecipientresolver"></a>
 
