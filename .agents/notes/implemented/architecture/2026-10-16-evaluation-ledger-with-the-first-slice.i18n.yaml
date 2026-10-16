@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-16-evaluation-ledger-with-the-first-slice.md
-2026-10-16-evaluation-ledger-with-the-first-slice.md: 3ac1d2627d79f90bd34bf38e9303383049fad008
-2026-10-16-evaluation-ledger-with-the-first-slice.zh.md: 590e99b6fcecd3d6d41a976f63c01a10d1ba1f60
+2026-10-16-evaluation-ledger-with-the-first-slice.md: 8054cccba38a2a34594caa051b24e0eb0db2867f
+2026-10-16-evaluation-ledger-with-the-first-slice.zh.md: bc148e6f9a2c27756daea7abca3715f6bd16c9ad
