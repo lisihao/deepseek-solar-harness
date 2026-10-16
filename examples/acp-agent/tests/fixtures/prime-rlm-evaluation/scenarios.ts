@@ -9,7 +9,7 @@
 import { messageText, type FakeHandler, type FakeMessage, type FakeReply } from '../prime-rlm-terminal/fake-deepseek.ts'
 
 export const SCENARIO_NAMES = [
-  'tree', 'integration', 'refuse-first', 'refuse-later', 'missing-usage', 'unknown-no-replay', 'unknown-error-finish', 'unknown-child', 'unknown-continuation', 'known-retry', 'zero-child',
+  'tree', 'integration', 'refuse-first', 'refuse-later', 'refuse-round', 'cancelled', 'missing-usage', 'unknown-no-replay', 'unknown-error-finish', 'unknown-child', 'unknown-continuation', 'known-retry', 'zero-child',
   'ordinary',
 ] as const
 
@@ -41,7 +41,8 @@ const GENEROUS: ScenarioLimits = {
   inputTokens: 5_000_000, outputTokens: 5_000_000, httpAttempts: 60, concurrentRequests: 8, maxOutputTokensPerRequest: 100,
 }
 
-function taskText(message: FakeMessage): string {
+/** The task text a request carries: the daemon wraps every API prompt in a JSON envelope, and the model reads its `task`. */
+export function taskText(message: FakeMessage): string {
   type Envelope = { readonly dshOperatorContextEnvelope: { readonly task: { readonly content: readonly { readonly text?: string }[] } } }
   return (JSON.parse(messageText(message)) as Envelope).dshOperatorContextEnvelope.task.content.map(block => block.text ?? '').join('\n')
 }
@@ -115,6 +116,12 @@ export function scenarioOf(name: ScenarioName): Scenario {
     case 'refuse-later':
       // Root: 2 requests; each of the two children: 2. The continuation's first request is the 7th.
       return scenario(name, integrationHandler(), { limits: { ...GENEROUS, httpAttempts: 6 } })
+    case 'refuse-round':
+      // The root's first request settles; its second request, the next round of the same command, is the second attempt.
+      return scenario(name, single, { limits: { ...GENEROUS, httpAttempts: 1 } })
+    case 'cancelled':
+      // The second round of the root is held open until the driver cancels the run.
+      return scenario(name, (messages, body, raw) => (messages.at(-1)?.role === 'tool' ? new Promise<FakeReply>(() => undefined) : single(messages, body, raw)))
     case 'missing-usage':
       return scenario(name, singleRoundHandler({ firstWithoutUsage: true }))
     case 'unknown-no-replay':

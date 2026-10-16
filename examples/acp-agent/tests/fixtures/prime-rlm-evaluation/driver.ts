@@ -25,8 +25,8 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import type { LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
-import { messageText, startFakeDeepSeek, type FakeDeepSeek, type FakeMessage, type FakeReply } from '../prime-rlm-terminal/fake-deepseek.ts'
-import { SCENARIO_NAMES, scenarioOf, type Scenario, type ScenarioName } from './scenarios.ts'
+import { startFakeDeepSeek, type FakeDeepSeek, type FakeMessage, type FakeReply } from '../prime-rlm-terminal/fake-deepseek.ts'
+import { SCENARIO_NAMES, scenarioOf, taskText, type Scenario, type ScenarioName } from './scenarios.ts'
 import { scenarioTranscript } from './transcript.ts'
 
 const configPath = process.argv[2]
@@ -73,12 +73,6 @@ function within<T>(label: string, work: Promise<T>, limitMs: number): Promise<T>
       (error: unknown) => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(JSON.stringify(error))) },
     )
   })
-}
-
-/** The task text a request carries: the daemon wraps every API prompt in a JSON envelope, and the model reads its `task`. */
-function taskText(message: FakeMessage): string {
-  type Envelope = { readonly dshOperatorContextEnvelope: { readonly task: { readonly content: readonly { readonly text?: string }[] } } }
-  return (JSON.parse(messageText(message)) as Envelope).dshOperatorContextEnvelope.task.content.map(block => block.text ?? '').join('\n')
 }
 
 /** A tree of agents: the root asks a child, which asks its own child; each reports upward, so the root is also continued. */
@@ -256,9 +250,21 @@ try {
     'start', service().start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId }), runUntil,
   )
   const limit = runUntil
+  if (scenario.name === 'cancelled') {
+    // The run is cancelled once the held request has arrived, so the cancellation meets a request that is in flight.
+    while (((await owned.fake)?.raw.length ?? 0) < 2) {
+      if (Date.now() >= limit) throw new Error('the held request never arrived')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    const current = await rpc('inspect', service().inspect(started.runId), runUntil)
+    await rpc('control', service().control({
+      commandId: `cancel:${String(started.runId)}`, runId: started.runId, expectedRevision: current.revision, action: 'cancel',
+      reason: 'cancel the run while its second request is held open',
+    }), runUntil)
+  }
   for (;;) {
     const snapshot = await rpc('inspect', service().inspect(started.runId), runUntil)
-    if (['completed', 'failed', 'indeterminate'].includes(snapshot.state)) break
+    if (['completed', 'failed', 'indeterminate', 'cancelled'].includes(snapshot.state)) break
     if (Date.now() >= limit) throw new Error(`the run did not settle within ${String(RUN_MS)} ms (state ${snapshot.state})`)
     await new Promise(resolve => setTimeout(resolve, 50))
   }

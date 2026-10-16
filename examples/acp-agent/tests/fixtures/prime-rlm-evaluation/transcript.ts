@@ -36,7 +36,7 @@ interface MeteringEventData {
     readonly unaccounted: number
     readonly observed: { readonly input: number; readonly output: number }
     readonly missing: ReadonlyArray<{ readonly round: number | null; readonly state: string }>
-    readonly attempts: ReadonlyArray<{ readonly id: string }>
+    readonly attempts: ReadonlyArray<{ readonly id: string; readonly refusal?: string }>
   }
 }
 
@@ -185,6 +185,12 @@ export function scenarioTranscript(input: TranscriptInput) {
     retryScheduled: events.filter(event => event.type === 'node.retry_scheduled').length,
     namesDispatchNotAdmitted: everything.includes('RLM_DISPATCH_NOT_ADMITTED'),
     namesOperatorBusy: everything.includes('OPERATOR_BUSY'),
+    namesAdmissionRefusedInEvents: everything.includes('ADMISSION_REFUSED'),
+    refusalReasonsInMeteringRows: unique(events.filter(event => event.type === 'evaluation.command.metering').flatMap(
+      event => (event.data as unknown as MeteringEventData).metering.attempts.flatMap(
+        entry => entry.refusal === undefined ? [] : [entry.refusal],
+      ),
+    )),
     namesDispatchUnknown: events.some(event => event.type === 'rlm.message.dispatch_unknown'),
   }
 }

@@ -68,6 +68,8 @@ const EVALUATION_SCENARIOS: ReadonlyArray<readonly [ScenarioName, string]> = [
   ['integration', 'meters a root, two children and a batched continuation that reads a child result, each request reserved before it is sent'],
   ['refuse-first', 'sends nothing when the first request is refused, and reports the refusal without requeueing or a busy error'],
   ['refuse-later', 'sends nothing past a refused request of the batched continuation, which fails without requeueing its messages'],
+  ['refuse-round', 'sends nothing past a refused request of a later round of one command, which keeps the usage of its settled round'],
+  ['cancelled', 'keeps the error of a command cancelled with a request in flight and records that request as unknown'],
   ['missing-usage', 'withholds the usage of a command when a request reports none, and records the missing request apart from the outcome'],
   ['unknown-no-replay', 'does not replay a node whose failed command left a request of unknown outcome, although its retry policy lists the error code'],
   ['unknown-error-finish', 'reports a command whose request ended in an HTTP error with an unknown outcome and does not retry the node'],
