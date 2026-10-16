@@ -37,7 +37,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { OrchestrationArtifactRef, type LogicalTaskGraphV1, type OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
-import { assertLossless, correlate, project, projectionSha256, Tokens, type CaptureWho } from './capture.ts'
+import { assertLossless, correlate, dispatchFacts, project, projectionSha256, Tokens, type CaptureWho } from './capture.ts'
 import { messageText, startFakeDeepSeek, type FakeBody, type FakeDeepSeek, type FakeMessage, type FakeRawRequest, type FakeReply, type FakeUsage } from './fake-deepseek.ts'
 
 const configPath = process.argv[2]
@@ -599,7 +599,7 @@ async function productionRecords() {
     receipts: Array<{ commandId: string; sessionId?: string; operation?: string }>
     events: Array<{ type: string; sessionId: string; data: Record<string, unknown> }>
   }
-  return { sessions: state.sessions.map(session => session.snapshot), receipts: state.receipts, events: state.events }
+  return { sessions: state.sessions.map(session => session.snapshot), receipts: state.receipts, runtimeEvents: state.events }
 }
 
 /**
@@ -608,11 +608,13 @@ async function productionRecords() {
  * task are; the context the child saw; and, when asked, the raw requests, their projection and the correlation, written to a
  * directory. A request that cannot be tied to exactly one dispatch fails the scenario.
  * @param runId - the run of the scenario.
+ * @param events - the run's orchestration events, which record the dispatches.
  * @param raw - the requests the fake received while the scenario ran, in arrival order.
  */
-async function captureTranscript(runId: OrchestrationRunId, raw: readonly FakeRawRequest[]) {
-  const production = await productionRecords()
-  const { requests: byArrival, otherRun } = correlate(raw, production, String(runId), dispatchHint)
+async function captureTranscript(runId: OrchestrationRunId, events: RunEvents, raw: readonly FakeRawRequest[]) {
+  const { runtimeEvents, ...production } = await productionRecords()
+  const facts = dispatchFacts(events, runtimeEvents)
+  const { requests: byArrival, otherRun } = correlate(raw, production, facts, String(runId), dispatchHint)
   // Tokens are numbered in the order of the dispatch and round, not of arrival: root and child requests arrive concurrently.
   const order: readonly CaptureWho[] = ['root', 'child', 'continuation']
   const correlated = [...byArrival].sort((left, right) => order.indexOf(left.who) - order.indexOf(right.who) || left.round - right.round)
@@ -792,7 +794,7 @@ async function run(scenario: Scenario) {
       }
       : {},
     ...scenario.batch === true ? await batchTranscript(started.runId, events, until) : {},
-    ...scenario.capture === true ? await captureTranscript(started.runId, ((await owned.fake)?.raw ?? []).slice(fakeStart)) : {},
+    ...scenario.capture === true ? await captureTranscript(started.runId, events, ((await owned.fake)?.raw ?? []).slice(fakeStart)) : {},
   }
 }
 

@@ -9,8 +9,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { LogicalTaskGraphV1, OrchestrationAdmissionTraceV1, OrchestrationNodeSpecV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import {
-  assertRestores, correlateResident, projectResident, serializeRequest, Tokens,
-  type ResidentDispatchFacts, type SerializedRequest,
+  assertRestores, correlateResident, dispatchFacts, projectResident, serializeRequest, Tokens,
+  type SerializedRequest,
 } from '../../../../examples/acp-agent/tests/fixtures/prime-rlm-terminal/capture.ts'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
@@ -708,15 +708,7 @@ describe('what a Resident root and a Resident child are given', () => {
     const runtime = JSON.parse(await readFile(join(fixture.root, 'rlm-runtime', 'state.json'), 'utf8')) as {
       events: Array<{ type: string; sessionId: string; data: { commandId?: string } }>
     }
-    const facts: ResidentDispatchFacts = {
-      started: events.filter(event => event.type === 'rlm.execution.started').map(event => ({ runtimeSessionId: String(event.data.runtimeSessionId) })),
-      dispatched: events.filter(event => event.type === 'rlm.child.dispatched').map(event => ({
-        executionId: String(event.data.executionId), childSessionId: String(event.data.childSessionId),
-      })),
-      delivered: runtime.events.filter(event => event.type === 'rlm.message.delivered').map(event => ({
-        sessionId: event.sessionId, commandId: String(event.data.commandId),
-      })),
-    }
+    const facts = dispatchFacts(events, runtime.events)
     const withBridge = seam.filter(entry => fixture.resident.requests[entry.ordinal]?.modelToolBridge !== undefined)
     const correlated = correlateResident(withBridge.map(entry => ({
       ordinal: entry.ordinal,
@@ -746,7 +738,10 @@ describe('what a Resident root and a Resident child are given', () => {
       const write = (name: string, value: unknown): Promise<void> => writeFile(join(directory, name), `${JSON.stringify(value, null, 2)}\n`)
       await write('resident-raw.json', {
         covers: 'the call from the orchestration daemon into the ResidentClient; not the native driver\'s own model requests or tool rounds',
-        requests: seam.map(entry => ({ ordinal: entry.ordinal, request: entry.serialized.value, excluded: entry.serialized.excluded })),
+        requests: seam.map(entry => ({
+          ordinal: entry.ordinal, sha256: createHash('sha256').update(JSON.stringify(entry.serialized.value)).digest('hex'),
+          request: entry.serialized.value, excluded: entry.serialized.excluded,
+        })),
       })
       await write('resident-correlation.json', {
         facts, requests: correlated.map(({ ordinal, who, commandId, bridgeSessionId }) => ({ ordinal, who, commandId, bridgeSessionId })),

@@ -269,6 +269,9 @@ describe('reading the result of a direct child', () => {
     const missing = await read(vanished)
     expect(missing).toMatchObject({ status: 'not_found', resultRef: ref('result:vanished') })
     expect(missing).not.toHaveProperty('text')
+    // Only the read that returned a segment (the failed child's) is recorded as an event.
+    const events = await t.service.readEvents({ sessionId: t.root1, after: 0, limit: 500 })
+    expect(events.filter(event => event.type === 'rlm.child.result.read').map(event => event.data.status)).toEqual(['failed'])
     await t.ctx.root.fiber.dispose()
   })
 

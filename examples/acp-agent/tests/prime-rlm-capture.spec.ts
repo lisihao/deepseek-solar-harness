@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assertLossless, assertRestores, CaptureError, correlate, correlateResident, project, projectionSha256, projectResident,
   serializeRequest, Tokens,
-  type CaptureWho, type ProductionRecords, type ResidentDispatchFacts,
+  type CaptureWho, type ProductionRecords, type DispatchFacts,
 } from './fixtures/prime-rlm-terminal/capture.ts'
 import type { FakeRawRequest } from './fixtures/prime-rlm-terminal/fake-deepseek.ts'
 
@@ -43,7 +43,12 @@ const production = (childCommand = CHILD_COMMAND): ProductionRecords => ({
     { commandId: `${childCommand}:deepseek-tool:fake-call-2`, sessionId: CHILD_SESSION, operation: 'cell.execute' },
     { commandId: `${DELIVER_COMMAND}:deepseek-tool:fake-call-3`, sessionId: ROOT_SESSION, operation: 'cell.execute' },
   ],
-  events: [{ type: 'rlm.message.delivered', sessionId: ROOT_SESSION, data: { commandId: DELIVER_COMMAND } }],
+})
+
+const facts = (): DispatchFacts => ({
+  started: [{ runtimeSessionId: ROOT_SESSION }],
+  dispatched: [{ executionId: CHILD_COMMAND, childSessionId: CHILD_SESSION }],
+  delivered: [{ sessionId: ROOT_SESSION, commandId: DELIVER_COMMAND }],
 })
 
 /** Seven requests in an arrival order that interleaves the root and the child. */
@@ -58,12 +63,12 @@ const scenario = (childCommand = CHILD_COMMAND): FakeRawRequest[] => [
 
 describe('correlating requests with the production dispatch records', () => {
   it('ties each request to its session, command and chain by tool-call ids and receipts, in arrival order', () => {
-    const { requests, otherRun } = correlate(scenario(), production(), RUN, hint)
+    const { requests, otherRun } = correlate(scenario(), production(), facts(), RUN, hint)
     expect(otherRun).toEqual([])
-    const facts = requests.map(({ ordinal, round, who, sessionId, workerCommand, chain }) => (
+    const seen = requests.map(({ ordinal, round, who, sessionId, workerCommand, chain }) => (
       { ordinal, round, who, sessionId, workerCommand, chain }
     ))
-    expect(facts).toEqual([
+    expect(seen).toEqual([
       { ordinal: 0, round: 0, who: 'root', sessionId: ROOT_SESSION, workerCommand: ROOT_COMMAND, chain: 0 },
       { ordinal: 1, round: 0, who: 'child', sessionId: CHILD_SESSION, workerCommand: CHILD_COMMAND, chain: 1 },
       { ordinal: 2, round: 1, who: 'root', sessionId: ROOT_SESSION, workerCommand: ROOT_COMMAND, chain: 0 },
@@ -74,14 +79,14 @@ describe('correlating requests with the production dispatch records', () => {
   })
 
   it('reports, and does not classify, the requests of another run', () => {
-    const { requests, otherRun } = correlate(scenario(), production(), 'run-99999999-9999-4999-8999-999999999999', hint)
+    const { requests, otherRun } = correlate(scenario(), production(), facts(), 'run-99999999-9999-4999-8999-999999999999', hint)
     expect(requests).toEqual([])
     expect(otherRun).toEqual([0, 1, 2, 3, 4, 5])
   })
 
-  const fails = (raw: FakeRawRequest[], records: ProductionRecords, message: string, text = hint): void => {
-    expect(() => correlate(raw, records, RUN, text)).toThrow(CaptureError)
-    expect(() => correlate(raw, records, RUN, text)).toThrow(message)
+  const fails = (raw: FakeRawRequest[], records: ProductionRecords, message: string, text = hint, known = facts()): void => {
+    expect(() => correlate(raw, records, known, RUN, text)).toThrow(CaptureError)
+    expect(() => correlate(raw, records, known, RUN, text)).toThrow(message)
   }
 
   it('fails on a tool call id two requests were answered with', () => {
@@ -128,13 +133,20 @@ describe('correlating requests with the production dispatch records', () => {
     fails(scenario(), other, 'the runtime kept')
   })
 
+  it('fails when the recorded dispatch of the root, or of the child, is missing or names another session', () => {
+    fails(scenario(), production(), 'matches 0 dispatch records', hint, { ...facts(), started: [] })
+    fails(scenario(), production(), 'matches 0 dispatch records', hint, { ...facts(), dispatched: [] })
+    const elsewhere = { ...facts(), dispatched: [{ executionId: CHILD_COMMAND, childSessionId: ROOT_SESSION }] }
+    fails(scenario(), production(), 'matches 0 dispatch records', hint, elsewhere)
+  })
+
   it('fails when the text of a request says another dispatch than the production records', () => {
     fails(scenario(), production(), 'its text says child', () => 'child')
   })
 
-  it('fails on a child session whose command is not a child dispatch, and on a continuation nobody delivered', () => {
-    fails(scenario('x'), production('x'), 'not a child dispatch')
-    fails(scenario(), { ...production(), events: [] }, 'rlm.message.delivered')
+  it('fails on a command no dispatch record names, in the session it ran in', () => {
+    fails(scenario('x'), production('x'), 'matches 0 dispatch records')
+    fails(scenario(), production(), 'matches 0 dispatch records', hint, { ...facts(), delivered: [] })
   })
 })
 
@@ -221,7 +233,7 @@ describe('serializing a request of the provider seam', () => {
 describe('correlating Resident requests with the dispatch records', () => {
   const EXEC = 'orch:run-11111111-1111-4111-8111-111111111111:capture:1'
   const CHILD_EXEC = `${EXEC}:rlm:rlm-child-33333333-3333-4333-8333-333333333333`
-  const facts: ResidentDispatchFacts = {
+  const facts: DispatchFacts = {
     started: [{ runtimeSessionId: `rlm:${EXEC}` }],
     dispatched: [{ executionId: CHILD_EXEC, childSessionId: CHILD_SESSION }],
     delivered: [{ sessionId: `rlm:${EXEC}`, commandId: DELIVER_COMMAND }],

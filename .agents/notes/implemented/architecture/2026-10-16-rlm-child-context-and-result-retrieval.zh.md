@@ -44,13 +44,13 @@ parent 也没有读取 child 已存结果的有界方式。`listSubagents()` 去
 
 模型可见的变化有：`typescript_repl` 工具描述的字节（新增两句，说明新的 helper；出现在 API 的工具列表和 Resident 的 bridge 中）、root 请求中的策略指令文本（版本 1.5.1），以及对于此改动之后创建的 child，其之后的 API 请求在 `JSON.stringify(context)` 工具结果里带的是它自己的 context，而不是 root 的。对缓存命中、token、成本和回答的影响未测量。
 
-状态文件格式没有变化：新 helper 读取持久化 children 里已有的 `resultRef`，状态仍是版本 6，旧 child 的 context 不迁移也不改写（状态文件的其他内容照常写入）。新增一种持久化记录：返回片段的读取会向 `state.json` 的 `events` 列表追加一条 `rlm.child.result.read` 事件（child、command、引用、offset、长度、标志位、两个哈希、状态；不含文本）。状态加载只检查 `events` 是数组，不检查事件类型，且其中已有 35 种事件类型，所以没有这项改动的构建能加载这样的文件；这是读代码得出的，没有在旧构建上试过。auto-refine 回合会把会话最近 128 条事件放进它的提示，因此这些小记录可能出现在那里。
+状态文件格式没有变化：新 helper 读取持久化 children 里已有的 `resultRef`，状态仍是版本 6，旧 child 的 context 不迁移也不改写（状态文件的其他内容照常写入）。新增一种持久化记录：返回片段的读取会向 `state.json` 的 `events` 列表追加一条 `rlm.child.result.read` 事件（child、command、引用、offset、长度、标志位、两个哈希、状态；不含文本）。状态加载只检查 `events` 是数组，不检查事件类型，且 runtime 源码在基线提交中已有 33 个不同的 `rlm.*` 事件类型字符串，所以没有这项改动的构建能加载这样的文件；这是读代码得出的，没有在旧构建上试过。auto-refine 回合会把会话最近 128 条事件放进它的提示，因此这些小记录可能出现在那里。
 
 被封存的 `rlm-runtime`、`rlm-runtime-local`、`rlm-strategy-local` 和 `orchestration-local` 会变化，包含这项改动的 Desktop 发布需要重新封存它们。
 
 ## 测试
 
-`child-context.spec.ts` 覆盖允许的键、含最后一行的完整任务、不含 parent 的任务或其存入的值、孙 child 以及持久化会话。`child-result.spec.ts` 覆盖对含代理对和多字节字符的文本做带两个哈希的重组、输出上限、每一种拒绝（另一个会话、猜出的引用、已删除的 child、没有读取器的 host）、未结束、`indeterminate`、失败和没有结果的 child 的状态、范围、混合块的渲染、摘要、事件、读取器发现结果损坏时的错误，以及重启后相同的授权。`rlm-continuation.spec.ts` 覆盖属于其他 run、节点、child 会话或其他种类的已存条目，以及对属于该 child 的条目：缺失、为空或非字符串的 execution id，缺失或未知的 stop reason，不是列表的 output，以及为 null、没有 type 或字段类型错误的 block。`rlm-strategy-local/tests/strategy.spec.ts` 覆盖两种 fidelity，包括明确要求两个 child 的小任务。
+`child-context.spec.ts` 覆盖允许的键、含最后一行的完整任务、不含 parent 的任务或其存入的值、孙 child 以及持久化会话。`child-result.spec.ts` 覆盖对含代理对和多字节字符的文本做带两个哈希的重组、输出上限、每一种拒绝（另一个会话、猜出的引用、已删除的 child、没有读取器的 host）、未结束、`indeterminate`、失败和没有结果的 child 的状态、范围、混合块的渲染、摘要、事件、读取器发现结果损坏时的错误，以及重启后相同的授权。重启测试在同一个状态文件上创建新的 runtime 并重新绑定 host；它不检验 daemon 或 Resident 自身的恢复。在此改动之前创建的 child，其 `context` 里仍然带有 parent 的任务，有测试断言这一点。`rlm-continuation.spec.ts` 覆盖属于其他 run、节点、child 会话或其他种类的已存条目，以及对属于该 child 的条目：缺失、为空或非字符串的 execution id，缺失或未知的 stop reason，不是列表的 output，以及为 null、没有 type 或字段类型错误的 block。`rlm-strategy-local/tests/strategy.spec.ts` 覆盖两种 fidelity，包括明确要求两个 child 的小任务。
 
 **请求捕获。** fake provider 保存每个请求的原始字节、sha256、到达序号，以及它所回答的 tool call id。Loader 捕获经过生产 Loader、daemon、model worker 和 adapter 到 loopback fake；只替换 provider。它通过 tool-call id 和 runtime 保存的 cell receipt，把每个请求对应到 runtime 记录的会话和 worker command，并用它们核对 tool 结果；请求文本只作为必须一致的核对，无法唯一对应到一次派发的请求会使场景失败，而不是默认算作 child。快照使用的投影只把已知位置上每次运行都不同的值替换为每个不同值一个的带序号 token，任务文本、工具 schema 和策略文本保持原样，并且只有在把值放回后得到原始请求时才通过。Resident 捕获保存 daemon 发给 ResidentClient 的请求中每个可序列化的字段，点名被排除的字段（`signal`）及原因，加入 root 的消息 continuation，并把每个请求对应到 daemon 和 runtime 记录的事件。**它的限度：** 只覆盖 daemon 到 ResidentClient 的调用，不覆盖原生驱动自己的模型请求和工具回合。原始文件、对应关系、投影和逐字段比较保存在评测报告目录中。
 

@@ -24,12 +24,11 @@ export class CaptureError extends Error {
 /** Which dispatch a request belonged to. */
 export type CaptureWho = 'root' | 'child' | 'continuation'
 
-/** The parts of the runtime's persisted state a capture is checked against. */
+/** The parts of the runtime's persisted state a capture is checked against, besides the dispatch records. */
 export interface ProductionRecords {
   readonly sessions: ReadonlyArray<{ readonly sessionId: string; readonly parentSessionId?: string }>
   /** The receipts of model-tool cells: `commandId` is `<worker command>:deepseek-tool:<tool call id>`. */
   readonly receipts: ReadonlyArray<{ readonly commandId: string; readonly sessionId?: string; readonly operation?: string }>
-  readonly events: ReadonlyArray<{ readonly type: string; readonly sessionId: string; readonly data: Readonly<Record<string, unknown>> }>
 }
 
 /** One request tied to its production dispatch. */
@@ -71,7 +70,8 @@ function textOf(content: unknown): string {
  * Ties every request to the production session and command it was sent for, by the tool-call ids the fake issued and the
  * receipts the runtime kept for the cells those calls ran. A request's text is used only to check the result.
  * @param raw - the requests of the scenario in arrival order.
- * @param production - the runtime's persisted sessions, receipts and events.
+ * @param production - the runtime's persisted sessions and receipts.
+ * @param facts - the dispatches the orchestration and runtime events recorded; the kind of each request comes from them.
  * @param runId - the orchestration run; requests of the sessions of other runs are reported, not classified.
  * @param hint - what the text of a request says its dispatch is; a disagreement with the production records fails.
  * @returns the correlated requests in arrival order.
@@ -80,6 +80,7 @@ function textOf(content: unknown): string {
 export function correlate(
   raw: readonly FakeRawRequest[],
   production: ProductionRecords,
+  facts: DispatchFacts,
   runId: string,
   hint: (firstMessageText: string) => CaptureWho,
 ): Correlation {
@@ -134,7 +135,10 @@ export function correlate(
       otherRun.push(...indexes.map(index => (parsed[index] as ParsedRequest).raw.ordinal))
       continue
     }
-    const who = whoOf(identity, production)
+    if (!production.sessions.some(session => session.sessionId === identity.sessionId)) {
+      throw new CaptureError(`The runtime holds no session ${identity.sessionId}`)
+    }
+    const who = dispatchOf(identity.sessionId, identity.workerCommand, facts)
     for (const index of indexes) {
       const request = parsed[index] as ParsedRequest
       const hinted = hint(textOf(request.messages[0]?.content))
@@ -185,23 +189,6 @@ function chainIdentity(chain: readonly ParsedRequest[], production: ProductionRe
   if (commands.size !== 1 || sessionId === undefined) throw new CaptureError(`A model loop ran under ${String(commands.size)} worker commands; exactly one is needed`)
   const [workerCommand] = [...commands] as [string]
   return { sessionId, workerCommand }
-}
-
-function whoOf(identity: { sessionId: string; workerCommand: string }, production: ProductionRecords): CaptureWho {
-  const session = production.sessions.find(value => value.sessionId === identity.sessionId)
-  if (session === undefined) throw new CaptureError(`The runtime holds no session ${identity.sessionId}`)
-  const { workerCommand } = identity
-  if (session.parentSessionId !== undefined) {
-    if (!workerCommand.includes(':rlm-child-')) throw new CaptureError(`Child session ${identity.sessionId} ran a command that is not a child dispatch: ${workerCommand}`)
-    return 'child'
-  }
-  if (workerCommand.endsWith(':rlm:root')) return 'root'
-  if (workerCommand.endsWith(':deliver')) {
-    const delivered = production.events.some(event => event.type === 'rlm.message.delivered' && event.sessionId === identity.sessionId && event.data.commandId === workerCommand)
-    if (!delivered) throw new CaptureError(`No rlm.message.delivered event names the continuation command ${workerCommand}`)
-    return 'continuation'
-  }
-  throw new CaptureError(`Root session ${identity.sessionId} ran a command of a kind this capture does not know: ${workerCommand}`)
 }
 
 function tryParse(text: string): unknown {
@@ -348,7 +335,8 @@ export function assertLossless(raw: FakeRawRequest, projection: unknown, tokens:
   const original = JSON.parse(raw.body) as { tools?: unknown; messages?: Array<{ role?: unknown }> }
   const projected = projection as { tools?: unknown; messages?: Array<{ role?: unknown }> }
   const restored = tokens.restore(JSON.stringify(projection))
-  if (restored !== JSON.stringify(original)) throw new CaptureError(`The projection of request ${String(raw.ordinal)} does not restore to the raw request`)
+  if (JSON.stringify(original) !== raw.body) throw new CaptureError(`Request ${String(raw.ordinal)} is not the serialization of its own parsed body`)
+  if (restored !== raw.body) throw new CaptureError(`The projection of request ${String(raw.ordinal)} does not restore to the raw request`)
   if (!isDeepStrictEqual(projected.tools, original.tools)) throw new CaptureError(`The projection of request ${String(raw.ordinal)} changed the tool schemas`)
   if (!isDeepStrictEqual(projected.messages?.map(message => message.role), original.messages?.map(message => message.role))) {
     throw new CaptureError(`The projection of request ${String(raw.ordinal)} changed the roles of the messages`)
@@ -363,14 +351,57 @@ export function projectionSha256(projection: unknown): string {
   return createHash('sha256').update(JSON.stringify(projection)).digest('hex')
 }
 
-/** What the orchestration and runtime events say about the dispatches of a run, for the Resident seam. */
-export interface ResidentDispatchFacts {
+/** What the orchestration and runtime events say about the dispatches of a run. */
+export interface DispatchFacts {
   /** `rlm.execution.started`: the runtime session of the root. */
   readonly started: ReadonlyArray<{ readonly runtimeSessionId: string }>
-  /** `rlm.child.dispatched`: the execution (which is the command of the child's Resident request) and the session of the child. */
+  /** `rlm.child.dispatched`: the execution (which is the command of the child's dispatch) and the session of the child. */
   readonly dispatched: ReadonlyArray<{ readonly executionId: string; readonly childSessionId: string }>
   /** `rlm.message.delivered`: the command a delivered message was handed to. */
   readonly delivered: ReadonlyArray<{ readonly sessionId: string; readonly commandId: string }>
+}
+
+/**
+ * @param orchestration - the events of the orchestration run.
+ * @param runtime - the events of the RLM runtime (its persisted `events`).
+ * @returns the dispatch facts those events record.
+ */
+export function dispatchFacts(
+  orchestration: ReadonlyArray<{ readonly type: string; readonly data: Readonly<Record<string, unknown>> }>,
+  runtime: ReadonlyArray<{ readonly type: string; readonly sessionId: string; readonly data: Readonly<Record<string, unknown>> }>,
+): DispatchFacts {
+  return {
+    started: orchestration.filter(event => event.type === 'rlm.execution.started').map(event => ({ runtimeSessionId: String(event.data.runtimeSessionId) })),
+    dispatched: orchestration.filter(event => event.type === 'rlm.child.dispatched').map(event => ({
+      executionId: String(event.data.executionId), childSessionId: String(event.data.childSessionId),
+    })),
+    delivered: runtime.filter(event => event.type === 'rlm.message.delivered').map(event => ({
+      sessionId: event.sessionId, commandId: String(event.data.commandId),
+    })),
+  }
+}
+
+/**
+ * Names the dispatch a command and session belong to by the events that recorded it: the root's session and its `:rlm:root`
+ * command, a child's session and the execution `rlm.child.dispatched` named, or the session and command a message was
+ * delivered to. Exactly one record must match.
+ * @param sessionId - the session the command ran in.
+ * @param command - the command of the dispatch, without a tool-call suffix.
+ * @param facts - the recorded dispatches.
+ * @returns the kind of dispatch.
+ * @throws CaptureError when no record, or more than one, matches.
+ */
+export function dispatchOf(sessionId: string | undefined, command: string, facts: DispatchFacts): CaptureWho {
+  const matches: CaptureWho[] = []
+  // The root's session is `rlm:<execution>`, and its command is `<execution>:rlm:root`.
+  if (facts.started.some(start => start.runtimeSessionId === sessionId
+    && `${start.runtimeSessionId.replace(/^rlm:/u, '')}:rlm:root` === command)) matches.push('root')
+  if (facts.dispatched.some(child => child.executionId === command && child.childSessionId === sessionId)) matches.push('child')
+  if (facts.delivered.some(entry => entry.commandId === command && entry.sessionId === sessionId)) matches.push('continuation')
+  if (matches.length !== 1) {
+    throw new CaptureError(`Command ${command} in session ${String(sessionId)} matches ${String(matches.length)} dispatch records: ${matches.join(', ')}`)
+  }
+  return matches[0] as CaptureWho
 }
 
 /** A request of the Resident provider seam: its position among all of them, its command, and the session of its model-tool bridge. */
@@ -382,8 +413,7 @@ export interface ResidentSeamRequest {
 
 /**
  * Ties each Resident request to a root, a child or a message continuation by the events the daemon and runtime recorded for the
- * dispatch: the command and the session of the request must both match one record. A request that matches none, or more than
- * one, fails.
+ * dispatch: the command and the session of the request must both match one record (`dispatchOf`).
  * @param requests - the requests that carry a model-tool bridge, in arrival order.
  * @param facts - the recorded dispatches.
  * @returns the kind of dispatch of each request, in the order given.
@@ -391,20 +421,9 @@ export interface ResidentSeamRequest {
  */
 export function correlateResident(
   requests: readonly ResidentSeamRequest[],
-  facts: ResidentDispatchFacts,
+  facts: DispatchFacts,
 ): Array<ResidentSeamRequest & { readonly who: CaptureWho }> {
-  return requests.map((request) => {
-    const matches: CaptureWho[] = []
-    // The root's session is `rlm:<execution>`, and its Resident command is `<execution>:rlm:root`.
-    if (facts.started.some(start => start.runtimeSessionId === request.bridgeSessionId
-      && `${start.runtimeSessionId.replace(/^rlm:/u, '')}:rlm:root` === request.commandId)) matches.push('root')
-    if (facts.dispatched.some(child => child.executionId === request.commandId && child.childSessionId === request.bridgeSessionId)) matches.push('child')
-    if (facts.delivered.some(entry => entry.commandId === request.commandId && entry.sessionId === request.bridgeSessionId)) matches.push('continuation')
-    if (matches.length !== 1) {
-      throw new CaptureError(`Resident request ${String(request.ordinal)} (${request.commandId}) matches ${String(matches.length)} dispatch records: ${matches.join(', ')}`)
-    }
-    return { ...request, who: matches[0] as CaptureWho }
-  })
+  return requests.map(request => ({ ...request, who: dispatchOf(request.bridgeSessionId, request.commandId, facts) }))
 }
 
 /**
