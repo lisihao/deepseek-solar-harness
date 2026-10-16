@@ -724,9 +724,7 @@ describe('what a Resident root and a Resident child are given', () => {
     expect(child?.nativeToolPolicy).toBe('disabled')
   })
 
-  // The child's REPL shows a clone of the root's context, whose `task` is the root's whole task. Fixed by the next commit; until
-  // then this test is expected to fail, and the failure is the before evidence.
-  it.fails('shows the child\'s REPL its own task and none of the root\'s private note', async () => {
+  it('shows the child\'s REPL its own task and none of the root\'s private note', async () => {
     const { context } = await capture()
     expect(context?.task).toBe(CHILD_TASK)
     expect(JSON.stringify(context)).not.toContain(CANARY)

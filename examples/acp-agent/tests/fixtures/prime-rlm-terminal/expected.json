@@ -307,10 +307,10 @@
           "tool"
         ],
         "tools": 1,
-        "containsRootMarker": true,
-        "containsRootTail": true,
+        "containsRootMarker": false,
+        "containsRootTail": false,
         "containsChildTail": true,
-        "bodySha256": "ae70c71185bd74b8f539fc4fa56d83ffa612e323b129f403c148147f3a3add43"
+        "bodySha256": "8f5e3ddbbc786b07e2f692a34c9453d129652da7813febff658f5f71ef91ea69"
       },
       {
         "who": "child",
@@ -323,10 +323,10 @@
           "tool"
         ],
         "tools": 1,
-        "containsRootMarker": true,
-        "containsRootTail": true,
+        "containsRootMarker": false,
+        "containsRootTail": false,
         "containsChildTail": true,
-        "bodySha256": "04d0f1c820ee5477feb906519f15c9f1d84a6c45f3fe4d7934b7a5926c3de041"
+        "bodySha256": "0d45c2835151f837dee6d0c8c07229478efe48ef40406f5e67a38c8215cea4ed"
       },
       {
         "who": "continuation",
@@ -350,8 +350,8 @@
         "runId",
         "task"
       ],
-      "taskIsTheChildsOwn": false,
-      "containsRootMarker": true
+      "taskIsTheChildsOwn": true,
+      "containsRootMarker": false
     }
   },
   "daemonsStopped": true

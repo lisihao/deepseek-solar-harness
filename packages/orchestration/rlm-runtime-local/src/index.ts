@@ -288,6 +288,34 @@ function selectMessageBatch(ordered: readonly RlmMessageV1[]): RlmMessageV1[] {
   return batch
 }
 
+/**
+ * The keys of a root context that name where the node came from, not what it asks for: the run and node, the references of the
+ * sealed context packet, capability plan and graph certificate, and the sealed default selection for children. These are protocol
+ * fields fixed by this Provider's contract with its Consumer, not a deployment setting.
+ */
+const CHILD_CONTEXT_PROTOCOL_KEYS = [
+  'runId', 'nodeId', 'contextPacketRef', 'capabilityPlanRef', 'graphCertificateHash',
+  'defaultChildOperatorId', 'defaultChildModel', 'defaultChildTier',
+] as const
+
+/**
+ * The `context` a new child's REPL starts with: the protocol keys its parent has, and `task` set to the child's own task. Nothing
+ * else of the parent's context goes with it: not the parent's task, which may hold the whole input and other agents' tasks, and not
+ * values the parent's cells stored there. Material a child needs is part of the task its parent writes for it.
+ * @param parent - the parent's context.
+ * @param task - the child's own task, whole.
+ * @returns the child's initial context.
+ */
+function childContext(parent: Readonly<Record<string, RlmJsonValue>>, task: string): Record<string, RlmJsonValue> {
+  const context: Record<string, RlmJsonValue> = {}
+  for (const key of CHILD_CONTEXT_PROTOCOL_KEYS) {
+    const value = parent[key]
+    if (value !== undefined) context[key] = structuredClone(value)
+  }
+  context.task = task
+  return context
+}
+
 function now(): string { return new Date().toISOString() }
 function goalObjective(value: string): string {
   const objective = nonBlank(value, 'goal objective')
@@ -1013,7 +1041,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       lifecycle: 'idle', stateRevision: 0, eventCursor: this.document.eventSequence, children: [],
       restorableVariables: [], degradedVariables: [], createdAt, updatedAt: createdAt,
     }
-    this.document.sessions.push({ snapshot: childSession, context: structuredClone(parent.context), variables: [] })
+    this.document.sessions.push({ snapshot: childSession, context: childContext(parent.context, task), variables: [] })
     this.bindings.set(String(childSessionId), bindings)
     this.updateSession(parent, { children: [...parent.snapshot.children, child], stateRevision: parent.snapshot.stateRevision + 1 })
     this.acceptReceipt(String(request.commandId), requestHash, request.parentSessionId, 'child.spawn')
