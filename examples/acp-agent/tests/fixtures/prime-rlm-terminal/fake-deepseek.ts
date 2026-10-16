@@ -14,10 +14,17 @@ export interface FakeMessage {
   readonly tool_calls?: unknown
 }
 
-/** What the fake sends back for one request. */
+/** The usage a reply reports, in the wire fields of the API: `prompt_tokens` includes the cache hits. */
+export interface FakeUsage {
+  readonly promptTokens: number
+  readonly completionTokens: number
+  readonly cacheHitTokens: number
+}
+
+/** What the fake sends back for one request; `usage` defaults to 3 prompt and 2 completion tokens and no cache hits. */
 export type FakeReply =
-  | { readonly kind: 'tool'; readonly name: string; readonly arguments: string }
-  | { readonly kind: 'text'; readonly text: string; readonly finish: 'stop' | 'length' }
+  | { readonly kind: 'tool'; readonly name: string; readonly arguments: string; readonly usage?: FakeUsage }
+  | { readonly kind: 'text'; readonly text: string; readonly finish: 'stop' | 'length'; readonly usage?: FakeUsage }
 
 /** Decides the reply for one request; it may wait, for example for a gate the driver opens later. */
 export type FakeHandler = (messages: readonly FakeMessage[]) => FakeReply | Promise<FakeReply>
@@ -47,6 +54,13 @@ function sse(response: ServerResponse, payload: unknown): void {
 }
 
 function writeReply(response: ServerResponse, reply: FakeReply): void {
+  const usage = reply.usage === undefined
+    ? { prompt_tokens: 3, completion_tokens: 2 }
+    : {
+      prompt_tokens: reply.usage.promptTokens,
+      completion_tokens: reply.usage.completionTokens,
+      prompt_cache_hit_tokens: reply.usage.cacheHitTokens,
+    }
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
   if (reply.kind === 'tool') {
     const midpoint = Math.max(1, Math.floor(reply.arguments.length / 2))
@@ -54,10 +68,10 @@ function writeReply(response: ServerResponse, reply: FakeReply): void {
     const second = { index: 0, function: { arguments: reply.arguments.slice(midpoint) } }
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [first] }, finish_reason: null }] })
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [second] }, finish_reason: null }] })
-    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 2 } })
+    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: 'tool_calls' }], usage })
   } else {
     sse(response, { choices: [{ index: 0, delta: { content: reply.text }, finish_reason: null }] })
-    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: reply.finish }], usage: { prompt_tokens: 3, completion_tokens: 2 } })
+    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: reply.finish }], usage })
   }
   sse(response, '[DONE]')
   response.end()

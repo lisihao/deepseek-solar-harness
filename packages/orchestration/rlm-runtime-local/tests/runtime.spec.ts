@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -597,92 +598,122 @@ describe('LocalRlmRuntime', () => {
     await recoveredContext.root.fiber.dispose()
   })
 
-  it('migrates v1-v4 child provenance and missing results without replaying uncertain work', async () => {
-    const sourceRoot = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-legacy-source-'))
-    let dispatches = 0
-    const bindings: RlmRuntimeHostBindings = {
-      dispatchChild: async (request) => {
-        dispatches += 1
-        return {
-          nativeSessionId: `native-${request.name}`,
-          nativeTurnId: `turn-${request.name}`,
-          result: Promise.resolve({ status: 'settled' }),
-          interrupt: () => Promise.resolve(),
-        }
-      },
-    }
-    const first = await runtime(sourceRoot, bindings)
-    const cellCommandId = RlmCommandId('legacy-fixture-cell')
-    const cellCode = 'await rlm("legacy fixture child", { name: "legacy-child" })'
-    await expect(first.service.executeCell({
-      sessionId: first.sessionId,
-      commandId: cellCommandId,
-      code: cellCode,
-    })).resolves.toMatchObject({ value: { modelOrigin: 'parent-inherited' } })
-    await waitUntil(async () => (await first.service.listChildren(first.sessionId))[0]?.lifecycle === 'settled')
-    const sourceState = JSON.parse(await readFile(join(sourceRoot, 'state.json'), 'utf8')) as Record<string, unknown>
-    await first.ctx.root.fiber.dispose()
+  describe('the durable state file', () => {
+    type StateJson = {
+      version?: number
+      messages: Array<Record<string, unknown>>
+      messageBatchDispatches?: unknown
+    } & Record<string, unknown>
 
-    // Remove fields introduced after each historical state version. The
-    // replacer also removes modelOrigin from nested cell receipt results.
-    const legacyStateJson = JSON.stringify(sourceState, (key, value: unknown) => {
-      if (key === 'modelOrigin' || key === 'childModelPolicy') return undefined
-      if (key === 'effectiveMode' || key === 'deliveryStatus' || key === 'queuedAt' || key === 'deliveredAt' || key === 'deliveryError') return undefined
-      return value
+    async function freshState(): Promise<StateJson> {
+      const sourceRoot = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-state-source-'))
+      const first = await runtime(sourceRoot, { dispatchChild: () => { throw new Error('not used') } })
+      await first.ctx.root.fiber.dispose()
+      return JSON.parse(await readFile(join(sourceRoot, 'state.json'), 'utf8')) as StateJson
+    }
+
+    function messageOf(outcome: unknown): string { return outcome instanceof Error ? outcome.message : '' }
+
+    function message(id: string, patch: Record<string, unknown> = {}): Record<string, unknown> {
+      return {
+        version: 1, messageId: id, commandId: `send-${id}`, fromSessionId: 'rlm-session-other', toSessionId: 'rlm-session-root',
+        mode: 'steer', text: 'x', effectiveMode: 'steer', deliveryStatus: 'queued', queuedAt: '2026-10-16T00:00:00.000Z',
+        createdAt: '2026-10-16T00:00:00.000Z', ...patch,
+      }
+    }
+
+    function record(ids: string[], patch: Record<string, unknown> = {}): Record<string, unknown> {
+      const [first] = ids
+      return {
+        version: 1,
+        commandId: ids.length === 1 ? `${first}:deliver` : 'wrong',
+        sessionId: 'rlm-session-root', messageIds: ids, state: 'held', createdAt: '2026-10-16T00:00:00.000Z', ...patch,
+      }
+    }
+
+    async function load(state: StateJson): Promise<{ readonly bytes: string; readonly outcome: unknown }> {
+      const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-state-load-'))
+      const bytes = `${JSON.stringify(state)}\n`
+      await writeFile(join(root, 'state.json'), bytes, { mode: 0o600 })
+      let outcome: unknown
+      try {
+        const context = new Context()
+        // The instance itself is not the outcome: a failing assertion would print its members, and printing a service calls it.
+        void new LocalRlmRuntime(context, root)
+        outcome = 'loaded'
+        await context.root.fiber.dispose()
+      } catch (error) {
+        outcome = error
+      }
+      expect(await readFile(join(root, 'state.json'), 'utf8')).toBe(bytes)
+      return { bytes, outcome }
+    }
+
+    it.each([1, 2, 3, 4, 5, 7])('refuses a version %i file by name and leaves its bytes unchanged', async (version) => {
+      const state = await freshState()
+      state.version = version
+      delete state.messageBatchDispatches
+      const { outcome } = await load(state)
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain(`version ${String(version)}`)
     })
 
-    for (const version of [1, 2, 3, 4] as const) {
-      const recoveredRoot = await mkdtemp(join(tmpdir(), `dsh-rlm-runtime-legacy-v${String(version)}-`))
-      const state = JSON.parse(legacyStateJson) as {
-        version: number
-        receipts: Array<Record<string, unknown>>
-        heartbeats?: unknown
-        controlLeases?: unknown
-      }
-      state.version = version
-      if (version === 1) {
-        delete state.heartbeats
-        delete state.controlLeases
-      } else {
-        state.heartbeats = []
-        if (version === 4) state.controlLeases = []
-        else delete state.controlLeases
-      }
-      const childReceipt = state.receipts.find(receipt => receipt.operation === 'child.spawn')
-      if (childReceipt === undefined) throw new Error(`legacy fixture v${String(version)} is missing child receipt`)
-      const childCommandId = childReceipt.commandId
-      if (typeof childCommandId !== 'string') throw new Error('legacy child receipt has no command id')
-      // A settled receipt with no result cannot be replayed or decoded safely.
-      delete childReceipt.result
-      delete childReceipt.resultSha256
-      await writeFile(join(recoveredRoot, 'state.json'), `${JSON.stringify(state)}\n`, { mode: 0o600 })
+    it('refuses a version 6 file that has no messageBatchDispatches, leaving it unchanged', async () => {
+      const state = await freshState()
+      delete state.messageBatchDispatches
+      const { outcome } = await load(state)
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain('unsupported shape')
+    })
 
-      const recoveredContext = new Context()
-      const recovered = new LocalRlmRuntime(recoveredContext, recoveredRoot)
-      await recovered.bindHost(first.sessionId, bindings)
-      await expect(recovered.listChildren(first.sessionId)).resolves.toMatchObject([{
-        lifecycle: 'settled',
-        modelOrigin: 'legacy',
-      }])
-      await expect(recovered.inspectReceipt(RlmCommandId(childCommandId))).resolves.toMatchObject({
-        state: 'indeterminate',
-        error: { code: 'RLM_COMMAND_INDETERMINATE' },
+    it('loads a version 6 file and keeps accepted and held batches', async () => {
+      const state = await freshState()
+      state.messages = [message('m1', { deliveryStatus: 'delivered' }), message('m2')]
+      state.messageBatchDispatches = [record(['m1'], { state: 'accepted' }), record(['m2'])]
+      expect((await load(state)).outcome).toBe('loaded')
+    })
+
+    it.each([
+      ['a record that is not an object', () => ({ state: 'held' }), []],
+      ['an unknown state', () => record(['m1'], { state: 'done' }), ['m1']],
+      ['no members', () => record([], { commandId: 'x' }), []],
+      ['a duplicate member', () => record(['m1', 'm1']), ['m1']],
+      ['a command that does not match its members', () => record(['m1'], { commandId: 'm1:batch-9-00000000:deliver' }), ['m1']],
+      ['a member that is not in the state', () => record(['gone']), []],
+      ['a member addressed to another session', () => record(['m1'], { sessionId: 'rlm-session-elsewhere' }), ['m1']],
+      ['an accepted batch whose member is still queued', () => record(['m1'], { state: 'accepted' }), ['m1']],
+      ['an intended batch whose member is delivered', () => record(['m1'], { state: 'intended' }), ['m1:delivered']],
+    ])('refuses %s, leaving the file unchanged', async (_name, make, ids) => {
+      const state = await freshState()
+      state.messages = ids.map((id) => {
+        const [name, status] = id.split(':')
+        return message(name!, status === 'delivered' ? { deliveryStatus: 'delivered' } : {})
       })
-      await expect(recovered.executeCell({
-        sessionId: first.sessionId,
-        commandId: cellCommandId,
-        code: cellCode,
-      })).resolves.toMatchObject({ value: { modelOrigin: 'legacy' } })
-      expect(dispatches).toBe(1)
+      state.messageBatchDispatches = [make()]
+      expect((await load(state)).outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+    })
 
-      const migrated = JSON.parse(await readFile(join(recoveredRoot, 'state.json'), 'utf8')) as {
-        version: number
-        sessions: Array<{ snapshot: { children: Array<{ modelOrigin?: unknown }> } }>
-      }
-      expect(migrated.version).toBe(5)
-      expect(migrated.sessions.flatMap(session => session.snapshot.children).every(child => child.modelOrigin === 'legacy')).toBe(true)
-      await recoveredContext.root.fiber.dispose()
-    }
+    it('refuses a member that is in two batches', async () => {
+      const state = await freshState()
+      state.messages = [message('m1'), message('m2')]
+      state.messageBatchDispatches = [record(['m1']), record(['m1'])]
+      const { outcome } = await load(state)
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain('two batches')
+    })
+
+    it('refuses members whose delivery order disagrees with their record', async () => {
+      const state = await freshState()
+      state.messages = [
+        message('m1', { effectiveMode: 'follow_up' }),
+        message('m2', { effectiveMode: 'steer' }),
+      ]
+      const members = ['m1', 'm2']
+      state.messageBatchDispatches = [record(members, { commandId: `m1:batch-2-${createHash('sha256').update('["m1","m2"]').digest('hex').slice(0, 8)}:deliver` })]
+      const { outcome } = await load(state)
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain('out of order')
+    })
   })
 
   it('rejects unknown rlm() options instead of silently ignoring them', async () => {

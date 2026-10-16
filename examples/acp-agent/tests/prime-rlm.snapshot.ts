@@ -47,15 +47,15 @@ it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overw
     libBinScript: driver,
     configPath: fileURLToPath(new URL('./fixtures/prime-rlm-terminal/cordis.yml', import.meta.url)),
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
-    // The driver starts the production orchestration and Resident daemons and runs three scenarios. Its timer limits are listed
-    // in its header and sum to 107.7 s (not counting directory creation, module loading, and scheduling); a normal run takes
-    // about 12 s. This limit lets it fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it. The
+    // The driver starts the production orchestration and Resident daemons and runs four scenarios. Its timer limits are listed
+    // in its header and sum to 119.7 s (not counting directory creation, module loading, and scheduling); a normal run takes
+    // about 15 s. This limit lets it fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it. The
     // test's own limit, below, is 15 s longer.
-    processTimeoutMs: 125_000,
+    processTimeoutMs: 140_000,
   })
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expected, stdout)
   expect(stdout).toBe(await readFile(expected, 'utf8'))
-}, 140_000)
+}, 155_000)
 
 const execFileAsync = promisify(execFile)
 

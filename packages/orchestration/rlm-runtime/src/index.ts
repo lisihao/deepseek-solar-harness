@@ -229,6 +229,13 @@ export interface RlmRuntimeHostBindings {
      */
     readonly messageOrigin?: 'controller' | 'agent'
     readonly deliveryMode: 'steer' | 'follow_up'
+    /**
+     * The messages one `message` continuation delivers, in delivery order. A runtime that batches messages always sends the complete
+     * list, and a single message is a list of one; it is optional only because a goal, heartbeat, or autonomous continuation has
+     * no messages and an older caller sent none. A host that is given the list records it with the execution it starts. The command
+     * of a batch is one logical execution that may run several tool rounds and requests; its usage is the usage of all of them.
+     */
+    readonly messageIds?: readonly RlmMessageV1['messageId'][]
     readonly model: RlmModelSelectionV1
     /** Optional for legacy host continuations; LocalRlmRuntime supplies the sealed value. */
     readonly executionOptions?: RlmChildExecutionOptionsV1
@@ -658,6 +665,8 @@ export type RlmRuntimeErrorCode =
   | 'RLM_OUTPUT_LIMIT'
   | 'RLM_CONTROL_BUSY'
   | 'RLM_CONTROL_LEASE_INVALID'
+  /** A host refused a continuation before it created any execution; nothing was admitted. */
+  | 'RLM_DISPATCH_NOT_ADMITTED'
 
 /** Provider-neutral RLM runtime error. */
 export class RlmRuntimeError extends HarnessError {

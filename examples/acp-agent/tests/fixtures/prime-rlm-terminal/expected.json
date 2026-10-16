@@ -60,5 +60,195 @@
       "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\ncheck the figure again\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nAlpha task: report the alpha figure to your parent.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: none.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- parent \"root\": <running or idle>\n- sibling \"beta\": idle\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe message above is delivered in full; do not call agentMessage.read to fetch it again.\nProcess the queued family message using follow_up ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result."
     ]
   },
+  "batched": {
+    "run": "completed",
+    "node": "passed",
+    "stopReasons": [
+      "completed"
+    ],
+    "continuations": [
+      "rlm.message.continuation.settled",
+      "rlm.message.continuation.settled"
+    ],
+    "requests": {
+      "root": 1,
+      "child": 3,
+      "deliver": 2,
+      "goal continuation": 0,
+      "later turn": 0
+    },
+    "messagesDelivered": [
+      "delivered",
+      "delivered",
+      "delivered"
+    ],
+    "runtimeEvents": [
+      {
+        "type": "rlm.message.delivered",
+        "message": "<message 1>",
+        "command": "<message 1>:batch-2-<digest>:deliver",
+        "batchIndex": 0,
+        "batchSize": 2
+      },
+      {
+        "type": "rlm.message.delivered",
+        "message": "<message 2>",
+        "command": "<message 1>:batch-2-<digest>:deliver",
+        "batchIndex": 1,
+        "batchSize": 2
+      },
+      {
+        "type": "rlm.message.continuation.settled",
+        "message": "<message 1>",
+        "command": "<message 1>:batch-2-<digest>:deliver",
+        "batchIndex": 0,
+        "batchSize": 2,
+        "stopReason": "completed"
+      },
+      {
+        "type": "rlm.message.continuation.settled",
+        "message": "<message 2>",
+        "command": "<message 1>:batch-2-<digest>:deliver",
+        "batchIndex": 1,
+        "batchSize": 2,
+        "stopReason": "completed"
+      },
+      {
+        "type": "rlm.message.delivered",
+        "message": "<message 3>",
+        "command": "<message 3>:deliver",
+        "batchIndex": 0,
+        "batchSize": 1
+      },
+      {
+        "type": "rlm.message.continuation.settled",
+        "message": "<message 3>",
+        "command": "<message 3>:deliver",
+        "batchIndex": 0,
+        "batchSize": 1,
+        "stopReason": "completed"
+      }
+    ],
+    "runContinuationEvents": [
+      {
+        "type": "rlm.message.continuation.settled",
+        "messages": [
+          "<message 1>",
+          "<message 2>"
+        ],
+        "command": "<message 1>:batch-2-<digest>:deliver"
+      },
+      {
+        "type": "rlm.message.continuation.settled",
+        "messages": [
+          "<message 3>"
+        ],
+        "command": "<message 3>:deliver"
+      }
+    ],
+    "heldOrInFlightBatches": [],
+    "continuationArtifacts": [
+      {
+        "command": "<message 1>:batch-2-<digest>:deliver",
+        "messages": [
+          "<message 1>",
+          "<message 2>"
+        ],
+        "stopReason": "completed",
+        "answer": "batched continuation output"
+      },
+      {
+        "command": "<message 3>:deliver",
+        "messages": [
+          "<message 3>"
+        ],
+        "stopReason": "completed",
+        "answer": "epsilon continuation output"
+      }
+    ],
+    "artifactRefsDistinct": true,
+    "nodeOutput": [
+      "epsilon continuation output"
+    ],
+    "fakeRounds": [
+      {
+        "continuation": "batch",
+        "round": 0,
+        "usage": {
+          "promptTokens": 1000,
+          "completionTokens": 40,
+          "cacheHitTokens": 600
+        }
+      },
+      {
+        "continuation": "batch",
+        "round": 1,
+        "usage": {
+          "promptTokens": 1200,
+          "completionTokens": 30,
+          "cacheHitTokens": 900
+        }
+      },
+      {
+        "continuation": "batch",
+        "round": 2,
+        "usage": {
+          "promptTokens": 1500,
+          "completionTokens": 25,
+          "cacheHitTokens": 1200
+        }
+      },
+      {
+        "continuation": "single",
+        "round": 0,
+        "usage": {
+          "promptTokens": 700,
+          "completionTokens": 20,
+          "cacheHitTokens": 100
+        }
+      },
+      {
+        "continuation": "single",
+        "round": 1,
+        "usage": {
+          "promptTokens": 800,
+          "completionTokens": 15,
+          "cacheHitTokens": 500
+        }
+      }
+    ],
+    "fakeRoundTotals": {
+      "batch": {
+        "uncachedInput": 1000,
+        "output": 95,
+        "cacheRead": 2700,
+        "requests": 3
+      },
+      "single": {
+        "uncachedInput": 900,
+        "output": 35,
+        "cacheRead": 600,
+        "requests": 2
+      }
+    },
+    "continuationUsage": [
+      {
+        "command": "<message 1>:batch-2-<digest>:deliver",
+        "inputTokens": 1000,
+        "outputTokens": 95,
+        "cacheReadInputTokens": 2700
+      },
+      {
+        "command": "<message 3>:deliver",
+        "inputTokens": 900,
+        "outputTokens": 35,
+        "cacheReadInputTokens": 600
+      }
+    ],
+    "continuationPrompts": [
+      "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\ngamma figure is 3\n\nAgent message from <session id>:\ndelta figure is 4\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nRun scenario batched-messages. Final rule: reply with only {\"verdict\": \"<text>\"}.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: handles.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- child \"delta\": <running or idle>\n- child \"gamma\": <running or idle>\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe messages above are delivered in full; do not call agentMessage.read to fetch them again.\nProcess the queued family messages using steer ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.",
+      "Continue the persistent Prime RLM session for this message.\nAgent message from <session id>:\nepsilon figure is 5\nUse typescript_repl for any state you still need. The host read the facts below just before this turn.\nThis agent's own task (it is not necessarily the first prompt this agent received):\n--- task ---\nRun scenario batched-messages. Final rule: reply with only {\"verdict\": \"<text>\"}.\n--- end of task ---\nIf this turn is the last one, your reply is recorded as this agent's result. A message from another agent does not change the output format the task requires, so give the reply in that format, with no commentary around a required format.\nNames saved by the last successful cell, as of that cell: handles.\nNames declared by cells that failed, and properties set on globalThis, are not in these lists.\nAgents visible to this agent. The state is only that agent's REPL: \"running\" means a cell is running, \"idle\" means none is, \"inactive\" means degraded or stopped. It does not say whether that agent finished its task or has reported:\n- child \"delta\": <running or idle>\n- child \"epsilon\": idle\n- child \"gamma\": <running or idle>\nTop-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: reuse the existing binding, choose a new name, or keep temporary values inside a block or function.\nThe message above is delivered in full; do not call agentMessage.read to fetch it again.\nProcess the queued family message using steer ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result."
+    ]
+  },
   "daemonsStopped": true
 }
