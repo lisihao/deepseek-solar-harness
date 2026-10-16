@@ -6,7 +6,7 @@
 import type { FakeRawRequest } from '../prime-rlm-terminal/fake-deepseek.ts'
 import { DELTA, GAMMA, type Scenario } from './scenarios.ts'
 
-export interface LedgerAttempt {
+interface LedgerAttempt {
   readonly id?: string
   readonly seq?: number
   readonly state: string

@@ -16,7 +16,7 @@ export const SCENARIO_NAMES = [
 export type ScenarioName = (typeof SCENARIO_NAMES)[number]
 
 /** The limits of a scope file; every field is required by the ledger. */
-export interface ScenarioLimits {
+interface ScenarioLimits {
   readonly inputTokens: number
   readonly outputTokens: number
   readonly httpAttempts: number
