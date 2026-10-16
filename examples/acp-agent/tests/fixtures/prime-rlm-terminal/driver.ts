@@ -21,8 +21,11 @@
  *
  * The `context-capture` scenario records every request the shipping worker sent for a root, one child, and the root's message
  * continuation: what each was given, whether a marker that only the root's task carries reaches the child (in its request and in
- * the `context` its REPL shows), and whether the last line of each task reaches the model. With `DSH_REQUEST_CAPTURE_DIR` set it
- * also writes the normalized bodies there, for a before and after comparison; nothing else reads that variable.
+ * the `context` its REPL shows), and whether the last line of each task reaches the model. Each request is tied to the
+ * production session and command it was sent for through the tool-call ids and the runtime's receipts; a request that cannot be
+ * tied to exactly one dispatch fails the scenario. With `DSH_REQUEST_CAPTURE_DIR` set it also writes there the raw requests with
+ * their digests and arrival order, the correlation, and the projection used for the snapshot, for a before and after
+ * comparison; nothing else reads that variable.
  *
  * `DSH_TERMINAL_FIXTURE_FAULT` is read only by the fault tests of this fixture; it is ignored when unset.
  */
@@ -34,7 +37,8 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import { OrchestrationArtifactRef, type LogicalTaskGraphV1, type OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
-import { messageText, startFakeDeepSeek, type FakeBody, type FakeDeepSeek, type FakeMessage, type FakeReply, type FakeUsage } from './fake-deepseek.ts'
+import { assertLossless, correlate, project, projectionSha256, Tokens, type CaptureWho } from './capture.ts'
+import { messageText, startFakeDeepSeek, type FakeBody, type FakeDeepSeek, type FakeMessage, type FakeRawRequest, type FakeReply, type FakeUsage } from './fake-deepseek.ts'
 
 const configPath = process.argv[2]
 const home = process.env.DSH_HOME
@@ -128,9 +132,6 @@ const READ_RESULT_CODE = [
 ].join('\n')
 /** Opens when the child has sent its message, so the root's turn ends with that message waiting. */
 const captureChildDone = Promise.withResolvers<undefined>()
-type CaptureWho = 'root' | 'child' | 'continuation'
-/** Every request body of the `context-capture` scenario, with who it was for and the index of its tool round. */
-const capturedRequests: Array<{ readonly who: CaptureWho; readonly round: number; readonly body: FakeBody }> = []
 
 /** The prompts the `context-prompts` scenario captured from the requests the daemon's model worker sent, by who received them. */
 const captured: { rootContinuations: string[]; childContinuations: string[] } = { rootContinuations: [], childContinuations: [] }
@@ -230,16 +231,14 @@ async function batchReply(messages: readonly FakeMessage[]): Promise<FakeReply> 
  * Answers the requests of the `context-capture` scenario and records each body. The child's first round reads its own `context`;
  * the next request carries that value back as a tool result, which is how the scenario sees what the child's REPL showed.
  */
-async function captureReply(messages: readonly FakeMessage[], body: FakeBody): Promise<FakeReply> {
+async function captureReply(messages: readonly FakeMessage[]): Promise<FakeReply> {
   const first = messages[0]
   if (first === undefined) throw new Error('fake DeepSeek received a request without messages')
   const text = taskText(first)
   const round = messages.filter(message => message.role === 'tool').length
   const repl = (code: string): FakeReply => ({ kind: 'tool', name: 'typescript_repl', arguments: JSON.stringify({ code }) })
   const answer = (output: string): FakeReply => ({ kind: 'text', text: output, finish: 'stop' })
-  const record = (who: CaptureWho): void => { capturedRequests.push({ who, round, body }) }
   if (text.includes('Agent message from')) {
-    record('continuation')
     if (round === 0) {
       counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
       return repl(READ_RESULT_CODE)
@@ -247,7 +246,6 @@ async function captureReply(messages: readonly FakeMessage[], body: FakeBody): P
     return answer('capture continuation output')
   }
   if (text.includes(CAPTURE_ROOT_TASK)) {
-    record('root')
     if (round > 0) {
       await captureChildDone.promise
       return answer('root turn ended')
@@ -255,7 +253,6 @@ async function captureReply(messages: readonly FakeMessage[], body: FakeBody): P
     counts.set('root', (counts.get('root') ?? 0) + 1)
     return repl(`const handle = await rlm(${JSON.stringify(CAPTURE_CHILD_TASK)}, { name: "inspector" }); "spawned"`)
   }
-  record('child')
   if (round === 0) {
     counts.set('child', (counts.get('child') ?? 0) + 1)
     return repl('JSON.stringify(context)')
@@ -391,12 +388,12 @@ function reply(kind: Kind, scenario: Scenario): FakeReply {
   }
 }
 
-function handle(messages: readonly FakeMessage[], body: FakeBody): FakeReply | Promise<FakeReply> {
+function handle(messages: readonly FakeMessage[]): FakeReply | Promise<FakeReply> {
   const last = messages.at(-1)
   if (last === undefined) throw new Error('fake DeepSeek received a request without messages')
   if (current?.context === true) return contextReply(messages)
   if (current?.batch === true) return batchReply(messages)
-  if (current?.capture === true) return captureReply(messages, body)
+  if (current?.capture === true) return captureReply(messages)
   // The round after a tool call ends the turn.
   if (last.role === 'tool') return { kind: 'text', text: 'done', finish: 'stop' }
   if (current === undefined) throw new Error('fake DeepSeek received a request between scenarios')
@@ -552,20 +549,17 @@ async function waitFor(
 
 type RunEvents = Awaited<ReturnType<Booted['orchestrations']['readEvents']>>['events']
 
-/** The body with the parts that differ in every run (ids, hashes, times) replaced, as stable text. */
-function normalizedBody(body: FakeBody): string {
-  return JSON.stringify(body)
-    .replaceAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu, '<uuid>')
-    .replaceAll(/[0-9a-f]{64}/gu, '<sha256>')
-    .replaceAll(/fake-call-\d+/gu, 'fake-call-<n>')
-    // The isolated home, which the launcher names afresh each run, appears in the workspace path the prompt states.
-    .replaceAll(/[^\s"\\]*dsh-prime-rlm-terminal-snapshot-[A-Za-z0-9]+/gu, '<home>')
-    .replaceAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, '<time>')
+/** A request the capture tied to its dispatch, with its raw body parsed. */
+interface FoundRequest {
+  readonly who: CaptureWho
+  readonly round: number
+  readonly raw: FakeRawRequest
+  readonly body: FakeBody
 }
 
 /** What the root's continuation read back from its child's stored result, taken from the tool result of its next request. */
-function resultReadBack() {
-  const next = capturedRequests.find(request => request.who === 'continuation' && request.round === 1)
+function resultReadBack(found: readonly FoundRequest[]) {
+  const next = found.find(request => request.who === 'continuation' && request.round === 1)
   const tool = next?.body.messages?.filter(message => message.role === 'tool').at(-1)
   if (tool === undefined) return null
   const cell = JSON.parse(messageText(tool)) as { readonly value?: unknown }
@@ -581,8 +575,8 @@ function resultReadBack() {
 }
 
 /** The `context` value a child's REPL printed, read back from the tool result of its next request. */
-function childContextSeen(): Record<string, unknown> | undefined {
-  const next = capturedRequests.find(request => request.who === 'child' && request.round === 1)
+function childContextSeen(found: readonly FoundRequest[]): Record<string, unknown> | undefined {
+  const next = found.find(request => request.who === 'child' && request.round === 1)
   const tool = next?.body.messages?.filter(message => message.role === 'tool').at(-1)
   if (tool === undefined) return undefined
   const text = messageText(tool)
@@ -591,36 +585,78 @@ function childContextSeen(): Record<string, unknown> | undefined {
   return typeof parsed.value === 'string' ? JSON.parse(parsed.value) as Record<string, unknown> : undefined
 }
 
+/** What the text of a request says its dispatch is. Used only to check what the production records say. */
+function dispatchHint(firstMessageText: string): CaptureWho {
+  const task = taskText({ role: 'user', content: firstMessageText })
+  if (task.includes('Agent message from')) return 'continuation'
+  return task.includes(CAPTURE_ROOT_TASK) ? 'root' : 'child'
+}
+
+/** The runtime's persisted sessions, receipts and events: the production record of which session ran which command. */
+async function productionRecords() {
+  const state = JSON.parse(await readFile(join(isolatedHome, 'orchestrations', 'rlm-runtime', 'state.json'), 'utf8')) as {
+    sessions: Array<{ snapshot: { sessionId: string; parentSessionId?: string } }>
+    receipts: Array<{ commandId: string; sessionId?: string; operation?: string }>
+    events: Array<{ type: string; sessionId: string; data: Record<string, unknown> }>
+  }
+  return { sessions: state.sessions.map(session => session.snapshot), receipts: state.receipts, events: state.events }
+}
+
 /**
- * What the `context-capture` scenario shows: per request, who it was for, what it carried, and where the marker and the last line
- * of each task are; the context the child saw; and, when asked, the normalized bodies written to a directory.
+ * What the `context-capture` scenario shows: per request, which production dispatch it was sent for (taken from the tool-call
+ * ids and the receipts the runtime kept, not from the text), what it carried, and where the marker and the last line of each
+ * task are; the context the child saw; and, when asked, the raw requests, their projection and the correlation, written to a
+ * directory. A request that cannot be tied to exactly one dispatch fails the scenario.
+ * @param runId - the run of the scenario.
+ * @param raw - the requests the fake received while the scenario ran, in arrival order.
  */
-async function captureTranscript() {
+async function captureTranscript(runId: OrchestrationRunId, raw: readonly FakeRawRequest[]) {
+  const production = await productionRecords()
+  const { requests: byArrival, otherRun } = correlate(raw, production, String(runId), dispatchHint)
+  // Tokens are numbered in the order of the dispatch and round, not of arrival: root and child requests arrive concurrently.
   const order: readonly CaptureWho[] = ['root', 'child', 'continuation']
-  const sorted = [...capturedRequests].sort((left, right) => order.indexOf(left.who) - order.indexOf(right.who) || left.round - right.round)
-  const rows = sorted.map((request) => {
-    const text = normalizedBody(request.body)
+  const correlated = [...byArrival].sort((left, right) => order.indexOf(left.who) - order.indexOf(right.who) || left.round - right.round)
+  const tokens = new Tokens()
+  const found: FoundRequest[] = []
+  type Projected = { readonly ordinal: number; readonly who: CaptureWho; readonly round: number; readonly projection: unknown }
+  const projections: Projected[] = []
+  for (const request of correlated) {
+    const rawRequest = raw.find(candidate => candidate.ordinal === request.ordinal) as FakeRawRequest
+    const body = JSON.parse(rawRequest.body) as FakeBody
+    const projection = project(body as never, tokens)
+    assertLossless(rawRequest, projection, tokens)
+    found.push({ who: request.who, round: request.round, raw: rawRequest, body })
+    projections.push({ ordinal: request.ordinal, who: request.who, round: request.round, projection })
+  }
+  const rows = projections.map(({ who, round, projection }, index) => {
+    const text = (found[index] as FoundRequest).raw.body
+    const body = (found[index] as FoundRequest).body
     return {
-      who: request.who, round: request.round,
-      roles: (request.body.messages ?? []).map(message => message.role),
-      tools: (request.body.tools ?? []).length,
+      who, round,
+      roles: (body.messages ?? []).map(message => message.role),
+      tools: (body.tools ?? []).length,
       containsRootMarker: text.includes(CANARY),
       containsRootTail: text.includes('ROOT-TAIL-RULE'),
       containsChildTail: text.includes('CHILD-TAIL-RULE'),
-      bodySha256: createHash('sha256').update(text).digest('hex'),
+      bodySha256: projectionSha256(projection),
     }
-  })
-  const context = childContextSeen()
+  }).sort((left, right) => order.indexOf(left.who) - order.indexOf(right.who) || left.round - right.round)
+  const context = childContextSeen(found)
   const directory = process.env.DSH_REQUEST_CAPTURE_DIR
   if (directory !== undefined) {
     await mkdir(directory, { recursive: true })
-    await writeFile(join(directory, 'api-capture.json'), `${JSON.stringify(sorted.map(request => ({
-      who: request.who, round: request.round, body: JSON.parse(normalizedBody(request.body)) as unknown,
-    })), null, 2)}\n`)
+    const write = (name: string, value: unknown): Promise<void> => (
+      writeFile(join(directory, name), `${JSON.stringify(value, null, 2)}\n`)
+    )
+    await write('api-raw.json', raw.map(({ ordinal, sha256, issuedToolCallId, body }) => ({ ordinal, sha256, issuedToolCallId, body })))
+    await write('api-correlation.json', { requests: byArrival, otherRun })
+    await write('api-projection.json', { tokens: tokens.table(), requests: projections })
   }
   return {
     requests: rows,
-    resultRead: resultReadBack(),
+    // Requests that belong to another run are named, not classified; a request that belongs to no run fails above.
+    requestsOfOtherRuns: otherRun.length,
+    resultRead: resultReadBack(found),
     childContext: context === undefined ? null : {
       keys: Object.keys(context).sort(),
       taskIsTheChildsOwn: context.task === CAPTURE_CHILD_TASK,
@@ -708,6 +744,7 @@ async function run(scenario: Scenario) {
   counts.clear()
   current = scenario
   const until = Date.now() + SCENARIO_MS
+  const fakeStart = (await owned.fake)?.raw.length ?? 0
   const progress: { runId?: OrchestrationRunId } = {}
   type Snapshot = Awaited<ReturnType<Booted['orchestrations']['inspect']>>
   const inspect = (runId: OrchestrationRunId): Promise<Snapshot> => track(fault === 'hang-inspect' ? never<Snapshot>() : service().inspect(runId))
@@ -755,7 +792,7 @@ async function run(scenario: Scenario) {
       }
       : {},
     ...scenario.batch === true ? await batchTranscript(started.runId, events, until) : {},
-    ...scenario.capture === true ? await captureTranscript() : {},
+    ...scenario.capture === true ? await captureTranscript(started.runId, ((await owned.fake)?.raw ?? []).slice(fakeStart)) : {},
   }
 }
 

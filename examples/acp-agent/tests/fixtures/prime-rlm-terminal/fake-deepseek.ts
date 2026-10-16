@@ -4,6 +4,7 @@
  * provider is replaced. `packages/test-support/llm-mock-server` replays a fixed behavior sequence and cannot choose a reply
  * from the request, which the concurrent root, child, and continuation calls of an RLM run need.
  */
+import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
@@ -37,12 +38,27 @@ export interface FakeBody {
 /** Decides the reply for one request; it may wait, for example for a gate the driver opens later. */
 export type FakeHandler = (messages: readonly FakeMessage[], body: FakeBody) => FakeReply | Promise<FakeReply>
 
+/**
+ * One chat-completions request exactly as it arrived: the body bytes before any parsing, their digest, the order it arrived in
+ * among all requests of this fake, and the id of the tool call the fake answered it with (absent when it answered with text).
+ */
+export interface FakeRawRequest {
+  /** 0 for the first request this fake received. */
+  readonly ordinal: number
+  readonly body: string
+  readonly sha256: string
+  /** Set once the reply has been chosen: the `id` of the tool call this request was answered with. */
+  issuedToolCallId?: string
+}
+
 /** A running fake and what it was asked. */
 export interface FakeDeepSeek {
   readonly baseURL: string
   readonly requests: readonly (readonly FakeMessage[])[]
   /** The whole body of every request, in arrival order: model, messages, and the tools offered. */
   readonly bodies: readonly FakeBody[]
+  /** Every request as it arrived, in arrival order, with the body bytes unparsed. */
+  readonly raw: readonly FakeRawRequest[]
   close(): Promise<void>
 }
 
@@ -65,7 +81,8 @@ function sse(response: ServerResponse, payload: unknown): void {
 
 let toolCallCounter = 0
 
-function writeReply(response: ServerResponse, reply: FakeReply): void {
+/** Writes the reply and returns the id of the tool call it carries, when it carries one. */
+function writeReply(response: ServerResponse, reply: FakeReply): string | undefined {
   const usage = reply.usage === undefined
     ? { prompt_tokens: 3, completion_tokens: 2 }
     : {
@@ -74,11 +91,13 @@ function writeReply(response: ServerResponse, reply: FakeReply): void {
       prompt_cache_hit_tokens: reply.usage.cacheHitTokens,
     }
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
+  let issued: string | undefined
   if (reply.kind === 'tool') {
     const midpoint = Math.max(1, Math.floor(reply.arguments.length / 2))
     // Each call has its own id: the runtime treats a repeated tool call id of one session as a conflicting repeat of the first cell.
     toolCallCounter += 1
-    const first = { index: 0, id: `fake-call-${String(toolCallCounter)}`, type: 'function', function: { name: reply.name, arguments: reply.arguments.slice(0, midpoint) } }
+    issued = `fake-call-${String(toolCallCounter)}`
+    const first = { index: 0, id: issued, type: 'function', function: { name: reply.name, arguments: reply.arguments.slice(0, midpoint) } }
     const second = { index: 0, function: { arguments: reply.arguments.slice(midpoint) } }
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [first] }, finish_reason: null }] })
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [second] }, finish_reason: null }] })
@@ -89,6 +108,7 @@ function writeReply(response: ServerResponse, reply: FakeReply): void {
   }
   sse(response, '[DONE]')
   response.end()
+  return issued
 }
 
 async function body(request: IncomingMessage): Promise<string> {
@@ -105,6 +125,7 @@ async function body(request: IncomingMessage): Promise<string> {
 export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepSeek> {
   const requests: (readonly FakeMessage[])[] = []
   const bodies: FakeBody[] = []
+  const raw: FakeRawRequest[] = []
   const open = new Set<ServerResponse>()
   const server: Server = createServer((request, response) => {
     open.add(response)
@@ -117,11 +138,15 @@ export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepS
         return
       }
       if (request.method === 'POST' && /\/chat\/completions$/u.test(url)) {
-        const parsed = JSON.parse(await body(request)) as FakeBody
+        const text = await body(request)
+        const parsed = JSON.parse(text) as FakeBody
         const messages = parsed.messages ?? []
+        const record: FakeRawRequest = { ordinal: raw.length, body: text, sha256: createHash('sha256').update(text).digest('hex') }
+        raw.push(record)
         requests.push(messages)
         bodies.push(parsed)
-        writeReply(response, await handler(messages, parsed))
+        const issued = writeReply(response, await handler(messages, parsed))
+        if (issued !== undefined) record.issuedToolCallId = issued
         return
       }
       response.writeHead(404, { 'content-type': 'application/json' })
@@ -137,6 +162,7 @@ export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepS
     baseURL: `http://127.0.0.1:${String(port)}`,
     requests,
     bodies,
+    raw,
     close: async () => {
       for (const response of open) response.destroy()
       await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
