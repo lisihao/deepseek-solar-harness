@@ -26,7 +26,7 @@ Two changes were made on separate bases. The evaluation request ledger ([note](2
 
 ## Alternatives considered
 
-**Change the worker to report incomplete usage.** Rejected: the worker and the adapter are outside the scope of this change and are under the upstream-edit inventory; the ledger already holds what is needed.
+**Change the worker to report incomplete usage.** Rejected: the worker and the adapter are WP1's and outside the scope of this change; the ledger already holds what is needed.
 
 **Add the command, round and session as fields of an attempt.** Rejected: it changes the persisted ledger format, whose reader accepts no unknown field; the label carries them, and the event lists them with the row id.
 
@@ -34,7 +34,7 @@ Two changes were made on separate bases. The evaluation request ledger ([note](2
 
 ## Consequences
 
-Under a scope a command's usage can be absent where it used to be partial. `evaluation.command.metering` is a new orchestration event type, written only in homes with a scope; the store keeps event types as text and no reader validates them; a build without this change was not run against such a home. An outcome the ledger cannot prove is now indeterminate where it was failed: a thrown failure and an error stop with an outstanding request. In the run `unknown-continuation` the members of the continuation are `indeterminate`, while the node is `failed` with `OPERATOR_STOPPED`: that comes from the existing rule that a settled result which did not complete fails the node, and was not changed. A refusal is visible in the ledger row's reason and in the rows of the metering event (`input-exhausted`, `attempts-exhausted`); the node's blocker is `OPERATOR_STOPPED`, and `ADMISSION_REFUSED` appears in no orchestration event.
+Under a scope a command's usage can be absent where it used to be partial. `evaluation.command.metering` is a new orchestration event type, written only in homes with a scope; the store keeps event types as text and no reader validates them; a build without this change was not run against such a home. An outcome the ledger cannot prove is now indeterminate where it was failed: a thrown failure and an error stop with an outstanding request. In the run `unknown-continuation` the members of the continuation are `indeterminate`, while the node is `failed` with `OPERATOR_STOPPED`: that comes from the existing rule that a settled result which did not complete fails the node, and was not changed. A refusal is visible in the ledger row's reason and in the rows of the metering event (`input-exhausted`, `attempts-exhausted`). The worker turns any finish that is not a stop, a length limit or an abort into `stopReason: 'error'` and drops the failure's code (WP1's own `worker-evaluation.spec.ts` asserts the error stop), so `ADMISSION_REFUSED` appears in no orchestration event; in `refuse-first`, `refuse-later` and `refuse-round`, where the refused request ends the root's last command, the node's blocker is `OPERATOR_STOPPED`. This was not introduced by this change and is not mapped here.
 
 ## Tests
 

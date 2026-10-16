@@ -26,7 +26,7 @@ Status: implemented
 
 ## 考虑过的替代方案
 
-**修改 worker 让它报告不完整的用量。** 否决：worker 与适配器不在本次改动范围内，且受 upstream 编辑清单约束；账本已经有所需信息。
+**修改 worker 让它报告不完整的用量。** 否决：worker 与适配器属于 WP1，不在本次改动范围内；账本已经有所需信息。
 
 **把命令、回合和会话作为 attempt 的字段。** 否决：这会改变持久化的账本格式，其读取器不接受未知字段；标签已携带它们，事件会连同行 id 列出。
 
@@ -34,7 +34,7 @@ Status: implemented
 
 ## 后果
 
-在 scope 下，命令的用量可能缺失，而此前是不完整的部分值。`evaluation.command.metering` 是新的 orchestration 事件类型，只在有 scope 的 home 中写入；store 把事件类型当文本保存，没有读取器校验它们；没有这项改动的构建未在这样的 home 上运行过。账本无法证明的结局现在是 indeterminate，此前是 failed：即有请求未了结的抛出失败和 error 停止。在场景 `unknown-continuation` 中，continuation 的成员是 `indeterminate`，而节点是 `failed`（`OPERATOR_STOPPED`）：这来自既有规则（未完成的已结算结果会使节点失败），未作改动。拒绝可见于账本行的原因和 metering 事件的行（`input-exhausted`、`attempts-exhausted`）；节点的 blocker 是 `OPERATOR_STOPPED`，`ADMISSION_REFUSED` 不出现在任何 orchestration 事件里。
+在 scope 下，命令的用量可能缺失，而此前是不完整的部分值。`evaluation.command.metering` 是新的 orchestration 事件类型，只在有 scope 的 home 中写入；store 把事件类型当文本保存，没有读取器校验它们；没有这项改动的构建未在这样的 home 上运行过。账本无法证明的结局现在是 indeterminate，此前是 failed：即有请求未了结的抛出失败和 error 停止。在场景 `unknown-continuation` 中，continuation 的成员是 `indeterminate`，而节点是 `failed`（`OPERATOR_STOPPED`）：这来自既有规则（未完成的已结算结果会使节点失败），未作改动。拒绝可见于账本行的原因和 metering 事件的行（`input-exhausted`、`attempts-exhausted`）。worker 把任何不是 stop、长度限制或 abort 的 finish 变成 `stopReason: 'error'`，并丢掉失败的代码（WP1 自己的 `worker-evaluation.spec.ts` 断言的就是这个 error 停止），所以 `ADMISSION_REFUSED` 不出现在任何 orchestration 事件里；在 `refuse-first`、`refuse-later` 和 `refuse-round` 中，被拒绝的请求结束了 root 的最后一个命令，节点的 blocker 是 `OPERATOR_STOPPED`。这不是本次改动引入的，这里也没有对它做映射。
 
 ## 测试
 
