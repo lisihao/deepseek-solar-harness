@@ -26,6 +26,8 @@ export type FakeHandler = (messages: readonly FakeMessage[]) => FakeReply | Prom
 export interface FakeDeepSeek {
   readonly baseURL: string
   readonly requests: readonly (readonly FakeMessage[])[]
+  /** The exact bytes of every chat-completions body received, in order, so a test can join each to one admitted request. */
+  readonly bodies: readonly string[]
   close(): Promise<void>
 }
 
@@ -76,6 +78,7 @@ async function body(request: IncomingMessage): Promise<string> {
  */
 export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepSeek> {
   const requests: (readonly FakeMessage[])[] = []
+  const bodies: string[] = []
   const open = new Set<ServerResponse>()
   const server: Server = createServer((request, response) => {
     open.add(response)
@@ -88,7 +91,9 @@ export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepS
         return
       }
       if (request.method === 'POST' && /\/chat\/completions$/u.test(url)) {
-        const parsed = JSON.parse(await body(request)) as { messages?: FakeMessage[] }
+        const raw = await body(request)
+        bodies.push(raw)
+        const parsed = JSON.parse(raw) as { messages?: FakeMessage[] }
         const messages = parsed.messages ?? []
         requests.push(messages)
         writeReply(response, await handler(messages))
@@ -106,6 +111,7 @@ export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepS
   return {
     baseURL: `http://127.0.0.1:${String(port)}`,
     requests,
+    bodies,
     close: async () => {
       for (const response of open) response.destroy()
       await new Promise<void>((resolve) => { server.close(() => { resolve() }) })

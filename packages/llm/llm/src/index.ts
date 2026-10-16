@@ -26,7 +26,7 @@ import type { ResolvedRetryPolicy } from './retry-policy.ts'
 import type { ProviderRequestId } from './brand.ts'
 import { callConfigEquals, deepFreeze } from './call-config.ts'
 import type { LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
-import { HarnessError, INVALID_CREDENTIAL_CODE } from './error.ts'
+import { ADMISSION_REFUSED_CODE, HarnessError, INVALID_CREDENTIAL_CODE } from './error.ts'
 import { normalizeLlmFailure } from './adapter-failure.ts'
 import { normalizeApiKey } from './api-key.ts'
 
@@ -178,6 +178,12 @@ export interface PreparedLlmCall {
  * DeepSeek and library-backed pi-ai adapters meet this contract through different internals.
  */
 export abstract class LlmAdapter {
+  /**
+   * Whether this adapter calls {@link GenerateOptions.admission} for every physical request it sends. A call that sets an
+   * admission on an adapter where this is false fails before dispatch instead of sending the request unmetered.
+   */
+  readonly enforcesAdmission: boolean = false
+
   /**
    * Describe one provider route owned by this adapter.
    * @param provider - a route passed to `registerAdapter()` for this instance.
@@ -870,6 +876,9 @@ export class LlmRuntime extends Service {
           ? deepFreeze({ ...options, ...resolvedConfig })
           : { ...options, ...resolvedConfig }
       const adapter = registration.adapter
+      if (resolvedOptions.admission !== undefined && !adapter.enforcesAdmission) {
+        throw new LlmError(`provider "${options.provider}" cannot enforce request admission`, ADMISSION_REFUSED_CODE)
+      }
       const stream = adapter.stream(this.forAdapter(resolvedOptions, adapter))
       iterator = stream[Symbol.asyncIterator]()
     } catch (error: unknown) {

@@ -8,6 +8,7 @@
  * @module dsh-llm-deepseek/adapter
  */
 
+import { createHash } from 'node:crypto'
 import { attributionHeaders, contentHasImage, CONTEXT_WINDOW_EXCEEDED_CODE, INSUFFICIENT_BALANCE_CODE, isContextWindowExceededError, isQuotaExceededError, LlmAdapter, LlmError, ProviderRequestId, QUOTA_EXCEEDED_CODE, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
@@ -184,6 +185,9 @@ export function httpErrorCode(status: number, error?: WireError['error']): strin
   return `HTTP_${status}`
 }
 
+/** Block types the request body carries as text; any other block type is reported to an admission as non-text content. */
+const TEXT_BLOCK_TYPES: ReadonlySet<string> = new Set(['text', 'reasoning', 'tool-call', 'tool-result'])
+
 /**
  * The first real `LlmAdapter`. One instance serves every model name it was
  * registered under (the harness model name IS the wire model name).
@@ -192,6 +196,9 @@ export function httpErrorCode(status: number, error?: WireError['error']): strin
  * map to `ABORTED`; the configured per-read idle watchdog maps to `TIMEOUT`.
  */
 export class DeepSeekAdapter extends LlmAdapter {
+  /** Every physical request is admitted just before `fetch`, after its body is serialized (see `request`). */
+  override readonly enforcesAdmission = true
+
   /** Endpoint/account-local IDs returned by successful directory listings. */
   private readonly discoveredModelIds = new Map<string, readonly string[]>()
   /** Refresh order per endpoint/account scope; stale results cannot republish. */
@@ -404,6 +411,43 @@ export class DeepSeekAdapter extends LlmAdapter {
     // Prepared outside the try so the TRANSPORT label below covers exactly the
     // transport boundary, never a serialization failure.
     const payload = JSON.stringify(body)
+    // Admission sees the exact serialized request and runs before anything is sent. A refusal throws here, outside the
+    // TRANSPORT label below, so a refused request never reaches `fetch`.
+    const ticket = options.admission?.({
+      model: body.model,
+      bodyBytes: Buffer.byteLength(payload, 'utf8'),
+      bodySha256: createHash('sha256').update(payload).digest('hex'),
+      maxOutputTokens: body.max_tokens,
+      thinking: body.thinking?.type,
+      reasoningEffort: body.reasoning_effort,
+      hasNonTextContent: options.messages.some(message => message.content.some(block => !TEXT_BLOCK_TYPES.has(block.type))),
+    })
+    let settled = false
+    try {
+      for await (const chunk of this.send(payload, options, signal, connection, apiKey, userId, onComment)) {
+        // Usage is delivered only with `[DONE]`. It is recorded before the chunk reaches the consumer, so a consumer that
+        // stops reading right after it cannot lose it; every other ending leaves the reservation held.
+        if (chunk.type === 'usage' && ticket !== undefined) {
+          ticket.settle(chunk.usage)
+          settled = true
+        }
+        yield chunk
+      }
+    } finally {
+      if (ticket !== undefined && !settled) ticket.abandon()
+    }
+  }
+
+  /** Send one serialized request and translate its response; the caller has already admitted it. */
+  private async * send(
+    payload: string,
+    options: GenerateOptions,
+    signal: AbortSignal,
+    connection: DeepSeekConnectionOptions,
+    apiKey: string,
+    userId: AnonymousUserId,
+    onComment: () => void,
+  ): AsyncIterable<StreamChunk> {
     const headers = {
       'authorization': `Bearer ${apiKey}`,
       'content-type': 'application/json',
@@ -427,6 +471,9 @@ export class DeepSeekAdapter extends LlmAdapter {
         headers,
         body: payload,
         signal,
+        // One admission is one physical request. A 307 or 308 would make `fetch` send the POST again to another URL without a new
+        // admission, so a call that carries an admission fails on any redirect instead of following it. Other calls are unchanged.
+        ...options.admission === undefined ? {} : { redirect: 'error' as const },
       })
     } catch (error: unknown) {
       // The outer stream distinguishes caller cancellation and watchdog expiry.

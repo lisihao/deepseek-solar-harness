@@ -330,6 +330,16 @@
       "name": "A controller message may change the task format; the origin of a message continuation is recorded by the runtime (orchestration-local, rlm-runtime and rlm-runtime-local sealed together; no version change)",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "959563b9af"
+    },
+    {
+      "name": "Evaluation scope ledger: admission at the physical request, scope generation limits, and the owner-locked request ledger (llm, llm-deepseek, model-worker, model-worker-deepseek and orchestration-local sealed together; no version change)",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "3bb78b6ce6"
+    },
+    {
+      "name": "Evaluation ledger: guarded lock takeover, no writes after close, no redirects under an admission, totals checked before recovery, and corrected bound wording (llm, llm-deepseek and orchestration-local resealed; no version change)",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "1d8704dcbc"
     }
   ],
   "sourcePackages": {
@@ -504,14 +514,14 @@
     "dsh-packages/deepseek-ai-dsh-host-webserver-0.1.0-rc.5.tgz": "6349e28b2ad740163df7558cfa73738f09768bf38d950ef4b9aa1bdbd33100c8",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "8f1658c79dca2f4426da492889be2b1d4b6d7df497437b0e21c227f246b3e2af",
     "dsh-packages/deepseek-ai-dsh-kennel-review-0.1.0-rc.5.tgz": "162962c8cdcd606c8742d2646564d12ed2d8b3132f8222e43c40fb0ba0ca69dc",
-    "dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz": "f09a0440276c18795ff73f9e6f73ffec3c81cf0a2357b8b5117d62ecec8c1344",
-    "dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz": "40f37e9d912d491328d222d9298aac5b59d7aa5ef292881200d72efdefa1ce1b",
+    "dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz": "314c21de00a0b12360d4e753fb4467ac45dbd2528260b3266843edfd0de07257",
+    "dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz": "d36ce0433773dc58971fc34ca762a73c95c40c6a43c14262072a8e6560e5c8d8",
     "dsh-packages/deepseek-ai-dsh-model-allocation-0.1.0-rc.5.tgz": "aec7a9e7ce751652cf4733b7f76a1d3b8e9059bd02f6fed41f3663767d871ae0",
     "dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz": "2b81dcdd91882499928b9e3cc193c01eea2a114f6b49dfc0ce75bdd617fc0c68",
-    "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "2abb1112a13d28db66203cbbaefc2d5c833937e392fa01b3088fe32f96d1b770",
-    "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "47cff98eb94dfcbc9273cee79a2d55b76ac782d6eef802e5cc03c145f30bd42b",
+    "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "87bebe7ffe31501a109b9f5d172fdf839a311347b0a8a4e6f0cf793880aea92b",
+    "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "71b91e5233f218e5d31c56724b1eb885ff73e367bc54499af83a4e082e69a06f",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "ae7f77c743f1664388595ac06cf3c53d2ee17484d3791ae4ef79f32c411a0fba",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "d0ba5863e01275a357f4a27ea07b15d0af74f812e448c73f6c1e07a054b131aa",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "c09de9bf845a47be4a0385db074db17567ca867be713beff241ede1bd776bae4",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "2ef397368e994f1f5fb22958ff64f110e696e77bcdd2702c3d2f58e13821f36b",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "ff739e592e964c0af34c4b13b9598d61aeba26090e6b41ccabaaee4296a0da2b",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "70c32494b88d6ad6cbc68dfca97cb9644f92bd69c66b3a1ec28a4ee5b8fff11d",

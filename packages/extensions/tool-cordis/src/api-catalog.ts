@@ -4762,7 +4762,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GenerateOptions',
-    declaration: 'export interface GenerateOptions {\n    provider: string;\n    model: string;\n    reasoningEffort?: ReasoningEffortId;\n    messages: Message[];\n    system?: string;\n    tools?: ToolSchema[];\n    temperature?: number;\n    maxTokens?: number;\n    stop?: string[];\n    signal?: AbortSignal;\n    sessionId?: Branded<\'SessionId\'>;\n    purpose?: \'compaction\' | \'session-title\';\n}',
+    declaration: 'export interface GenerateOptions {\n    provider: string;\n    model: string;\n    reasoningEffort?: ReasoningEffortId;\n    messages: Message[];\n    system?: string;\n    tools?: ToolSchema[];\n    temperature?: number;\n    maxTokens?: number;\n    stop?: string[];\n    signal?: AbortSignal;\n    sessionId?: Branded<\'SessionId\'>;\n    purpose?: \'compaction\' | \'session-title\';\n    admission?: RequestAdmission;\n}',
   },
   {
     name: 'GenericCallView',
@@ -5110,7 +5110,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmAdapter',
-    declaration: 'export abstract class LlmAdapter {\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    listModels(_provider: string, _options?: {\n        readonly refresh?: boolean;\n    }): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
+    declaration: 'export abstract class LlmAdapter {\n    readonly enforcesAdmission: boolean;\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    listModels(_provider: string, _options?: {\n        readonly refresh?: boolean;\n    }): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
   {
     name: 'LlmCallConfig',
@@ -5397,8 +5397,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ModelTaskPhase = \'planning\' | \'execution\' | \'verification\' | \'synthesis\';',
   },
   {
+    name: 'ModelWorkerEvaluationV1',
+    declaration: 'export interface ModelWorkerEvaluationV1 {\n    readonly model: string;\n    readonly maxOutputTokens: number;\n    readonly reasoningEffort: string;\n    remainingOutputTokens(): number;\n    admission(label: string): RequestAdmission;\n}',
+  },
+  {
     name: 'ModelWorkerExecuteRequest',
-    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly parent?: Agent;\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly modelToolBridge?: ModelWorkerToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly parent?: Agent;\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly modelToolBridge?: ModelWorkerToolBridgeV1;\n    readonly evaluation?: ModelWorkerEvaluationV1;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ModelWorkerProvider',
@@ -5867,6 +5871,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RemotePrincipal',
     declaration: 'export interface RemotePrincipal {\n    readonly deviceId: string;\n    readonly deviceName: string;\n    readonly scope: RemoteDeviceScope;\n}',
+  },
+  {
+    name: 'RequestAdmission',
+    declaration: 'export type RequestAdmission = (request: RequestAdmissionInput) => RequestAdmissionTicket;',
+  },
+  {
+    name: 'RequestAdmissionInput',
+    declaration: 'export interface RequestAdmissionInput {\n    readonly model: string;\n    readonly bodyBytes: number;\n    readonly bodySha256: string;\n    readonly maxOutputTokens: number | undefined;\n    readonly thinking: string | undefined;\n    readonly reasoningEffort: string | undefined;\n    readonly hasNonTextContent: boolean;\n}',
+  },
+  {
+    name: 'RequestAdmissionTicket',
+    declaration: 'export interface RequestAdmissionTicket {\n    settle(usage: TokenUsage): void;\n    abandon(): void;\n}',
   },
   {
     name: 'RequestContext',

@@ -29,7 +29,14 @@ import type {
 } from '@deepseek-ai/dsh-continual-harness'
 import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
-import LlmRuntime, { type ContentBlock, type ContextSnapshotSection, type ResolvedRetryPolicy, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, {
+  ADMISSION_REFUSED_CODE,
+  type ContentBlock,
+  type ContextSnapshotSection,
+  type ResolvedRetryPolicy,
+  type StreamChunk,
+  type TokenUsage,
+} from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   ContinualHarnessMode,
@@ -39,8 +46,8 @@ import type {
 } from '@deepseek-ai/dsh-model-allocation'
 import { nativeModelTier } from '@deepseek-ai/dsh-model-allocation'
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
-import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
-import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
+import ModelWorkerRuntime, { type ModelWorkerExecuteRequest, type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
+import DeepSeekModelWorker, { DEEPSEEK_WORKER_ID } from '@deepseek-ai/dsh-model-worker-deepseek'
 import FileTaskTemplateProvider, { type TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
 import { inferTaskAttributes, inferTaskType, renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
 import {
@@ -139,6 +146,7 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
+import { EvaluationLedger, parseEvaluationScope } from './evaluation-ledger.ts'
 import { rlmContinuationPrompt, rlmContinuationResult, rlmMessageContinuationFacts, rlmResultSucceeded } from './rlm-continuation.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
@@ -401,6 +409,18 @@ function assertRlmBridgeAllowed(
       `RLM model-tool bridge requested unsealed parent tool: ${unsealedTool.name}`,
       'GRAPH_INVALID',
     )
+  }
+}
+
+/** The stream of a model call that carried no admission under an evaluation scope: one error finish, nothing sent. */
+async function * withoutAdmission(scopeId: string): AsyncGenerator<StreamChunk> {
+  await Promise.resolve()
+  yield {
+    type: 'finish',
+    reason: {
+      kind: 'error',
+      failure: { message: `evaluation scope ${scopeId} admits only calls that carry an admission; this one did not`, code: ADMISSION_REFUSED_CODE },
+    },
   }
 }
 
@@ -1252,6 +1272,8 @@ export class OrchestrationDaemon {
   private readonly attemptOperators = new Map<string, string>()
   private clusterActionAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
+  /** The ledger of the evaluation scope this home is sealed to; absent in an ordinary home. */
+  private evaluation: EvaluationLedger | undefined
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
   private tickInFlight: Promise<void> | undefined
@@ -1290,11 +1312,33 @@ export class OrchestrationDaemon {
   /* jscpd:ignore-start */
   /** Start the headless compiler composition, recovery pass, socket, and Scheduler. */
   async start(): Promise<void> {
+    // A scope file in the root seals this home to one evaluation. It is only read and checked here, before the lock, so a file
+    // that cannot be used stops the daemon without leaving a lock behind. The ledger is created, recovered, or written only after
+    // the daemon lock is held, and opening it takes the ledger's own owner lock first, which holds even in the moment when the
+    // daemon lock exists but its pid file is not written yet.
+    const scopePath = join(this.options.root, 'evaluation-scope.json')
+    const sealed = existsSync(scopePath) ? parseEvaluationScope(readFileSync(scopePath, 'utf8')) : undefined
     this.acquireLock()
+    if (sealed !== undefined) {
+      try {
+        this.evaluation = EvaluationLedger.open(join(this.options.root, 'evaluation-ledger.json'), sealed.scope, sealed.sha256)
+      } catch (error) {
+        this.releaseLock()
+        throw error
+      }
+    }
     const thisRoot = this.options.root
     await this.ctx.plugin(PhysicalOperatorRuntime)
     await this.ctx.plugin(FileTaskTemplateProvider, { dshHome: this.options.dshHome })
     await this.ctx.plugin(LlmRuntime)
+    const sealedScope = this.evaluation?.scope.scopeId
+    if (sealedScope !== undefined) {
+      // Under a scope every model call made through this daemon's context must carry an admission. The worker's calls do; a call
+      // from any other plugin loaded into the daemon does not, and is refused here without reaching an adapter.
+      this.ctx.on('llm/stream', (options, next): AsyncIterable<StreamChunk> => options.admission === undefined
+        ? withoutAdmission(sealedScope)
+        : next())
+    }
     await this.ctx.plugin(ModelWorkerRuntime)
     if (this.options.modelWorkerProviders === undefined) {
       await this.ctx.plugin(LocalCredentialProvider, { dshHome: this.options.dshHome, watch: true })
@@ -1395,6 +1439,7 @@ export class OrchestrationDaemon {
     this.store.close()
     if (localIpcUsesFilesystem()) this.safeUnlink(this.socketPath)
     this.safeUnlink(join(this.options.root, 'daemon.pid'))
+    this.evaluation?.close()
     this.releaseLock()
     this.closedResolver.resolve()
   }
@@ -2820,6 +2865,7 @@ export class OrchestrationDaemon {
         : await this.workspaceSnapshots(record.graph).captureInput(
           (this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot).snapshotId,
         )
+      this.assertUnmetered('Resident or remote operator')
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -3668,7 +3714,7 @@ export class OrchestrationDaemon {
           childEnvelope,
           receiveOperatorContextEnvelope(childEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
         )
-        const workerResult = this.ctx.modelWorkers.execute({
+        const workerResult = this.executeModelWorker({
           commandId: String(executionId), workerId: request.model.operatorId,
           model: request.model.model, prompt: modelWorkerEnvelopePrompt(childEnvelope),
           parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
@@ -3943,6 +3989,40 @@ export class OrchestrationDaemon {
     return { moduleId, callable }
   }
 
+  /**
+   * Dispatch one model-worker request. Under an evaluation scope only the DeepSeek API worker may run, and the request carries the
+   * scope's generation limits and an admission for each physical request it makes; outside a scope the request is unchanged.
+   */
+  private executeModelWorker(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
+    const ledger = this.evaluation
+    if (ledger === undefined) return this.ctx.modelWorkers.execute(request)
+    if (request.workerId !== DEEPSEEK_WORKER_ID) {
+      return Promise.reject(new OrchestrationError(
+        `evaluation scope ${ledger.scope.scopeId} admits only the ${DEEPSEEK_WORKER_ID} worker, not ${request.workerId}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      ))
+    }
+    return this.ctx.modelWorkers.execute({
+      ...request,
+      evaluation: {
+        model: ledger.scope.model,
+        maxOutputTokens: ledger.scope.limits.maxOutputTokensPerRequest,
+        reasoningEffort: ledger.scope.generation.reasoningEffort,
+        remainingOutputTokens: () => ledger.remainingOutputTokens(),
+        admission: label => ledger.admission(label),
+      },
+    })
+  }
+
+  /** Refuse a dispatch that would send model requests the scope's ledger cannot see. */
+  private assertUnmetered(kind: string): void {
+    if (this.evaluation === undefined) return
+    throw new OrchestrationError(
+      `evaluation scope ${this.evaluation.scope.scopeId} meters only API worker requests; ${kind} dispatch is refused`,
+      'ORCHESTRATION_UNAVAILABLE',
+    )
+  }
+
   private async dispatchRlmContinuation(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
@@ -4029,7 +4109,7 @@ export class OrchestrationDaemon {
       continuationEnvelope,
       receiveOperatorContextEnvelope(continuationEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
     )
-    const result = this.ctx.modelWorkers.execute({
+    const result = this.executeModelWorker({
       commandId: String(request.commandId), workerId: request.model.operatorId,
       model: request.model.model, prompt: modelWorkerEnvelopePrompt(continuationEnvelope),
       parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
@@ -4343,6 +4423,7 @@ export class OrchestrationDaemon {
     residentLaneId?: string,
     nativeToolPolicy?: PhysicalOperatorNativeToolPolicy,
   ): Promise<StartedResidentTurn> {
+    this.assertUnmetered('Resident or remote operator')
     const operator = this.ctx.physicalOperators.getOperator(allocation.operatorId)
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
@@ -4423,7 +4504,7 @@ export class OrchestrationDaemon {
         rootEnvelope,
         receiveOperatorContextEnvelope(rootEnvelope, `model-worker:${plan.operatorPlan.operatorId}`, 'text'),
       )
-      const rootExecution = this.ctx.modelWorkers.execute({
+      const rootExecution = this.executeModelWorker({
         commandId: rootCommandId,
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
@@ -4486,7 +4567,7 @@ export class OrchestrationDaemon {
         contextEnvelope,
         receiveOperatorContextEnvelope(contextEnvelope, `model-worker:${plan.operatorPlan.operatorId}`, 'text'),
       )
-      const result = this.ctx.modelWorkers.execute({
+      const result = this.executeModelWorker({
         commandId: String(plan.executionId),
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
