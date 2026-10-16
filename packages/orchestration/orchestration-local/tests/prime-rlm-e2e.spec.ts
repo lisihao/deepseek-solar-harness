@@ -771,6 +771,25 @@ describe('what a Resident root and a Resident child are given', () => {
     expect(read.value?.ref).toBe(settled?.data.artifactRef)
   })
 
+  it('completes an explicit RLM node whose root creates no child, with no child dispatched and a child count of zero', async () => {
+    const fixture = await e2eHarness('dsh-prime-zero-child-')
+    fixture.resident.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined || !request.commandId.endsWith(':rlm:root')) return
+      await callTypescriptRepl(request, `${request.commandId}:program`, '({ answer: "solved directly", children: (await rlm.listSubagents()).length })')
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: 'A small task that needs no helpers.' },
+      admission: admission({ sourceSessionId: 'zero-child-rlm', rlm: 'enabled' }),
+      graph: taskGraph(fixture.workspace, [node('zero', 'A small task that needs no helpers.', { operatorId: 'codex' })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    const complete = await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(complete.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled' })
+    const events = (await fixture.client.readEvents({ runId: run.runId, limit: 300 })).events
+    expect(events.filter(event => event.type === 'rlm.child.dispatched')).toEqual([])
+    expect(events.find(event => event.type === 'rlm.execution.settled')?.data).toMatchObject({ childCount: 0 })
+  })
+
   it('shows the child\'s REPL its own task and none of the root\'s private note', async () => {
     const { context } = await capture()
     expect(context?.task).toBe(CHILD_TASK)

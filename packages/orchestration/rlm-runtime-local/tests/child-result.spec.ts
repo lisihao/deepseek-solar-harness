@@ -101,6 +101,20 @@ async function setup(options: SetupOptions = {}) {
   return { root, ctx, service, root1, create, spawn, settledTree, run, reads, store, bindings }
 }
 
+describe('a root that creates no child', () => {
+  it('finishes with no child, no child record, and nothing to read, and is idle for drain', async () => {
+    const t = await setup()
+    expect(await t.run(t.root1, '({ answer: 6 * 7 })')).toEqual({ answer: 42 })
+    expect(await t.run(t.root1, 'await rlm.listSubagents()')).toEqual([])
+    expect(await t.run(t.root1, 'await rlm.childSummaries()')).toEqual([])
+    expect((await t.run(t.root1, 'await rlm.readChildResult("rlm-child-none")')).error.code).toBe('RLM_FAMILY_VIOLATION')
+    await expect(t.service.drain(t.root1, 500)).resolves.toMatchObject({ activeExecutions: 0, queuedMessages: 0 })
+    const events = (JSON.parse(await readFile(join(t.root, 'state.json'), 'utf8')) as { events: Array<{ type: string }> }).events
+    expect(events.filter(event => event.type.startsWith('rlm.child.')).map(event => event.type)).toEqual([])
+    await t.ctx.root.fiber.dispose()
+  })
+})
+
 describe('reading the result of a direct child', () => {
   it('returns segments that put back together into the whole result, with the hash of the segment and of the whole', async () => {
     const t = await setup()
