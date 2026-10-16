@@ -266,7 +266,7 @@ class FakeResidentClient {
 }
 
 class KeylessModelWorker implements ModelWorkerProvider {
-  readonly id = 'deepseek-keyless-fixture'
+  readonly id: string = 'deepseek-keyless-fixture'
   readonly requests: ModelWorkerExecuteRequest[] = []
   onExecute?: (request: ModelWorkerExecuteRequest) => Promise<void>
   /** Replaces the default completed result of a call, for example with a partial output and a non-success stop reason. */
@@ -2646,13 +2646,22 @@ describe('orchestration daemon', () => {
       return { home, root, fake, guard, resident, atReceipt }
     }
 
-    async function run(f: Fixture, task: string, deep = true, rlm = true, providers?: readonly ModelWorkerProvider[]) {
+    interface RunOptions {
+      readonly retry?: { readonly maxAttempts: number; readonly retryableCodes: readonly string[] }
+      /** Runs after the daemon started and before the run is compiled, for example to make the store refuse an event. */
+      readonly prepare?: (daemon: OrchestrationDaemon) => void
+    }
+
+    async function run(
+      f: Fixture, task: string, deep = true, rlm = true, providers?: readonly ModelWorkerProvider[], options: RunOptions = {},
+    ) {
       const daemon = new OrchestrationDaemon({
         root: f.root, dshHome: f.home, residentClient: f.resident as unknown as ResidentDaemonClient, schedulerIntervalMs: 10,
         ...providers === undefined ? {} : { modelWorkerProviders: providers },
       })
       await daemon.start()
       cleanup.push(async () => { await daemon.close() })
+      options.prepare?.(daemon)
       const client = new OrchestrationDaemonClient({ root: f.root, dshHome: f.home, autoStart: false, connectTimeoutMs: 2_000 })
       const workspace = join(f.home, 'workspace')
       await mkdir(workspace, { recursive: true })
@@ -2665,12 +2674,15 @@ describe('orchestration daemon', () => {
           ...base,
           nodes: [{
             ...node, role: rlm ? 'recursive synthesis' : node.role, task, writeScopes: [],
+            ...options.retry === undefined
+              ? {}
+              : { retryPolicy: { ...options.retry, backoffMs: 0, retryableCodes: [...options.retry.retryableCodes] } },
             ...rlm ? { rlm: { mode: 'enabled' as const, maxDepth: deep ? 2 : 1, maxChildren: 2, maxTurns: 4 } } : {},
           }],
         },
       })
       const started = await startCompilation(client, compilation.compilationId)
-      const settled = await eventually(() => client.inspect(String(started.runId)), value => ['completed', 'failed'].includes(value.state))
+      const settled = await eventually(() => client.inspect(String(started.runId)), value => ['completed', 'failed', 'indeterminate', 'cancelled'].includes(value.state))
       return { daemon, client, settled, runId: started.runId }
     }
 
@@ -2998,6 +3010,139 @@ describe('orchestration daemon', () => {
       await expect(new OrchestrationDaemon(options).start()).rejects.toThrow(/not usable/u)
       expect(readFileSync(join(f.root, 'evaluation-ledger.json'), 'utf8')).toContain('"scopeSha256":"zz"')
       expect(f.fake.received).toHaveLength(0)
+    })
+
+    /**
+     * A worker with the API worker's id that sends no HTTP request. It reserves one request through the scope's admission, as the
+     * real worker does, and then does what the test says. Every other part is the daemon's: the ledger, the consumers of the result,
+     * and the node's retry policy.
+     */
+    class ProbeWorker extends KeylessModelWorker {
+      override readonly id: string = 'deepseek-api'
+      after: (request: ModelWorkerExecuteRequest, ticket: { settle(usage: object): void; abandon(): void }) => Promise<ModelWorkerResult> =
+        () => Promise.reject(new Error('the probe worker was not told what to do'))
+
+      override async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
+        this.requests.push(request)
+        const evaluation = request.evaluation
+        if (evaluation === undefined) throw new Error('the probe worker runs only under a scope')
+        const ticket = evaluation.admission(`${request.commandId}#round0@probe-session`)({
+          model: evaluation.model, bodyBytes: 100, bodySha256: createHash('sha256').update(request.commandId).digest('hex'),
+          maxOutputTokens: 10, thinking: 'enabled', reasoningEffort: evaluation.reasoningEffort, hasNonTextContent: false,
+        })
+        return await this.after(request, ticket)
+      }
+    }
+
+    const REPLAYABLE = {
+      maxAttempts: 2, retryableCodes: ['MODEL_WORKER_INVALID', 'ORCHESTRATION_UNAVAILABLE', 'NODE_INDETERMINATE', 'OPERATOR_STOPPED'],
+    }
+    const rejected = (): Promise<ModelWorkerResult> => Promise.reject(Object.assign(new Error('reply rejected'), { code: 'MODEL_WORKER_INVALID' }))
+
+    /** Make the store refuse every event of one type, as a short write failure would; every other event is stored. */
+    function refuseEvents(daemon: OrchestrationDaemon, type: string): void {
+      const store = (daemon as unknown as { store: { appendEvents(events: readonly { type: string }[]): void } }).store
+      const original = store.appendEvents.bind(store)
+      store.appendEvents = (events) => {
+        if (events.some(entry => entry.type === type)) throw new Error(`store refused ${type}`)
+        original(events)
+      }
+    }
+
+    /** What the daemon's attempt handling was given for each failed attempt. */
+    function captureFailures(daemon: OrchestrationDaemon): unknown[] {
+      const captured: unknown[] = []
+      const target = daemon as unknown as { failAttempt(active: unknown, error: unknown): void }
+      const original = target.failAttempt.bind(daemon)
+      target.failAttempt = (active, error) => {
+        captured.push(error)
+        original(active, error)
+      }
+      return captured
+    }
+
+    const causesOf = (error: unknown): string[] => {
+      const cause = (error as { cause?: unknown }).cause
+      return cause instanceof AggregateError ? cause.errors.map(entry => (entry instanceof Error ? entry.message : String(entry))) : []
+    }
+
+    it.each([
+      ['a refused failure notification', 'rlm.execution.failed', rejected],
+      ['a refused metering event', 'evaluation.command.metering', (): Promise<ModelWorkerResult> => Promise.resolve({ output: [], stopReason: 'error' })],
+    ] as const)('keeps a command with a request of unknown outcome unknown, and reports the write error too, after %s', async (_name, refused, outcome) => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      worker.after = (_request, ticket) => {
+        ticket.abandon()
+        return outcome()
+      }
+      let failures: unknown[] = []
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE,
+        prepare: (daemon) => {
+          refuseEvents(daemon, refused)
+          failures = captureFailures(daemon)
+        },
+      })
+      // The node is not retried although its policy lists the code the failure would otherwise have, and there is room to retry.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(worker.requests).toHaveLength(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(failures).toHaveLength(1)
+      expect(failures[0]).toMatchObject({ name: 'UnknownPhysicalOutcomeError', code: 'COMMAND_INDETERMINATE' })
+      expect(causesOf(failures[0])).toContain(`store refused ${refused}`)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+    })
+
+    it('retries a node whose command failed in a known way, and keeps the second attempt apart', async () => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      let first = true
+      worker.after = (_request, ticket) => {
+        ticket.settle({ inputTokens: 5, outputTokens: 2 })
+        if (!first) return Promise.resolve({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' })
+        first = false
+        return rejected()
+      }
+      const { settled } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE })
+      expect(settled.state).toBe('completed')
+      expect(worker.requests).toHaveLength(2)
+      expect(new Set(worker.requests.map(request => request.commandId)).size).toBe(2)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['settled', 'settled'])
+    })
+
+    it('keeps the error of a command that threw after its caller cancelled it, although a request of it is unknown', async () => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      const thrown: unknown[] = []
+      let daemonOf: OrchestrationDaemon | undefined
+      worker.after = async (request, ticket) => {
+        // The caller cancels the run's active work; the worker notices, leaves its request unknown, and throws.
+        // The run's work is registered as active only after this worker was called, so the cancellation comes a little later.
+        const runId = /run-[0-9a-f-]{36}/u.exec(request.commandId)?.[0] ?? ''
+        setTimeout(() => {
+          void (daemonOf as unknown as { interruptActive(id: string): Promise<void> }).interruptActive(runId)
+        }, 150)
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the cancel')
+      }
+      await run(f, ROOT, false, true, [worker], {
+        prepare: (daemon) => {
+          daemonOf = daemon
+          const target = daemon as unknown as { executeModelWorker(request: unknown, accounting: unknown): Promise<unknown> }
+          const original = target.executeModelWorker.bind(daemon)
+          target.executeModelWorker = (request, accounting) => {
+            const result = original(request, accounting)
+            result.catch((error: unknown) => { thrown.push(error) })
+            return result
+          }
+        },
+      })
+      expect(thrown).toHaveLength(1)
+      expect(thrown[0]).toMatchObject({ message: 'worker threw after the cancel' })
+      expect((thrown[0] as Error).name).not.toBe('UnknownPhysicalOutcomeError')
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
     })
 
     it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {

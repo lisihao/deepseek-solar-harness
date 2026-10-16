@@ -191,6 +191,18 @@ describe('the attempts of one command', () => {
     expect(ledger.attemptsOf('cmd:3')).toMatchObject({ rows: 0, sent: 0, missing: [] })
   })
 
+  it('counts the requests of one session that are reserved or unknown, and no others', () => {
+    const ledger = open()
+    ledger.admission('cmd:1#round0@s1')(request({ bodySha256: 'b'.repeat(64) })).settle(usage)
+    ledger.admission('cmd:1#round1@s1')(request({ bodySha256: 'c'.repeat(64) })).abandon()
+    ledger.admission('cmd:2#round0@s1')(request({ bodySha256: 'd'.repeat(64) }))
+    ledger.admission('cmd:3#round0@s2')(request({ bodySha256: 'e'.repeat(64) })).abandon()
+    ledger.admission('cmd:4#plain')(request({ bodySha256: 'f'.repeat(64) })).abandon()
+    expect(ledger.outstandingInSession('s1')).toBe(2)
+    expect(ledger.outstandingInSession('s2')).toBe(1)
+    expect(ledger.outstandingInSession('s3')).toBe(0)
+  })
+
   it('names the requests whose usage it does not hold, and leaves a refusal out of them', () => {
     const limits = { ...SCOPE.limits, httpAttempts: 3 }
     const ledger = open({ ...SCOPE, limits }, scopeText({ limits }))
