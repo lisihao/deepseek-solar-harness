@@ -16,7 +16,7 @@
 
 状态原子写入配置的 owner-local root。重启恢复会分别恢复可序列化变量，把未完成 Receipt 变为 `indeterminate`，并要求显式放弃，绝不重放无法证明的原生 effect。`compact.run()` 只记录 Receipt 绑定的 Host 调度决定；真实原生历史压缩必须由 Host 在 turn boundary 执行，TypeScript namespace 不会被重置。
 
-Provider 在 `state.json` 中保存版本 5 状态。构造时会迁移版本 1 至 4，并在注册 runtime owner 前原子重写该文件。迁移后的 Child 标记为 `modelOrigin: legacy`；缺少结果的已结算 Child Receipt 会变为 `indeterminate`，绝不会自动再次派发。替换旧 Provider 时保留私有的升级前状态副本：回退旧二进制时也必须恢复兼容的状态文件。
+Provider 在 `state.json` 中保存版本 6 状态，其中必须有 `messageBatchDispatches` 数组。构造时只读取版本 6，并在注册 runtime owner 之前，对其他任何版本、缺少该数组的版本 6 文件、以及与消息不一致的批次记录，抛出 `RLM_UNAVAILABLE` 拒绝；它不迁移、不修复、不改写，被拒绝的文件保持原有字节。只读到版本 5 的 Provider 同样会拒绝版本 6 文件。因此本构建不打开版本 5 及更早的状态：替换旧 Provider 需要另外的迁移决定，评测使用新的空 home。
 
 `interrupt(sessionId)` 请求该会话及其下方每个会话当前活动的执行停止，包括已删除 child 中仍在停止的执行和尚未结束的被拒绝执行，并在这些请求结算时返回，不是在执行停止时返回。它不关闭任何东西：之后的消息或到期的 heartbeat 仍会准入新的执行。`deleteChild` 是永久的。它在第一个 await 之前就关闭该 child 的子树并记录命令。已关闭的会话不再准入消息投递、到期 heartbeat、spawn、cell、heartbeat 创建，也不再收发消息；`trackExecution` 会中断随后才完成的 dispatch、拒绝它，并在它结束前继续把它计入。关闭状态（child 上的 `deleted` 标记、其下已停止的会话，以及删除命令的回执）已持久化，重启后子树仍然关闭。执行句柄无论是已登记的还是被拒绝的，都只存在于内存，重启后会丢失。随后 `deleteChild` 中断该 child 下方每个活动的执行。如果某个中断被拒绝，命令以第一个拒绝失败：子树保持关闭，回执为 `failed`，相同命令 id 返回该失败，新的删除命令会再次中断。已完成的部分中断不会回滚，运行时也不证明被中断的执行已经停止。`drain` 会统计已删除后代中仍在运行的执行，以及尚未结束的被拒绝执行，因此根不会在它们停止前被报告为已排空；排给已删除会话的消息不计入，也永远不会投递。直接被删除的 child 在删除之后到达的结果会被忽略（`rlm.child.late_result_ignored`）。在已关闭的祖先之下被接纳的后代不会被忽略：它仍可以结算自己的记录，所以被删除 child 的子树里，后代在删除之后可能显示为 `settled`。`drain` 返回最后一个 continuation 结果，带有它自己的 `status`、`stopReason` 和部分 `output`，不会把失败或不确定的 continuation 改写成成功。
 

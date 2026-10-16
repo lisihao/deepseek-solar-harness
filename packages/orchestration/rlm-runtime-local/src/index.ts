@@ -131,45 +131,26 @@ interface StoredReceipt {
   resolutionReason?: string
 }
 
-interface StoreDocumentV1 {
+/**
+ * One message batch handed to the host as one continuation. It is written before the host is called, so a crash or a failed
+ * write leaves a record that says a dispatch may have been admitted, and the batch is never selected again from the queue.
+ * `intended`: written, the host's answer is not recorded. `accepted`: the host returned an execution and every member is
+ * delivered, in the same write. `held`: the dispatch may have been admitted and its outcome is unknown; nothing re-sends it.
+ */
+interface StoredMessageBatchDispatch {
   readonly version: 1
-  eventSequence: number
-  sessions: StoredSession[]
-  receipts: StoredReceipt[]
-  messages: RlmMessageV1[]
-  events: RlmRuntimeEventV1[]
+  /** Worker command of the batch; `messageBatchCommandId(messageIds)`. */
+  readonly commandId: string
+  readonly sessionId: string
+  /** Members in delivery order: unique, all addressed to `sessionId`. */
+  readonly messageIds: readonly string[]
+  state: 'intended' | 'accepted' | 'held'
+  readonly createdAt: string
 }
 
-interface StoreDocumentV2 extends Omit<StoreDocumentV1, 'version' | 'messages'> {
-  readonly version: 2
-  messages: Array<Omit<RlmMessageV1, 'effectiveMode' | 'deliveryStatus' | 'queuedAt' | 'deliveredAt' | 'deliveryError'>>
-  heartbeats: RlmHeartbeatV1[]
-}
-
-interface StoreDocumentV3 {
-  readonly version: 3
-  eventSequence: number
-  sessions: StoredSession[]
-  receipts: StoredReceipt[]
-  messages: RlmMessageV1[]
-  events: RlmRuntimeEventV1[]
-  heartbeats: RlmHeartbeatV1[]
-}
-
-interface StoreDocumentV4 {
-  readonly version: 4
-  eventSequence: number
-  sessions: StoredSession[]
-  receipts: StoredReceipt[]
-  messages: RlmMessageV1[]
-  events: RlmRuntimeEventV1[]
-  heartbeats: RlmHeartbeatV1[]
-  controlLeases: StoredControlLease[]
-}
-
-/** Current on-disk shape after all legacy child provenance migrations. */
+/** Current on-disk shape. Version 6 requires `messageBatchDispatches`; no other version is read or rewritten. */
 interface StoreDocument {
-  readonly version: 5
+  readonly version: 6
   eventSequence: number
   sessions: StoredSession[]
   receipts: StoredReceipt[]
@@ -177,10 +158,10 @@ interface StoreDocument {
   events: RlmRuntimeEventV1[]
   heartbeats: RlmHeartbeatV1[]
   controlLeases: StoredControlLease[]
+  messageBatchDispatches: StoredMessageBatchDispatch[]
 }
 
-const RLM_STATE_SCHEMA_VERSION = 5
-const LEGACY_CHILD_MODEL_ORIGIN: RlmChildModelOriginV1 = 'legacy'
+const RLM_STATE_SCHEMA_VERSION = 6
 
 // Kept local so the persistent RLM state owner does not acquire a runtime
 // dependency on the optional strategy Provider solely for request hashing.
@@ -195,153 +176,64 @@ function canonical(value: unknown): string {
 function sha256(value: unknown): string { return createHash('sha256').update(canonical(value)).digest('hex') }
 /* jscpd:ignore-end */
 
-function isChildModelOrigin(value: unknown): value is RlmChildModelOriginV1 {
-  return value === 'parent-inherited'
-    || value === 'allocator-default'
-    || value === 'explicit'
-    || value === LEGACY_CHILD_MODEL_ORIGIN
+/**
+ * The worker command of a message batch. A single message keeps the command of an unbatched delivery, `<messageId>:deliver`; a
+ * larger batch names its first member, its size, and a digest of all members in order, so a batch with other members never
+ * reuses the command of an earlier one.
+ * @param messageIds - the members in delivery order; not empty.
+ * @returns the command id.
+ */
+function messageBatchCommandId(messageIds: readonly string[]): string {
+  const [first] = messageIds
+  if (first === undefined) throw new RlmRuntimeError('RLM message batch has no members', 'RLM_INVALID')
+  if (messageIds.length === 1) return `${first}:deliver`
+  return `${first}:deliver:batch-${String(messageIds.length)}-${sha256(messageIds).slice(0, 8)}`
 }
 
-function migrateChildSnapshot(value: unknown): { readonly value: RlmChildSnapshotV1; readonly changed: boolean } {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new RlmRuntimeError('RLM child snapshot has an unsupported shape', 'RLM_UNAVAILABLE')
-  }
-  const child = value as Partial<RlmChildSnapshotV1>
-  if (child.modelOrigin === undefined) {
-    return { value: { ...child, modelOrigin: LEGACY_CHILD_MODEL_ORIGIN } as RlmChildSnapshotV1, changed: true }
-  }
-  if (!isChildModelOrigin(child.modelOrigin)) {
-    throw new RlmRuntimeError('RLM child snapshot has an unsupported model origin', 'RLM_UNAVAILABLE')
-  }
-  return { value: child as RlmChildSnapshotV1, changed: false }
-}
-
-function childModelOriginForHandle(
-  value: Readonly<Record<string, unknown>>,
-  sessions: readonly StoredSession[],
-): RlmChildModelOriginV1 {
-  const childId = value.rlmChildId
-  const sessionId = value.sessionId
-  for (const session of sessions) {
-    const child = session.snapshot.children.find(candidate => candidate.rlmChildId === childId || candidate.sessionId === sessionId)
-    if (child !== undefined) return child.modelOrigin
-  }
-  return LEGACY_CHILD_MODEL_ORIGIN
-}
-
-function isChildHandleShape(value: Readonly<Record<string, unknown>>): boolean {
-  return typeof value.rlmChildId === 'string'
-    && typeof value.sessionId === 'string'
-    && typeof value.name === 'string'
-    && typeof value.sessionDir === 'string'
-    && value.model !== undefined
+/** The delivery order of two messages to one session: steer before follow_up, then by creation time. */
+function messageDeliveryOrder(left: RlmMessageV1, right: RlmMessageV1): number {
+  const priority = (left.effectiveMode === 'steer' ? 0 : 1) - (right.effectiveMode === 'steer' ? 0 : 1)
+  return priority === 0 ? left.createdAt.localeCompare(right.createdAt) : priority
 }
 
 /**
- * Normalize legacy child handles embedded in settled cell/control receipts.
- * Only values carrying the stable child identity are treated as handles; all
- * other model output remains byte-for-byte structurally unchanged.
+ * Check the batch records of a loaded state against its messages. Any inconsistency refuses the whole file; nothing is repaired.
+ * @param records - `messageBatchDispatches` as read.
+ * @param messages - `messages` as read.
  */
-function migrateChildHandles(
-  value: unknown,
-  sessions: readonly StoredSession[],
-): { readonly value: unknown; readonly changed: boolean } {
-  if (Array.isArray(value)) {
-    let changed = false
-    const entries = value.map((entry) => {
-      const migrated = migrateChildHandles(entry, sessions)
-      changed ||= migrated.changed
-      return migrated.value
-    })
-    return { value: entries, changed }
+function validateMessageBatchDispatches(records: readonly StoredMessageBatchDispatch[], messages: readonly RlmMessageV1[]): void {
+  const refuse = (why: string): never => {
+    throw new RlmRuntimeError(`RLM message batch record is inconsistent (${why}), and the file was not changed`, 'RLM_UNAVAILABLE')
   }
-  if (value === null || typeof value !== 'object') return { value, changed: false }
-  const record = value as Record<string, unknown>
-  if (isChildHandleShape(record)) {
-    if (record.modelOrigin === undefined) {
-      return {
-        value: { ...record, modelOrigin: childModelOriginForHandle(record, sessions) },
-        changed: true,
-      }
+  const byId = new Map(messages.map(message => [message.messageId, message]))
+  const seen = new Set<string>()
+  // Durable JSON is an untrusted boundary: the record fields are checked as read, not trusted from their declared types.
+  // oxlint-disable typescript/no-unnecessary-condition
+  for (const record of records) {
+    if (record === null || typeof record !== 'object' || record.version !== 1 || typeof record.commandId !== 'string'
+      || typeof record.sessionId !== 'string' || typeof record.createdAt !== 'string' || !Array.isArray(record.messageIds)
+      || record.messageIds.length === 0 || record.messageIds.some(id => typeof id !== 'string')
+      || (record.state !== 'intended' && record.state !== 'accepted' && record.state !== 'held')) refuse('shape')
+    if (new Set(record.messageIds).size !== record.messageIds.length) refuse('duplicate member')
+    if (record.commandId !== messageBatchCommandId(record.messageIds)) refuse('command does not match its members')
+    let previous: RlmMessageV1 | undefined
+    const statuses = new Set<string>()
+    for (const id of record.messageIds) {
+      const message = byId.get(id)
+      if (message === undefined) return refuse('unknown member')
+      if (seen.has(id)) refuse('member in two batches')
+      seen.add(id)
+      if (String(message.toSessionId) !== record.sessionId) refuse('member of another session')
+      if (previous !== undefined && messageDeliveryOrder(previous, message) > 0) refuse('members out of order')
+      previous = message
+      statuses.add(message.deliveryStatus)
     }
-    if (!isChildModelOrigin(record.modelOrigin)) {
-      throw new RlmRuntimeError('RLM child handle has an unsupported model origin', 'RLM_UNAVAILABLE')
-    }
-    return { value, changed: false }
-  }
-  let changed = false
-  const entries = Object.entries(record).map(([key, entry]) => {
-    const migrated = migrateChildHandles(entry, sessions)
-    changed ||= migrated.changed
-    return [key, migrated.value] as const
-  })
-  return { value: Object.fromEntries(entries), changed }
-}
-
-function migrateStoredSession(session: unknown): { readonly value: StoredSession; readonly changed: boolean } {
-  if (session === null || typeof session !== 'object' || !('snapshot' in session)
-    || session.snapshot === null || typeof session.snapshot !== 'object') {
-    throw new RlmRuntimeError('RLM session has an unsupported shape', 'RLM_UNAVAILABLE')
-  }
-  const stored = session as StoredSession
-  const snapshot = stored.snapshot
-  if (!Array.isArray(snapshot.children)) {
-    throw new RlmRuntimeError('RLM session children have an unsupported shape', 'RLM_UNAVAILABLE')
-  }
-  let changed = false
-  const children = snapshot.children.map((child) => {
-    const migrated = migrateChildSnapshot(child)
-    changed ||= migrated.changed
-    return migrated.value
-  })
-  const resolvedPolicy = snapshot.childModelPolicy
-    ?? (snapshot.defaultChildModel === undefined ? 'parent-inherit' : 'allocator-default')
-  if (snapshot.childModelPolicy === undefined) changed = true
-  const context = (stored as unknown as {
-    readonly context?: Readonly<Record<string, RlmJsonValue>>
-  }).context ?? {}
-  return {
-    value: {
-      ...stored,
-      snapshot: {
-        ...snapshot,
-        children,
-        childModelPolicy: resolvedPolicy,
-      },
-      context,
-    },
-    changed,
-  }
-}
-
-function migrateStoredReceipt(
-  receipt: StoredReceipt,
-  sessions: readonly StoredSession[],
-): { readonly value: StoredReceipt; readonly changed: boolean } {
-  // A settled command without a result cannot be replayed safely. Preserve
-  // the receipt as an explicit indeterminate outcome instead of returning an
-  // undefined value through the typed receipt decoder.
-  if (receipt.state === 'settled' && receipt.result === undefined) {
-    return {
-      value: {
-        ...receipt,
-        state: 'indeterminate',
-        error: receipt.error ?? {
-          message: 'RLM settled receipt has no durable result after state migration',
-          code: 'RLM_COMMAND_INDETERMINATE',
-        },
-      },
-      changed: true,
+    if (statuses.size !== 1) refuse('members disagree on delivery')
+    if (record.state === 'accepted' ? !statuses.has('delivered') : record.state === 'intended' && !statuses.has('queued')) {
+      refuse('state disagrees with member delivery')
     }
   }
-  if (receipt.result === undefined) return { value: receipt, changed: false }
-  const migrated = migrateChildHandles(receipt.result, sessions)
-  const resultSha256 = receipt.resultSha256 ?? sha256(migrated.value)
-  if (!migrated.changed && resultSha256 === receipt.resultSha256) return { value: receipt, changed: false }
-  return {
-    value: { ...receipt, result: migrated.value, resultSha256 },
-    changed: true,
-  }
+  // oxlint-enable typescript/no-unnecessary-condition
 }
 
 function now(): string { return new Date().toISOString() }
@@ -558,7 +450,6 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   private readonly bridgeServer: Server
   private readonly bridgeSocketPath: string
   private readonly bridgeReady: Promise<void>
-  private legacyStateMigrated = false
   private document: StoreDocument
 
   constructor(ctx: Context, root: Config) {
@@ -571,7 +462,6 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     chmodSync(this.sessionsRoot, 0o700)
     this.filename = join(root, 'state.json')
     this.document = this.load()
-    if (this.legacyStateMigrated) this.persist()
     registerRuntimeOwner(this.runtimeOwnerKey, this.runtimeInstanceId)
     const accountingStartedAt = Date.now()
     for (const session of this.document.sessions) {
@@ -2426,71 +2316,9 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   }
 
   private load(): StoreDocument {
+    let text: string
     try {
-      const parsed = JSON.parse(readFileSync(this.filename, 'utf8')) as StoreDocument | StoreDocumentV4 | StoreDocumentV3 | StoreDocumentV2 | StoreDocumentV1
-      // Durable JSON is an untrusted boundary; supported historical shapes are validated before migration.
-      // oxlint-disable typescript/no-unnecessary-condition
-      if ((parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3
-        && parsed.version !== 4 && parsed.version !== RLM_STATE_SCHEMA_VERSION)
-        || !Array.isArray(parsed.sessions) || !Array.isArray(parsed.receipts)
-        || !Array.isArray(parsed.messages) || !Array.isArray(parsed.events) || !Number.isSafeInteger(parsed.eventSequence)
-        || (parsed.version !== 1 && !Array.isArray(parsed.heartbeats))
-        || ((parsed.version === 4 || parsed.version === RLM_STATE_SCHEMA_VERSION) && !Array.isArray(parsed.controlLeases))) {
-        throw new RlmRuntimeError('RLM runtime state has an unsupported shape', 'RLM_UNAVAILABLE')
-      }
-      const loadedAt = now()
-      const sessions = parsed.sessions.map((session) => {
-        const migrated = migrateStoredSession(session)
-        this.legacyStateMigrated ||= migrated.changed
-        const goal = normalizedGoal(migrated.value.snapshot.goal, loadedAt)
-        return {
-          ...migrated.value,
-          snapshot: { ...migrated.value.snapshot, ...goal === undefined ? {} : { goal } },
-        }
-      })
-      const receipts = parsed.receipts.map((receipt) => {
-        const migrated = migrateStoredReceipt(receipt, sessions)
-        this.legacyStateMigrated ||= migrated.changed
-        return migrated.value
-      })
-      const messages = parsed.messages.map((message) => {
-        const legacy = message as RlmMessageV1 & Partial<Pick<RlmMessageV1, 'effectiveMode' | 'deliveryStatus' | 'queuedAt'>>
-        if (legacy.deliveryStatus !== undefined && legacy.effectiveMode !== undefined && legacy.queuedAt !== undefined) return legacy
-        this.legacyStateMigrated = true
-        return {
-          ...legacy,
-          effectiveMode: legacy.mode === 'steer' ? 'steer' as const : 'follow_up' as const,
-          deliveryStatus: 'delivered' as const,
-          queuedAt: legacy.createdAt,
-          deliveredAt: legacy.createdAt,
-        }
-      })
-      const controlLeases = (parsed.version === 4 || parsed.version === RLM_STATE_SCHEMA_VERSION)
-        ? parsed.controlLeases.map((lease) => {
-          if (lease === null || typeof lease !== 'object' || Array.isArray(lease)) {
-            throw new RlmRuntimeError('RLM control lease has an unsupported shape', 'RLM_UNAVAILABLE')
-          }
-          const value = lease as Partial<StoredControlLease>
-          if (value.version !== 1 || typeof value.sessionId !== 'string' || typeof value.leaseId !== 'string'
-            || typeof value.callerId !== 'string' || typeof value.ownerInstanceId !== 'string'
-            || !Number.isSafeInteger(value.ownerPid) || typeof value.acquiredAt !== 'string' || typeof value.lastSeenAt !== 'string') {
-            throw new RlmRuntimeError('RLM control lease has an unsupported shape', 'RLM_UNAVAILABLE')
-          }
-          return { ...value, version: 1 } as StoredControlLease
-        })
-        : []
-      if (parsed.version !== RLM_STATE_SCHEMA_VERSION) this.legacyStateMigrated = true
-      return {
-        version: RLM_STATE_SCHEMA_VERSION,
-        eventSequence: parsed.eventSequence,
-        sessions,
-        receipts,
-        messages,
-        events: parsed.events,
-        heartbeats: parsed.version === 1 ? [] : parsed.heartbeats,
-        controlLeases,
-      }
-      // oxlint-enable typescript/no-unnecessary-condition
+      text = readFileSync(this.filename, 'utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {
         version: RLM_STATE_SCHEMA_VERSION,
@@ -2501,8 +2329,51 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         events: [],
         heartbeats: [],
         controlLeases: [],
+        messageBatchDispatches: [],
       }
       throw error
+    }
+    // Durable JSON is an untrusted boundary. A file this build does not support is refused as it is: nothing is migrated,
+    // repaired, or written, so the file stays readable by the build that wrote it.
+    // oxlint-disable typescript/no-unnecessary-condition
+    const parsed = JSON.parse(text) as Partial<StoreDocument> & { readonly version?: unknown }
+    if (parsed.version !== RLM_STATE_SCHEMA_VERSION) {
+      throw new RlmRuntimeError(
+        `RLM runtime state has version ${String(parsed.version)}; this build reads only version ${String(RLM_STATE_SCHEMA_VERSION)}, and the file was not changed`,
+        'RLM_UNAVAILABLE',
+      )
+    }
+    if (!Array.isArray(parsed.sessions) || !Array.isArray(parsed.receipts) || !Array.isArray(parsed.messages)
+      || !Array.isArray(parsed.events) || typeof parsed.eventSequence !== 'number' || !Number.isSafeInteger(parsed.eventSequence)
+      || !Array.isArray(parsed.heartbeats)
+      || !Array.isArray(parsed.controlLeases) || !Array.isArray(parsed.messageBatchDispatches)) {
+      throw new RlmRuntimeError('RLM runtime state has an unsupported shape, and the file was not changed', 'RLM_UNAVAILABLE')
+    }
+    const loadedAt = now()
+    const sessions = parsed.sessions.map((session) => {
+      const goal = normalizedGoal(session.snapshot.goal, loadedAt)
+      return { ...session, snapshot: { ...session.snapshot, ...goal === undefined ? {} : { goal } } }
+    })
+    for (const lease of parsed.controlLeases) {
+      if (lease === null || typeof lease !== 'object' || Array.isArray(lease)
+        || lease.version !== 1 || typeof lease.sessionId !== 'string' || typeof lease.leaseId !== 'string'
+        || typeof lease.callerId !== 'string' || typeof lease.ownerInstanceId !== 'string'
+        || !Number.isSafeInteger(lease.ownerPid) || typeof lease.acquiredAt !== 'string' || typeof lease.lastSeenAt !== 'string') {
+        throw new RlmRuntimeError('RLM control lease has an unsupported shape, and the file was not changed', 'RLM_UNAVAILABLE')
+      }
+    }
+    validateMessageBatchDispatches(parsed.messageBatchDispatches, parsed.messages)
+    // oxlint-enable typescript/no-unnecessary-condition
+    return {
+      version: RLM_STATE_SCHEMA_VERSION,
+      eventSequence: parsed.eventSequence,
+      sessions,
+      receipts: parsed.receipts,
+      messages: parsed.messages,
+      events: parsed.events,
+      heartbeats: parsed.heartbeats,
+      controlLeases: parsed.controlLeases,
+      messageBatchDispatches: parsed.messageBatchDispatches,
     }
   }
 
