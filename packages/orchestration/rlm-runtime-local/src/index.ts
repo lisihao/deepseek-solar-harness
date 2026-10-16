@@ -178,8 +178,8 @@ function sha256(value: unknown): string { return createHash('sha256').update(can
 
 /**
  * The worker command of a message batch. A single message keeps the command of an unbatched delivery, `<messageId>:deliver`; a
- * larger batch names its first member, its size, and a digest of all members in order, so a batch with other members never
- * reuses the command of an earlier one.
+ * larger batch names its first member, its size, and a digest of all members in order, and ends in `:deliver` as well, so a batch
+ * with other members never reuses the command of an earlier one.
  * @param messageIds - the members in delivery order; not empty.
  * @returns the command id.
  */
@@ -187,7 +187,7 @@ function messageBatchCommandId(messageIds: readonly string[]): string {
   const [first] = messageIds
   if (first === undefined) throw new RlmRuntimeError('RLM message batch has no members', 'RLM_INVALID')
   if (messageIds.length === 1) return `${first}:deliver`
-  return `${first}:deliver:batch-${String(messageIds.length)}-${sha256(messageIds).slice(0, 8)}`
+  return `${first}:batch-${String(messageIds.length)}-${sha256(messageIds).slice(0, 8)}:deliver`
 }
 
 /** The delivery order of two messages to one session: steer before follow_up, then by creation time. */
@@ -234,6 +234,58 @@ function validateMessageBatchDispatches(records: readonly StoredMessageBatchDisp
     }
   }
   // oxlint-enable typescript/no-unnecessary-condition
+}
+
+/** Longest rendered message block, in UTF-16 code units, that qualifies further messages to join the first one in a batch. */
+const MESSAGE_BATCH_QUALIFYING_UNITS = MAX_MESSAGE_CHARS
+
+/**
+ * One message as the continuation instruction states it: its sender line, its text, and its artifact references. A batch of one
+ * is exactly this block, which is what an unbatched delivery sent.
+ */
+function messageInstructionBlock(message: RlmMessageV1): string {
+  const prefix = message.source === 'control' ? 'Controller input:' : `Agent message from ${String(message.fromSessionId)}:`
+  return [
+    prefix,
+    message.text,
+    ...message.artifactRefs === undefined || message.artifactRefs.length === 0
+      ? []
+      : [`Artifact references: ${message.artifactRefs.join(', ')}`],
+  ].join('\n')
+}
+
+function messageBatchInstruction(messages: readonly RlmMessageV1[]): string {
+  return messages.map(messageInstructionBlock).join('\n\n')
+}
+
+/**
+ * Whether a message may share a continuation with others. A controller's input may change the task, so it is always alone; the
+ * decision reads the fields the runtime recorded (`source`, `controlLeaseId`), never the text.
+ */
+function messageIsBatchable(message: RlmMessageV1): boolean {
+  return message.source !== 'control' && message.controlLeaseId === undefined
+}
+
+/**
+ * The members of the next message batch: the first message of the delivery order, then the messages directly after it for as long
+ * as each is batchable, has the first message's delivery mode, and keeps the rendered instruction within
+ * `MESSAGE_BATCH_QUALIFYING_UNITS` UTF-16 code units. It stops at the first message that does not qualify and never skips it. The
+ * first message is always taken, whatever its size, so a message that is longer than the threshold is delivered alone exactly as
+ * before. This bounds only which messages share a continuation; it is not a limit on the prompt or its tokens.
+ * @param ordered - the queued messages of one session in delivery order; not empty.
+ * @returns the members in delivery order.
+ */
+function selectMessageBatch(ordered: readonly RlmMessageV1[]): RlmMessageV1[] {
+  const [first] = ordered
+  if (first === undefined) return []
+  const batch = [first]
+  if (!messageIsBatchable(first)) return batch
+  for (const next of ordered.slice(1)) {
+    if (!messageIsBatchable(next) || next.effectiveMode !== first.effectiveMode) break
+    if (messageBatchInstruction([...batch, next]).length > MESSAGE_BATCH_QUALIFYING_UNITS) break
+    batch.push(next)
+  }
+  return batch
 }
 
 function now(): string { return new Date().toISOString() }
@@ -1124,7 +1176,10 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       const openIds = new Set(this.subtreeSessions(sessionId).filter(value => !this.isClosed(value.snapshot.sessionId))
         .map(value => String(value.snapshot.sessionId)))
       const activeExecutions = this.executionsOf(this.treeSessions(sessionId)).length
-      const queuedMessages = this.document.messages.filter(value => openIds.has(String(value.toSessionId)) && value.deliveryStatus === 'queued').length
+      const heldMembers = new Set(this.document.messageBatchDispatches
+        .filter(record => record.state === 'held' && openIds.has(record.sessionId)).flatMap(record => record.messageIds))
+      const queuedMessages = this.document.messages.filter(value => openIds.has(String(value.toSessionId))
+        && (value.deliveryStatus === 'queued' || heldMembers.has(value.messageId))).length
       if (activeExecutions === 0 && queuedMessages === 0) {
         const lastContinuation = this.lastContinuations.get(String(sessionId))
         return {
@@ -1846,83 +1901,159 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     try {
       const session = this.requireSession(sessionId)
       if (this.isClosed(sessionId) || this.activeExecutions.has(key) || session.snapshot.lifecycle === 'running') return 0
+      // A held batch may have been admitted and its outcome is unknown; nothing in this session is sent until that is resolved.
+      if (this.document.messageBatchDispatches.some(record => record.sessionId === key && record.state === 'held')) return 0
       const bindings = this.bindings.get(key)
       if (bindings?.dispatchContinuation === undefined) return 0
-      const message = this.document.messages
-        .filter(value => value.toSessionId === sessionId && value.deliveryStatus === 'queued')
-        .sort((left, right) => {
-          const priority = (left.effectiveMode === 'steer' ? 0 : 1) - (right.effectiveMode === 'steer' ? 0 : 1)
-          return priority === 0 ? left.createdAt.localeCompare(right.createdAt) : priority
-        })[0]
-      if (message === undefined) return 0
-      try {
-        const instructionPrefix = message.source === 'control'
-          ? 'Controller input:'
-          : `Agent message from ${String(message.fromSessionId)}:`
-        const execution = await bindings.dispatchContinuation({
-          sessionId,
-          commandId: RlmCommandId(`${message.messageId}:deliver`),
-          instruction: [
-            instructionPrefix,
-            message.text,
-            ...message.artifactRefs === undefined || message.artifactRefs.length === 0
-              ? []
-              : [`Artifact references: ${message.artifactRefs.join(', ')}`],
-          ].join('\n'),
-          source: 'message',
-          messageOrigin: message.source === 'control' ? 'controller' : 'agent',
-          deliveryMode: message.effectiveMode,
-          model: session.snapshot.model,
-          executionOptions: session.snapshot.executionOptions ?? { version: 1 },
-        })
-        if (this.isClosed(sessionId)) await this.refuseClosedExecution(sessionId, execution)
-        const { deliveryError: _deliveryError, ...messageWithoutError } = message
-        const delivered: RlmMessageV1 = {
-          ...messageWithoutError, deliveryStatus: 'delivered', deliveredAt: now(),
-        }
-        const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
-        this.document.messages[index] = delivered
-        this.appendEvent(sessionId, 'rlm.message.delivered', {
-          messageId: message.messageId, effectiveMode: message.effectiveMode,
-          nativeSessionId: execution.nativeSessionId, nativeTurnId: execution.nativeTurnId,
-        })
-        void execution.result.then((result) => {
-          this.lastContinuations.set(key, result)
-          this.appendEvent(sessionId, `rlm.message.continuation.${result.status}`, {
-            messageId: message.messageId,
-            ...result.resultRef === undefined ? {} : { resultRef: result.resultRef },
-            ...result.error === undefined ? {} : { error: result.error },
-          })
-          this.persist()
-        })
-        await this.trackExecution(sessionId, execution)
-        this.persist()
-        return 1
-      } catch (error) {
-        const code = error instanceof Error && 'code' in error ? String(error.code) : ''
-        if (code === 'SESSION_BUSY' || code === 'RLM_SESSION_BUSY' || /session.*busy/iu.test(error instanceof Error ? error.message : String(error))) {
-          const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
-          this.document.messages[index] = {
-            ...message,
-            deliveryError: 'target session is busy; delivery remains queued',
-          }
-          this.persist()
-          return 0
-        }
-        const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
-        this.document.messages[index] = {
-          ...message,
-          deliveryError: error instanceof Error ? error.message : String(error),
-        }
-        this.appendEvent(sessionId, 'rlm.message.delivery_failed', {
-          messageId: message.messageId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        this.persist()
-        return 0
-      }
+      const inBatch = new Set(this.document.messageBatchDispatches.flatMap(record => record.messageIds))
+      const batch = selectMessageBatch(this.document.messages
+        .filter(value => value.toSessionId === sessionId && value.deliveryStatus === 'queued' && !inBatch.has(value.messageId))
+        .sort(messageDeliveryOrder))
+      const [head] = batch
+      if (head === undefined) return 0
+      return await this.dispatchMessageBatch(session, bindings, batch, head)
     } finally {
       this.activeMessagePumps.delete(key)
+    }
+  }
+
+  /**
+   * Hand one frozen message batch to the host as one continuation.
+   *
+   * The batch is written to the state file before the host is called. If the host refuses before it creates any execution, the
+   * record is removed and the members stay queued. If the host may have created one, the record becomes `held` and the batch is
+   * never selected again. Once the host returns an execution, every member is delivered and the record `accepted` in one write.
+   */
+  private async dispatchMessageBatch(
+    session: StoredSession,
+    bindings: RlmRuntimeHostBindings,
+    batch: readonly RlmMessageV1[],
+    head: RlmMessageV1,
+  ): Promise<number> {
+    const sessionId = session.snapshot.sessionId
+    const key = String(sessionId)
+    const messageIds = batch.map(message => message.messageId)
+    const commandId = messageBatchCommandId(messageIds)
+    const record: StoredMessageBatchDispatch = {
+      version: 1, commandId, sessionId: key, messageIds, state: 'intended', createdAt: now(),
+    }
+    this.document.messageBatchDispatches.push(record)
+    try {
+      this.persist()
+    } catch (error) {
+      // The host was not called, so nothing was admitted; the next successful write replaces whatever the failed one left.
+      this.document.messageBatchDispatches.splice(this.document.messageBatchDispatches.indexOf(record), 1)
+      throw error
+    }
+    const batchFacts = { commandId, batchSize: batch.length }
+    let execution: RlmChildExecution
+    try {
+      if (bindings.dispatchContinuation === undefined) throw new RlmRuntimeError('RLM host cannot continue a session', 'RLM_DISPATCH_NOT_ADMITTED')
+      execution = await bindings.dispatchContinuation({
+        sessionId,
+        commandId: RlmCommandId(commandId),
+        instruction: messageBatchInstruction(batch),
+        source: 'message',
+        messageOrigin: head.source === 'control' ? 'controller' : 'agent',
+        deliveryMode: head.effectiveMode,
+        messageIds,
+        model: session.snapshot.model,
+        executionOptions: session.snapshot.executionOptions ?? { version: 1 },
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      if (error instanceof RlmRuntimeError && error.code === 'RLM_DISPATCH_NOT_ADMITTED') {
+        this.document.messageBatchDispatches.splice(this.document.messageBatchDispatches.indexOf(record), 1)
+        for (const message of batch) this.replaceMessage(message.messageId, { ...message, deliveryError: reason })
+        this.appendEvent(sessionId, 'rlm.message.delivery_failed', { messageId: head.messageId, messageIds, error: reason, ...batchFacts })
+      } else {
+        this.holdBatch(record, sessionId, reason)
+      }
+      this.persistBestEffort()
+      return 0
+    }
+    try {
+      if (this.isClosed(sessionId)) await this.refuseClosedExecution(sessionId, execution)
+      for (const [batchIndex, message] of batch.entries()) {
+        const { deliveryError: _deliveryError, ...withoutError } = message
+        this.replaceMessage(message.messageId, { ...withoutError, deliveryStatus: 'delivered', deliveredAt: now() })
+        this.appendEvent(sessionId, 'rlm.message.delivered', {
+          messageId: message.messageId, effectiveMode: message.effectiveMode,
+          nativeSessionId: execution.nativeSessionId, nativeTurnId: execution.nativeTurnId, ...batchFacts, batchIndex,
+        })
+      }
+      record.state = 'accepted'
+      this.watchBatchExecution(record, batch, execution)
+      await this.trackAcceptedBatchExecution(sessionId, execution)
+      this.persist()
+      return 1
+    } catch (error) {
+      // The host created an execution, so the batch is not retried whatever went wrong here; whether the file now says
+      // `intended` or `accepted` is read from disk by the next start and is not guessed from this error.
+      this.holdBatch(record, sessionId, error instanceof Error ? error.message : String(error))
+      this.persistBestEffort()
+      return 0
+    }
+  }
+
+  private replaceMessage(messageId: string, replacement: RlmMessageV1): void {
+    const index = this.document.messages.findIndex(value => value.messageId === messageId)
+    this.document.messages[index] = replacement
+  }
+
+  private holdBatch(record: StoredMessageBatchDispatch, sessionId: RlmRuntimeSessionId, reason: string): void {
+    record.state = 'held'
+    this.appendEvent(sessionId, 'rlm.message.dispatch_unknown', {
+      messageId: record.messageIds[0] ?? '', messageIds: [...record.messageIds], commandId: record.commandId, batchSize: record.messageIds.length, error: reason,
+    })
+  }
+
+  /** Write the state file, keeping the in-memory state when the write fails: a held batch must still block this instance. */
+  private persistBestEffort(): void {
+    try {
+      this.persist()
+    } catch {
+      // Nothing else can reach this: the caller already holds the batch in memory, and the next start reads the file as it is.
+    }
+  }
+
+  /** One terminal event per member when the batch's execution ends, each with the execution's own status and stop reason. */
+  private watchBatchExecution(record: StoredMessageBatchDispatch, batch: readonly RlmMessageV1[], execution: RlmChildExecution): void {
+    const sessionId = RlmRuntimeSessionId(record.sessionId)
+    const finish = (result: RlmChildExecutionResult): void => {
+      this.lastContinuations.set(record.sessionId, result)
+      for (const [batchIndex, message] of batch.entries()) {
+        this.appendEvent(sessionId, `rlm.message.continuation.${result.status}`, {
+          messageId: message.messageId,
+          commandId: record.commandId, batchSize: batch.length, batchIndex,
+          ...result.resultRef === undefined ? {} : { resultRef: result.resultRef },
+          ...result.error === undefined ? {} : { error: result.error },
+          ...result.stopReason === undefined ? {} : { stopReason: result.stopReason },
+        })
+      }
+      // The record leaves with the terminal events. A held record stays: its outcome is not the one this execution reported.
+      if (record.state === 'accepted') {
+        this.document.messageBatchDispatches.splice(this.document.messageBatchDispatches.indexOf(record), 1)
+      }
+      this.persistBestEffort()
+    }
+    void execution.result.then(finish, (error: unknown) => {
+      finish({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
+    })
+  }
+
+  /**
+   * Register the accepted execution to its session. If the session already has one, this one is interrupted and counted by
+   * `drain` until its result settles: an interrupt that returns does not prove it stopped. Its members stay delivered and get
+   * their terminal events from the result.
+   */
+  private async trackAcceptedBatchExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<void> {
+    try {
+      await this.trackExecution(sessionId, execution)
+    } catch (error) {
+      if (!(error instanceof RlmRuntimeError) || error.code !== 'RLM_SESSION_BUSY') throw error
+      const interruptFailure = await this.countAndInterruptExecution(sessionId, execution)
+      if (interruptFailure !== '') throw new RlmRuntimeError(`an accepted continuation could not be interrupted${interruptFailure}`, 'RLM_UNAVAILABLE')
     }
   }
 
@@ -2064,14 +2195,22 @@ export class LocalRlmRuntime extends RlmRuntimeService {
    * command until its result settles, because the interrupt request does not prove that it stopped. A failed interrupt is
    * named in the error.
    */
-  private async refuseClosedExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<never> {
+  /**
+   * Count an execution that is not registered to its session until its result settles, and ask it to stop. The returned text is
+   * empty when the interrupt request succeeded, which does not prove that the execution stopped.
+   */
+  private async countAndInterruptExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<string> {
     this.refusedExecutions.set(execution, sessionId)
     const release = (): void => { this.refusedExecutions.delete(execution) }
     void execution.result.then(release, release)
-    const interruptFailure = await execution.interrupt().then(
+    return await execution.interrupt().then(
       () => '',
       (error: unknown) => `; interrupting it also failed: ${error instanceof Error ? error.message : String(error)}`,
     )
+  }
+
+  private async refuseClosedExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<never> {
+    const interruptFailure = await this.countAndInterruptExecution(sessionId, execution)
     throw new RlmRuntimeError(
       `RLM session was deleted before its execution was registered: ${String(sessionId)}${interruptFailure}`,
       'RLM_UNAVAILABLE',
@@ -2379,6 +2518,10 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   private recoverUncertainWork(): void {
     let changed = false
+    // A batch written before its host answer was recorded may have been admitted: it is held, not retried.
+    for (const record of this.document.messageBatchDispatches) {
+      if (record.state === 'intended') { record.state = 'held'; changed = true }
+    }
     for (const receipt of this.document.receipts) {
       if (receipt.state === 'accepted' || receipt.state === 'running') { receipt.state = 'indeterminate'; changed = true }
     }

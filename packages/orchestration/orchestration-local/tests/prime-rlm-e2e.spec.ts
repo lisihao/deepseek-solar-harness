@@ -474,7 +474,35 @@ describe('Prime-compatible orchestration offline E2E', () => {
       })
     }
     expect(explicitEvents.events.filter(event => event.type === 'rlm.child.settled')).toHaveLength(2)
-    expect(explicitEvents.events.filter(event => event.type === 'rlm.message.continuation.settled')).toHaveLength(2)
+    // Messages queued together share one continuation, so the count of continuation events depends on arrival; the messages they
+    // name do not. The runtime's own record says which two messages the children sent and in which order they were delivered; the
+    // continuation events must name exactly those, each once, in that order, under the commands the runtime delivered them with.
+    const runtimeState = JSON.parse(await readFile(join(fixture.root, 'rlm-runtime', 'state.json'), 'utf8')) as {
+      messages: Array<{ messageId: string; source?: string; deliveryStatus: string; deliveredAt?: string }>
+      events: Array<{ type: string; data: { messageId?: string; commandId?: string; batchIndex?: number; batchSize?: number } }>
+      messageBatchDispatches: unknown[]
+    }
+    const childMessages = runtimeState.messages.filter(message => message.source !== 'control')
+    expect(childMessages).toHaveLength(2)
+    expect(new Set(childMessages.map(message => message.messageId)).size).toBe(2)
+    expect(childMessages.every(message => message.deliveryStatus === 'delivered')).toBe(true)
+    const messageContinuations = explicitEvents.events.filter(event => event.type === 'rlm.message.continuation.settled')
+    expect(messageContinuations.flatMap(event => event.data.messageIds as string[]))
+      .toEqual(runtimeState.events.filter(event => event.type === 'rlm.message.delivered').map(event => event.data.messageId))
+    expect(messageContinuations.flatMap(event => event.data.messageIds as string[]).sort())
+      .toEqual(childMessages.map(message => message.messageId).sort())
+    for (const continuation of messageContinuations) {
+      const members = continuation.data.messageIds as string[]
+      const deliveredEvents = runtimeState.events
+        .filter(event => event.type === 'rlm.message.delivered' && members.includes(event.data.messageId ?? ''))
+      expect(deliveredEvents.map(event => event.data.messageId)).toEqual(members)
+      expect(new Set(deliveredEvents.map(event => event.data.commandId))).toEqual(new Set([continuation.data.commandId]))
+      expect(deliveredEvents.map(event => [event.data.batchIndex, event.data.batchSize]))
+        .toEqual(members.map((_, index) => [index, members.length]))
+    }
+    // Nothing is left held or in flight once the run has completed.
+    expect(runtimeState.messageBatchDispatches).toEqual([])
+    expect(runtimeState.events.some(event => event.type === 'rlm.message.dispatch_unknown')).toBe(false)
     expect(explicitEvents.events).toContainEqual(expect.objectContaining({ type: 'rlm.goal.continuation.settled' }))
     expect(explicitEvents.events).toContainEqual(expect.objectContaining({ type: 'rlm.compaction.settled' }))
     expect(explicitEvents.events).toContainEqual(expect.objectContaining({ type: 'harness.refinement.applied' }))

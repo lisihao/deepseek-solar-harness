@@ -55,6 +55,8 @@ export function rlmContinuationPrompt(
     readonly source: 'goal' | 'heartbeat' | 'message' | 'autonomous'
     readonly instruction: string
     readonly deliveryMode: 'steer' | 'follow_up'
+    /** The messages a `message` continuation delivers; more than one makes the wording plural. */
+    readonly messageIds?: readonly string[]
   },
   inspection: string = GENERIC_INSPECTION,
 ): string {
@@ -68,7 +70,7 @@ export function rlmContinuationPrompt(
         ? 'Treat this heartbeat as scheduled new work. Use explicit family messages for any recursive results.'
         : request.source === 'autonomous'
           ? 'This follow-up was injected by the host Autonomous policy. Do not claim completion from prose; make concrete progress and let the host quality gates decide.'
-          : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
+          : `Process the queued family message${(request.messageIds?.length ?? 1) > 1 ? 's' : ''} using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
   ].join('\n')
 }
 
@@ -91,12 +93,15 @@ function namedList(names: readonly string[]): string {
  *   the parent plus the sealed `maxChildren` of the session and of its parent.
  * @param origin - who sent the message, as the runtime recorded it (`messageOrigin`), never read from the message text. A controller's
  *   input may change the task or its output format; a message from another agent may not.
+ * @param messageCount - how many messages the continuation delivers; only agent messages are delivered together, and more than one
+ *   makes the closing sentence plural.
  * @returns the sentences to pass to {@link rlmContinuationPrompt} as `inspection`.
  */
 export function rlmMessageContinuationFacts(
   session: Pick<RlmRuntimeSessionSnapshotV1, 'task' | 'restorableVariables' | 'degradedVariables'>,
   roster: Pick<RlmFamilyRosterV1, 'entries'>,
   origin: 'controller' | 'agent',
+  messageCount = 1,
 ): string {
   return [
     'Use typescript_repl for any state you still need. The host read the facts below just before this turn.',
@@ -121,6 +126,8 @@ export function rlmMessageContinuationFacts(
     ...roster.entries.map(member => `- ${member.relationship} ${JSON.stringify(member.name)}: ${member.status}`),
     'Top-level const and let names persist between cells of this session. Do not declare a name that is already in use at the top level: '
     + 'reuse the existing binding, choose a new name, or keep temporary values inside a block or function.',
-    'The message above is delivered in full; do not call agentMessage.read to fetch it again.',
+    messageCount > 1
+      ? 'The messages above are delivered in full; do not call agentMessage.read to fetch them again.'
+      : 'The message above is delivered in full; do not call agentMessage.read to fetch it again.',
   ].join('\n')
 }

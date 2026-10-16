@@ -53,6 +53,7 @@ import {
 import {
   RLM_TYPESCRIPT_REPL_TOOL_SCHEMA,
   RlmCommandId,
+  RlmRuntimeError,
   RlmRuntimeSessionId,
   type RlmChildExecution,
   type RlmChildExecutionResult,
@@ -3951,18 +3952,33 @@ export class OrchestrationDaemon {
     cancellation: RlmCancellationScope,
     physicalRuns: PhysicalOperatorRun[],
   ): Promise<Awaited<ReturnType<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>>> {
-    const execution = cancellation.begin(String(request.sessionId))
-    const executionId = PhysicalOperatorExecutionId(String(request.commandId))
-    const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
-    assertRlmBridgeAllowed(request.executionOptions ?? { version: 1 }, bridge)
-    const inspection = request.source === 'message'
-      ? rlmMessageContinuationFacts(
-        await this.ctx.rlmRuntime.inspect(request.sessionId),
-        await this.ctx.rlmRuntime.familyRoster(request.sessionId),
-        request.messageOrigin === 'controller' ? 'controller' : 'agent',
-      )
-      : undefined
-    const prompt: ContentBlock[] = [{ type: 'text', text: rlmContinuationPrompt(request, inspection) }]
+    // Everything up to the point where a native execution is started is a refusal that admitted nothing. A message continuation
+    // reports it as such, so the runtime may keep the message queued; an error from anywhere later is not marked.
+    let execution: ReturnType<RlmCancellationScope['begin']>
+    let executionId: PhysicalOperatorExecutionId
+    let bridge: Awaited<ReturnType<typeof this.ctx.rlmRuntime.modelToolBridge>>
+    let prompt: ContentBlock[]
+    try {
+      if (request.source === 'message' && (request.messageIds === undefined || request.messageIds.length === 0)) {
+        throw new OrchestrationError('a message continuation must name the messages it delivers', 'GRAPH_INVALID')
+      }
+      execution = cancellation.begin(String(request.sessionId))
+      executionId = PhysicalOperatorExecutionId(String(request.commandId))
+      bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
+      assertRlmBridgeAllowed(request.executionOptions ?? { version: 1 }, bridge)
+      const inspection = request.source === 'message'
+        ? rlmMessageContinuationFacts(
+          await this.ctx.rlmRuntime.inspect(request.sessionId),
+          await this.ctx.rlmRuntime.familyRoster(request.sessionId),
+          request.messageOrigin === 'controller' ? 'controller' : 'agent',
+          request.messageIds?.length,
+        )
+        : undefined
+      prompt = [{ type: 'text', text: rlmContinuationPrompt(request, inspection) }]
+    } catch (error) {
+      if (request.source !== 'message') throw error
+      throw new RlmRuntimeError(error instanceof Error ? error.message : String(error), 'RLM_DISPATCH_NOT_ADMITTED')
+    }
     const settle = async (
       result: PhysicalOperatorResult,
       workerResult?: ModelWorkerResult,
@@ -3987,6 +4003,7 @@ export class OrchestrationDaemon {
         runId: String(record.snapshot.runId), nodeId: spec.id,
         runtimeSessionId: String(request.sessionId), commandId: String(request.commandId),
         operatorId: request.model.operatorId, model: request.model.model,
+        ...request.messageIds === undefined ? {} : { messageIds: [...request.messageIds] },
         stopReason: result.stopReason, output: result.output,
       })
       this.store.recordArtifact('compilation_artifacts', {
@@ -3996,6 +4013,7 @@ export class OrchestrationDaemon {
       const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
       this.store.appendEvents([event(record.snapshot.runId, `rlm.${request.source}.continuation.${status}`, {
         runtimeSessionId: String(request.sessionId), commandId: String(request.commandId),
+        ...request.messageIds === undefined ? {} : { messageIds: [...request.messageIds] },
         artifactRef: String(artifactRef), stopReason: result.stopReason,
       }, record.snapshot.nodes.find(value => value.id === spec.id))])
       await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')

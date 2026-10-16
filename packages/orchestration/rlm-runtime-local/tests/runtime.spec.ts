@@ -612,6 +612,8 @@ describe('LocalRlmRuntime', () => {
       return JSON.parse(await readFile(join(sourceRoot, 'state.json'), 'utf8')) as StateJson
     }
 
+    function messageOf(outcome: unknown): string { return outcome instanceof Error ? outcome.message : '' }
+
     function message(id: string, patch: Record<string, unknown> = {}): Record<string, unknown> {
       return {
         version: 1, messageId: id, commandId: `send-${id}`, fromSessionId: 'rlm-session-other', toSessionId: 'rlm-session-root',
@@ -650,13 +652,16 @@ describe('LocalRlmRuntime', () => {
       state.version = version
       delete state.messageBatchDispatches
       const { outcome } = await load(state)
-      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE', message: expect.stringContaining(`version ${String(version)}`) })
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain(`version ${String(version)}`)
     })
 
     it('refuses a version 6 file that has no messageBatchDispatches, leaving it unchanged', async () => {
       const state = await freshState()
       delete state.messageBatchDispatches
-      expect((await load(state)).outcome).toMatchObject({ code: 'RLM_UNAVAILABLE', message: expect.stringContaining('unsupported shape') })
+      const { outcome } = await load(state)
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain('unsupported shape')
     })
 
     it('loads a version 6 file and keeps accepted and held batches', async () => {
@@ -667,11 +672,11 @@ describe('LocalRlmRuntime', () => {
     })
 
     it.each([
-      ['a record that is not an object', () => ({ state: 'held' }) as unknown, []],
+      ['a record that is not an object', () => ({ state: 'held' }), []],
       ['an unknown state', () => record(['m1'], { state: 'done' }), ['m1']],
       ['no members', () => record([], { commandId: 'x' }), []],
       ['a duplicate member', () => record(['m1', 'm1']), ['m1']],
-      ['a command that does not match its members', () => record(['m1'], { commandId: 'm1:deliver:batch-9-00000000' }), ['m1']],
+      ['a command that does not match its members', () => record(['m1'], { commandId: 'm1:batch-9-00000000:deliver' }), ['m1']],
       ['a member that is not in the state', () => record(['gone']), []],
       ['a member addressed to another session', () => record(['m1'], { sessionId: 'rlm-session-elsewhere' }), ['m1']],
       ['an accepted batch whose member is still queued', () => record(['m1'], { state: 'accepted' }), ['m1']],
@@ -690,7 +695,9 @@ describe('LocalRlmRuntime', () => {
       const state = await freshState()
       state.messages = [message('m1'), message('m2')]
       state.messageBatchDispatches = [record(['m1']), record(['m1'])]
-      expect((await load(state)).outcome).toMatchObject({ code: 'RLM_UNAVAILABLE', message: expect.stringContaining('two batches') })
+      const { outcome } = await load(state)
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain('two batches')
     })
 
     it('refuses members whose delivery order disagrees with their record', async () => {
@@ -700,8 +707,10 @@ describe('LocalRlmRuntime', () => {
         message('m2', { effectiveMode: 'steer' }),
       ]
       const members = ['m1', 'm2']
-      state.messageBatchDispatches = [record(members, { commandId: `m1:deliver:batch-2-${createHash('sha256').update('["m1","m2"]').digest('hex').slice(0, 8)}` })]
-      expect((await load(state)).outcome).toMatchObject({ code: 'RLM_UNAVAILABLE', message: expect.stringContaining('out of order') })
+      state.messageBatchDispatches = [record(members, { commandId: `m1:batch-2-${createHash('sha256').update('["m1","m2"]').digest('hex').slice(0, 8)}:deliver` })]
+      const { outcome } = await load(state)
+      expect(outcome).toMatchObject({ code: 'RLM_UNAVAILABLE' })
+      expect(messageOf(outcome)).toContain('out of order')
     })
   })
 
