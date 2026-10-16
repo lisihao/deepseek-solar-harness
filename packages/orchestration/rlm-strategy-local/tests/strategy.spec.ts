@@ -19,12 +19,13 @@ describe('LocalRlmStrategy', () => {
       enabled: true,
       fidelity: 'dsh-optimized',
       strategyId: 'dsh-native-rlm',
-      strategyVersion: '1.4.0',
+      strategyVersion: '1.5.0',
       maxDepth: 1,
       reason: 'auto-explicit-decomposition',
     })
     expect(plan.instruction).toContain('distinct solution, failure-analysis, evidence-review, or alternative-design lenses')
     expect(plan.instruction).toContain('coverage-checked')
+    expect(plan.instruction).toContain('a small or strictly sequential task is solved directly with none')
   })
 
   it('keeps an ordinary automatic node direct', async () => {
