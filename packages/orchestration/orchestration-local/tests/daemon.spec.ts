@@ -345,8 +345,8 @@ class ExternalWebAdvisorWorker implements ModelWorkerProvider {
   }
 }
 
-async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 5_000
+async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean, limitMs = 5_000): Promise<T> {
+  const deadline = Date.now() + limitMs
   for (;;) {
     const value = await read()
     if (accept(value)) return value
@@ -2654,6 +2654,8 @@ describe('orchestration daemon', () => {
       readonly autonomous?: true
       /** Cancel the run through the client as soon as this holds for the requests the endpoint has received. */
       readonly cancelWhen?: () => boolean
+      /** The node's attempt deadline, which the daemon's own timer enforces. */
+      readonly timeoutMs?: number
     }
 
     async function run(
@@ -2682,6 +2684,7 @@ describe('orchestration daemon', () => {
               ? {}
               : { retryPolicy: { ...options.retry, backoffMs: 0, retryableCodes: [...options.retry.retryableCodes] } },
             ...rlm ? { rlm: { mode: 'enabled' as const, maxDepth: deep ? 2 : 1, maxChildren: 2, maxTurns: 4 } } : {},
+            ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
             ...options.autonomous === undefined
               ? {}
               : {
@@ -2704,7 +2707,10 @@ describe('orchestration daemon', () => {
           reason: 'cancel the run while a request of it is in flight',
         })
       }
-      const settled = await eventually(() => client.inspect(String(started.runId)), value => ['completed', 'failed', 'indeterminate', 'cancelled'].includes(value.state))
+      const settled = await eventually(
+        () => client.inspect(String(started.runId)), value => ['completed', 'failed', 'indeterminate', 'cancelled'].includes(value.state),
+        options.timeoutMs === undefined ? 5_000 : options.timeoutMs + 10_000,
+      )
       return { daemon, client, settled, runId: started.runId }
     }
 
@@ -3291,6 +3297,69 @@ describe('orchestration daemon', () => {
       expect(settled.nodes[0]?.state).toBe('failed')
       expect(ledgerOf(f).attempts.map(attempt => attempt.state)).not.toContain('unknown')
     })
+
+    /** The three outcomes of a held request that its attempt deadline interrupted, as the worker reports them. */
+    const afterDeadline = {
+      'returns an aborted result': () => Promise.resolve<ModelWorkerResult>({ output: [], stopReason: 'aborted' }),
+      'throws': () => Promise.reject(new Error('worker threw after the deadline')),
+    } as const
+
+    it.each(Object.entries(afterDeadline))('keeps a root unknown when its attempt deadline passes and the worker %s, and does not run the node again', async (_name, outcome) => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      worker.after = async (request, ticket) => {
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        return await outcome()
+      }
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE, timeoutMs: 1_200 })
+      // The deadline is not a cancellation by the caller: the request stays unknown, and the policy cannot replay the node.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+    }, 20_000)
+
+    it.each([
+      ['a goal continuation', 'goal', false],
+      ['an Autonomous direct continuation', 'autonomous', true],
+      ['a message continuation under Autonomous Mode', 'message', true],
+    ] as const)('keeps %s unknown when the attempt deadline passes while its request is open, and does not run the node again', async (_name, source, autonomous) => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker(source, async (request, ticket) => {
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the deadline')
+      })
+      // The deadline is the daemon's own attempt timer. It is long enough for the root and the child to finish first and short
+      // enough to end before the drain wait of the continuation, which starts later and has the same length.
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE, ...autonomous ? { autonomous: true as const } : {}, timeoutMs: 3_000,
+      })
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    }, 20_000)
+
+    it('retries a node whose attempt deadline passed after its request was settled, as a known failure', async () => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      let first = true
+      worker.after = async (request, ticket) => {
+        ticket.settle(SETTLED)
+        if (!first) return completed('second attempt')
+        first = false
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        throw new Error('worker threw after the deadline')
+      }
+      const { settled } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE, timeoutMs: 1_200 })
+      expect(settled.state).toBe('completed')
+      expect(worker.requests.filter(isRoot)).toHaveLength(2)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['settled', 'settled'])
+    }, 20_000)
 
     it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {
       const f = await fixture(treeHandler(), { ...SCOPE, inputBound: 'proven-token-count' })
