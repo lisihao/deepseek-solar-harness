@@ -463,7 +463,7 @@ export interface CommandAccount {
   readonly admissionCalls: number
   /** Requests the worker asked to admit that have no row; a row that exists without a call cannot be told from another command's. */
   readonly unaccounted: number
-  /** Every counted request has a row, none lacks usage, and the command sent at least one request. */
+  /** Every admission call has a row, none of the rows lacks usage, and the worker asked to admit at least one request. */
   readonly complete: boolean
 }
 
@@ -475,7 +475,8 @@ export interface CommandAccount {
  */
 export function accountOf(counts: CommandAttempts, admissionCalls: number): CommandAccount {
   const unaccounted = admissionCalls - counts.rows
-  // A command that ended without asking to admit any request has nothing the ledger could vouch for.
+  // A command that ended without asking to admit any request has nothing the ledger could vouch for. A command whose only request
+  // was refused is complete: it asked once, its row records the refusal, and nothing was sent.
   return { counts, admissionCalls, unaccounted, complete: counts.missing.length === 0 && unaccounted === 0 && admissionCalls > 0 }
 }
 
@@ -575,6 +576,17 @@ export class EvaluationLedger {
    */
   remainingOutputTokens(): number {
     return Math.max(0, this.scope.limits.outputTokens - this.totals().output)
+  }
+
+  /**
+   * How many requests sent in one runtime session the ledger holds as reserved or unknown.
+   * @param session - the session id as it appears in the labels of the worker's requests.
+   * @returns the number of such attempts.
+   */
+  outstandingInSession(session: string): number {
+    return this.state.attempts.filter(
+      attempt => (attempt.state === 'reserved' || attempt.state === 'unknown') && parseAttemptLabel(attempt.label)?.session === session,
+    ).length
   }
 
   /**

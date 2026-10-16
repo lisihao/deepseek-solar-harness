@@ -3229,8 +3229,7 @@ export class OrchestrationDaemon {
     } catch (error) {
       controller.abort()
       await Promise.allSettled(physicalRuns.map(value => value.dispose()))
-      this.recordRlmFailure(record, plan, prepared, error)
-      throw error
+      throw this.reportRlmFailure(record, plan, prepared, error)
     }
   }
 
@@ -3276,6 +3275,34 @@ export class OrchestrationDaemon {
       executionId: String(plan.executionId), runtimeSessionId: String(prepared.rootSessionId),
       code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
     }, prepared.node)])
+  }
+
+  /**
+   * Record the failure of an RLM execution and return the error to rethrow. A store that refuses the notification does not change
+   * what the execution failed with when that was an unknown physical outcome: the outcome keeps its identity (so the node is not
+   * retried as an ordinary failure) and carries the refused write as part of its cause. Any other failure behaves as before.
+   * @param record - the run.
+   * @param plan - the node plan.
+   * @param prepared - the prepared execution.
+   * @param error - what the execution failed with.
+   * @returns the error to throw.
+   */
+  private reportRlmFailure(
+    record: RuntimeRunRecord,
+    plan: NodeExecutionPlanV1,
+    prepared: PreparedRlmExecution,
+    error: unknown,
+  ): unknown {
+    try {
+      this.recordRlmFailure(record, plan, prepared, error)
+      return error
+    } catch (writeError) {
+      // Rethrown unless the failure being reported is an unknown outcome, which is returned with this error attached.
+      if (!(error instanceof UnknownPhysicalOutcomeError)) throw writeError
+      return new UnknownPhysicalOutcomeError(
+        error.message, new AggregateError([error.cause, writeError], 'the unknown outcome and the refused failure notification'),
+      )
+    }
   }
 
   private async flushRlmHarnessBoundary(
@@ -4110,6 +4137,24 @@ export class OrchestrationDaemon {
   }
 
   /**
+   * Whether, under an evaluation scope, the ledger holds a request of this command as reserved or unknown.
+   * @param command - the command id as it appears in the ledger's labels.
+   * @returns `true` only with such evidence; always `false` outside a scope.
+   */
+  private holdsUnknownRequest(command: string): boolean {
+    return this.evaluation !== undefined && this.evaluation.attemptsOf(command).missing.length > 0
+  }
+
+  /**
+   * Whether, under an evaluation scope, the ledger holds a request sent in this runtime session as reserved or unknown.
+   * @param session - the runtime session id as it appears in the ledger's labels.
+   * @returns `true` only with such evidence; always `false` outside a scope.
+   */
+  private sessionHoldsUnknownRequest(session: string): boolean {
+    return this.evaluation !== undefined && this.evaluation.outstandingInSession(session) > 0
+  }
+
+  /**
    * Record, apart from the terminal outcome of a command, what the ledger holds for its physical requests.
    * @param accounting - the run and node plan.
    * @param account - the decided account of the command.
@@ -4323,6 +4368,11 @@ export class OrchestrationDaemon {
         cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
         cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
       }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      if ((result.stopReason === 'error' || result.stopReason === 'aborted') && this.sessionHoldsUnknownRequest(String(sessionId))) {
+        throw new UnknownPhysicalOutcomeError(
+          `Autonomous root turn stopped with ${result.stopReason} while a request of the session has an unknown outcome`, result.stopReason,
+        )
+      }
       if (result.stopReason === 'error' || result.stopReason === 'aborted') {
         throw new OrchestrationError(
           `Autonomous root turn stopped with ${result.stopReason}`,
@@ -4383,6 +4433,9 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
+      if (continuation.status === 'indeterminate' && this.holdsUnknownRequest(commandId)) {
+        throw new UnknownPhysicalOutcomeError(continuation.error ?? 'Autonomous continuation has a request of unknown outcome', continuation)
+      }
       if (continuation.status !== 'settled') {
         throw Object.assign(new Error(continuation.error ?? `Autonomous continuation became ${continuation.status}`), {
           code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
@@ -4467,6 +4520,9 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
+      if (continuation.status === 'indeterminate' && this.holdsUnknownRequest(String(claim.commandId))) {
+        throw new UnknownPhysicalOutcomeError(continuation.error ?? 'RLM goal continuation has a request of unknown outcome', continuation)
+      }
       if (continuation.status !== 'settled') {
         throw Object.assign(new Error(continuation.error ?? `RLM goal continuation became ${continuation.status}`), {
           code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
@@ -4680,8 +4736,7 @@ export class OrchestrationDaemon {
         ...rootResult.usage === undefined ? {} : { usage: rootResult.usage },
       })
     } catch (error) {
-      this.recordRlmFailure(record, plan, prepared, error)
-      throw error
+      throw this.reportRlmFailure(record, plan, prepared, error)
     }
   }
 
