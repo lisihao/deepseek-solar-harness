@@ -395,11 +395,6 @@ export function takeEvaluationOwnerLock(lockPath: string, interleave: OwnerLockI
   return { release: () => { release(lockPath) } }
 }
 
-/**
- * The durable account of one scope. Every method is synchronous and writes the ledger before it returns, so the check of a
- * balance and the recording of a reservation cannot be interleaved with another request and a reservation is on disk before
- * its request is sent. One process owns the ledger at a time: opening it takes an owner lock before the file is read or written.
- */
 /** The logical command, tool round and session an attempt belongs to, as the DeepSeek worker names them in the attempt's label. */
 export interface AttemptOrigin {
   readonly command: string
@@ -496,6 +491,11 @@ export function isUnknownOutcome(missing: number, cancelled: boolean, alreadyUnk
   return missing > 0 && !cancelled && !alreadyUnknown
 }
 
+/**
+ * The durable account of one scope. Every method is synchronous and writes the ledger before it returns, so the check of a
+ * balance and the recording of a reservation cannot be interleaved with another request and a reservation is on disk before
+ * its request is sent. One process owns the ledger at a time: opening it takes an owner lock before the file is read or written.
+ */
 export class EvaluationLedger {
   /** Set by `close()`: from then on the owner lock is released and this object writes nothing. */
   private closed = false
