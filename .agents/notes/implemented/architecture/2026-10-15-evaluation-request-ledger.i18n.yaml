@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-15-evaluation-request-ledger.md
-2026-10-15-evaluation-request-ledger.md: 1576e2227c06b7aa7b1fbc9025f146e7408c71f2
-2026-10-15-evaluation-request-ledger.zh.md: 837910aa8dd5c1f0caa7b0cb039f0f7cd27b3695
+2026-10-15-evaluation-request-ledger.md: ec775812bffeca54fb2fabd921a4fd9317c11157
+2026-10-15-evaluation-request-ledger.zh.md: 8ba7d348e484854a46e0bd000de27627d3efbe5f
