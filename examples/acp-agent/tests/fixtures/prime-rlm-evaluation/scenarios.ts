@@ -9,7 +9,8 @@
 import { messageText, type FakeHandler, type FakeMessage, type FakeReply } from '../prime-rlm-terminal/fake-deepseek.ts'
 
 export const SCENARIO_NAMES = [
-  'tree', 'integration', 'refuse-first', 'refuse-later', 'refuse-round', 'cancelled', 'missing-usage', 'unknown-no-replay', 'unknown-error-finish', 'unknown-child', 'unknown-continuation', 'known-retry', 'zero-child',
+  'tree', 'integration', 'refuse-first', 'refuse-later', 'refuse-round', 'cancelled', 'missing-usage', 'unknown-no-replay', 'unknown-error-finish', 'unknown-child', 'unknown-continuation', 'unknown-goal', 'unknown-autonomous',
+  'unknown-message-autonomous', 'known-goal-retry', 'known-retry', 'zero-child',
   'ordinary',
 ] as const
 
@@ -30,6 +31,8 @@ export interface Scenario {
   readonly scoped: boolean
   readonly limits: ScenarioLimits
   readonly retry: { readonly maxAttempts: number; readonly retryableCodes: readonly string[] }
+  /** Run the node under Autonomous Mode, with an end condition that no run of this fixture satisfies. */
+  readonly autonomous?: true
   /** The fake provider's behavior; `undefined` for `tree`, whose handler is in the driver. */
   readonly handler: FakeHandler | undefined
 }
@@ -98,6 +101,36 @@ function singleRoundHandler(options: { readonly firstWithoutUsage?: boolean } = 
 }
 
 const NO_RETRY = { maxAttempts: 1, retryableCodes: [] as readonly string[] }
+/** A policy that would replay a node after any of the codes a failed command or continuation can end with. */
+const RETRY_ANY = {
+  maxAttempts: 2,
+  retryableCodes: ['NODE_INDETERMINATE', 'ORCHESTRATION_UNAVAILABLE', 'MODEL_WORKER_INVALID', 'OPERATOR_STOPPED', 'SERVER', 'ABORTED'],
+} as const
+const GOAL = 'EVAL-GOAL-OBJECTIVE'
+
+/**
+ * A root that sets a goal (or runs under Autonomous Mode) and ends; the host then continues it. The first request of the
+ * continuation gets `failure`: an HTTP 500 (unknown outcome), or a reply the worker rejects after its usage was reported (known).
+ */
+function continuationHandler(source: 'goal' | 'autonomous', failure: 'unknown' | 'known' | 'none'): FakeHandler {
+  let failed = false
+  return (messages) => {
+    const first = messages[0]
+    if (first === undefined) throw new Error('fake DeepSeek received a request without messages')
+    const task = taskText(first)
+    const afterTool = messages.at(-1)?.role === 'tool'
+    if (task.includes(`for this ${source}.`)) {
+      if (failure !== 'none' && !failed) {
+        failed = true
+        return failure === 'unknown' ? { kind: 'http-error', status: 500 } : { kind: 'empty-tool-calls' }
+      }
+      return answer(`${source} continuation done`)
+    }
+    if (afterTool) return answer('root done')
+    return repl(source === 'goal' ? `await goal.create(${JSON.stringify(GOAL)}, { continuationBudget: 1 }); "goal set"` : '1 + 1')
+  }
+}
+
 
 function scenario(name: ScenarioName, handler: FakeHandler | undefined, over: Partial<Omit<Scenario, 'name' | 'handler'>> = {}): Scenario {
   return { name, scoped: true, limits: GENEROUS, retry: NO_RETRY, handler, ...over }
@@ -143,6 +176,17 @@ export function scenarioOf(name: ScenarioName): Scenario {
     case 'unknown-continuation':
       // The continuation's first request gets an HTTP 500: its two messages end with an unknown outcome and are not sent again.
       return scenario(name, integrationHandler('continuation'))
+    case 'unknown-goal':
+      // The goal continuation's first request gets an HTTP 500, and the retry policy lists every code the consumer could use.
+      return scenario(name, continuationHandler('goal', 'unknown'), { retry: RETRY_ANY })
+    case 'unknown-autonomous':
+      return scenario(name, continuationHandler('autonomous', 'unknown'), { retry: RETRY_ANY, autonomous: true })
+    case 'unknown-message-autonomous':
+      // The batched continuation's first request gets an HTTP 500 while the node runs under Autonomous Mode.
+      return scenario(name, integrationHandler('continuation'), { retry: RETRY_ANY, autonomous: true })
+    case 'known-goal-retry':
+      // A goal continuation fails in a way the worker rejects after its usage was reported: a known failure, retried.
+      return scenario(name, continuationHandler('goal', 'known'), { retry: RETRY_ANY })
     case 'known-retry':
       // The first request settles with usage and the worker then rejects it (code MODEL_WORKER_INVALID); the second attempt succeeds.
       return scenario(name, (messages, body, raw) => (raw.ordinal === 0 ? { kind: 'empty-tool-calls' } : single(messages, body, raw)), {

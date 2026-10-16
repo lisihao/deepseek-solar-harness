@@ -53,7 +53,7 @@ export interface TranscriptInput {
   readonly runtimeEventTypes: readonly string[]
 }
 
-type Who = 'root' | 'gamma' | 'delta' | 'continuation'
+type Who = 'root' | 'gamma' | 'delta' | 'continuation' | 'goal continuation' | 'autonomous continuation'
 
 function taskOf(body: string): string {
   type Envelope = { messages?: Array<{ content?: unknown }> }
@@ -66,13 +66,15 @@ function taskOf(body: string): string {
 
 function whoOf(task: string): Who {
   if (task.includes('Agent message from')) return 'continuation'
+  if (task.includes('for this goal.')) return 'goal continuation'
+  if (task.includes('for this autonomous.')) return 'autonomous continuation'
   if (task.includes(GAMMA)) return 'gamma'
   return task.includes(DELTA) ? 'delta' : 'root'
 }
 
 /** The number of the node attempt a command id belongs to: `orch:<run>:<node>:<attempt>:rlm:...`. */
 function attemptOf(command: string): number | null {
-  const match = /^orch:[^:]+:[^:]+:(\d+)(?::|$)/u.exec(command)
+  const match = /^(?:rlm:)?orch:[^:]+:[^:]+:(\d+)(?::|$)/u.exec(command)
   return match?.[1] === undefined ? null : Number(match[1])
 }
 
@@ -103,6 +105,8 @@ export function scenarioTranscript(input: TranscriptInput) {
     const known = commandOwner.get(command)
     if (known !== undefined) return known
     if (command.endsWith(':rlm:root')) return 'root'
+    if (command.includes(':goal-continuation:')) return 'goal continuation'
+    if (command.includes(':autonomous-continuation:')) return 'autonomous continuation'
     return command.endsWith(':deliver') ? 'continuation' : 'unseen'
   }
   const requests = joined.map(({ request, row }) => {

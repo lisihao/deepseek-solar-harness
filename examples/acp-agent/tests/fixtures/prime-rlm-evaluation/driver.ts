@@ -92,7 +92,7 @@ function handle(messages: readonly FakeMessage[]): FakeReply {
   return repl(`await rlm(${JSON.stringify(KID)}, { name: "kid" }); "spawned"`)
 }
 
-function graph(workspace: string, retry: Scenario['retry']): LogicalTaskGraphV1 {
+function graph(workspace: string, scenario: Scenario): LogicalTaskGraphV1 {
   return {
     version: 1, title: 'keyless evaluation graph', workspace, maxParallel: 1, risk: 'low',
     nodes: [{
@@ -102,7 +102,16 @@ function graph(workspace: string, retry: Scenario['retry']): LogicalTaskGraphV1 
       effectBudget: { read: [], write: [], execute: [], network: [], cost: [], risk: [] },
       approvedSecretRefs: [], readScopes: ['src'], writeScopes: [],
       acceptance: [{ id: 'done', description: 'operator completes', kind: 'operator-completed' }],
-      retryPolicy: { maxAttempts: retry.maxAttempts, backoffMs: 0, retryableCodes: [...retry.retryableCodes] },
+      retryPolicy: { maxAttempts: scenario.retry.maxAttempts, backoffMs: 0, retryableCodes: [...scenario.retry.retryableCodes] },
+      ...scenario.autonomous === true
+        ? {
+          requiredArtifacts: ['EVAL-ART'],
+          autonomous: {
+            mode: 'enabled', maxContinuations: 2,
+            endCondition: { version: 1, operator: 'all', checks: [{ id: 'art', kind: 'artifact-present', ref: 'EVAL-ART' }] },
+          },
+        }
+        : {},
       rlm: { mode: 'enabled', maxDepth: 2, maxChildren: 2, maxTurns: 4 },
     }],
   }
@@ -244,7 +253,7 @@ try {
   const compilation = await rpc('compile', service().compile({
     intent: { request: 'evaluation scope' },
     admission: { policy: 'codex', route: 'taskgraph', sourceSessionId: 'evaluation', rlm: 'enabled', continualHarness: 'off', optimization: 'balanced' },
-    graph: graph(workspace, scenario.retry),
+    graph: graph(workspace, scenario),
   }), runUntil)
   const started = await rpc(
     'start', service().start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId }), runUntil,
