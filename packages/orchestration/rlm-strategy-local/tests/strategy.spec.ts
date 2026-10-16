@@ -65,5 +65,11 @@ describe('LocalRlmStrategy', () => {
       runId: 'run', nodeId: 'rlm', phase: 'execution', role: 'implementer',
       task: 'change one label', requestedMode: 'enabled', objective: 'economy',
     })).resolves.toMatchObject({ enabled: true, fidelity: 'prime-strict', reason: 'user-enabled' })
+    const strict = await service.resolve({
+      runId: 'run', nodeId: 'rlm-strict', phase: 'execution', role: 'implementer',
+      task: 'change one label', requestedMode: 'enabled', objective: 'economy',
+    })
+    expect(strict.instruction).toContain('a small or strictly sequential task is solved directly with none')
+    expect(strict.instruction).toContain('distinct solution, failure-analysis, evidence-review, or alternative-design lenses')
   })
 })

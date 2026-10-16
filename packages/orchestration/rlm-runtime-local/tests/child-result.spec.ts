@@ -157,6 +157,20 @@ describe('reading the result of a direct child', () => {
     await t.ctx.root.fiber.dispose()
   })
 
+  it('renders the text blocks of a result joined by one newline and counts, without rendering, the blocks that are not text', async () => {
+    const mixed: RlmChildResultContentV1 = {
+      kind: 'prime-rlm-child-result', commandId: 'exec-1', stopReason: 'completed',
+      output: [{ type: 'text', text: 'first' }, { type: 'reasoning', text: 'private thoughts' }, { type: 'text', text: 'second' }],
+    }
+    const t = await setup({ behaviors: { a: { status: 'settled', stored: mixed, hasRef: true } } })
+    const { a } = await t.settledTree()
+    const segment = await t.run(t.root1, `await rlm.readChildResult(${JSON.stringify(a)})`)
+    expect(segment).toMatchObject({ text: 'first\nsecond', totalUnits: 12, omittedBlocks: 1, complete: true })
+    expect(JSON.stringify(segment)).not.toContain('private thoughts')
+    expect(segment.fullSha256).toBe(createHash('sha256').update('first\nsecond', 'utf8').digest('hex'))
+    await t.ctx.root.fiber.dispose()
+  })
+
   it('keeps the whole object it returns to a third of the output limit of the reading session, and always moves forward', async () => {
     const t = await setup({ maxOutputBytes: 4_200 })
     const { a } = await t.settledTree()
