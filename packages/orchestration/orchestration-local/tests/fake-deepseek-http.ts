@@ -42,8 +42,6 @@ export type FakeAnswer =
   | { readonly kind: 'text'; readonly text: string; readonly usage?: FakeUsage | null }
   /** Send the first bytes of a response and then wait, as a response that has not finished does. Released by `release()`. */
   | { readonly kind: 'hold' }
-  /** Answer with a non-2xx status and an empty error body, as a failing endpoint does. */
-  | { readonly kind: 'http-error'; readonly status: number }
 
 /** Decides the answer to one request. */
 export type FakeHandler = (request: ReceivedRequest, index: number) => FakeAnswer | Promise<FakeAnswer>
@@ -71,7 +69,7 @@ function wireUsage(usage: FakeUsage): Record<string, number> {
   }
 }
 
-function writeAnswer(response: ServerResponse, answer: Exclude<FakeAnswer, { kind: 'hold' } | { kind: 'http-error' }>): void {
+function writeAnswer(response: ServerResponse, answer: Exclude<FakeAnswer, { kind: 'hold' }>): void {
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
   const usage = answer.usage === null ? undefined : wireUsage(answer.usage ?? DEFAULT_USAGE)
   if (answer.kind === 'tool') {
@@ -117,11 +115,6 @@ export async function startFakeDeepSeekHttp(handler: FakeHandler): Promise<FakeD
         response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
         sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: null }] })
         held.push(response)
-        return
-      }
-      if (answer.kind === 'http-error') {
-        response.writeHead(answer.status, { 'content-type': 'application/json' })
-        response.end(JSON.stringify({ error: { message: `fake endpoint failure ${String(answer.status)}` } }))
         return
       }
       writeAnswer(response, answer)

@@ -3269,6 +3269,29 @@ describe('orchestration daemon', () => {
       expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
     })
 
+    it('keeps the storage error, and retries by the policy, when the store refuses the Autonomous usage event of a root that finished normally', async () => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker('autonomous', () => Promise.reject(new Error('the root finished, so no continuation should be needed')))
+      let failures: unknown[] = []
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE,
+        autonomous: true,
+        prepare: (daemon) => {
+          refuseEvents(daemon, 'rlm.autonomous.usage')
+          failures = captureFailures(daemon)
+        },
+      })
+      // No request is in doubt, so the refused write is an ordinary storage error and the node is retried as before.
+      expect(failures.length).toBeGreaterThan(0)
+      for (const failure of failures) {
+        expect((failure as Error).name).not.toBe('UnknownPhysicalOutcomeError')
+        expect((failure as Error).message).toBe('store refused rlm.autonomous.usage')
+      }
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toHaveLength(1)
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).not.toContain('unknown')
+    })
+
     it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {
       const f = await fixture(treeHandler(), { ...SCOPE, inputBound: 'proven-token-count' })
       await run(f, ROOT)
