@@ -19,13 +19,13 @@ describe('LocalRlmStrategy', () => {
       enabled: true,
       fidelity: 'dsh-optimized',
       strategyId: 'dsh-native-rlm',
-      strategyVersion: '1.5.0',
+      strategyVersion: '1.5.1',
       maxDepth: 1,
       reason: 'auto-explicit-decomposition',
     })
     expect(plan.instruction).toContain('distinct solution, failure-analysis, evidence-review, or alternative-design lenses')
     expect(plan.instruction).toContain('coverage-checked')
-    expect(plan.instruction).toContain('a small or strictly sequential task is solved directly with none')
+    expect(plan.instruction).toContain('solve a small or strictly sequential task directly with none')
   })
 
   it('keeps an ordinary automatic node direct', async () => {
@@ -69,7 +69,27 @@ describe('LocalRlmStrategy', () => {
       runId: 'run', nodeId: 'rlm-strict', phase: 'execution', role: 'implementer',
       task: 'change one label', requestedMode: 'enabled', objective: 'economy',
     })
-    expect(strict.instruction).toContain('a small or strictly sequential task is solved directly with none')
+    expect(strict.instruction).toContain('solve a small or strictly sequential task directly with none')
     expect(strict.instruction).toContain('distinct solution, failure-analysis, evidence-review, or alternative-design lenses')
+  })
+
+  it('leaves a division of work the task explicitly asks for to the node, within the limits and capabilities already sealed', async () => {
+    const service = await strategy()
+    const task = 'Change one label. Use exactly two children: one edits the label and one updates its test.'
+    const plans = await Promise.all([
+      service.resolve({ runId: 'run', nodeId: 'explicit-strict', phase: 'execution', role: 'implementer', task, requestedMode: 'enabled', objective: 'economy' }),
+      service.resolve({ runId: 'run', nodeId: 'explicit-auto', phase: 'execution', role: 'implementer', task: `${task} Explore the candidate designs recursively.`, requestedMode: 'auto' }),
+    ])
+    expect(plans.map(plan => plan.fidelity).sort()).toEqual(['dsh-optimized', 'prime-strict'])
+    for (const plan of plans) {
+      expect(plan.enabled).toBe(true)
+      expect(plan.maxChildren).toBeGreaterThanOrEqual(2)
+      expect(plan.instruction).toContain('Unless the task explicitly asks for a division of work, create children only for independent parts')
+      expect(plan.instruction).toContain('When the task explicitly asks for a division of work, follow it within the child, depth and turn limits above and the sealed capabilities')
+      expect(plan.instruction).toContain(`at most ${String(plan.maxChildren)} fresh-context children per level`)
+      // The advice to solve a small task directly is part of the sentence that begins with the exception, in both fidelities.
+      expect(plan.instruction.match(/solve a small or strictly sequential task directly/gu)).toHaveLength(1)
+      expect(plan.instruction).toContain('worth their cost, and solve a small or strictly sequential task directly with none.')
+    }
   })
 })

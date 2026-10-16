@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/orchestration/rlm-strategy-local/README.md
-README.md: 3adf9c4657674477ff32ebcc5928c0842e344834
-README.zh.md: 59708549ebc33b31a02d315ab7c4c7fd8ee53832
+README.md: 40ae0056235ee025c05d5ed8252636440558b716
+README.zh.md: aba01fba49cee629cddf5a12ea8abb402d30dedc
