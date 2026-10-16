@@ -1,0 +1,233 @@
+{
+  "scenario": "refuse-later",
+  "scoped": true,
+  "run": "failed",
+  "nodes": [
+    {
+      "state": "failed",
+      "attempt": 1,
+      "blockers": [
+        "OPERATOR_STOPPED"
+      ]
+    }
+  ],
+  "outbound": 6,
+  "rowsAdmitted": 6,
+  "refusals": [
+    "attempts-exhausted"
+  ],
+  "everyRequestJoinsOneRowAndEveryRowOneRequest": true,
+  "everyRequestWasReservedBeforeItArrived": true,
+  "ledgerStates": [
+    "refused",
+    "settled"
+  ],
+  "requests": [
+    {
+      "who": "delta",
+      "attempt": 1,
+      "round": 0,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    },
+    {
+      "who": "delta",
+      "attempt": 1,
+      "round": 1,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    },
+    {
+      "who": "gamma",
+      "attempt": 1,
+      "round": 0,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    },
+    {
+      "who": "gamma",
+      "attempt": 1,
+      "round": 1,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    },
+    {
+      "who": "root",
+      "attempt": 1,
+      "round": 0,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    },
+    {
+      "who": "root",
+      "attempt": 1,
+      "round": 1,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    }
+  ],
+  "metering": [
+    {
+      "who": "continuation",
+      "attempt": null,
+      "outcome": {
+        "kind": "returned",
+        "stopReason": "error"
+      },
+      "complete": true,
+      "admissionCalls": 1,
+      "rows": 1,
+      "sent": 0,
+      "refused": 1,
+      "unaccounted": 0,
+      "observed": {
+        "input": 0,
+        "output": 0
+      },
+      "missingRounds": [],
+      "listedAttemptsAreTheLedgersRows": true
+    },
+    {
+      "who": "delta",
+      "attempt": 1,
+      "outcome": {
+        "kind": "returned",
+        "stopReason": "completed"
+      },
+      "complete": true,
+      "admissionCalls": 2,
+      "rows": 2,
+      "sent": 2,
+      "refused": 0,
+      "unaccounted": 0,
+      "observed": {
+        "input": 6,
+        "output": 4
+      },
+      "missingRounds": [],
+      "listedAttemptsAreTheLedgersRows": true
+    },
+    {
+      "who": "gamma",
+      "attempt": 1,
+      "outcome": {
+        "kind": "returned",
+        "stopReason": "completed"
+      },
+      "complete": true,
+      "admissionCalls": 2,
+      "rows": 2,
+      "sent": 2,
+      "refused": 0,
+      "unaccounted": 0,
+      "observed": {
+        "input": 6,
+        "output": 4
+      },
+      "missingRounds": [],
+      "listedAttemptsAreTheLedgersRows": true
+    },
+    {
+      "who": "root",
+      "attempt": 1,
+      "outcome": {
+        "kind": "returned",
+        "stopReason": "completed"
+      },
+      "complete": true,
+      "admissionCalls": 2,
+      "rows": 2,
+      "sent": 2,
+      "refused": 0,
+      "unaccounted": 0,
+      "observed": {
+        "input": 6,
+        "output": 4
+      },
+      "missingRounds": [],
+      "listedAttemptsAreTheLedgersRows": true
+    }
+  ],
+  "rlmUsageEvents": [
+    {
+      "source": "child",
+      "who": "delta",
+      "attempt": 1
+    },
+    {
+      "source": "child",
+      "who": "gamma",
+      "attempt": 1
+    },
+    {
+      "source": "root",
+      "who": "root",
+      "attempt": 1
+    }
+  ],
+  "continuationEvents": [
+    {
+      "type": "rlm.message.continuation.failed",
+      "members": 2
+    }
+  ],
+  "continuationCommands": 1,
+  "messageStatuses": [
+    "delivered"
+  ],
+  "runtimeOutcomeEvents": {
+    "rlm.child.settled": 2,
+    "rlm.message.continuation.failed": 2
+  },
+  "retryScheduled": 0,
+  "namesDispatchNotAdmitted": false,
+  "namesOperatorBusy": false,
+  "namesAdmissionRefusedInEvents": false,
+  "refusalReasonsInMeteringRows": [
+    "attempts-exhausted"
+  ],
+  "namesDispatchUnknown": false,
+  "daemonsStopped": true
+}

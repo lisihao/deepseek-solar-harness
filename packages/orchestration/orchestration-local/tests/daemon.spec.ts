@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -25,6 +26,8 @@ import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
 import type { OrchestrationClusterPeerTransport } from '../src/cluster.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
+import type { EvaluationLedgerState } from '../src/evaluation-ledger.ts'
+import { refuseNonLoopbackFetch, startFakeDeepSeekHttp, type FakeAnswer, type FakeDeepSeekHttp, type FakeHandler } from './fake-deepseek-http.ts'
 import { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from '../src/store.ts'
 import type { RemotePhysicalOperatorServer } from '../src/remote-physical-operator.ts'
 
@@ -263,7 +266,7 @@ class FakeResidentClient {
 }
 
 class KeylessModelWorker implements ModelWorkerProvider {
-  readonly id = 'deepseek-keyless-fixture'
+  readonly id: string = 'deepseek-keyless-fixture'
   readonly requests: ModelWorkerExecuteRequest[] = []
   onExecute?: (request: ModelWorkerExecuteRequest) => Promise<void>
   /** Replaces the default completed result of a call, for example with a partial output and a non-success stop reason. */
@@ -342,8 +345,8 @@ class ExternalWebAdvisorWorker implements ModelWorkerProvider {
   }
 }
 
-async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 5_000
+async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean, limitMs = 5_000): Promise<T> {
+  const deadline = Date.now() + limitMs
   for (;;) {
     const value = await read()
     if (accept(value)) return value
@@ -2560,6 +2563,936 @@ describe('orchestration daemon', () => {
       expect(prompt).toContain(taskBlock(ROOT_TASK))
       expect(prompt).toContain('Names saved by the last successful cell, as of that cell: kept.')
       expect(prompt).toContain('- child "A": ')
+    })
+  })
+
+  describe('an evaluation scope on the real DeepSeek worker, against a loopback endpoint', () => {
+    const ROOT = 'EVAL-ROOT: combine the results.'
+    const KID = 'EVAL-KID: ask your own child.'
+    const GRAND = 'EVAL-GRAND: report to your parent.'
+    const SCOPE = {
+      version: 1, scopeId: 'wp1', model: 'deepseek-v4-flash', inputBound: 'request-bytes-audited',
+      limits: {
+        inputTokens: 5_000_000, outputTokens: 5_000_000, httpAttempts: 100, concurrentRequests: 8, maxOutputTokensPerRequest: 4_096,
+      },
+      generation: { thinking: 'enabled', reasoningEffort: 'high' },
+    }
+    type Scope = Omit<typeof SCOPE, 'limits'> & { limits: typeof SCOPE.limits }
+    const taskOf = (message: { content?: unknown }): string => typeof message.content === 'string' ? message.content : ''
+
+    /** A tree of agents: root -> kid -> grand, each reporting upward, so the root is continued by its child's message. */
+    const treeHandler = (usage?: { promptTokens: number; completionTokens: number; cacheHit?: number }): FakeHandler => (request) => {
+      const first = taskOf(request.parsed.messages.find(message => message.role === 'user') ?? {})
+      const afterTool = request.parsed.messages.at(-1)?.role === 'tool'
+      const answer = (value: FakeAnswer): FakeAnswer => value
+      // A real endpoint stops at max_tokens, so the fake never reports more output than the request allowed.
+      const reported = { promptTokens: 40, completionTokens: 12, ...usage }
+      const completionTokens = Math.min(reported.completionTokens, request.parsed.max_tokens ?? reported.completionTokens)
+      const withUsage = { usage: { ...reported, completionTokens } }
+      const repl = (code: string): FakeAnswer => answer({ kind: 'tool', code, ...withUsage })
+      const text = (value: string): FakeAnswer => answer({ kind: 'text', text: value, ...withUsage })
+      if (afterTool) return text('done')
+      if (first.includes('Agent message from')) {
+        // A continuation: the kid, woken by its child, reports to the root; the root only answers.
+        return first.includes(KID) ? repl('await agentMessage.send("kid report", { receiverRole: "parent", mode: "auto" }); "sent"') : text('root continuation')
+      }
+      if (first.includes(GRAND)) return repl('await agentMessage.send("grand report", { receiverRole: "parent", mode: "auto" }); "sent"')
+      if (first.includes(KID)) return repl(`await rlm(${JSON.stringify(GRAND)}, { name: "grand" }); "spawned"`)
+      return repl(`await rlm(${JSON.stringify(KID)}, { name: "kid" }); "spawned"`)
+    }
+
+    interface Fixture {
+      readonly home: string
+      readonly root: string
+      readonly fake: FakeDeepSeekHttp
+      readonly guard: ReturnType<typeof refuseNonLoopbackFetch>
+      readonly resident: FakeResidentClient
+      /** The ledger as it was on disk at the moment each request reached the endpoint, in arrival order. */
+      readonly atReceipt: { sha256: string; attemptId?: string; state?: string; reservedInput?: number; reservedOutput?: number }[]
+    }
+
+    async function fixture(handler: FakeHandler, scope: unknown = SCOPE): Promise<Fixture> {
+      const home = await mkdtemp(join(tmpdir(), 'dsh-evaluation-scope-'))
+      const root = join(home, 'orchestrations')
+      await mkdir(root, { recursive: true })
+      if (scope !== null) await writeFile(join(root, 'evaluation-scope.json'), typeof scope === 'string' ? scope : JSON.stringify(scope))
+      const guard = refuseNonLoopbackFetch()
+      const atReceipt: Fixture['atReceipt'] = []
+      const fake = await startFakeDeepSeekHttp((request, index) => {
+        // A request that has reached the endpoint must already be reserved in the ledger file: reservation comes before sending.
+        const ledgerPath = join(root, 'evaluation-ledger.json')
+        const attempt = existsSync(ledgerPath)
+          ? (JSON.parse(readFileSync(ledgerPath, 'utf8')) as EvaluationLedgerState).attempts.find(value => value.bodySha256 === request.sha256)
+          : undefined
+        atReceipt.push({
+          sha256: request.sha256,
+          ...attempt === undefined
+            ? {}
+            : { attemptId: attempt.id, state: attempt.state, reservedInput: attempt.reservedInput, reservedOutput: attempt.reservedOutput },
+        })
+        return handler(request, index)
+      })
+      vi.stubEnv('DEEPSEEK_BASE_URL', fake.baseURL)
+      vi.stubEnv('DEEPSEEK_API_KEY', 'fixture-not-a-key')
+      const resident = new FakeResidentClient()
+      resident.available = false
+      cleanup.push(async () => {
+        fake.release()
+        await fake.close()
+        guard.restore()
+        vi.unstubAllEnvs()
+        await rm(home, { recursive: true, force: true })
+      })
+      return { home, root, fake, guard, resident, atReceipt }
+    }
+
+    interface RunOptions {
+      readonly retry?: { readonly maxAttempts: number; readonly retryableCodes: readonly string[] }
+      /** Runs after the daemon started and before the run is compiled, for example to make the store refuse an event. */
+      readonly prepare?: (daemon: OrchestrationDaemon) => void
+      /** Run the node under Autonomous Mode, with an end condition that nothing in this suite satisfies. */
+      readonly autonomous?: true
+      /** Cancel the run through the client as soon as this holds for the requests the endpoint has received. */
+      readonly cancelWhen?: () => boolean
+      /** The node's attempt deadline, which the daemon's own timer enforces. */
+      readonly timeoutMs?: number
+    }
+
+    async function run(
+      f: Fixture, task: string, deep = true, rlm = true, providers?: readonly ModelWorkerProvider[], options: RunOptions = {},
+    ) {
+      const daemon = new OrchestrationDaemon({
+        root: f.root, dshHome: f.home, residentClient: f.resident as unknown as ResidentDaemonClient, schedulerIntervalMs: 10,
+        ...providers === undefined ? {} : { modelWorkerProviders: providers },
+      })
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close() })
+      options.prepare?.(daemon)
+      const client = new OrchestrationDaemonClient({ root: f.root, dshHome: f.home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(f.home, 'workspace')
+      await mkdir(workspace, { recursive: true })
+      const base = graph(workspace)
+      const { operator: _operator, ...node } = base.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'Evaluation scope run.' },
+        admission: { policy: 'codex', route: 'taskgraph', sourceSessionId: 'evaluation-scope', rlm: 'enabled', continualHarness: 'off', optimization: 'balanced' },
+        graph: {
+          ...base,
+          nodes: [{
+            ...node, role: rlm ? 'recursive synthesis' : node.role, task, writeScopes: [],
+            ...options.retry === undefined
+              ? {}
+              : { retryPolicy: { ...options.retry, backoffMs: 0, retryableCodes: [...options.retry.retryableCodes] } },
+            ...rlm ? { rlm: { mode: 'enabled' as const, maxDepth: deep ? 2 : 1, maxChildren: 2, maxTurns: 4 } } : {},
+            ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
+            ...options.autonomous === undefined
+              ? {}
+              : {
+                requiredArtifacts: ['EVAL-ART'],
+                autonomous: {
+                  mode: 'enabled' as const, maxContinuations: 2,
+                  endCondition: { version: 1 as const, operator: 'all' as const, checks: [{ id: 'art', kind: 'artifact-present' as const, ref: 'EVAL-ART' }] },
+                },
+              },
+          }],
+        },
+      })
+      const started = await startCompilation(client, compilation.compilationId)
+      const cancelWhen = options.cancelWhen
+      if (cancelWhen !== undefined) {
+        await eventually(async () => cancelWhen(), value => value)
+        const current = await client.inspect(String(started.runId))
+        await client.control({
+          commandId: `cancel:${String(started.runId)}`, runId: started.runId, expectedRevision: current.revision, action: 'cancel',
+          reason: 'cancel the run while a request of it is in flight',
+        })
+      }
+      const settled = await eventually(
+        () => client.inspect(String(started.runId)), value => ['completed', 'failed', 'indeterminate', 'cancelled'].includes(value.state),
+        options.timeoutMs === undefined ? 5_000 : options.timeoutMs + 10_000,
+      )
+      return { daemon, client, settled, runId: started.runId }
+    }
+
+    const optionsOf = (f: Fixture) => ({
+      root: f.root, dshHome: f.home, residentClient: f.resident as unknown as ResidentDaemonClient, schedulerIntervalMs: 10,
+    })
+    const ledgerOf = (f: Fixture): EvaluationLedgerState => JSON.parse(readFileSync(join(f.root, 'evaluation-ledger.json'), 'utf8')) as EvaluationLedgerState
+    const admitted = (state: EvaluationLedgerState) => state.attempts.filter(attempt => attempt.state !== 'refused')
+
+    /** The sessions of a run with their depth and parent, read from the runtime after the run. */
+    async function sessionTree(
+      daemon: OrchestrationDaemon,
+    ): Promise<{ sessionId: string; parentSessionId: string | null; depth: number }[]> {
+      interface Listing { list(): Promise<readonly { sessionId: string; parentSessionId?: string; depth: number }[]> }
+      const runtime = (daemon as unknown as { ctx: { rlmRuntime: Listing } }).ctx.rlmRuntime
+      return (await runtime.list()).map(session => ({
+        sessionId: session.sessionId, parentSessionId: session.parentSessionId ?? null, depth: session.depth,
+      }))
+    }
+
+    /** The session an attempt's label names (`...@<session>`) and that session's depth in the run's tree. */
+    function attemptSession(
+      label: string | undefined,
+      tree: readonly { sessionId: string; depth: number }[],
+    ): { session?: string; depth?: number } {
+      const session = label?.split('@').at(1)
+      const found = session === undefined ? undefined : tree.find(entry => entry.sessionId === session)
+      return found === undefined ? {} : { session: found.sessionId, depth: found.depth }
+    }
+
+    /**
+     * When `DSH_EVALUATION_EVIDENCE_DIR` is set, write what an auditor can reconcile by hand: each request the endpoint received
+     * with the ledger attempt it joins to and that attempt's state when the request arrived, the final ledger, and the outbound
+     * counts. Without the variable nothing is written.
+     */
+    async function exportEvidence(name: string, f: Fixture, daemon?: OrchestrationDaemon): Promise<void> {
+      const directory = process.env.DSH_EVALUATION_EVIDENCE_DIR
+      if (directory === undefined) return
+      const state = ledgerOf(f)
+      const target = join(directory, name)
+      await mkdir(target, { recursive: true })
+      const origin = new URL(f.fake.baseURL).origin
+      const tree = daemon === undefined ? [] : await sessionTree(daemon)
+      const requests = f.fake.received.map((request, index) => ({
+        index,
+        sha256: request.sha256,
+        bytes: Buffer.byteLength(request.body, 'utf8'),
+        model: request.parsed.model,
+        max_tokens: request.parsed.max_tokens,
+        thinking: request.parsed.thinking,
+        reasoning_effort: request.parsed.reasoning_effort,
+        ledgerAtReceipt: f.atReceipt[index],
+        ledgerAttemptId: state.attempts.find(attempt => attempt.bodySha256 === request.sha256)?.id,
+        ...attemptSession(state.attempts.find(attempt => attempt.bodySha256 === request.sha256)?.label, tree),
+      }))
+      const settled = state.attempts.filter(attempt => attempt.state === 'settled')
+      await writeFile(join(target, 'sessions.json'), `${JSON.stringify(tree, null, 2)}\n`)
+      await writeFile(join(target, 'received-requests.json'), `${JSON.stringify(requests, null, 2)}\n`)
+      await writeFile(join(target, 'ledger-final.json'), `${JSON.stringify(state, null, 2)}\n`)
+      await writeFile(join(target, 'outbound.json'), `${JSON.stringify({
+        endpointOrigin: origin,
+        requestsReceivedByEndpoint: f.fake.received.length,
+        fetchOriginsSeenInProcess: [...new Set(f.guard.origins)],
+        nonLoopbackFetchesRefused: f.guard.refused,
+        admittedAttempts: admitted(state).length,
+        refusedAttempts: state.attempts.length - admitted(state).length,
+        refusals: state.attempts
+          .filter(attempt => attempt.refusal !== undefined)
+          .map(attempt => ({ id: attempt.id, label: attempt.label, reason: attempt.refusal })),
+        settledAttempts: settled.length,
+        reservedInputAtEnd: state.attempts.reduce((sum, attempt) => sum + (attempt.state === 'refused' ? 0 : attempt.usage?.input ?? attempt.reservedInput), 0),
+        reservedOutputAtEnd: state.attempts.reduce((sum, attempt) => sum + (attempt.state === 'refused' ? 0 : attempt.usage?.output ?? attempt.reservedOutput), 0),
+        // The scope file the daemon actually read for this test, not the default of the suite.
+        scope: JSON.parse(readFileSync(join(f.root, 'evaluation-scope.json'), 'utf8')) as unknown,
+        note: 'Scoped to this test process: the only endpoint given to the daemon is the loopback server, and any fetch to another host throws.',
+      }, null, 2)}\n`)
+    }
+
+    it('meters every physical request of a root, child, grandchild, and continuation, and joins each received body to one attempt', async () => {
+      const f = await fixture(treeHandler())
+      const { settled, daemon } = await run(f, ROOT)
+      expect(settled.state).toBe('completed')
+      const state = ledgerOf(f)
+      // What left the process equals what the ledger admitted, one to one by the sha256 of the exact body.
+      const received = f.fake.received
+      expect(received.length).toBeGreaterThanOrEqual(9)
+      expect(admitted(state)).toHaveLength(received.length)
+      expect(admitted(state).map(attempt => attempt.bodySha256).sort()).toEqual(received.map(request => request.sha256).sort())
+      expect(new Set(received.map(request => request.sha256)).size).toBe(received.length)
+      for (const attempt of admitted(state)) {
+        const request = received.find(value => value.sha256 === attempt.bodySha256)!
+        expect(attempt.bodyBytes).toBe(Buffer.byteLength(request.body, 'utf8'))
+        expect(request.parsed.max_tokens).toBe(attempt.reservedOutput)
+        expect(request.parsed.thinking).toEqual({ type: 'enabled' })
+        expect(request.parsed.reasoning_effort).toBe('high')
+        expect(request.parsed.model).toBe('deepseek-v4-flash')
+        expect(attempt.state).toBe('settled')
+      }
+      // The whole tree shares the one ledger. Each attempt names the session that sent it, and the runtime says how deep that
+      // session is: the root is depth 0, its child 1, its grandchild 2, and a continuation runs in the session it wakes.
+      const tree = await sessionTree(daemon)
+      expect(Math.max(...tree.map(entry => entry.depth))).toBe(2)
+      const depths = admitted(state).map(attempt => attemptSession(attempt.label, tree).depth)
+      expect(depths.every(depth => depth !== undefined)).toBe(true)
+      const perDepth = (depth: number): number => depths.filter(value => value === depth).length
+      expect(perDepth(0)).toBeGreaterThanOrEqual(3)
+      expect(perDepth(1)).toBeGreaterThanOrEqual(3)
+      expect(perDepth(2)).toBeGreaterThanOrEqual(2)
+      const continuations = admitted(state).filter(attempt => attempt.label.includes(':deliver#'))
+      expect(new Set(continuations.map(attempt => attemptSession(attempt.label, tree).depth))).toEqual(new Set([0, 1]))
+      expect(f.guard.refused).toBe(0)
+      expect(new Set(f.guard.origins)).toEqual(new Set([new URL(f.fake.baseURL).origin]))
+      // Reservation came before sending: when each request reached the endpoint its attempt was already reserved on disk.
+      expect(f.atReceipt).toHaveLength(received.length)
+      expect(f.atReceipt.every(entry => entry.state === 'reserved' && entry.attemptId !== undefined)).toBe(true)
+      await exportEvidence('tree-run', f, daemon)
+    })
+
+    it('puts the scope ceiling in every request body and lowers it to what is left, never to a provider default', async () => {
+      const f = await fixture(treeHandler({ promptTokens: 40, completionTokens: 12 }), {
+        ...SCOPE, limits: { ...SCOPE.limits, outputTokens: 120, maxOutputTokensPerRequest: 100 },
+      } satisfies Scope)
+      await run(f, ROOT)
+      const sent = f.fake.received.map(request => request.parsed.max_tokens)
+      // Requests overlap, so what is left at admission also excludes the output reserved by requests still in flight: some
+      // requests are lowered below the ceiling of 100. None is raised above it, none is missing, none falls back to 256000.
+      expect(sent.length).toBeGreaterThanOrEqual(3)
+      expect(sent.every(value => value !== undefined && value >= 1 && value <= 100)).toBe(true)
+      expect(Math.min(...sent.map(value => value ?? 0))).toBeLessThan(100)
+      expect(admitted(ledgerOf(f)).map(attempt => attempt.reservedOutput)).toEqual(sent)
+      // Large reservations use the scope up quickly: later requests are refused before they are sent.
+      expect(ledgerOf(f).attempts.some(attempt => attempt.refusal === 'output-exhausted')).toBe(true)
+      // Whatever was lowered or refused, the output the scope counts never passes its limit of 120 tokens.
+      const totals = admitted(ledgerOf(f)).reduce((sum, attempt) => sum + (attempt.usage?.output ?? attempt.reservedOutput), 0)
+      expect(totals).toBeLessThanOrEqual(120)
+    })
+
+    it('sends nothing once the attempts are used up, and does not give a retry a fresh budget', async () => {
+      const f = await fixture(treeHandler(), { ...SCOPE, limits: { ...SCOPE.limits, httpAttempts: 3 } } satisfies Scope)
+      await run(f, ROOT)
+      expect(f.fake.received).toHaveLength(3)
+      const state = ledgerOf(f)
+      expect(admitted(state)).toHaveLength(3)
+      expect(state.attempts.filter(attempt => attempt.refusal === 'attempts-exhausted').length).toBeGreaterThanOrEqual(1)
+      await exportEvidence('attempts-exhausted', f)
+    })
+
+    it('sends nothing at all when the input limit cannot hold the first request', async () => {
+      const f = await fixture(treeHandler(), { ...SCOPE, limits: { ...SCOPE.limits, inputTokens: 10 } } satisfies Scope)
+      const { settled } = await run(f, ROOT)
+      expect(settled.state).toBe('failed')
+      expect(f.fake.received).toHaveLength(0)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.refusal)).toContain('input-exhausted')
+    })
+
+    it('counts cache-read tokens as input', async () => {
+      const f = await fixture(treeHandler({ promptTokens: 300, completionTokens: 10, cacheHit: 250 }))
+      await run(f, ROOT)
+      const settled = admitted(ledgerOf(f)).filter(attempt => attempt.state === 'settled')
+      expect(settled.length).toBeGreaterThan(0)
+      expect(settled.every(attempt => attempt.usage?.input === 300 && attempt.usage.output === 10)).toBe(true)
+    })
+
+    it('stops admitting after usage that passes the byte bound, and reports the violation instead of cutting the usage', async () => {
+      const f = await fixture(treeHandler({ promptTokens: 9_000_000, completionTokens: 1 }))
+      const { settled } = await run(f, ROOT)
+      expect(settled.state).toBe('failed')
+      expect(f.fake.received).toHaveLength(1)
+      const state = ledgerOf(f)
+      expect(state.boundViolation).toMatchObject({ what: 'input' })
+      expect(state.attempts[0]?.usage?.input).toBe(9_000_000)
+      expect(state.attempts.some(attempt => attempt.refusal === 'bound-violated')).toBe(true)
+    })
+
+    it('keeps a request that never finished as unknown across a restart, and does not send it again', async () => {
+      const f = await fixture(() => ({ kind: 'hold' }))
+      const first = await (async () => {
+        const daemon = new OrchestrationDaemon({
+          root: f.root, dshHome: f.home, residentClient: f.resident as unknown as ResidentDaemonClient, schedulerIntervalMs: 10,
+        })
+        await daemon.start()
+        const client = new OrchestrationDaemonClient({ root: f.root, dshHome: f.home, autoStart: false, connectTimeoutMs: 2_000 })
+        const workspace = join(f.home, 'workspace')
+        await mkdir(workspace, { recursive: true })
+        const base = graph(workspace)
+        const { operator: _operator, ...node } = base.nodes[0]!
+        const compilation = await client.compile({
+          intent: { request: 'Hold.' },
+          admission: { policy: 'codex', route: 'taskgraph', sourceSessionId: 'evaluation-hold', rlm: 'enabled', continualHarness: 'off', optimization: 'balanced' },
+          graph: { ...base, nodes: [{ ...node, role: 'recursive synthesis', task: ROOT, writeScopes: [], rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } }] },
+        })
+        await startCompilation(client, compilation.compilationId)
+        await eventually(async () => f.fake.received.length, count => count === 1)
+        return daemon
+      })()
+      const before = ledgerOf(f)
+      expect(before.attempts.map(attempt => attempt.state)).toEqual(['reserved'])
+      await first.close()
+      const reopened = new OrchestrationDaemon({
+        root: f.root, dshHome: f.home, residentClient: f.resident as unknown as ResidentDaemonClient, schedulerIntervalMs: 10,
+      })
+      await expect(reopened.start()).resolves.toBeUndefined()
+      cleanup.push(async () => { await reopened.close() })
+      const after = ledgerOf(f)
+      expect(after.attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+      expect(after.attempts[0]?.reservedInput).toBe(before.attempts[0]?.reservedInput)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(f.fake.received).toHaveLength(1)
+      await exportEvidence('unknown-after-restart', f)
+    })
+
+    it('refuses to start on an invalid scope file, leaving no lock behind, and starts once it is fixed', async () => {
+      const f = await fixture(treeHandler(), { ...SCOPE, limits: { ...SCOPE.limits, httpAttempts: 0 } })
+      const options = optionsOf(f)
+      await expect(new OrchestrationDaemon(options).start()).rejects.toThrow(/evaluation scope is invalid/u)
+      await writeFile(join(f.root, 'evaluation-scope.json'), JSON.stringify(SCOPE))
+      const daemon = new OrchestrationDaemon(options)
+      await daemon.start()
+      await daemon.close()
+    })
+
+    it('refuses a ledger written under another scope file', async () => {
+      const f = await fixture(treeHandler())
+      const { daemon } = await run(f, ROOT)
+      await daemon.close()
+      await writeFile(join(f.root, 'evaluation-scope.json'), JSON.stringify({ ...SCOPE, limits: { ...SCOPE.limits, httpAttempts: 101 } }))
+      const options = optionsOf(f)
+      await expect(new OrchestrationDaemon(options).start()).rejects.toThrow(/another scope file/u)
+    })
+
+    it('refuses Resident dispatch, so no model request escapes the ledger', async () => {
+      const f = await fixture(treeHandler())
+      f.resident.available = true
+      const { settled } = await run(f, ROOT, false)
+      expect(settled.state).toBe('failed')
+      expect(f.resident.requests).toHaveLength(0)
+      expect(f.fake.received).toHaveLength(0)
+    })
+
+    it('keeps a request that ended without usage blocking the next send, across a restart', async () => {
+      const f = await fixture(() => ({ kind: 'hold' }), { ...SCOPE, limits: { ...SCOPE.limits, concurrentRequests: 1 } })
+      const options = optionsOf(f)
+      const first = new OrchestrationDaemon(options)
+      await first.start()
+      const client = new OrchestrationDaemonClient({ root: f.root, dshHome: f.home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(f.home, 'workspace')
+      await mkdir(workspace, { recursive: true })
+      const base = graph(workspace)
+      const { operator: _operator, ...node } = base.nodes[0]!
+      const submit = async (name: string) => {
+        const compilation = await client.compile({
+          intent: { request: name },
+          admission: { policy: 'codex', route: 'taskgraph', sourceSessionId: name, rlm: 'enabled', continualHarness: 'off', optimization: 'balanced' },
+          graph: { ...base, nodes: [{ ...node, role: 'recursive synthesis', task: ROOT, writeScopes: [], rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } }] },
+        })
+        return startCompilation(client, compilation.compilationId)
+      }
+      await submit('first')
+      await eventually(async () => f.fake.received.length, count => count === 1)
+      // The held response ends without usage when the process goes away: that request is unknown, not finished.
+      await first.close()
+      const second = new OrchestrationDaemon(options)
+      await expect(second.start()).resolves.toBeUndefined()
+      cleanup.push(async () => { await second.close() })
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+      await submit('second')
+      // The second run's request reaches admission either way; whether it is refused or reserved is what the ledger shows.
+      await eventually(async () => ledgerOf(f).attempts.length, count => count >= 2)
+      // The unknown request still holds the only slot, so the second run's request is refused and nothing more is sent.
+      expect(ledgerOf(f).attempts[1]?.refusal).toBe('concurrency-exhausted')
+      expect(f.fake.received).toHaveLength(1)
+    })
+
+    it('turns a request that was in flight when the process died into unknown on the next start, and does not send it again', async () => {
+      const f = await fixture(treeHandler(), { ...SCOPE, limits: { ...SCOPE.limits, concurrentRequests: 1 } })
+      const text = JSON.stringify({ ...SCOPE, limits: { ...SCOPE.limits, concurrentRequests: 1 } })
+      await writeFile(join(f.root, 'evaluation-scope.json'), text)
+      // The ledger a crashed daemon leaves behind: one request reserved, never settled, and no lock owner alive.
+      const sha = createHash('sha256').update(text).digest('hex')
+      const crashed = {
+        version: 1, scopeId: 'wp1', scopeSha256: sha, nextSeq: 2,
+        attempts: [{
+          id: 'wp1-000001', seq: 1, label: 'crashed#round0', state: 'reserved', model: 'deepseek-v4-flash', bodyBytes: 900,
+          bodySha256: 'c'.repeat(64), reservedInput: 900, reservedOutput: 100, admittedAt: '2026-10-15T00:00:00.000Z',
+        }],
+      }
+      await writeFile(join(f.root, 'evaluation-ledger.json'), JSON.stringify(crashed))
+      const { settled } = await run(f, ROOT)
+      expect(ledgerOf(f).attempts[0]).toMatchObject({ id: 'wp1-000001', state: 'unknown', reservedInput: 900 })
+      // It still holds the only slot, so the run could not send anything.
+      expect(f.fake.received).toHaveLength(0)
+      expect(settled.state).toBe('failed')
+    })
+
+    it('does not let a second daemon on the same root touch the first one’s ledger, even before the first has written its pid file', async () => {
+      const f = await fixture(() => ({ kind: 'hold' }))
+      const options = optionsOf(f)
+      const first = new OrchestrationDaemon(options)
+      await first.start()
+      cleanup.push(async () => { await first.close() })
+      const client = new OrchestrationDaemonClient({ root: f.root, dshHome: f.home, autoStart: false, connectTimeoutMs: 2_000 })
+      const workspace = join(f.home, 'workspace')
+      await mkdir(workspace, { recursive: true })
+      const base = graph(workspace)
+      const { operator: _operator, ...node } = base.nodes[0]!
+      const compilation = await client.compile({
+        intent: { request: 'owner' },
+        admission: { policy: 'codex', route: 'taskgraph', sourceSessionId: 'owner', rlm: 'enabled', continualHarness: 'off', optimization: 'balanced' },
+        graph: { ...base, nodes: [{ ...node, role: 'recursive synthesis', task: ROOT, writeScopes: [], rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } }] },
+      })
+      await startCompilation(client, compilation.compilationId)
+      await eventually(async () => f.fake.received.length, count => count === 1)
+      const before = readFileSync(join(f.root, 'evaluation-ledger.json'), 'utf8')
+      expect((JSON.parse(before) as EvaluationLedgerState).attempts[0]?.state).toBe('reserved')
+      // The moment in which the daemon lock exists but names no live owner: the daemon lock alone would let a second start in.
+      await rm(join(f.root, 'daemon.pid'), { force: true })
+      await expect(new OrchestrationDaemon(options).start()).rejects.toThrow(/ledger lock .* is held/u)
+      expect(readFileSync(join(f.root, 'evaluation-ledger.json'), 'utf8')).toBe(before)
+    })
+
+    it('refuses to start on a ledger that cannot be trusted, keeps its text, and sends nothing', async () => {
+      const f = await fixture(treeHandler())
+      await writeFile(join(f.root, 'evaluation-ledger.json'), '{"version":1,"scopeId":"wp1","scopeSha256":"zz","nextSeq":1,"attempts":[]}')
+      const options = optionsOf(f)
+      await expect(new OrchestrationDaemon(options).start()).rejects.toThrow(/not usable/u)
+      expect(readFileSync(join(f.root, 'evaluation-ledger.json'), 'utf8')).toContain('"scopeSha256":"zz"')
+      expect(f.fake.received).toHaveLength(0)
+    })
+
+    /**
+     * A worker with the API worker's id that sends no HTTP request. It reserves one request through the scope's admission, as the
+     * real worker does, and then does what the test says. Every other part is the daemon's: the ledger, the consumers of the result,
+     * and the node's retry policy.
+     */
+    class ProbeWorker extends KeylessModelWorker {
+      override readonly id: string = 'deepseek-api'
+      after: (request: ModelWorkerExecuteRequest, ticket: { settle(usage: object): void; abandon(): void }) => Promise<ModelWorkerResult> =
+        () => Promise.reject(new Error('the probe worker was not told what to do'))
+
+      override async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
+        this.requests.push(request)
+        const evaluation = request.evaluation
+        if (evaluation === undefined) throw new Error('the probe worker runs only under a scope')
+        const ticket = evaluation.admission(`${request.commandId}#round0@${request.modelToolBridge?.sessionId ?? 'probe-session'}`)({
+          model: evaluation.model, bodyBytes: 100, bodySha256: createHash('sha256').update(request.commandId).digest('hex'),
+          maxOutputTokens: 10, thinking: 'enabled', reasoningEffort: evaluation.reasoningEffort, hasNonTextContent: false,
+        })
+        return await this.after(request, ticket)
+      }
+    }
+
+    const REPLAYABLE = {
+      maxAttempts: 2, retryableCodes: ['MODEL_WORKER_INVALID', 'ORCHESTRATION_UNAVAILABLE', 'NODE_INDETERMINATE', 'OPERATOR_STOPPED'],
+    }
+    const rejected = (): Promise<ModelWorkerResult> => Promise.reject(Object.assign(new Error('reply rejected'), { code: 'MODEL_WORKER_INVALID' }))
+
+    /** Make the store refuse every event of one type, as a short write failure would; every other event is stored. */
+    function refuseEvents(daemon: OrchestrationDaemon, type: string): void {
+      const store = (daemon as unknown as { store: { appendEvents(events: readonly { type: string }[]): void } }).store
+      const original = store.appendEvents.bind(store)
+      store.appendEvents = (events) => {
+        if (events.some(entry => entry.type === type)) throw new Error(`store refused ${type}`)
+        original(events)
+      }
+    }
+
+    /** What the daemon's attempt handling was given for each failed attempt. */
+    function captureFailures(daemon: OrchestrationDaemon): unknown[] {
+      const captured: unknown[] = []
+      const target = daemon as unknown as { failAttempt(active: unknown, error: unknown): void }
+      const original = target.failAttempt.bind(daemon)
+      target.failAttempt = (active, error) => {
+        captured.push(error)
+        original(active, error)
+      }
+      return captured
+    }
+
+    const causesOf = (error: unknown): string[] => {
+      const cause = (error as { cause?: unknown }).cause
+      return cause instanceof AggregateError ? cause.errors.map(entry => (entry instanceof Error ? entry.message : String(entry))) : []
+    }
+
+    it.each([
+      ['a refused failure notification', 'rlm.execution.failed', rejected],
+      ['a refused metering event', 'evaluation.command.metering', (): Promise<ModelWorkerResult> => Promise.resolve({ output: [], stopReason: 'error' })],
+    ] as const)('keeps a command with a request of unknown outcome unknown, and reports the write error too, after %s', async (_name, refused, outcome) => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      worker.after = (_request, ticket) => {
+        ticket.abandon()
+        return outcome()
+      }
+      let failures: unknown[] = []
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE,
+        prepare: (daemon) => {
+          refuseEvents(daemon, refused)
+          failures = captureFailures(daemon)
+        },
+      })
+      // The node is not retried although its policy lists the code the failure would otherwise have, and there is room to retry.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(worker.requests).toHaveLength(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(failures).toHaveLength(1)
+      expect(failures[0]).toMatchObject({ name: 'UnknownPhysicalOutcomeError', code: 'COMMAND_INDETERMINATE' })
+      expect(causesOf(failures[0])).toContain(`store refused ${refused}`)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+    })
+
+    it('retries a node whose command failed in a known way, and keeps the second attempt apart', async () => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      let first = true
+      worker.after = (_request, ticket) => {
+        ticket.settle({ inputTokens: 5, outputTokens: 2 })
+        if (!first) return Promise.resolve({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' })
+        first = false
+        return rejected()
+      }
+      const { settled } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE })
+      expect(settled.state).toBe('completed')
+      expect(worker.requests).toHaveLength(2)
+      expect(new Set(worker.requests.map(request => request.commandId)).size).toBe(2)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['settled', 'settled'])
+    })
+
+    it('keeps the error of a command that threw after its caller cancelled it, although a request of it is unknown', async () => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      const thrown: unknown[] = []
+      let daemonOf: OrchestrationDaemon | undefined
+      worker.after = async (request, ticket) => {
+        // The caller cancels the run's active work; the worker notices, leaves its request unknown, and throws.
+        // The run's work is registered as active only after this worker was called, so the cancellation comes a little later.
+        const runId = /run-[0-9a-f-]{36}/u.exec(request.commandId)?.[0] ?? ''
+        setTimeout(() => {
+          void (daemonOf as unknown as { interruptActive(id: string): Promise<void> }).interruptActive(runId)
+        }, 150)
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the cancel')
+      }
+      await run(f, ROOT, false, true, [worker], {
+        prepare: (daemon) => {
+          daemonOf = daemon
+          const target = daemon as unknown as { executeModelWorker(request: unknown, accounting: unknown): Promise<unknown> }
+          const original = target.executeModelWorker.bind(daemon)
+          target.executeModelWorker = (request, accounting) => {
+            const result = original(request, accounting)
+            result.catch((error: unknown) => { thrown.push(error) })
+            return result
+          }
+        },
+      })
+      expect(thrown).toHaveLength(1)
+      expect(thrown[0]).toMatchObject({ message: 'worker threw after the cancel' })
+      expect((thrown[0] as Error).name).not.toBe('UnknownPhysicalOutcomeError')
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+    })
+
+    const SETTLED = { inputTokens: 5, outputTokens: 2 }
+    const completed = (text: string): ModelWorkerResult => ({ output: [{ type: 'text', text }], stopReason: 'completed', usage: SETTLED })
+    const isRoot = (request: ModelWorkerExecuteRequest): boolean => request.commandId.endsWith(':rlm:root')
+    const isChild = (request: ModelWorkerExecuteRequest): boolean => request.commandId.includes(':rlm:rlm-child-')
+
+    /**
+     * What the probe worker does for the three kinds of continuation a root can have. The root and the child settle their request
+     * and use the real REPL, so the runtime holds a real goal, a real Autonomous node or a real message from a child; the
+     * continuation is what `onContinuation` decides. The daemon, the ledger, the consumers of the continuation and the retry
+     * policy are the shipped ones.
+     */
+    function continuationWorker(
+      source: 'goal' | 'autonomous' | 'message',
+      onContinuation: Parameters<ProbeWorker['after']> extends [infer Request, infer Ticket]
+        ? (request: Request, ticket: Ticket) => Promise<ModelWorkerResult>
+        : never,
+    ): ProbeWorker {
+      const worker = new ProbeWorker()
+      worker.after = async (request, ticket) => {
+        if (isRoot(request)) {
+          ticket.settle(SETTLED)
+          if (source === 'goal') await callRlmTool(request, 'root-goal', 'await goal.create("EVAL-GOAL-OBJECTIVE", { continuationBudget: 1 }); "goal set"')
+          if (source === 'message') await callRlmTool(request, 'root-spawn', `await rlm(${JSON.stringify(KID)}, { name: "kid" }); "spawned"`)
+          return completed('root done')
+        }
+        if (isChild(request)) {
+          ticket.settle(SETTLED)
+          await callRlmTool(request, 'kid-report', 'await agentMessage.send("kid report", { receiverRole: "parent", mode: "auto" }); "sent"')
+          return completed('kid done')
+        }
+        return await onContinuation(request, ticket)
+      }
+      return worker
+    }
+
+    it.each([
+      ['a goal continuation', 'goal', false],
+      ['an Autonomous direct continuation', 'autonomous', true],
+      ['a message continuation under Autonomous Mode', 'message', true],
+    ] as const)('keeps a run cancelled when the worker throws after the cancel of %s, keeps its request unknown, and sends nothing more', async (_name, source, autonomous) => {
+      const f = await fixture(treeHandler())
+      let held = false
+      const worker = continuationWorker(source, async (request, ticket) => {
+        held = true
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the cancel')
+      })
+      const { settled } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE, ...autonomous ? { autonomous: true as const } : {}, cancelWhen: () => held,
+      })
+      // The cancelled run is not turned into an indeterminate one by the consumer that read the interrupted continuation.
+      expect(settled.state).toBe('cancelled')
+      // The request stays unknown: the quota it holds is not released, and the root is not sent again.
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+      const sent = worker.requests.length
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(worker.requests).toHaveLength(sent)
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+    })
+
+    it.each([
+      ['the state of the Autonomous node', 'saveAutonomousState'],
+      ['the Autonomous usage event', 'rlm.autonomous.usage'],
+    ] as const)('keeps an unknown message continuation under Autonomous Mode unknown when the store refuses %s', async (_name, refused) => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker('message', (_request, ticket) => {
+        ticket.abandon()
+        return Promise.resolve({ output: [], stopReason: 'error' })
+      })
+      let failures: unknown[] = []
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE,
+        autonomous: true,
+        prepare: (daemon) => {
+          if (refused === 'saveAutonomousState') {
+            // The first save creates the node's state before anything runs; the ones after it record a turn.
+            const store = (daemon as unknown as { store: { saveAutonomousState(...args: unknown[]): void } }).store
+            const original = store.saveAutonomousState.bind(store)
+            let saves = 0
+            store.saveAutonomousState = (...args) => {
+              saves += 1
+              if (saves > 1) throw new Error(`store refused ${refused}`)
+              original(...args)
+            }
+          } else {
+            refuseEvents(daemon, refused)
+          }
+          failures = captureFailures(daemon)
+        },
+      })
+      // The node is not retried although its policy lists the code a storage failure would have, and there is room to retry.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(failures).toHaveLength(1)
+      expect(failures[0]).toMatchObject({ name: 'UnknownPhysicalOutcomeError', code: 'COMMAND_INDETERMINATE' })
+      expect(causesOf(failures[0])).toContain(`store refused ${refused}`)
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    })
+
+    it('keeps the storage error, and retries by the policy, when the store refuses the Autonomous usage event of a root that finished normally', async () => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker('autonomous', () => Promise.reject(new Error('the root finished, so no continuation should be needed')))
+      let failures: unknown[] = []
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE,
+        autonomous: true,
+        prepare: (daemon) => {
+          refuseEvents(daemon, 'rlm.autonomous.usage')
+          failures = captureFailures(daemon)
+        },
+      })
+      // No request is in doubt, so the refused write is an ordinary storage error and the node is retried as before.
+      expect(failures.length).toBeGreaterThan(0)
+      for (const failure of failures) {
+        expect((failure as Error).name).not.toBe('UnknownPhysicalOutcomeError')
+        expect((failure as Error).message).toBe('store refused rlm.autonomous.usage')
+      }
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toHaveLength(1)
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).not.toContain('unknown')
+    })
+
+    /** The three outcomes of a held request that its attempt deadline interrupted, as the worker reports them. */
+    const afterDeadline = {
+      'returns an aborted result': () => Promise.resolve<ModelWorkerResult>({ output: [], stopReason: 'aborted' }),
+      'throws': () => Promise.reject(new Error('worker threw after the deadline')),
+    } as const
+
+    it.each(Object.entries(afterDeadline))('keeps a root unknown when its attempt deadline passes and the worker %s, and does not run the node again', async (_name, outcome) => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      worker.after = async (request, ticket) => {
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        return await outcome()
+      }
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE, timeoutMs: 1_200 })
+      // The deadline is not a cancellation by the caller: the request stays unknown, and the policy cannot replay the node.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+    }, 20_000)
+
+    it.each([
+      ['a goal continuation', 'goal', false],
+      ['an Autonomous direct continuation', 'autonomous', true],
+      ['a message continuation under Autonomous Mode', 'message', true],
+    ] as const)('keeps %s unknown when the attempt deadline passes while its request is open, and does not run the node again', async (_name, source, autonomous) => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker(source, async (request, ticket) => {
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the deadline')
+      })
+      // The deadline is the daemon's own attempt timer. It is long enough for the root and the child to finish first and short
+      // enough to end before the drain wait of the continuation, which starts later and has the same length.
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE, ...autonomous ? { autonomous: true as const } : {}, timeoutMs: 3_000,
+      })
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    }, 20_000)
+
+    it('retries a node whose attempt deadline passed after its request was settled, as a known failure', async () => {
+      const f = await fixture(treeHandler())
+      const worker = new ProbeWorker()
+      let first = true
+      worker.after = async (request, ticket) => {
+        ticket.settle(SETTLED)
+        if (!first) return completed('second attempt')
+        first = false
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        throw new Error('worker threw after the deadline')
+      }
+      const { settled } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE, timeoutMs: 1_200 })
+      expect(settled.state).toBe('completed')
+      expect(worker.requests.filter(isRoot)).toHaveLength(2)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['settled', 'settled'])
+    }, 20_000)
+
+    interface RuntimeInterrupt {
+      list(): Promise<readonly { sessionId: string; depth: number }[]>
+      interrupt(sessionId: string): Promise<void>
+    }
+
+    it.each([
+      ['its own open request', 'root'],
+      ['the open request of a goal continuation', 'goal'],
+    ] as const)('keeps a node unknown when an interrupt of the root session, which does not cancel the run, ends %s, and does not run it again', async (_name, where) => {
+      const f = await fixture(treeHandler())
+      let daemonOf: OrchestrationDaemon | undefined
+      const interruptRoot = (): void => {
+        const runtime = (daemonOf as unknown as { ctx: { rlmRuntime: RuntimeInterrupt } }).ctx.rlmRuntime
+        // The run's work is registered as active only after this request began, so the interrupt comes a little later.
+        setTimeout(() => {
+          void runtime.list().then(async (sessions) => {
+            await runtime.interrupt(sessions.find(entry => entry.depth === 0)?.sessionId ?? '')
+          })
+        }, 200)
+      }
+      const hold = async (request: ModelWorkerExecuteRequest, ticket: { abandon(): void }): Promise<never> => {
+        interruptRoot()
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the interrupt')
+      }
+      let worker: ProbeWorker
+      if (where === 'goal') {
+        worker = continuationWorker('goal', hold)
+      } else {
+        worker = new ProbeWorker()
+        worker.after = hold
+      }
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE, prepare: (daemon) => { daemonOf = daemon },
+      })
+      // The run keeps running, so only the request's own state keeps the node from being run again.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    }, 20_000)
+
+    it('does not run a node again when its message continuation, without Autonomous Mode, ends with a request of unknown outcome', async () => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker('message', (_request, ticket) => {
+        ticket.abandon()
+        return Promise.resolve({ output: [], stopReason: 'error' })
+      })
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE })
+      // The node ends as an unfinished result, as it did before: it is not completed, and it is not run again.
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(settled.nodes[0]?.blockers.map(blocker => blocker.code)).toEqual(['OPERATOR_STOPPED'])
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    }, 20_000)
+
+    it('keeps a node unknown when an interrupt of the root session ends the open request of the real worker, and does not run it again', async () => {
+      const f = await fixture(() => ({ kind: 'hold' }))
+      await run(f, ROOT, false, true, undefined, {
+        retry: REPLAYABLE,
+        prepare: (daemon) => {
+          const runtime = (daemon as unknown as { ctx: { rlmRuntime: RuntimeInterrupt } }).ctx.rlmRuntime
+          // The endpoint holds the root's request; once it has arrived, the runtime interrupts the root session.
+          void eventually(async () => f.fake.received.length, count => count >= 1).then(async () => {
+            const sessions = await runtime.list()
+            await runtime.interrupt(sessions.find(entry => entry.depth === 0)?.sessionId ?? '')
+          })
+        },
+      }).then(async ({ settled, client, runId }) => {
+        expect(settled.nodes[0]?.state).toBe('indeterminate')
+        expect(settled.nodes[0]?.attempt).toBe(1)
+        expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      })
+      expect(f.fake.received).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+    }, 20_000)
+
+    it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {
+      const f = await fixture(treeHandler(), { ...SCOPE, inputBound: 'proven-token-count' })
+      await run(f, ROOT)
+      expect(f.fake.received).toHaveLength(0)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.refusal)).toContain('input-bound-unproven')
+    })
+
+    it('refuses a model call from any other plugin of the daemon that carries no admission, without reaching the endpoint', async () => {
+      const f = await fixture(treeHandler())
+      const daemon = new OrchestrationDaemon(optionsOf(f))
+      await daemon.start()
+      cleanup.push(async () => { await daemon.close() })
+      type Reason = { kind: string; failure?: { code?: string } } | undefined
+      interface Llm { llm: { stream(options: object): AsyncIterable<{ type: string; reason?: Reason }> } }
+      const { llm } = (daemon as unknown as { ctx: Llm }).ctx
+      const message = { role: 'user', content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'other' } }
+      const reasons: Reason[] = []
+      for await (const chunk of llm.stream({ provider: 'deepseek-official', model: 'deepseek-v4-flash', messages: [message] })) {
+        if (chunk.type === 'finish') reasons.push(chunk.reason)
+      }
+      expect(reasons.map(reason => [reason?.kind, reason?.failure?.code])).toEqual([['error', 'ADMISSION_REFUSED']])
+      expect(f.fake.received).toHaveLength(0)
+    })
+
+    it('refuses a worker other than the DeepSeek API worker, and Resident dispatch of a node that is not recursive', async () => {
+      const f = await fixture(treeHandler())
+      const worker = new KeylessModelWorker()
+      const other = await run(f, ROOT, true, true, [worker])
+      expect(other.settled.state).toBe('failed')
+      expect(worker.requests).toHaveLength(0)
+      expect(f.fake.received).toHaveLength(0)
+    })
+
+    it('refuses a Resident dispatch of a node that is not recursive', async () => {
+      const f = await fixture(treeHandler())
+      f.resident.available = true
+      const { settled } = await run(f, ROOT, false, false)
+      expect(settled.state).toBe('failed')
+      expect(f.resident.requests).toHaveLength(0)
+      expect(f.fake.received).toHaveLength(0)
+    })
+
+    it('leaves a home with no scope file exactly as it was: no ledger, no ceiling, the adapter default', async () => {
+      const f = await fixture(treeHandler(), null)
+      const { settled } = await run(f, ROOT)
+      expect(settled.state).toBe('completed')
+      expect(existsSync(join(f.root, 'evaluation-ledger.json'))).toBe(false)
+      expect(f.fake.received.length).toBeGreaterThanOrEqual(9)
+      expect(new Set(f.fake.received.map(request => request.parsed.max_tokens)).size).toBe(1)
+      expect(f.fake.received[0]?.parsed.max_tokens).not.toBeUndefined()
+      expect(f.fake.received[0]?.parsed.max_tokens).toBeGreaterThan(4_096)
     })
   })
 

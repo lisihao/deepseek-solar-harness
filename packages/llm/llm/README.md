@@ -83,6 +83,10 @@ Every adapter that puts a credential in an HTTP header judges it the same way be
 
 Two adapters implement `LlmAdapter` on different internals: [`@deepseek-ai/dsh-llm-deepseek`](../llm-deepseek) uses direct fetch with `eventsource-parser` SSE framing for the `deepseek-official` route, while [`@deepseek-ai/dsh-llm-pi-ai`](../llm-pi-ai) dynamically resolves configured provider/model pairs through `@earendil-works/pi-ai`. Both follow the `StreamChunk` conventions in `types.ts`: usage precedes finish and tool arguments remain raw strings. Adapter implementations may throw or emit a failure finish internally; `LlmRuntime` exposes both as a terminal failure finish. See [the twin LLM adapters](../../../.agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.md) for the adapter rationale and [the terminal-failure decision](../../../.agents/notes/implemented/architecture/2026-07-29-terminal-llm-stream-failures.md) for the service boundary.
 
+## Request admission
+
+`GenerateOptions.admission` is an optional closure that meters every physical request of a call. An adapter that supports it declares `enforcesAdmission = true` and calls the closure once per HTTP request, after the request body is built and before anything is sent, with the facts of that request (`RequestAdmissionInput`: model, body bytes and sha256, the wire `max_tokens`, thinking mode and effort, whether any content is not text). The closure returns a ticket to settle with the provider's usage or to abandon, or throws a `LlmError` with code `ADMISSION_REFUSED_CODE`, in which case nothing was sent. A call that sets an admission on an adapter that does not enforce it fails before dispatch instead of being sent unmetered. A call without an admission is unchanged.
+
 ## Model Experience
 
 None, as the service adds no model-bound text, schema, or message; it only materializes and logs an adapter-configured reasoning effort.

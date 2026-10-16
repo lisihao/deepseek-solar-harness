@@ -1,0 +1,83 @@
+{
+  "scenario": "refuse-round",
+  "scoped": true,
+  "run": "failed",
+  "nodes": [
+    {
+      "state": "failed",
+      "attempt": 1,
+      "blockers": [
+        "OPERATOR_STOPPED"
+      ]
+    }
+  ],
+  "outbound": 1,
+  "rowsAdmitted": 1,
+  "refusals": [
+    "attempts-exhausted"
+  ],
+  "everyRequestJoinsOneRowAndEveryRowOneRequest": true,
+  "everyRequestWasReservedBeforeItArrived": true,
+  "ledgerStates": [
+    "refused",
+    "settled"
+  ],
+  "requests": [
+    {
+      "who": "root",
+      "attempt": 1,
+      "round": 0,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    }
+  ],
+  "metering": [
+    {
+      "who": "root",
+      "attempt": 1,
+      "outcome": {
+        "kind": "returned",
+        "stopReason": "error"
+      },
+      "complete": true,
+      "admissionCalls": 2,
+      "rows": 2,
+      "sent": 1,
+      "refused": 1,
+      "unaccounted": 0,
+      "observed": {
+        "input": 3,
+        "output": 2
+      },
+      "missingRounds": [],
+      "listedAttemptsAreTheLedgersRows": true
+    }
+  ],
+  "rlmUsageEvents": [
+    {
+      "source": "root",
+      "who": "root",
+      "attempt": 1
+    }
+  ],
+  "continuationEvents": [],
+  "continuationCommands": 0,
+  "messageStatuses": [],
+  "runtimeOutcomeEvents": {},
+  "retryScheduled": 0,
+  "namesDispatchNotAdmitted": false,
+  "namesOperatorBusy": false,
+  "namesAdmissionRefusedInEvents": false,
+  "refusalReasonsInMeteringRows": [
+    "attempts-exhausted"
+  ],
+  "namesDispatchUnknown": false,
+  "daemonsStopped": true
+}

@@ -1,0 +1,37 @@
+{
+  "scope": {
+    "httpAttempts": 6,
+    "maxOutputTokensPerRequest": 100,
+    "inputBound": "request-bytes-audited"
+  },
+  "outboundRequests": 6,
+  "admittedAttempts": 6,
+  "everyRequestJoinsOneAdmittedAttempt": true,
+  "everyBodyLengthMatches": true,
+  "attemptStates": [
+    "settled"
+  ],
+  "refusals": [
+    "attempts-exhausted"
+  ],
+  "wire": {
+    "models": [
+      "deepseek-v4-flash"
+    ],
+    "maxTokens": [
+      100
+    ],
+    "thinking": [
+      "enabled"
+    ],
+    "reasoningEffort": [
+      "high"
+    ]
+  },
+  "requestsByKind": {
+    "rootTurns": true,
+    "continuations": true,
+    "children": true
+  },
+  "daemonsStopped": true
+}

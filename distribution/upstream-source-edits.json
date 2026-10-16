@@ -432,7 +432,7 @@
     },
     "packages/llm/llm-deepseek/src/adapter.ts": {
       "kind": "migration-debt",
-      "note": "feat(physical-operator): select native Codex and Claude Code models from the model menu; feat: add Web coordination and live catalog refresh"
+      "note": "feat(physical-operator): select native Codex and Claude Code models from the model menu; feat: add Web coordination and live catalog refresh ; request admission seam: admission before fetch and settlement on the usage chunk"
     },
     "packages/llm/llm-deepseek/src/index.ts": {
       "kind": "migration-debt",
@@ -452,11 +452,11 @@
     },
     "packages/llm/llm/src/error.ts": {
       "kind": "seam",
-      "note": "Expose an explicit insufficient-balance failure code so the kennel dispatcher can distinguish balance exhaustion from quota, authentication and transport failures before selecting Codex."
+      "note": "Expose an explicit insufficient-balance failure code so the kennel dispatcher can distinguish balance exhaustion from quota, authentication and transport failures before selecting Codex. ; request admission seam: ADMISSION_REFUSED_CODE"
     },
     "packages/llm/llm/src/index.ts": {
       "kind": "migration-debt",
-      "note": "feat: add Web coordination and live catalog refresh"
+      "note": "feat: add Web coordination and live catalog refresh ; request admission seam: LlmAdapter.enforcesAdmission and the fail-closed check in adapterStream"
     },
     "packages/llm/llm/src/message.ts": {
       "kind": "seam",
@@ -549,6 +549,10 @@
     "packages/util/home-paths/src/index.ts": {
       "kind": "migration-debt",
       "note": "fix(desktop): shorten local daemon socket paths; fix(runtime): make local IPC portable"
+    },
+    "packages/llm/llm/src/types.ts": {
+      "kind": "seam",
+      "note": "request admission seam: GenerateOptions.admission and the RequestAdmission types"
     }
   }
 }

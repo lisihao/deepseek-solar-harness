@@ -83,6 +83,10 @@
 
 两个适配器使用不同内部机制实现 `LlmAdapter`：[`@deepseek-ai/dsh-llm-deepseek`](../llm-deepseek) 针对 `deepseek-official` 路由使用直接 fetch 加 `eventsource-parser` SSE（Server-Sent Events）分帧，[`@deepseek-ai/dsh-llm-pi-ai`](../llm-pi-ai) 则通过 `@earendil-works/pi-ai` 动态解析已配置提供方／模型对。两者都遵循 `types.ts` 中的 `StreamChunk` 约定：usage 先于 finish，工具参数保持原始字符串。适配器实现在内部可以抛出异常或发出失败 finish；`LlmRuntime` 会将两者都暴露为终止失败 finish。适配器理由见[双 LLM 适配器](../../../.agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.md)，服务边界见[终止失败决策](../../../.agents/notes/implemented/architecture/2026-07-29-terminal-llm-stream-failures.md)。
 
+## 请求准入
+
+`GenerateOptions.admission` 是可选闭包，用于计量一次调用中的每个物理请求。支持它的 adapter 声明 `enforcesAdmission = true`，并在请求体构建之后、任何内容发出之前，对每个 HTTP 请求调用一次该闭包，传入该请求的事实（`RequestAdmissionInput`：模型、请求体字节数和 sha256、线上 `max_tokens`、thinking 模式与 effort、是否含非文本内容）。闭包返回一张票据，用 provider 报告的 usage 结算或放弃；或抛出 code 为 `ADMISSION_REFUSED_CODE` 的 `LlmError`，此时没有任何内容发出。对不强制准入的 adapter 设置 admission 的调用会在派发前失败，而不是不计量地发出。没有 admission 的调用不变。
+
 ## 模型体验
 
 无。服务不添加任何与模型绑定的文本、schema 或消息；它只会填入并记录适配器配置的推理强度。

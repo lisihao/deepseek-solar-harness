@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { HarnessError, type ContentBlock, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import { HarnessError, type ContentBlock, type RequestAdmission, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
@@ -18,6 +18,28 @@ export interface ModelWorkerToolBridgeV1 {
   }[]
 }
 
+/**
+ * The sealed evaluation scope of a request: the generation limits it must send and the admission that meters every physical
+ * request it makes. Set only by an orchestration layer that holds a scope; a request without it keeps the worker's ordinary
+ * behavior.
+ */
+export interface ModelWorkerEvaluationV1 {
+  /** The model every physical request names on the wire, whatever the allocation chose for this request. */
+  readonly model: string
+  /** `max_tokens` ceiling of one physical request; the worker never sends more, and never falls back to a provider default. */
+  readonly maxOutputTokens: number
+  /** Reasoning effort id sent on every physical request. */
+  readonly reasoningEffort: string
+  /** Output tokens the scope can still reserve right now; advisory, because admission re-checks atomically. */
+  remainingOutputTokens(): number
+  /**
+   * Admission for one physical request.
+   * @param label - names the request in the scope's ledger (the logical command and the tool round).
+   * @returns the admission to set on that request's `GenerateOptions`.
+   */
+  admission(label: string): RequestAdmission
+}
+
 /** Sealed one-shot request dispatched to a selected model worker. */
 export interface ModelWorkerExecuteRequest {
   readonly commandId: string
@@ -28,6 +50,8 @@ export interface ModelWorkerExecuteRequest {
   readonly parent?: Agent
   readonly rlmPlan?: RlmExecutionPlanV1
   readonly modelToolBridge?: ModelWorkerToolBridgeV1
+  /** Present when the request runs under an evaluation scope; see {@link ModelWorkerEvaluationV1}. */
+  readonly evaluation?: ModelWorkerEvaluationV1
   readonly signal: AbortSignal
 }
 

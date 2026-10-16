@@ -1,0 +1,61 @@
+{
+  "scenario": "refuse-first",
+  "scoped": true,
+  "run": "failed",
+  "nodes": [
+    {
+      "state": "failed",
+      "attempt": 1,
+      "blockers": [
+        "OPERATOR_STOPPED"
+      ]
+    }
+  ],
+  "outbound": 0,
+  "rowsAdmitted": 0,
+  "refusals": [
+    "input-exhausted"
+  ],
+  "everyRequestJoinsOneRowAndEveryRowOneRequest": true,
+  "everyRequestWasReservedBeforeItArrived": true,
+  "ledgerStates": [
+    "refused"
+  ],
+  "requests": [],
+  "metering": [
+    {
+      "who": "root",
+      "attempt": 1,
+      "outcome": {
+        "kind": "returned",
+        "stopReason": "error"
+      },
+      "complete": true,
+      "admissionCalls": 1,
+      "rows": 1,
+      "sent": 0,
+      "refused": 1,
+      "unaccounted": 0,
+      "observed": {
+        "input": 0,
+        "output": 0
+      },
+      "missingRounds": [],
+      "listedAttemptsAreTheLedgersRows": true
+    }
+  ],
+  "rlmUsageEvents": [],
+  "continuationEvents": [],
+  "continuationCommands": 0,
+  "messageStatuses": [],
+  "runtimeOutcomeEvents": {},
+  "retryScheduled": 0,
+  "namesDispatchNotAdmitted": false,
+  "namesOperatorBusy": false,
+  "namesAdmissionRefusedInEvents": false,
+  "refusalReasonsInMeteringRows": [
+    "input-exhausted"
+  ],
+  "namesDispatchUnknown": false,
+  "daemonsStopped": true
+}

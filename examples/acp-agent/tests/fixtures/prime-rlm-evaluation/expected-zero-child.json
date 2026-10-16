@@ -1,0 +1,90 @@
+{
+  "scenario": "zero-child",
+  "scoped": true,
+  "run": "completed",
+  "nodes": [
+    {
+      "state": "passed",
+      "attempt": 1,
+      "blockers": []
+    }
+  ],
+  "outbound": 2,
+  "rowsAdmitted": 2,
+  "refusals": [],
+  "everyRequestJoinsOneRowAndEveryRowOneRequest": true,
+  "everyRequestWasReservedBeforeItArrived": true,
+  "ledgerStates": [
+    "settled"
+  ],
+  "requests": [
+    {
+      "who": "root",
+      "attempt": 1,
+      "round": 0,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    },
+    {
+      "who": "root",
+      "attempt": 1,
+      "round": 1,
+      "joinedRow": true,
+      "rowState": "settled",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    }
+  ],
+  "metering": [
+    {
+      "who": "root",
+      "attempt": 1,
+      "outcome": {
+        "kind": "returned",
+        "stopReason": "completed"
+      },
+      "complete": true,
+      "admissionCalls": 2,
+      "rows": 2,
+      "sent": 2,
+      "refused": 0,
+      "unaccounted": 0,
+      "observed": {
+        "input": 6,
+        "output": 4
+      },
+      "missingRounds": [],
+      "listedAttemptsAreTheLedgersRows": true
+    }
+  ],
+  "rlmUsageEvents": [
+    {
+      "source": "root",
+      "who": "root",
+      "attempt": 1
+    }
+  ],
+  "continuationEvents": [],
+  "continuationCommands": 0,
+  "messageStatuses": [],
+  "runtimeOutcomeEvents": {},
+  "retryScheduled": 0,
+  "namesDispatchNotAdmitted": false,
+  "namesOperatorBusy": false,
+  "namesAdmissionRefusedInEvents": false,
+  "refusalReasonsInMeteringRows": [],
+  "namesDispatchUnknown": false,
+  "daemonsStopped": true
+}

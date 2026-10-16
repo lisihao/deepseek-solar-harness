@@ -29,7 +29,14 @@ import type {
 } from '@deepseek-ai/dsh-continual-harness'
 import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
-import LlmRuntime, { type ContentBlock, type ContextSnapshotSection, type ResolvedRetryPolicy, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, {
+  ADMISSION_REFUSED_CODE,
+  type ContentBlock,
+  type ContextSnapshotSection,
+  type ResolvedRetryPolicy,
+  type StreamChunk,
+  type TokenUsage,
+} from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   ContinualHarnessMode,
@@ -39,8 +46,8 @@ import type {
 } from '@deepseek-ai/dsh-model-allocation'
 import { nativeModelTier } from '@deepseek-ai/dsh-model-allocation'
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
-import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
-import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
+import ModelWorkerRuntime, { type ModelWorkerExecuteRequest, type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
+import DeepSeekModelWorker, { DEEPSEEK_WORKER_ID } from '@deepseek-ai/dsh-model-worker-deepseek'
 import FileTaskTemplateProvider, { type TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
 import { inferTaskAttributes, inferTaskType, renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
 import {
@@ -139,6 +146,7 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
+import { accountOf, EvaluationLedger, isUnknownOutcome, parseEvaluationScope, type CommandAccount } from './evaluation-ledger.ts'
 import {
   assertMessageContinuationNamesMessages,
   childResultFromArtifact,
@@ -409,6 +417,34 @@ function assertRlmBridgeAllowed(
       `RLM model-tool bridge requested unsealed parent tool: ${unsealedTool.name}`,
       'GRAPH_INVALID',
     )
+  }
+}
+
+/**
+ * A model-worker command that failed under an evaluation scope after sending a physical request whose usage the ledger does not
+ * hold. The request may have been processed and billed, so the command is an unknown outcome and must not be retried as an
+ * ordinary failure. Created only under a scope.
+ */
+class UnknownPhysicalOutcomeError extends OrchestrationError {
+  /** The failure of the command, and, if the store refused the metering event, that refusal as well. */
+  override readonly cause: unknown
+
+  constructor(message: string, cause: unknown) {
+    super(message, 'COMMAND_INDETERMINATE')
+    this.name = 'UnknownPhysicalOutcomeError'
+    this.cause = cause
+  }
+}
+
+/** The stream of a model call that carried no admission under an evaluation scope: one error finish, nothing sent. */
+async function * withoutAdmission(scopeId: string): AsyncGenerator<StreamChunk> {
+  await Promise.resolve()
+  yield {
+    type: 'finish',
+    reason: {
+      kind: 'error',
+      failure: { message: `evaluation scope ${scopeId} admits only calls that carry an admission; this one did not`, code: ADMISSION_REFUSED_CODE },
+    },
   }
 }
 
@@ -1178,6 +1214,39 @@ function workbenchTaskContract(
   return { ...base, contractSha256: canonicalSha256(base) }
 }
 
+/**
+ * The reason with which an attempt is aborted while its run keeps running, so that such an abort can be told from the run's
+ * cancellation. Aborting with any other reason (a cancellation of the run, a shutdown, an interrupt of a child) is not one of these.
+ */
+class AttemptAbortReason extends Error {}
+
+/** The attempt's own deadline passed. */
+class AttemptDeadlineError extends AttemptAbortReason {
+  constructor(timeoutMs: number) {
+    super(`orchestration attempt exceeded ${String(timeoutMs)}ms`)
+    this.name = 'AttemptDeadlineError'
+  }
+}
+
+/** The runtime interrupted the root session of the attempt; the run is not cancelled and the node may be run again. */
+class RootInterruptedError extends AttemptAbortReason {
+  constructor() {
+    super('the root session of the attempt was interrupted')
+    this.name = 'RootInterruptedError'
+  }
+}
+
+/**
+ * Whether the work was stopped together with its run: aborted for a reason other than the attempt's deadline or an interrupt of
+ * its root session, which leave the run running. A request that such an abort interrupted may still be in doubt, and the node
+ * would be run again, so it is not a cancellation.
+ * @param signal - the signal the work ran under.
+ * @returns `true` when the signal was aborted together with the run (or by an interrupt of one execution below the root).
+ */
+function abortedWithTheRun(signal: AbortSignal): boolean {
+  return signal.aborted && !(signal.reason instanceof AttemptAbortReason)
+}
+
 function attemptAbort(timeoutMs: number | undefined): {
   readonly controller: AbortController
   readonly clearTimeout: () => void
@@ -1186,7 +1255,7 @@ function attemptAbort(timeoutMs: number | undefined): {
   const timer = timeoutMs === undefined
     ? undefined
     : setTimeout(() => {
-      controller.abort(new Error(`orchestration attempt exceeded ${String(timeoutMs)}ms`))
+      controller.abort(new AttemptDeadlineError(timeoutMs))
     }, timeoutMs)
   if (timer !== undefined) timer.unref()
   return {
@@ -1260,6 +1329,8 @@ export class OrchestrationDaemon {
   private readonly attemptOperators = new Map<string, string>()
   private clusterActionAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
+  /** The ledger of the evaluation scope this home is sealed to; absent in an ordinary home. */
+  private evaluation: EvaluationLedger | undefined
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
   private tickInFlight: Promise<void> | undefined
@@ -1298,11 +1369,33 @@ export class OrchestrationDaemon {
   /* jscpd:ignore-start */
   /** Start the headless compiler composition, recovery pass, socket, and Scheduler. */
   async start(): Promise<void> {
+    // A scope file in the root seals this home to one evaluation. It is only read and checked here, before the lock, so a file
+    // that cannot be used stops the daemon without leaving a lock behind. The ledger is created, recovered, or written only after
+    // the daemon lock is held, and opening it takes the ledger's own owner lock first, which holds even in the moment when the
+    // daemon lock exists but its pid file is not written yet.
+    const scopePath = join(this.options.root, 'evaluation-scope.json')
+    const sealed = existsSync(scopePath) ? parseEvaluationScope(readFileSync(scopePath, 'utf8')) : undefined
     this.acquireLock()
+    if (sealed !== undefined) {
+      try {
+        this.evaluation = EvaluationLedger.open(join(this.options.root, 'evaluation-ledger.json'), sealed.scope, sealed.sha256)
+      } catch (error) {
+        this.releaseLock()
+        throw error
+      }
+    }
     const thisRoot = this.options.root
     await this.ctx.plugin(PhysicalOperatorRuntime)
     await this.ctx.plugin(FileTaskTemplateProvider, { dshHome: this.options.dshHome })
     await this.ctx.plugin(LlmRuntime)
+    const sealedScope = this.evaluation?.scope.scopeId
+    if (sealedScope !== undefined) {
+      // Under a scope every model call made through this daemon's context must carry an admission. The worker's calls do; a call
+      // from any other plugin loaded into the daemon does not, and is refused here without reaching an adapter.
+      this.ctx.on('llm/stream', (options, next): AsyncIterable<StreamChunk> => options.admission === undefined
+        ? withoutAdmission(sealedScope)
+        : next())
+    }
     await this.ctx.plugin(ModelWorkerRuntime)
     if (this.options.modelWorkerProviders === undefined) {
       await this.ctx.plugin(LocalCredentialProvider, { dshHome: this.options.dshHome, watch: true })
@@ -1403,6 +1496,7 @@ export class OrchestrationDaemon {
     this.store.close()
     if (localIpcUsesFilesystem()) this.safeUnlink(this.socketPath)
     this.safeUnlink(join(this.options.root, 'daemon.pid'))
+    this.evaluation?.close()
     this.releaseLock()
     this.closedResolver.resolve()
   }
@@ -2828,6 +2922,7 @@ export class OrchestrationDaemon {
         : await this.workspaceSnapshots(record.graph).captureInput(
           (this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot).snapshotId,
         )
+      this.assertUnmetered('Resident or remote operator')
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -3167,8 +3262,7 @@ export class OrchestrationDaemon {
     } catch (error) {
       controller.abort()
       await Promise.allSettled(physicalRuns.map(value => value.dispose()))
-      this.recordRlmFailure(record, plan, prepared, error)
-      throw error
+      throw this.reportRlmFailure(record, plan, prepared, error)
     }
   }
 
@@ -3194,7 +3288,7 @@ export class OrchestrationDaemon {
         `${String(plan.executionId)}:rlm:root`,
         signal,
       )
-      : await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
+      : await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, signal, spec.timeoutMs)
     const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
     this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
       executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
@@ -3214,6 +3308,34 @@ export class OrchestrationDaemon {
       executionId: String(plan.executionId), runtimeSessionId: String(prepared.rootSessionId),
       code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
     }, prepared.node)])
+  }
+
+  /**
+   * Record the failure of an RLM execution and return the error to rethrow. A store that refuses the notification does not change
+   * what the execution failed with when that was an unknown physical outcome: the outcome keeps its identity (so the node is not
+   * retried as an ordinary failure) and carries the refused write as part of its cause. Any other failure behaves as before.
+   * @param record - the run.
+   * @param plan - the node plan.
+   * @param prepared - the prepared execution.
+   * @param error - what the execution failed with.
+   * @returns the error to throw.
+   */
+  private reportRlmFailure(
+    record: RuntimeRunRecord,
+    plan: NodeExecutionPlanV1,
+    prepared: PreparedRlmExecution,
+    error: unknown,
+  ): unknown {
+    try {
+      this.recordRlmFailure(record, plan, prepared, error)
+      return error
+    } catch (writeError) {
+      // Rethrown unless the failure being reported is an unknown outcome, which is returned with this error attached.
+      if (!(error instanceof UnknownPhysicalOutcomeError)) throw writeError
+      return new UnknownPhysicalOutcomeError(
+        error.message, new AggregateError([error.cause, writeError], 'the unknown outcome and the refused failure notification'),
+      )
+    }
   }
 
   private async flushRlmHarnessBoundary(
@@ -3676,13 +3798,13 @@ export class OrchestrationDaemon {
           childEnvelope,
           receiveOperatorContextEnvelope(childEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
         )
-        const workerResult = this.ctx.modelWorkers.execute({
+        const workerResult = this.executeModelWorker({
           commandId: String(executionId), workerId: request.model.operatorId,
           model: request.model.model, prompt: modelWorkerEnvelopePrompt(childEnvelope),
           parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
           ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
           modelToolBridge: bridge, signal: execution.signal,
-        })
+        }, { record, plan })
         const syntheticSessionId = `model-worker:${request.model.operatorId}:${String(request.childSessionId)}`
         const syntheticTurnId = `model-worker-turn:${String(executionId)}`
         this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
@@ -3966,6 +4088,147 @@ export class OrchestrationDaemon {
     return { moduleId, callable }
   }
 
+  /**
+   * Dispatch one model-worker request. Under an evaluation scope only the DeepSeek API worker may run, and the request carries the
+   * scope's generation limits and an admission for each physical request it makes; outside a scope the request is unchanged.
+   *
+   * Under a scope, when the command ends, its physical requests are read back from the ledger and recorded in a
+   * `evaluation.command.metering` event, apart from how the command ended. If the ledger does not hold the usage of every request
+   * the command sent, the worker's usage is withheld: a sum of the known requests would read as the cost of the command. If the
+   * command fails with such a request outstanding, it is reported as an unknown outcome, not as an ordinary failure that the
+   * node's retry policy could replay.
+   * @param request - the worker request.
+   * @param accounting - the run and node plan the command belongs to, where its metering event is recorded.
+   * @returns the worker result; under a scope without its usage when the ledger's account of the command is incomplete.
+   */
+  private executeModelWorker(
+    request: ModelWorkerExecuteRequest,
+    accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
+  ): Promise<ModelWorkerResult> {
+    const ledger = this.evaluation
+    if (ledger === undefined) return this.ctx.modelWorkers.execute(request)
+    if (request.workerId !== DEEPSEEK_WORKER_ID) {
+      return Promise.reject(new OrchestrationError(
+        `evaluation scope ${ledger.scope.scopeId} admits only the ${DEEPSEEK_WORKER_ID} worker, not ${request.workerId}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      ))
+    }
+    const command = request.commandId
+    // Every call of an admission is one physical request. Counting the calls lets the account be checked against the rows.
+    let admissionCalls = 0
+    const run = this.ctx.modelWorkers.execute({
+      ...request,
+      evaluation: {
+        model: ledger.scope.model,
+        maxOutputTokens: ledger.scope.limits.maxOutputTokensPerRequest,
+        reasoningEffort: ledger.scope.generation.reasoningEffort,
+        remainingOutputTokens: () => ledger.remainingOutputTokens(),
+        admission: (label) => {
+          const admit = ledger.admission(label)
+          return (input) => {
+            admissionCalls += 1
+            return admit(input)
+          }
+        },
+      },
+    })
+    return run.then(
+      (result) => {
+        const account = accountOf(ledger.attemptsOf(command), admissionCalls)
+        const written = this.recordCommandMetering(accounting, account, { kind: 'returned', stopReason: result.stopReason })
+        // A worker reports a failed request as a result that stopped with an error, not only by throwing. When such a command left
+        // a request outstanding, the outcome of that request is unknown, as it is for a thrown failure.
+        const failedStop = result.stopReason === 'error' || result.stopReason === 'aborted'
+        if (failedStop && isUnknownOutcome(account.counts.missing.length, abortedWithTheRun(request.signal), false)) {
+          throw new UnknownPhysicalOutcomeError(
+            `model command ${command} stopped with ${result.stopReason} after sending ${String(account.counts.missing.length)} request(s) `
+            + 'whose usage the ledger does not hold',
+            written.written ? result.stopReason : new AggregateError([result.stopReason, written.error], 'the stop and the refused metering event'),
+          )
+        }
+        // Without a record of the account, nothing vouches for the usage either.
+        if (account.complete && written.written) return result
+        const { usage: _partialUsage, ...withoutUsage } = result
+        return withoutUsage
+      },
+      (error: unknown) => {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN'
+        const account = accountOf(ledger.attemptsOf(command), admissionCalls)
+        // A command stopped together with its run keeps the error it gets today; a deadline or an interrupt of the root, after which
+        // the node could be run again, is reclassified like a command that nobody stopped.
+        const alreadyUnknown = error instanceof UnknownPhysicalOutcomeError
+        const unknownOutcome = isUnknownOutcome(account.counts.missing.length, abortedWithTheRun(request.signal), alreadyUnknown)
+        const written = this.recordCommandMetering(accounting, account, { kind: 'failed', code })
+        // The classification is decided before the event is written, and a failed write does not change it.
+        if (!unknownOutcome) throw error
+        throw new UnknownPhysicalOutcomeError(
+          `model command ${command} failed (${code}) after sending ${String(account.counts.missing.length)} request(s) `
+          + `whose usage the ledger does not hold: ${error instanceof Error ? error.message : String(error)}`,
+          written.written ? error : new AggregateError([error, written.error], 'the original failure and the refused metering event'),
+        )
+      },
+    )
+  }
+
+  /**
+   * Whether, under an evaluation scope, the ledger holds a request of this command as reserved or unknown.
+   * @param command - the command id as it appears in the ledger's labels.
+   * @returns `true` only with such evidence; always `false` outside a scope.
+   */
+  private holdsUnknownRequest(command: string): boolean {
+    return this.evaluation !== undefined && this.evaluation.attemptsOf(command).missing.length > 0
+  }
+
+  /**
+   * Whether, under an evaluation scope, the ledger holds a request sent in this runtime session as reserved or unknown.
+   * @param session - the runtime session id as it appears in the ledger's labels.
+   * @returns `true` only with such evidence; always `false` outside a scope.
+   */
+  private sessionHoldsUnknownRequest(session: string): boolean {
+    return this.evaluation !== undefined && this.evaluation.outstandingInSession(session) > 0
+  }
+
+  /**
+   * Record, apart from the terminal outcome of a command, what the ledger holds for its physical requests.
+   * @param accounting - the run and node plan.
+   * @param account - the decided account of the command.
+   * @param outcome - how the command ended.
+   * @returns whether the event was written, or the error with which the store refused it.
+   */
+  private recordCommandMetering(
+    accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
+    account: CommandAccount,
+    outcome: { readonly kind: 'returned'; readonly stopReason: string } | { readonly kind: 'failed'; readonly code: string },
+  ): { readonly written: true } | { readonly written: false; readonly error: unknown } {
+    const { record, plan } = accounting
+    const { counts } = account
+    try {
+      this.store.appendEvents([event(record.snapshot.runId, 'evaluation.command.metering', {
+        commandId: counts.command,
+        outcome,
+        metering: {
+          complete: account.complete, source: 'ledger', admissionCalls: account.admissionCalls, rows: counts.rows, sent: counts.sent,
+          refused: counts.refused, unaccounted: account.unaccounted, observed: counts.observed,
+          missing: counts.missing, attempts: counts.attempts,
+        },
+      }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
+      return { written: true }
+    } catch (error) {
+      // The store refused the event (for example because it is closing). The caller withholds the usage or keeps the unknown
+      // outcome and attaches this error; nothing is retried here.
+      return { written: false, error }
+    }
+  }
+
+  /** Refuse a dispatch that would send model requests the scope's ledger cannot see. */
+  private assertUnmetered(kind: string): void {
+    if (this.evaluation === undefined) return
+    throw new OrchestrationError(
+      `evaluation scope ${this.evaluation.scope.scopeId} meters only API worker requests; ${kind} dispatch is refused`,
+      'ORCHESTRATION_UNAVAILABLE',
+    )
+  }
+
   private async dispatchRlmContinuation(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
@@ -4066,13 +4329,13 @@ export class OrchestrationDaemon {
       continuationEnvelope,
       receiveOperatorContextEnvelope(continuationEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
     )
-    const result = this.ctx.modelWorkers.execute({
+    const result = this.executeModelWorker({
       commandId: String(request.commandId), workerId: request.model.operatorId,
       model: request.model.model, prompt: modelWorkerEnvelopePrompt(continuationEnvelope),
       parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
       ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
       modelToolBridge: bridge, signal: execution.signal,
-    })
+    }, { record, plan })
     return {
       nativeSessionId: `model-worker:${request.model.operatorId}:${String(request.sessionId)}`,
       nativeTurnId: `model-worker-turn:${String(request.commandId)}`,
@@ -4094,7 +4357,7 @@ export class OrchestrationDaemon {
   ): Promise<RlmChildExecutionResult> {
     await this.flushRlmHarnessBoundary(record, spec, plan, sessionId, 'turn-end')
     return {
-      status: signal.aborted ? 'indeterminate' : 'failed',
+      status: signal.aborted || error instanceof UnknownPhysicalOutcomeError ? 'indeterminate' : 'failed',
       error: error instanceof Error ? error.message : String(error),
     }
   }
@@ -4129,16 +4392,32 @@ export class OrchestrationDaemon {
     for (;;) {
       const current = this.store.autonomousState(String(record.snapshot.runId), spec.id, plan.attempt)
         ?? createAutonomousState(policy)
+      // A stop with a request of the session in doubt, which nobody cancelled, is decided before the state and the usage are written,
+      // so a refused write cannot become the error the node is retried on; it is kept as an additional error.
+      const unknownStop = (result.stopReason === 'error' || result.stopReason === 'aborted')
+        && !abortedWithTheRun(signal) && this.sessionHoldsUnknownRequest(String(sessionId))
       const accounted = accountAutonomousUsage(current, commandId, result.usage)
-      this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, accounted)
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.usage', {
-        runtimeSessionId: String(sessionId), commandId,
-        turnsUsed: accounted.turnsUsed, tokensUsed: accounted.tokensUsed,
-        inputTokens: result.usage?.inputTokens ?? 0,
-        outputTokens: result.usage?.outputTokens ?? 0,
-        cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
-        cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
-      }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      let writeError: unknown
+      try {
+        this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, accounted)
+        this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.usage', {
+          runtimeSessionId: String(sessionId), commandId,
+          turnsUsed: accounted.turnsUsed, tokensUsed: accounted.tokensUsed,
+          inputTokens: result.usage?.inputTokens ?? 0,
+          outputTokens: result.usage?.outputTokens ?? 0,
+          cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
+          cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
+        }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      } catch (error) {
+        if (!unknownStop) throw error
+        writeError = error
+      }
+      if (unknownStop) {
+        throw new UnknownPhysicalOutcomeError(
+          `Autonomous root turn stopped with ${result.stopReason} while a request of the session has an unknown outcome`,
+          writeError === undefined ? result.stopReason : new AggregateError([result.stopReason, writeError], 'the stop and the refused write'),
+        )
+      }
       if (result.stopReason === 'error' || result.stopReason === 'aborted') {
         throw new OrchestrationError(
           `Autonomous root turn stopped with ${result.stopReason}`,
@@ -4199,6 +4478,9 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
+      if (continuation.status === 'indeterminate' && !abortedWithTheRun(signal) && this.holdsUnknownRequest(commandId)) {
+        throw new UnknownPhysicalOutcomeError(continuation.error ?? 'Autonomous continuation has a request of unknown outcome', continuation)
+      }
       if (continuation.status !== 'settled') {
         throw Object.assign(new Error(continuation.error ?? `Autonomous continuation became ${continuation.status}`), {
           code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
@@ -4259,6 +4541,7 @@ export class OrchestrationDaemon {
     sessionId: RlmRuntimeSessionId,
     bindings: RlmRuntimeHostBindings,
     initial: PhysicalOperatorResult,
+    signal: AbortSignal,
     timeoutMs?: number,
   ): Promise<PhysicalOperatorResult> {
     let result = initial
@@ -4283,6 +4566,9 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
+      if (continuation.status === 'indeterminate' && !abortedWithTheRun(signal) && this.holdsUnknownRequest(String(claim.commandId))) {
+        throw new UnknownPhysicalOutcomeError(continuation.error ?? 'RLM goal continuation has a request of unknown outcome', continuation)
+      }
       if (continuation.status !== 'settled') {
         throw Object.assign(new Error(continuation.error ?? `RLM goal continuation became ${continuation.status}`), {
           code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
@@ -4380,6 +4666,7 @@ export class OrchestrationDaemon {
     residentLaneId?: string,
     nativeToolPolicy?: PhysicalOperatorNativeToolPolicy,
   ): Promise<StartedResidentTurn> {
+    this.assertUnmetered('Resident or remote operator')
     const operator = this.ctx.physicalOperators.getOperator(allocation.operatorId)
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
@@ -4460,7 +4747,7 @@ export class OrchestrationDaemon {
         rootEnvelope,
         receiveOperatorContextEnvelope(rootEnvelope, `model-worker:${plan.operatorPlan.operatorId}`, 'text'),
       )
-      const rootExecution = this.ctx.modelWorkers.execute({
+      const rootExecution = this.executeModelWorker({
         commandId: rootCommandId,
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
@@ -4469,18 +4756,18 @@ export class OrchestrationDaemon {
         rlmPlan,
         modelToolBridge: bridge,
         signal: controller.signal,
-      })
+      }, { record, plan })
       await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
         nativeSessionId: `model-worker:${plan.operatorPlan.operatorId}:${String(rootSessionId)}`,
         nativeTurnId: `model-worker-turn:${String(plan.executionId)}:rlm:root`,
         result: rootExecution.then(
           value => asRlmExecutionResult({ output: [...value.output], stopReason: value.stopReason }),
           (error: unknown) => ({
-            status: controller.signal.aborted ? 'indeterminate' as const : 'failed' as const,
+            status: controller.signal.aborted || error instanceof UnknownPhysicalOutcomeError ? 'indeterminate' as const : 'failed' as const,
             error: error instanceof Error ? error.message : String(error),
           }),
         ),
-        interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+        interrupt: (): Promise<void> => { controller.abort(new RootInterruptedError()); return Promise.resolve() },
       })
       const rootResult = await rootExecution
       await this.accountRlmGoalUsage(
@@ -4495,8 +4782,7 @@ export class OrchestrationDaemon {
         ...rootResult.usage === undefined ? {} : { usage: rootResult.usage },
       })
     } catch (error) {
-      this.recordRlmFailure(record, plan, prepared, error)
-      throw error
+      throw this.reportRlmFailure(record, plan, prepared, error)
     }
   }
 
@@ -4523,7 +4809,7 @@ export class OrchestrationDaemon {
         contextEnvelope,
         receiveOperatorContextEnvelope(contextEnvelope, `model-worker:${plan.operatorPlan.operatorId}`, 'text'),
       )
-      const result = this.ctx.modelWorkers.execute({
+      const result = this.executeModelWorker({
         commandId: String(plan.executionId),
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
@@ -4531,7 +4817,7 @@ export class OrchestrationDaemon {
         parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-      })
+      }, { record, plan })
       const next = this.markAttemptRunning(record, spec, acceptedAttempt, {
         executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model, laneId: String(plan.executionId),
