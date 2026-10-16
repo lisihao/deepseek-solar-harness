@@ -18,6 +18,10 @@
 
 Provider 在 `state.json` 中保存版本 6 状态，其中必须有 `messageBatchDispatches` 数组。构造时只读取版本 6，并在注册 runtime owner 之前，对其他任何版本、缺少该数组的版本 6 文件、以及与消息不一致的批次记录，抛出 `RLM_UNAVAILABLE` 拒绝；它不迁移、不修复、不改写，被拒绝的文件保持原有字节。只读到版本 5 的 Provider 同样会拒绝版本 6 文件。因此本构建不打开版本 5 及更早的状态：替换旧 Provider 需要另外的迁移决定，评测使用新的空 home。
 
+排给同一个会话的消息在可以时一起投递：先取投递顺序中的第一条（steer 先于 follow_up，然后按到达顺序），再取紧跟其后的消息，只要每一条都是同一投递模式的 agent 消息，且渲染后的 instruction 不超过 16384 个 UTF-16 code unit。判断只读取 runtime 记录的 `source` 和 `controlLeaseId`，从不读文本；controller 的输入总是单独投递，遇到第一条不符合条件的消息就停止，不会跳过它。第一条消息自己渲染后的 instruction 已超过这个值时，仍像以前一样单独、完整地投递；这个阈值只决定哪些消息共用一次 continuation，不是提示的长度上限。一个批次就是一次 `dispatchContinuation` 调用和一个 worker command：单条消息的 command 是 `<messageId>:deliver`，更大的批次是 `<第一条 messageId>:batch-<条数>-<有序 id 的摘要>:deliver`。请求带有有序的 `messageIds`。每个成员各有自己的 `rlm.message.delivered` 和终态 `rlm.message.continuation.<status>` 事件；它们共享 `commandId`、结果引用，以及 execution 报告的状态和 stop reason，所以 `indeterminate` 的结果仍是 `indeterminate`。已 delivered 但没有终态事件，表示没有观察到结果（例如重启之后）；这与显式的 `indeterminate` 事件不同，两者都不会再次发送。批次的 usage 是它那一个逻辑 command 的 usage，可能跨越多轮工具调用和多个请求；按 command 汇总 usage，不按消息，也不按结果引用。
+
+批次在调用 host 之前先写入 `messageBatchDispatches`。只有错误码为 `RLM_DISPATCH_NOT_ADMITTED` 的 host 错误（在任何 execution 存在之前做出的拒绝）会删除该记录并让成员保持 queued，同时写 `deliveryError`。其他任何失败、重启时发现记录仍为 `intended`、host 应答之后写入失败、host 应答期间会话被删除，以及无法注册也无法中断的已接纳 execution，都会让该批次保持 held：记录保持 `held`，成员不会再被选中，该会话不再发送其他消息，`drain` 把这些成员计为未空闲，并由 `rlm.message.dispatch_unknown` 事件写明 command 与成员。这里没有自动对账，所以 held 的会话要手工处理状态文件后才会解除。因为会话已有 execution 而无法注册的已接纳 execution 会被中断，并由 `drain` 计入，直到它自己的结果结算；中断返回并不表示它已结束。
+
 `interrupt(sessionId)` 请求该会话及其下方每个会话当前活动的执行停止，包括已删除 child 中仍在停止的执行和尚未结束的被拒绝执行，并在这些请求结算时返回，不是在执行停止时返回。它不关闭任何东西：之后的消息或到期的 heartbeat 仍会准入新的执行。`deleteChild` 是永久的。它在第一个 await 之前就关闭该 child 的子树并记录命令。已关闭的会话不再准入消息投递、到期 heartbeat、spawn、cell、heartbeat 创建，也不再收发消息；`trackExecution` 会中断随后才完成的 dispatch、拒绝它，并在它结束前继续把它计入。关闭状态（child 上的 `deleted` 标记、其下已停止的会话，以及删除命令的回执）已持久化，重启后子树仍然关闭。执行句柄无论是已登记的还是被拒绝的，都只存在于内存，重启后会丢失。随后 `deleteChild` 中断该 child 下方每个活动的执行。如果某个中断被拒绝，命令以第一个拒绝失败：子树保持关闭，回执为 `failed`，相同命令 id 返回该失败，新的删除命令会再次中断。已完成的部分中断不会回滚，运行时也不证明被中断的执行已经停止。`drain` 会统计已删除后代中仍在运行的执行，以及尚未结束的被拒绝执行，因此根不会在它们停止前被报告为已排空；排给已删除会话的消息不计入，也永远不会投递。直接被删除的 child 在删除之后到达的结果会被忽略（`rlm.child.late_result_ignored`）。在已关闭的祖先之下被接纳的后代不会被忽略：它仍可以结算自己的记录，所以被删除 child 的子树里，后代在删除之后可能显示为 `settled`。`drain` 返回最后一个 continuation 结果，带有它自己的 `status`、`stopReason` 和部分 `output`，不会把失败或不确定的 continuation 改写成成功。
 
 ## Model Experience
@@ -34,4 +38,5 @@ Provider 不直接组装模型上下文。Tool schema 和有界 Cell result 由 
 - **源码恢复边界** — 声明源码恢复可保留直接 function/class/import 以及它们对其他已恢复顶层 binding 的引用；它重新创建声明代码，不会保留工厂 closure 捕获或已变更 class 静态字段等可变运行时状态。
 - **已删除会话中正在运行的 cell** — 删除不会中断子树里已经在运行的 cell；它的 spawn、发送和 heartbeat 调用会被拒绝，cell 在 `maxCellMs` 内结束。
 - **重启期间的 Resident turn** — 执行句柄在内存中，所以跨 daemon 重启仍在运行的 Resident turn 不会被对账，`drain` 也看不到它。被接受的中断不证明原生进程已经停止。
+- **Held 的消息批次** — 可能已被接纳的批次会一直 held，连同其后到达的消息，直到手工处理其状态文件；没有代码对其对账。
 - **兼容子集** — 原生 Provider tool 与 Continuous Harness 持有剩余 Prime 端到端兼容项。
