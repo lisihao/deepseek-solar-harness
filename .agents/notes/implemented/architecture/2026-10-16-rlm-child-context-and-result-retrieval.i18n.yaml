@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-16-rlm-child-context-and-result-retrieval.md
-2026-10-16-rlm-child-context-and-result-retrieval.md: 270ae3725e17d095431ad8830e9246e7488a08ef
-2026-10-16-rlm-child-context-and-result-retrieval.zh.md: 89699025a851b9b53bba56a6f84acacc50fb490d
+2026-10-16-rlm-child-context-and-result-retrieval.md: 19afa5dab2e3707248d44303ddc74842a72e2103
+2026-10-16-rlm-child-context-and-result-retrieval.zh.md: 61fc8a3e145de2908099ed6f1bf78a11fc9245f0
