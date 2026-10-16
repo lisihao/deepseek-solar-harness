@@ -13,18 +13,19 @@
  * Every wait is bounded here, and each cleanup step is attempted on its own: the daemons are detached, so a run that is
  * abandoned without cleanup would leave them running. A request whose wait was abandoned keeps running inside the client and
  * may still be starting a daemon, so the driver keeps those requests, refuses new ones once cleanup starts, waits a bounded time
- * for them, stops the daemons it started, and looks once more after a short pause for one that finished starting late. Only
- * daemons whose pid file names this home are stopped. `DSH_EVALUATION_FIXTURE_FAULT=slow-start` is read only by the fault test
- * of this fixture: the first request reaches the client just before the stage limit, as a late daemon start would.
+ * for them, stops the daemons it started, and looks once more after a short pause for one that finished starting late. A daemon
+ * is stopped by its pid file and also by its startup entry and this run's exact home (`daemon-cleanup.ts`), because a daemon that
+ * is still starting has no pid file yet. `DSH_EVALUATION_FIXTURE_FAULT` is read only by the fault tests of this fixture:
+ * `slow-start` makes the first request reach the client just before the stage limit, as a late daemon start would, and
+ * `hold-orchestration` or `hold-resident` keeps that daemon alive without a pid file until it is signalled.
  */
 
-import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import type { LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
+import { holdDaemonBeforeListening, stopDaemon, timedStage } from '../daemon-cleanup.ts'
 import { startFakeDeepSeek, type FakeDeepSeek, type FakeMessage, type FakeReply } from '../prime-rlm-terminal/fake-deepseek.ts'
 import { SCENARIO_NAMES, scenarioOf, taskText, type Scenario, type ScenarioName } from './scenarios.ts'
 import { scenarioTranscript } from './transcript.ts'
@@ -55,7 +56,6 @@ const RPC_MS = 5_000
 const DISPOSE_MS = 3_000
 const DAEMON_STOP_MS = 8_000
 const FAKE_CLOSE_MS = 2_000
-const PS_MS = 2_000
 const INFLIGHT_MS = 5_000
 const LATE_SWEEP_PAUSE_MS = 700
 
@@ -115,53 +115,6 @@ function graph(workspace: string, scenario: Scenario): LogicalTaskGraphV1 {
       rlm: { mode: 'enabled', maxDepth: 2, maxChildren: 2, maxTurns: 4 },
     }],
   }
-}
-
-const execFileAsync = promisify(execFile)
-
-function codeOf(error: unknown): unknown {
-  return typeof error === 'object' && error !== null ? (error as { readonly code?: unknown }).code : undefined
-}
-
-/** Stop one daemon this driver started, after checking from its pid file and its command line that it belongs to this home. */
-async function stopOwnDaemon(pidFile: string): Promise<boolean> {
-  let text: string
-  try {
-    text = await readFile(pidFile, 'utf8')
-  } catch (error) {
-    if (codeOf(error) === 'ENOENT') return false
-    throw error
-  }
-  const pid = Number(text.trim())
-  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`pid file ${pidFile} does not hold a pid`)
-  const alive = (): boolean => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch (error) {
-      if (codeOf(error) === 'ESRCH') return false
-      throw error
-    }
-  }
-  if (!alive()) return false
-  const command = await execFileAsync('ps', ['-o', 'command=', '-p', String(pid)], { timeout: PS_MS }).then(
-    result => result.stdout,
-    (error: unknown) => {
-      if (codeOf(error) === 1) return ''
-      throw error
-    },
-  )
-  if (command === '') return false
-  if (!command.includes(isolatedHome)) throw new Error(`pid ${String(pid)} from ${pidFile} does not belong to this run`)
-  process.kill(pid, 'SIGTERM')
-  const limit = Date.now() + 4_000
-  while (alive() && Date.now() < limit) await new Promise(resolve => setTimeout(resolve, 50))
-  if (alive()) {
-    process.kill(pid, 'SIGKILL')
-    await new Promise(resolve => setTimeout(resolve, 200))
-  }
-  if (alive()) throw new Error(`pid ${String(pid)} from ${pidFile} is still running after SIGKILL`)
-  return true
 }
 
 interface Attempt {
@@ -226,26 +179,32 @@ try {
   })
   const fake = await within('fake DeepSeek start', owned.fake, FAKE_MS)
   process.env.DEEPSEEK_BASE_URL = fake.baseURL
+  // hold-orchestration, hold-resident: that daemon stays alive without listening, so it has no pid file when the cleanup looks.
+  if (fault === 'hold-orchestration') holdDaemonBeforeListening('orchestration')
+  if (fault === 'hold-resident') holdDaemonBeforeListening('resident')
   owned.booted = boot('prime-rlm-evaluation-keyless', resolveConfigPath(configPath, undefined))
-  owned.service = (await within('boot', owned.booted, BOOT_MS)).orchestrations
+  const booted = owned.booted
+  owned.service = (await timedStage('boot', () => within('boot', booted, BOOT_MS))).orchestrations
 
-  const until = Date.now() + DAEMON_MS
-  let slowStarted = false
-  for (;;) {
-    try {
-      // slow-start: the first request reaches the client just before the stage limit, as a late start would.
-      if (fault === 'slow-start' && !slowStarted) {
-        slowStarted = true
-        await new Promise(resolve => setTimeout(resolve, DAEMON_MS - 100))
+  await timedStage('daemon ready', async () => {
+    const until = Date.now() + DAEMON_MS
+    let slowStarted = false
+    for (;;) {
+      try {
+        // slow-start: the first request reaches the client just before the stage limit, as a late start would.
+        if (fault === 'slow-start' && !slowStarted) {
+          slowStarted = true
+          await new Promise(resolve => setTimeout(resolve, DAEMON_MS - 100))
+        }
+        // The first request starts the daemon, so it may take the whole stage; later requests are bounded by RPC_MS.
+        await rpc('list', service().list(), until, DAEMON_MS)
+        break
+      } catch (error) {
+        if (error instanceof DeadlineError || Date.now() >= until) throw error
+        await new Promise(resolve => setTimeout(resolve, 100))
       }
-      // The first request starts the daemon, so it may take the whole stage; later requests are bounded by RPC_MS.
-      await rpc('list', service().list(), until, DAEMON_MS)
-      break
-    } catch (error) {
-      if (error instanceof DeadlineError || Date.now() >= until) throw error
-      await new Promise(resolve => setTimeout(resolve, 100))
     }
-  }
+  })
 
   const workspace = join(isolatedHome, 'workspace')
   await mkdir(workspace, { recursive: true })
@@ -380,15 +339,15 @@ try {
       process.stderr.write(`${message}\n`)
     }
   }
-  // Abandoned requests may still be starting a daemon; give them a bounded chance to finish so its pid file exists.
+  // Abandoned requests may still be starting a daemon; give them a bounded chance to finish before the daemons are stopped.
   await step('settle abandoned requests', async () => { await Promise.allSettled([...inflight]) }, INFLIGHT_MS)
   await step('dispose Loader context', async () => {
     const booted = owned.booted === undefined ? undefined : await owned.booted.then(context => context, () => undefined)
     await booted?.fiber.dispose()
   }, DISPOSE_MS)
   const stopBoth = async (suffix: string): Promise<void> => {
-    await step(`stop orchestration daemon${suffix}`, async () => { await stopOwnDaemon(join(isolatedHome, 'orchestrations', 'daemon.pid')) }, DAEMON_STOP_MS)
-    await step(`stop Resident daemon${suffix}`, async () => { await stopOwnDaemon(join(isolatedHome, 'resident-operators', 'daemon.pid')) }, DAEMON_STOP_MS)
+    await step(`stop orchestration daemon${suffix}`, async () => { await stopDaemon(isolatedHome, 'orchestration') }, DAEMON_STOP_MS)
+    await step(`stop Resident daemon${suffix}`, async () => { await stopDaemon(isolatedHome, 'resident') }, DAEMON_STOP_MS)
   }
   await stopBoth('')
   await step('close fake DeepSeek', async () => { await (await owned.fake)?.close() }, FAKE_CLOSE_MS)
