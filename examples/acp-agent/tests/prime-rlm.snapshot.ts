@@ -69,10 +69,11 @@ it('snapshot: prime-rlm-evaluation admits every physical request of an RLM tree 
     libBinScript: driver,
     configPath: fileURLToPath(new URL('./fixtures/prime-rlm-evaluation/cordis.yml', import.meta.url)),
     tsconfigPath: fileURLToPath(new URL('../../../tsconfig.json', import.meta.url)),
-    // The driver's body fails no later than fake server 3 s + boot 12 s + daemons ready 12 s + run 15 s = 42 s, and its cleanup
-    // takes abandoned requests 5 s + dispose 3 s + two daemon stops of 8 s + fake close 2 s + late-sweep pause 0.7 s + two more
-    // stops of 8 s = 42.7 s; a normal run takes about 8 s. The limit leaves room for loading and scheduling, and lets the driver
-    // fail by stage and finish its cleanup before the launcher's SIGKILL, which would skip it.
+    // The driver's explicit waits for its body are fake server 3 s + boot 12 s + daemons ready 12 s + run 15 s = 42 s, and for
+    // its cleanup abandoned requests 5 s + dispose 3 s + two daemon stops of 8 s + fake close 2 s + late-sweep pause 0.7 s + two
+    // more stops of 8 s = 42.7 s; these are waiting budgets, not a measured total, and exclude unmeasured I/O, loading and
+    // scheduling. A normal run takes about 8 s. The limit leaves room beyond the budgets so the driver can fail by stage and
+    // finish its cleanup before the launcher's SIGKILL, which would skip it.
     processTimeoutMs: 100_000,
     // Set only to collect the driver's reconcilable files; the snapshot itself does not depend on it.
     env: evidenceDirectory === undefined ? {} : { DSH_EVALUATION_EVIDENCE_DIR: evidenceDirectory },
