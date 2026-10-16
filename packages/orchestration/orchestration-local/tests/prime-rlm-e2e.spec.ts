@@ -726,7 +726,13 @@ describe('what a Resident root and a Resident child are given', () => {
 
   it('lets the root read its child\'s stored result in segments through the real daemon, and returns the same text as the store holds', async () => {
     const fixture = await e2eHarness('dsh-prime-read-result-')
-    interface Read { readonly text: string; readonly fullSha256: string; readonly count: number; readonly ref: string }
+    interface Read {
+      readonly text: string
+      readonly fullSha256: string
+      readonly count: number
+      readonly ref: string
+      readonly parts: ReadonlyArray<{ readonly text: string; readonly segmentSha256: string; readonly offset: number }>
+    }
     const read: { value: Read | undefined } = { value: undefined }
     fixture.resident.onExecute = async (request) => {
       if (request.modelToolBridge === undefined || !request.commandId.endsWith(':rlm:root')) return
@@ -740,14 +746,15 @@ describe('what a Resident root and a Resident child are given', () => {
       }
       const result = await callTypescriptRepl(request, `${id}:read`, [
         'const kid = (await rlm.listSubagents())[0];',
-        'let offset = 0, text = "", count = 0, fullSha256 = "", ref = "";',
+        'let offset = 0, text = "", count = 0, fullSha256 = "", ref = ""; const parts = [];',
         'for (;;) {',
         '  const part = await rlm.readChildResult(kid, { offset, limit: 40 });',
         '  text += part.text; count += 1; fullSha256 = part.fullSha256; ref = part.resultRef;',
+        '  parts.push({ text: part.text, segmentSha256: part.segmentSha256, offset: part.offset });',
         '  if (part.nextOffset === null) break;',
         '  offset = part.nextOffset;',
         '}',
-        '({ text, count, fullSha256, ref })',
+        '({ text, count, fullSha256, ref, parts })',
       ].join('\n'))
       read.value = result.value as Read
     }
@@ -769,6 +776,14 @@ describe('what a Resident root and a Resident child are given', () => {
     expect(read.value?.count).toBeGreaterThan(1)
     expect(read.value?.fullSha256).toBe(createHash('sha256').update(whole, 'utf8').digest('hex'))
     expect(read.value?.ref).toBe(settled?.data.artifactRef)
+    // Each segment carries the hash of its own text, and the segments start where the one before ended.
+    let expectedOffset = 0
+    for (const part of read.value?.parts ?? []) {
+      expect(part.segmentSha256).toBe(createHash('sha256').update(part.text, 'utf8').digest('hex'))
+      expect(part.offset).toBe(expectedOffset)
+      expectedOffset += part.text.length
+    }
+    expect(expectedOffset).toBe(whole.length)
   })
 
   it('completes an explicit RLM node whose root creates no child, with no child dispatched and a child count of zero', async () => {
