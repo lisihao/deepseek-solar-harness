@@ -235,8 +235,9 @@ it('snapshot: prime-rlm-evaluation stops a daemon whose start was abandoned and 
 
 // A daemon held alive without listening has no pid file for as long as the fault lasts, far longer than the 5 s wait for abandoned
 // requests and the 0.7 s pause before the second sweep. Only the scan by startup entry and run home can find it, so the "found by
-// its command line" line is what shows the window was real. Each daemon is held on its own: held together, the orchestration
-// daemon, which waits for the Resident daemon before it listens, may have exited by the time the cleanup looks.
+// its command line" line is what shows the window was real. Each daemon is held on its own: with both held, the one probe run
+// (g1-hold-terminal-source-20261016T120252Z-0) found only the Resident daemon by command line and left nothing running; why the
+// orchestration daemon was not found is unknown.
 describe.each([
   ['prime-rlm-terminal', 'DSH_TERMINAL_FIXTURE_FAULT', /stage "daemon ready" did not happen in time/u],
   ['prime-rlm-evaluation', 'DSH_EVALUATION_FIXTURE_FAULT', /request list did not return within/u],

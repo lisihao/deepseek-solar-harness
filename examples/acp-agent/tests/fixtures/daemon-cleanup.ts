@@ -1,9 +1,11 @@
 /**
  * Stop the daemons a keyless fixture driver started in its isolated home, including a daemon that exists but has not published
- * its pid file yet. A daemon writes its pid file only when it is listening, which comes after it has waited for its Resident
- * providers; a cleanup that reads only the pid file therefore reports "nothing to stop" for a process that is still starting and
- * will keep running after the driver has exited. Such a process is found by its startup entry and by the exact `--dsh-home` or
- * `--root` of this run, stopped, and confirmed gone, or the stop fails.
+ * its pid file yet. A daemon writes its pid file from its listen callback, so a cleanup that reads only the pid file reports
+ * "nothing to stop" for a process that is still starting and that keeps running after the driver has exited. The orchestration
+ * daemon listens only after it has waited for its Resident providers (`orchestration-local/src/daemon.ts`), so its window is the
+ * longer one. Such a process is found by its startup entry and by the exact `--dsh-home` or `--root` of this run, stopped, and
+ * confirmed gone, or the stop fails. The failing branches (a process still listed after the deadline, a rescue that SIGKILL did
+ * not end) have no test: SIGKILL ends the processes of these runs.
  */
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
