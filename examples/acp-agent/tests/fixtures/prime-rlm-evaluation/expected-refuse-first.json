@@ -52,6 +52,10 @@
   "retryScheduled": 0,
   "namesDispatchNotAdmitted": false,
   "namesOperatorBusy": false,
+  "namesAdmissionRefusedInEvents": false,
+  "refusalReasonsInMeteringRows": [
+    "input-exhausted"
+  ],
   "namesDispatchUnknown": false,
   "daemonsStopped": true
 }

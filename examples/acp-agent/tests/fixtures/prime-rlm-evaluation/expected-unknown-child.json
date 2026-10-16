@@ -237,6 +237,8 @@
   "retryScheduled": 0,
   "namesDispatchNotAdmitted": false,
   "namesOperatorBusy": false,
+  "namesAdmissionRefusedInEvents": false,
+  "refusalReasonsInMeteringRows": [],
   "namesDispatchUnknown": false,
   "daemonsStopped": true
 }
