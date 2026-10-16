@@ -2650,6 +2650,10 @@ describe('orchestration daemon', () => {
       readonly retry?: { readonly maxAttempts: number; readonly retryableCodes: readonly string[] }
       /** Runs after the daemon started and before the run is compiled, for example to make the store refuse an event. */
       readonly prepare?: (daemon: OrchestrationDaemon) => void
+      /** Run the node under Autonomous Mode, with an end condition that nothing in this suite satisfies. */
+      readonly autonomous?: true
+      /** Cancel the run through the client as soon as this holds for the requests the endpoint has received. */
+      readonly cancelWhen?: () => boolean
     }
 
     async function run(
@@ -2678,10 +2682,28 @@ describe('orchestration daemon', () => {
               ? {}
               : { retryPolicy: { ...options.retry, backoffMs: 0, retryableCodes: [...options.retry.retryableCodes] } },
             ...rlm ? { rlm: { mode: 'enabled' as const, maxDepth: deep ? 2 : 1, maxChildren: 2, maxTurns: 4 } } : {},
+            ...options.autonomous === undefined
+              ? {}
+              : {
+                requiredArtifacts: ['EVAL-ART'],
+                autonomous: {
+                  mode: 'enabled' as const, maxContinuations: 2,
+                  endCondition: { version: 1 as const, operator: 'all' as const, checks: [{ id: 'art', kind: 'artifact-present' as const, ref: 'EVAL-ART' }] },
+                },
+              },
           }],
         },
       })
       const started = await startCompilation(client, compilation.compilationId)
+      const cancelWhen = options.cancelWhen
+      if (cancelWhen !== undefined) {
+        await eventually(async () => cancelWhen(), value => value)
+        const current = await client.inspect(String(started.runId))
+        await client.control({
+          commandId: `cancel:${String(started.runId)}`, runId: started.runId, expectedRevision: current.revision, action: 'cancel',
+          reason: 'cancel the run while a request of it is in flight',
+        })
+      }
       const settled = await eventually(() => client.inspect(String(started.runId)), value => ['completed', 'failed', 'indeterminate', 'cancelled'].includes(value.state))
       return { daemon, client, settled, runId: started.runId }
     }
@@ -3026,7 +3048,7 @@ describe('orchestration daemon', () => {
         this.requests.push(request)
         const evaluation = request.evaluation
         if (evaluation === undefined) throw new Error('the probe worker runs only under a scope')
-        const ticket = evaluation.admission(`${request.commandId}#round0@probe-session`)({
+        const ticket = evaluation.admission(`${request.commandId}#round0@${request.modelToolBridge?.sessionId ?? 'probe-session'}`)({
           model: evaluation.model, bodyBytes: 100, bodySha256: createHash('sha256').update(request.commandId).digest('hex'),
           maxOutputTokens: 10, thinking: 'enabled', reasoningEffort: evaluation.reasoningEffort, hasNonTextContent: false,
         })
@@ -3143,6 +3165,108 @@ describe('orchestration daemon', () => {
       expect(thrown[0]).toMatchObject({ message: 'worker threw after the cancel' })
       expect((thrown[0] as Error).name).not.toBe('UnknownPhysicalOutcomeError')
       expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
+    })
+
+    const SETTLED = { inputTokens: 5, outputTokens: 2 }
+    const completed = (text: string): ModelWorkerResult => ({ output: [{ type: 'text', text }], stopReason: 'completed', usage: SETTLED })
+    const isRoot = (request: ModelWorkerExecuteRequest): boolean => request.commandId.endsWith(':rlm:root')
+    const isChild = (request: ModelWorkerExecuteRequest): boolean => request.commandId.includes(':rlm:rlm-child-')
+
+    /**
+     * What the probe worker does for the three kinds of continuation a root can have. The root and the child settle their request
+     * and use the real REPL, so the runtime holds a real goal, a real Autonomous node or a real message from a child; the
+     * continuation is what `onContinuation` decides. The daemon, the ledger, the consumers of the continuation and the retry
+     * policy are the shipped ones.
+     */
+    function continuationWorker(
+      source: 'goal' | 'autonomous' | 'message',
+      onContinuation: Parameters<ProbeWorker['after']> extends [infer Request, infer Ticket]
+        ? (request: Request, ticket: Ticket) => Promise<ModelWorkerResult>
+        : never,
+    ): ProbeWorker {
+      const worker = new ProbeWorker()
+      worker.after = async (request, ticket) => {
+        if (isRoot(request)) {
+          ticket.settle(SETTLED)
+          if (source === 'goal') await callRlmTool(request, 'root-goal', 'await goal.create("EVAL-GOAL-OBJECTIVE", { continuationBudget: 1 }); "goal set"')
+          if (source === 'message') await callRlmTool(request, 'root-spawn', `await rlm(${JSON.stringify(KID)}, { name: "kid" }); "spawned"`)
+          return completed('root done')
+        }
+        if (isChild(request)) {
+          ticket.settle(SETTLED)
+          await callRlmTool(request, 'kid-report', 'await agentMessage.send("kid report", { receiverRole: "parent", mode: "auto" }); "sent"')
+          return completed('kid done')
+        }
+        return await onContinuation(request, ticket)
+      }
+      return worker
+    }
+
+    it.each([
+      ['a goal continuation', 'goal', false],
+      ['an Autonomous direct continuation', 'autonomous', true],
+      ['a message continuation under Autonomous Mode', 'message', true],
+    ] as const)('keeps a run cancelled when the worker throws after the cancel of %s, keeps its request unknown, and sends nothing more', async (_name, source, autonomous) => {
+      const f = await fixture(treeHandler())
+      let held = false
+      const worker = continuationWorker(source, async (request, ticket) => {
+        held = true
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the cancel')
+      })
+      const { settled } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE, ...autonomous ? { autonomous: true as const } : {}, cancelWhen: () => held,
+      })
+      // The cancelled run is not turned into an indeterminate one by the consumer that read the interrupted continuation.
+      expect(settled.state).toBe('cancelled')
+      // The request stays unknown: the quota it holds is not released, and the root is not sent again.
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+      const sent = worker.requests.length
+      await new Promise(resolve => setTimeout(resolve, 300))
+      expect(worker.requests).toHaveLength(sent)
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+    })
+
+    it.each([
+      ['the state of the Autonomous node', 'saveAutonomousState'],
+      ['the Autonomous usage event', 'rlm.autonomous.usage'],
+    ] as const)('keeps an unknown message continuation under Autonomous Mode unknown when the store refuses %s', async (_name, refused) => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker('message', (_request, ticket) => {
+        ticket.abandon()
+        return Promise.resolve({ output: [], stopReason: 'error' })
+      })
+      let failures: unknown[] = []
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE,
+        autonomous: true,
+        prepare: (daemon) => {
+          if (refused === 'saveAutonomousState') {
+            // The first save creates the node's state before anything runs; the ones after it record a turn.
+            const store = (daemon as unknown as { store: { saveAutonomousState(...args: unknown[]): void } }).store
+            const original = store.saveAutonomousState.bind(store)
+            let saves = 0
+            store.saveAutonomousState = (...args) => {
+              saves += 1
+              if (saves > 1) throw new Error(`store refused ${refused}`)
+              original(...args)
+            }
+          } else {
+            refuseEvents(daemon, refused)
+          }
+          failures = captureFailures(daemon)
+        },
+      })
+      // The node is not retried although its policy lists the code a storage failure would have, and there is room to retry.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(failures).toHaveLength(1)
+      expect(failures[0]).toMatchObject({ name: 'UnknownPhysicalOutcomeError', code: 'COMMAND_INDETERMINATE' })
+      expect(causesOf(failures[0])).toContain(`store refused ${refused}`)
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
     })
 
     it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {

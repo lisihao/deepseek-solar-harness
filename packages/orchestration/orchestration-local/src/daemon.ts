@@ -3255,7 +3255,7 @@ export class OrchestrationDaemon {
         `${String(plan.executionId)}:rlm:root`,
         signal,
       )
-      : await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
+      : await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, signal, spec.timeoutMs)
     const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
     this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
       executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
@@ -4358,19 +4358,30 @@ export class OrchestrationDaemon {
     for (;;) {
       const current = this.store.autonomousState(String(record.snapshot.runId), spec.id, plan.attempt)
         ?? createAutonomousState(policy)
+      // A stop with a request of the session in doubt, which nobody cancelled, is decided before the state and the usage are written,
+      // so a refused write cannot become the error the node is retried on; it is kept as an additional error.
+      const unknownStop = (result.stopReason === 'error' || result.stopReason === 'aborted')
+        && !signal.aborted && this.sessionHoldsUnknownRequest(String(sessionId))
       const accounted = accountAutonomousUsage(current, commandId, result.usage)
-      this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, accounted)
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.usage', {
-        runtimeSessionId: String(sessionId), commandId,
-        turnsUsed: accounted.turnsUsed, tokensUsed: accounted.tokensUsed,
-        inputTokens: result.usage?.inputTokens ?? 0,
-        outputTokens: result.usage?.outputTokens ?? 0,
-        cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
-        cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
-      }, record.snapshot.nodes.find(value => value.id === spec.id))])
-      if ((result.stopReason === 'error' || result.stopReason === 'aborted') && this.sessionHoldsUnknownRequest(String(sessionId))) {
+      let writeError: unknown
+      try {
+        this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, accounted)
+        this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.usage', {
+          runtimeSessionId: String(sessionId), commandId,
+          turnsUsed: accounted.turnsUsed, tokensUsed: accounted.tokensUsed,
+          inputTokens: result.usage?.inputTokens ?? 0,
+          outputTokens: result.usage?.outputTokens ?? 0,
+          cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
+          cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
+        }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      } catch (error) {
+        if (!unknownStop) throw error
+        writeError = error
+      }
+      if (unknownStop) {
         throw new UnknownPhysicalOutcomeError(
-          `Autonomous root turn stopped with ${result.stopReason} while a request of the session has an unknown outcome`, result.stopReason,
+          `Autonomous root turn stopped with ${result.stopReason} while a request of the session has an unknown outcome`,
+          writeError === undefined ? result.stopReason : new AggregateError([result.stopReason, writeError], 'the stop and the refused write'),
         )
       }
       if (result.stopReason === 'error' || result.stopReason === 'aborted') {
@@ -4433,7 +4444,7 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
-      if (continuation.status === 'indeterminate' && this.holdsUnknownRequest(commandId)) {
+      if (continuation.status === 'indeterminate' && !signal.aborted && this.holdsUnknownRequest(commandId)) {
         throw new UnknownPhysicalOutcomeError(continuation.error ?? 'Autonomous continuation has a request of unknown outcome', continuation)
       }
       if (continuation.status !== 'settled') {
@@ -4496,6 +4507,7 @@ export class OrchestrationDaemon {
     sessionId: RlmRuntimeSessionId,
     bindings: RlmRuntimeHostBindings,
     initial: PhysicalOperatorResult,
+    signal: AbortSignal,
     timeoutMs?: number,
   ): Promise<PhysicalOperatorResult> {
     let result = initial
@@ -4520,7 +4532,7 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
-      if (continuation.status === 'indeterminate' && this.holdsUnknownRequest(String(claim.commandId))) {
+      if (continuation.status === 'indeterminate' && !signal.aborted && this.holdsUnknownRequest(String(claim.commandId))) {
         throw new UnknownPhysicalOutcomeError(continuation.error ?? 'RLM goal continuation has a request of unknown outcome', continuation)
       }
       if (continuation.status !== 'settled') {
