@@ -4076,6 +4076,16 @@ export class OrchestrationDaemon {
       (result) => {
         const account = this.accountCommand(ledger.attemptsOf(command), admissionCalls)
         const written = this.recordCommandMetering(accounting, account, { kind: 'returned', stopReason: result.stopReason })
+        // A worker reports a failed request as a result that stopped with an error, not only by throwing. When such a command left
+        // a request outstanding, the outcome of that request is unknown, as it is for a thrown failure.
+        const failedStop = result.stopReason === 'error' || result.stopReason === 'aborted'
+        if (failedStop && account.counts.missing.length > 0 && !request.signal.aborted) {
+          throw new UnknownPhysicalOutcomeError(
+            `model command ${command} stopped with ${result.stopReason} after sending ${String(account.counts.missing.length)} request(s) `
+            + 'whose usage the ledger does not hold',
+            written.written ? result.stopReason : new AggregateError([result.stopReason, written.error], 'the stop and the refused metering event'),
+          )
+        }
         // Without a record of the account, nothing vouches for the usage either.
         if (account.complete && written.written) return result
         const { usage: _partialUsage, ...withoutUsage } = result
