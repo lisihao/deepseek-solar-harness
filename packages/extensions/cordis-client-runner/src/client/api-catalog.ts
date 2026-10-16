@@ -423,7 +423,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AssistantProvenanceView',
-    declaration: 'export interface AssistantProvenanceView {\n    provider: string;\n    model: string;\n}',
+    declaration: 'export interface AssistantProvenanceView {\n    provider: string;\n    model: string;\n    reasoningEffort?: string;\n}',
   },
   {
     name: 'AssistantRequestConfig',
