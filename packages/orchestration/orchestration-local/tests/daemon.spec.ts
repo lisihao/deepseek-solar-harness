@@ -3412,10 +3412,34 @@ describe('orchestration daemon', () => {
         return Promise.resolve({ output: [], stopReason: 'error' })
       })
       const { settled, client, runId } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE })
+      // The node ends as an unfinished result, as it did before: it is not completed, and it is not run again.
+      expect(settled.nodes[0]?.state).toBe('failed')
+      expect(settled.nodes[0]?.blockers.map(blocker => blocker.code)).toEqual(['OPERATOR_STOPPED'])
       expect(settled.nodes[0]?.attempt).toBe(1)
       expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
       expect(worker.requests.filter(isRoot)).toHaveLength(1)
       expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    }, 20_000)
+
+    it('keeps a node unknown when an interrupt of the root session ends the open request of the real worker, and does not run it again', async () => {
+      const f = await fixture(() => ({ kind: 'hold' }))
+      await run(f, ROOT, false, true, undefined, {
+        retry: REPLAYABLE,
+        prepare: (daemon) => {
+          const runtime = (daemon as unknown as { ctx: { rlmRuntime: RuntimeInterrupt } }).ctx.rlmRuntime
+          // The endpoint holds the root's request; once it has arrived, the runtime interrupts the root session.
+          void eventually(async () => f.fake.received.length, count => count >= 1).then(async () => {
+            const sessions = await runtime.list()
+            await runtime.interrupt(sessions.find(entry => entry.depth === 0)?.sessionId ?? '')
+          })
+        },
+      }).then(async ({ settled, client, runId }) => {
+        expect(settled.nodes[0]?.state).toBe('indeterminate')
+        expect(settled.nodes[0]?.attempt).toBe(1)
+        expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      })
+      expect(f.fake.received).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['unknown'])
     }, 20_000)
 
     it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {
