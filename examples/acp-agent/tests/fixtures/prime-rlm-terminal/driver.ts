@@ -502,7 +502,9 @@ async function batchTranscript(runId: OrchestrationRunId, events: RunEvents, unt
       output: Array<{ type: string; text?: string }>
     }
     artifacts.push({
-      command: command(artifact.commandId), messages: artifact.messageIds.map(label), stopReason: artifact.stopReason,
+      command: command(artifact.commandId),
+      messages: (artifact.messageIds as string[] | undefined ?? []).map(label),
+      stopReason: artifact.stopReason,
       answer: artifact.output.filter(block => block.type === 'text').map(block => block.text ?? '').join(''),
     })
   }
