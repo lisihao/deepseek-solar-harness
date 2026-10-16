@@ -146,7 +146,7 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
-import { EvaluationLedger, parseEvaluationScope, type CommandAttempts } from './evaluation-ledger.ts'
+import { accountOf, EvaluationLedger, isUnknownOutcome, parseEvaluationScope, type CommandAccount } from './evaluation-ledger.ts'
 import {
   assertMessageContinuationNamesMessages,
   childResultFromArtifact,
@@ -4074,12 +4074,12 @@ export class OrchestrationDaemon {
     })
     return run.then(
       (result) => {
-        const account = this.accountCommand(ledger.attemptsOf(command), admissionCalls)
+        const account = accountOf(ledger.attemptsOf(command), admissionCalls)
         const written = this.recordCommandMetering(accounting, account, { kind: 'returned', stopReason: result.stopReason })
         // A worker reports a failed request as a result that stopped with an error, not only by throwing. When such a command left
         // a request outstanding, the outcome of that request is unknown, as it is for a thrown failure.
         const failedStop = result.stopReason === 'error' || result.stopReason === 'aborted'
-        if (failedStop && account.counts.missing.length > 0 && !request.signal.aborted) {
+        if (failedStop && isUnknownOutcome(account.counts.missing.length, request.signal.aborted, false)) {
           throw new UnknownPhysicalOutcomeError(
             `model command ${command} stopped with ${result.stopReason} after sending ${String(account.counts.missing.length)} request(s) `
             + 'whose usage the ledger does not hold',
@@ -4093,10 +4093,10 @@ export class OrchestrationDaemon {
       },
       (error: unknown) => {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN'
-        const account = this.accountCommand(ledger.attemptsOf(command), admissionCalls)
+        const account = accountOf(ledger.attemptsOf(command), admissionCalls)
         // A caller that cancelled the command keeps the error it gets today; only a command that nobody stopped is reclassified.
-        const outstanding = account.counts.missing.length > 0
-        const unknownOutcome = outstanding && !request.signal.aborted && !(error instanceof UnknownPhysicalOutcomeError)
+        const alreadyUnknown = error instanceof UnknownPhysicalOutcomeError
+        const unknownOutcome = isUnknownOutcome(account.counts.missing.length, request.signal.aborted, alreadyUnknown)
         const written = this.recordCommandMetering(accounting, account, { kind: 'failed', code })
         // The classification is decided before the event is written, and a failed write does not change it.
         if (!unknownOutcome) throw error
@@ -4110,21 +4110,6 @@ export class OrchestrationDaemon {
   }
 
   /**
-   * Decide, from the ledger's rows and the worker's admission calls, whether the account of a command is complete.
-   * @param counts - the ledger's rows for the command.
-   * @param admissionCalls - how many physical requests the worker asked to admit; each must have exactly one row.
-   * @returns the counts and whether every counted request has a row and none lacks usage.
-   */
-  private accountCommand(
-    counts: CommandAttempts,
-    admissionCalls: number,
-  ): { readonly counts: CommandAttempts; readonly admissionCalls: number; readonly unaccounted: number; readonly complete: boolean } {
-    const unaccounted = admissionCalls - counts.rows
-    // A command that returned without asking to admit any request has nothing the ledger could vouch for.
-    return { counts, admissionCalls, unaccounted, complete: counts.missing.length === 0 && unaccounted === 0 && admissionCalls > 0 }
-  }
-
-  /**
    * Record, apart from the terminal outcome of a command, what the ledger holds for its physical requests.
    * @param accounting - the run and node plan.
    * @param account - the decided account of the command.
@@ -4133,7 +4118,7 @@ export class OrchestrationDaemon {
    */
   private recordCommandMetering(
     accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
-    account: ReturnType<OrchestrationDaemon['accountCommand']>,
+    account: CommandAccount,
     outcome: { readonly kind: 'returned'; readonly stopReason: string } | { readonly kind: 'failed'; readonly code: string },
   ): { readonly written: true } | { readonly written: false; readonly error: unknown } {
     const { record, plan } = accounting

@@ -8,7 +8,9 @@ import { ADMISSION_REFUSED_CODE, type RequestAdmissionInput } from '@deepseek-ai
 import {
   EvaluationLedger,
   EvaluationLedgerError,
+  accountOf,
   evaluationUsageOf,
+  isUnknownOutcome,
   parseAttemptLabel,
   parseEvaluationScope,
   takeEvaluationOwnerLock,
@@ -203,6 +205,27 @@ describe('the attempts of one command', () => {
       { id: 'scope-a-000002', seq: 2, round: 1, session: 's', state: 'unknown', bodySha256: 'c'.repeat(64), bodyBytes: 100 },
       { id: 'scope-a-000003', seq: 3, round: 2, session: 's', state: 'reserved', bodySha256: 'd'.repeat(64), bodyBytes: 100 },
     ])
+  })
+})
+
+describe('the account of a command', () => {
+  const none = { command: 'c', rows: 0, sent: 0, refused: 0, observed: { input: 0, output: 0 }, missing: [], attempts: [] } as const
+  const hole = { id: 'x-000001', seq: 1, round: 0, session: 's', state: 'unknown', bodySha256: 'a'.repeat(64), bodyBytes: 1 } as const
+
+  it('is complete only when every request the worker asked to admit has a row and none lacks usage', () => {
+    expect(accountOf({ ...none, rows: 2, sent: 2 }, 2)).toMatchObject({ complete: true, unaccounted: 0 })
+    expect(accountOf({ ...none, rows: 2, sent: 1, refused: 1 }, 2).complete).toBe(true)
+    expect(accountOf({ ...none, rows: 2, sent: 2, missing: [hole] }, 2).complete).toBe(false)
+    expect(accountOf({ ...none, rows: 1, sent: 1 }, 2)).toMatchObject({ complete: false, unaccounted: 1 })
+    expect(accountOf({ ...none, rows: 2, sent: 2 }, 1)).toMatchObject({ complete: false, unaccounted: -1 })
+    expect(accountOf(none, 0).complete).toBe(false)
+  })
+
+  it('is reported as an unknown outcome only when a request is outstanding, nobody cancelled, and it is not already so', () => {
+    expect(isUnknownOutcome(1, false, false)).toBe(true)
+    expect(isUnknownOutcome(0, false, false)).toBe(false)
+    expect(isUnknownOutcome(1, true, false)).toBe(false)
+    expect(isUnknownOutcome(1, false, true)).toBe(false)
   })
 })
 

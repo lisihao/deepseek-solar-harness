@@ -12,7 +12,7 @@
   "outbound": 2,
   "rowsAdmitted": 0,
   "refusals": [],
-  "everyRequestJoinsOneRowAndEveryRowOneRequest": false,
+  "everyRequestJoinsOneRowAndEveryRowOneRequest": null,
   "everyRequestWasReservedBeforeItArrived": null,
   "ledgerStates": [],
   "requests": [

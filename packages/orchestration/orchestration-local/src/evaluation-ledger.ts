@@ -462,6 +462,40 @@ export interface CommandAttempts {
   readonly attempts: readonly CommandAttemptRow[]
 }
 
+/** The account of one command: the ledger's rows for it against the physical requests the worker asked to admit. */
+export interface CommandAccount {
+  readonly counts: CommandAttempts
+  readonly admissionCalls: number
+  /** Requests the worker asked to admit that have no row; a row that exists without a call cannot be told from another command's. */
+  readonly unaccounted: number
+  /** Every counted request has a row, none lacks usage, and the command sent at least one request. */
+  readonly complete: boolean
+}
+
+/**
+ * Decide whether the account of a command is complete.
+ * @param counts - the ledger's rows for the command.
+ * @param admissionCalls - how many physical requests the worker asked to admit; each must have exactly one row.
+ * @returns the account.
+ */
+export function accountOf(counts: CommandAttempts, admissionCalls: number): CommandAccount {
+  const unaccounted = admissionCalls - counts.rows
+  // A command that ended without asking to admit any request has nothing the ledger could vouch for.
+  return { counts, admissionCalls, unaccounted, complete: counts.missing.length === 0 && unaccounted === 0 && admissionCalls > 0 }
+}
+
+/**
+ * Whether a command that ended badly must be reported as an unknown outcome: a request it sent is not accounted for, nobody
+ * cancelled it, and it was not already reported so.
+ * @param missing - how many requests the ledger holds as reserved or unknown.
+ * @param cancelled - whether the caller's own signal had aborted.
+ * @param alreadyUnknown - whether the failure is already an unknown outcome.
+ * @returns `true` to report it as an unknown outcome.
+ */
+export function isUnknownOutcome(missing: number, cancelled: boolean, alreadyUnknown: boolean): boolean {
+  return missing > 0 && !cancelled && !alreadyUnknown
+}
+
 export class EvaluationLedger {
   /** Set by `close()`: from then on the owner lock is released and this object writes nothing. */
   private closed = false
