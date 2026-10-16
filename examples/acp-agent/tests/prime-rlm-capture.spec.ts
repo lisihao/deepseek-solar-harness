@@ -101,6 +101,12 @@ describe('correlating requests with the production dispatch records', () => {
     fails(raw, production(), 'issued no tool call')
   })
 
+  it('fails on a request that carries the result of a tool call a later request was answered with', () => {
+    const raw = scenario()
+    raw[0] = request(0, 'ROOT TASK', [{ id: 'fake-call-2', session: CHILD_SESSION, command: CHILD_COMMAND }], 'fake-call-1')
+    fails(raw, production(), 'does not follow the request that issued its last tool call')
+  })
+
   it('fails when two requests follow the same tool call', () => {
     const raw = scenario()
     raw.push(request(6, 'ROOT TASK', [{ id: 'fake-call-1', session: ROOT_SESSION, command: ROOT_COMMAND }]))
@@ -191,6 +197,12 @@ describe('projecting a request', () => {
     expect(() => { assertLossless(raw, JSON.parse(text), tokens) }).toThrow('does not restore to the raw request')
     const schemaless = { ...(projection as object), tools: [] }
     expect(() => { assertLossless(raw, schemaless, tokens) }).toThrow(CaptureError)
+    // A schema replaced by a token that stands for it restores exactly, and is still a changed schema.
+    const description = (JSON.parse(raw.body) as { tools: Array<{ function: { description: string } }> }).tools[0]?.function.description ?? ''
+    const token = tokens.take('schema', description)
+    const hidden = JSON.parse(JSON.stringify(projection)) as { tools: Array<{ function: { description: string } }> }
+    ;(hidden.tools[0] as { function: { description: string } }).function.description = token
+    expect(() => { assertLossless(raw, hidden, tokens) }).toThrow('changed the tool schemas')
   })
 })
 
