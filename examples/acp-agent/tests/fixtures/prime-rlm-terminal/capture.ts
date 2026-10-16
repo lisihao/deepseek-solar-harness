@@ -33,7 +33,7 @@ export interface ProductionRecords {
 }
 
 /** One request tied to its production dispatch. */
-export interface CorrelatedRequest {
+interface CorrelatedRequest {
   readonly ordinal: number
   /** The number of tool results the request carried back; 0 for the first request of a model loop. */
   readonly round: number
