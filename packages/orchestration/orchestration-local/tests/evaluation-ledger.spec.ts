@@ -9,6 +9,7 @@ import {
   EvaluationLedger,
   EvaluationLedgerError,
   evaluationUsageOf,
+  parseAttemptLabel,
   parseEvaluationScope,
   takeEvaluationOwnerLock,
   type EvaluationScopeV1,
@@ -165,6 +166,43 @@ describe('admission', () => {
     expect(ledger.remainingOutputTokens()).toBe(400)
     ledger.admission('a')(request({ maxOutputTokens: 70 }))
     expect(ledger.remainingOutputTokens()).toBe(330)
+  })
+})
+
+describe('the attempts of one command', () => {
+  const usage = { inputTokens: 40, outputTokens: 7 }
+
+  it('reads the command, round and session from a label, and nothing from another shape', () => {
+    expect(parseAttemptLabel('cmd:1#plain')).toEqual({ command: 'cmd:1', round: null, session: null })
+    expect(parseAttemptLabel('cmd:1#round3@rlm-session-x')).toEqual({ command: 'cmd:1', round: 3, session: 'rlm-session-x' })
+    for (const other of ['cmd:1', 'cmd:1#round@s', '#plain', 'cmd#round1', 'a#b#plain']) expect(parseAttemptLabel(other)).toBeUndefined()
+  })
+
+  it('counts rows one by one, so two requests with the same label and body are two rows', () => {
+    const ledger = open()
+    ledger.admission('cmd:1#round0@s')(request()).settle(usage)
+    ledger.admission('cmd:1#round0@s')(request()).settle(usage)
+    ledger.admission('cmd:2#plain')(request()).settle(usage)
+    const counted = ledger.attemptsOf('cmd:1')
+    expect(counted).toMatchObject({ command: 'cmd:1', rows: 2, sent: 2, refused: 0, missing: [] })
+    expect(counted.observed).toEqual({ input: 80, output: 14 })
+    expect(ledger.attemptsOf('cmd:3')).toMatchObject({ rows: 0, sent: 0, missing: [] })
+  })
+
+  it('names the requests whose usage it does not hold, and leaves a refusal out of them', () => {
+    const limits = { ...SCOPE.limits, httpAttempts: 3 }
+    const ledger = open({ ...SCOPE, limits }, scopeText({ limits }))
+    ledger.admission('cmd:1#round0@s')(request({ bodySha256: 'b'.repeat(64) })).settle(usage)
+    ledger.admission('cmd:1#round1@s')(request({ bodySha256: 'c'.repeat(64) })).abandon()
+    ledger.admission('cmd:1#round2@s')(request({ bodySha256: 'd'.repeat(64) }))
+    expect(() => ledger.admission('cmd:1#round3@s')(request())).toThrow('attempts-exhausted')
+    const counted = ledger.attemptsOf('cmd:1')
+    expect(counted).toMatchObject({ rows: 4, sent: 3, refused: 1 })
+    expect(counted.observed).toEqual({ input: 40, output: 7 })
+    expect(counted.missing).toEqual([
+      { id: 'scope-a-000002', seq: 2, round: 1, session: 's', state: 'unknown', bodySha256: 'c'.repeat(64), bodyBytes: 100 },
+      { id: 'scope-a-000003', seq: 3, round: 2, session: 's', state: 'reserved', bodySha256: 'd'.repeat(64), bodyBytes: 100 },
+    ])
   })
 })
 

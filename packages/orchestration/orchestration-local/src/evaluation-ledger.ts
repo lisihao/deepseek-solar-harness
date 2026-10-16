@@ -400,6 +400,52 @@ export function takeEvaluationOwnerLock(lockPath: string, interleave: OwnerLockI
  * balance and the recording of a reservation cannot be interleaved with another request and a reservation is on disk before
  * its request is sent. One process owns the ledger at a time: opening it takes an owner lock before the file is read or written.
  */
+/** The logical command, tool round and session an attempt belongs to, as the DeepSeek worker names them in the attempt's label. */
+export interface AttemptOrigin {
+  readonly command: string
+  /** `null` for the one request of a command that uses no tools. */
+  readonly round: number | null
+  readonly session: string | null
+}
+
+/**
+ * Read the origin of an attempt from its label: `<command>#plain` or `<command>#round<N>@<session>`. The label is how an attempt
+ * is related to a command; it never decides how many requests were sent, which attempts exist, or whether two are one.
+ * @param label - the label the worker gave the admission.
+ * @returns the origin, or `undefined` for a label of another shape.
+ */
+export function parseAttemptLabel(label: string): AttemptOrigin | undefined {
+  const plain = /^([^#]+)#plain$/u.exec(label)
+  if (plain?.[1] !== undefined) return { command: plain[1], round: null, session: null }
+  const round = /^([^#]+)#round(\d+)@(.+)$/u.exec(label)
+  if (round?.[1] === undefined || round[2] === undefined || round[3] === undefined) return undefined
+  return { command: round[1], round: Number(round[2]), session: round[3] }
+}
+
+/** A request that was sent, or may have been, and whose usage the ledger does not hold. */
+export interface MissingAttempt {
+  readonly id: string
+  readonly seq: number
+  readonly round: number | null
+  readonly session: string | null
+  readonly state: 'reserved' | 'unknown'
+  readonly bodySha256: string
+  readonly bodyBytes: number
+}
+
+/** What the ledger holds for the attempts of one command. */
+export interface CommandAttempts {
+  readonly command: string
+  /** Every attempt of the command, refusals included. */
+  readonly rows: number
+  /** Attempts that were admitted: the requests that were or may have been sent. */
+  readonly sent: number
+  readonly refused: number
+  /** The usage the ledger holds for the settled attempts. It is a partial sum when `missing` is not empty. */
+  readonly observed: EvaluationUsage
+  readonly missing: readonly MissingAttempt[]
+}
+
 export class EvaluationLedger {
   /** Set by `close()`: from then on the owner lock is released and this object writes nothing. */
   private closed = false
@@ -479,6 +525,34 @@ export class EvaluationLedger {
    */
   remainingOutputTokens(): number {
     return Math.max(0, this.scope.limits.outputTokens - this.totals().output)
+  }
+
+  /**
+   * The attempts of one command, counted from the ledger's rows. Rows are counted one by one: two requests with the same label or
+   * the same body are two rows.
+   * @param command - the logical command, as it appears in the labels.
+   * @returns the counts, the usage the ledger holds, and the attempts whose usage it does not hold.
+   */
+  attemptsOf(command: string): CommandAttempts {
+    const rows = this.state.attempts.filter(attempt => parseAttemptLabel(attempt.label)?.command === command)
+    const missing: MissingAttempt[] = []
+    let input = 0
+    let output = 0
+    for (const attempt of rows) {
+      if (attempt.state === 'settled' && attempt.usage !== undefined) {
+        input = addCounts(input, attempt.usage.input)
+        output = addCounts(output, attempt.usage.output)
+      }
+      if (attempt.state === 'reserved' || attempt.state === 'unknown') {
+        const origin = parseAttemptLabel(attempt.label)
+        missing.push({
+          id: attempt.id, seq: attempt.seq, round: origin?.round ?? null, session: origin?.session ?? null,
+          state: attempt.state, bodySha256: attempt.bodySha256, bodyBytes: attempt.bodyBytes,
+        })
+      }
+    }
+    const refused = rows.filter(attempt => attempt.state === 'refused').length
+    return { command, rows: rows.length, sent: rows.length - refused, refused, observed: { input, output }, missing }
   }
 
   /**

@@ -146,7 +146,7 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
-import { EvaluationLedger, parseEvaluationScope } from './evaluation-ledger.ts'
+import { EvaluationLedger, parseEvaluationScope, type CommandAttempts } from './evaluation-ledger.ts'
 import {
   assertMessageContinuationNamesMessages,
   childResultFromArtifact,
@@ -417,6 +417,18 @@ function assertRlmBridgeAllowed(
       `RLM model-tool bridge requested unsealed parent tool: ${unsealedTool.name}`,
       'GRAPH_INVALID',
     )
+  }
+}
+
+/**
+ * A model-worker command that failed under an evaluation scope after sending a physical request whose usage the ledger does not
+ * hold. The request may have been processed and billed, so the command is an unknown outcome and must not be retried as an
+ * ordinary failure. Created only under a scope.
+ */
+class UnknownPhysicalOutcomeError extends OrchestrationError {
+  constructor(message: string) {
+    super(message, 'COMMAND_INDETERMINATE')
+    this.name = 'UnknownPhysicalOutcomeError'
   }
 }
 
@@ -3728,7 +3740,7 @@ export class OrchestrationDaemon {
           parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
           ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
           modelToolBridge: bridge, signal: execution.signal,
-        })
+        }, { record, plan })
         const syntheticSessionId = `model-worker:${request.model.operatorId}:${String(request.childSessionId)}`
         const syntheticTurnId = `model-worker-turn:${String(executionId)}`
         this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
@@ -4015,8 +4027,20 @@ export class OrchestrationDaemon {
   /**
    * Dispatch one model-worker request. Under an evaluation scope only the DeepSeek API worker may run, and the request carries the
    * scope's generation limits and an admission for each physical request it makes; outside a scope the request is unchanged.
+   *
+   * Under a scope, when the command ends, its physical requests are read back from the ledger and recorded in a
+   * `evaluation.command.metering` event, apart from how the command ended. If the ledger does not hold the usage of every request
+   * the command sent, the worker's usage is withheld: a sum of the known requests would read as the cost of the command. If the
+   * command fails with such a request outstanding, it is reported as an unknown outcome, not as an ordinary failure that the
+   * node's retry policy could replay.
+   * @param request - the worker request.
+   * @param accounting - the run and node plan the command belongs to, where its metering event is recorded.
+   * @returns the worker result; under a scope without its usage when the ledger's account of the command is incomplete.
    */
-  private executeModelWorker(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
+  private executeModelWorker(
+    request: ModelWorkerExecuteRequest,
+    accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
+  ): Promise<ModelWorkerResult> {
     const ledger = this.evaluation
     if (ledger === undefined) return this.ctx.modelWorkers.execute(request)
     if (request.workerId !== DEEPSEEK_WORKER_ID) {
@@ -4025,16 +4049,75 @@ export class OrchestrationDaemon {
         'ORCHESTRATION_UNAVAILABLE',
       ))
     }
-    return this.ctx.modelWorkers.execute({
+    const command = request.commandId
+    // Every call of an admission is one physical request. Counting the calls lets the account be checked against the rows.
+    let admissionCalls = 0
+    const run = this.ctx.modelWorkers.execute({
       ...request,
       evaluation: {
         model: ledger.scope.model,
         maxOutputTokens: ledger.scope.limits.maxOutputTokensPerRequest,
         reasoningEffort: ledger.scope.generation.reasoningEffort,
         remainingOutputTokens: () => ledger.remainingOutputTokens(),
-        admission: label => ledger.admission(label),
+        admission: (label) => {
+          const admit = ledger.admission(label)
+          return (input) => {
+            admissionCalls += 1
+            return admit(input)
+          }
+        },
       },
     })
+    return run.then(
+      (result) => {
+        const metering = this.recordCommandMetering(accounting, ledger.attemptsOf(command), admissionCalls, {
+          kind: 'returned', stopReason: result.stopReason,
+        })
+        if (metering.complete) return result
+        const { usage: _partialUsage, ...withoutUsage } = result
+        return withoutUsage
+      },
+      (error: unknown) => {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN'
+        const metering = this.recordCommandMetering(accounting, ledger.attemptsOf(command), admissionCalls, { kind: 'failed', code })
+        // A caller that cancelled the command keeps the error it gets today; only a command that nobody stopped is reclassified.
+        const outstanding = metering.missing.length > 0
+        if (!outstanding || request.signal.aborted || error instanceof UnknownPhysicalOutcomeError) throw error
+        throw new UnknownPhysicalOutcomeError(
+          `model command ${command} failed (${code}) after sending ${String(metering.missing.length)} request(s) whose usage the ledger does not hold: `
+          + (error instanceof Error ? error.message : String(error)),
+        )
+      },
+    )
+  }
+
+  /**
+   * Record, apart from the terminal outcome of a command, what the ledger holds for its physical requests.
+   * @param accounting - the run and node plan.
+   * @param attempts - the ledger's rows for the command.
+   * @param admissionCalls - how many physical requests the worker asked to admit; each must have exactly one row.
+   * @param outcome - how the command ended.
+   * @returns the account; `complete` only when every counted request has a row and none lacks usage.
+   */
+  private recordCommandMetering(
+    accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
+    attempts: CommandAttempts,
+    admissionCalls: number,
+    outcome: { readonly kind: 'returned'; readonly stopReason: string } | { readonly kind: 'failed'; readonly code: string },
+  ): { readonly complete: boolean; readonly missing: CommandAttempts['missing'] } {
+    const unaccounted = admissionCalls - attempts.rows
+    // A command that returned without asking to admit any request has nothing the ledger could vouch for.
+    const complete = attempts.missing.length === 0 && unaccounted === 0 && admissionCalls > 0
+    const { record, plan } = accounting
+    this.store.appendEvents([event(record.snapshot.runId, 'evaluation.command.metering', {
+      commandId: attempts.command,
+      outcome,
+      metering: {
+        complete, source: 'ledger', admissionCalls, rows: attempts.rows, sent: attempts.sent, refused: attempts.refused, unaccounted,
+        observed: attempts.observed, missing: attempts.missing,
+      },
+    }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
+    return { complete, missing: attempts.missing }
   }
 
   /** Refuse a dispatch that would send model requests the scope's ledger cannot see. */
@@ -4152,7 +4235,7 @@ export class OrchestrationDaemon {
       parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
       ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
       modelToolBridge: bridge, signal: execution.signal,
-    })
+    }, { record, plan })
     return {
       nativeSessionId: `model-worker:${request.model.operatorId}:${String(request.sessionId)}`,
       nativeTurnId: `model-worker-turn:${String(request.commandId)}`,
@@ -4174,7 +4257,7 @@ export class OrchestrationDaemon {
   ): Promise<RlmChildExecutionResult> {
     await this.flushRlmHarnessBoundary(record, spec, plan, sessionId, 'turn-end')
     return {
-      status: signal.aborted ? 'indeterminate' : 'failed',
+      status: signal.aborted || error instanceof UnknownPhysicalOutcomeError ? 'indeterminate' : 'failed',
       error: error instanceof Error ? error.message : String(error),
     }
   }
@@ -4550,14 +4633,14 @@ export class OrchestrationDaemon {
         rlmPlan,
         modelToolBridge: bridge,
         signal: controller.signal,
-      })
+      }, { record, plan })
       await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
         nativeSessionId: `model-worker:${plan.operatorPlan.operatorId}:${String(rootSessionId)}`,
         nativeTurnId: `model-worker-turn:${String(plan.executionId)}:rlm:root`,
         result: rootExecution.then(
           value => asRlmExecutionResult({ output: [...value.output], stopReason: value.stopReason }),
           (error: unknown) => ({
-            status: controller.signal.aborted ? 'indeterminate' as const : 'failed' as const,
+            status: controller.signal.aborted || error instanceof UnknownPhysicalOutcomeError ? 'indeterminate' as const : 'failed' as const,
             error: error instanceof Error ? error.message : String(error),
           }),
         ),
@@ -4612,7 +4695,7 @@ export class OrchestrationDaemon {
         parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-      })
+      }, { record, plan })
       const next = this.markAttemptRunning(record, spec, acceptedAttempt, {
         executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model, laneId: String(plan.executionId),
