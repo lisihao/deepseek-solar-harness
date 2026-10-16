@@ -426,9 +426,13 @@ function assertRlmBridgeAllowed(
  * ordinary failure. Created only under a scope.
  */
 class UnknownPhysicalOutcomeError extends OrchestrationError {
-  constructor(message: string) {
+  /** The failure of the command, and, if the store refused the metering event, that refusal as well. */
+  override readonly cause: unknown
+
+  constructor(message: string, cause: unknown) {
     super(message, 'COMMAND_INDETERMINATE')
     this.name = 'UnknownPhysicalOutcomeError'
+    this.cause = cause
   }
 }
 
@@ -4070,54 +4074,76 @@ export class OrchestrationDaemon {
     })
     return run.then(
       (result) => {
-        const metering = this.recordCommandMetering(accounting, ledger.attemptsOf(command), admissionCalls, {
-          kind: 'returned', stopReason: result.stopReason,
-        })
-        if (metering.complete) return result
+        const account = this.accountCommand(ledger.attemptsOf(command), admissionCalls)
+        const written = this.recordCommandMetering(accounting, account, { kind: 'returned', stopReason: result.stopReason })
+        // Without a record of the account, nothing vouches for the usage either.
+        if (account.complete && written.written) return result
         const { usage: _partialUsage, ...withoutUsage } = result
         return withoutUsage
       },
       (error: unknown) => {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN'
-        const metering = this.recordCommandMetering(accounting, ledger.attemptsOf(command), admissionCalls, { kind: 'failed', code })
+        const account = this.accountCommand(ledger.attemptsOf(command), admissionCalls)
         // A caller that cancelled the command keeps the error it gets today; only a command that nobody stopped is reclassified.
-        const outstanding = metering.missing.length > 0
-        if (!outstanding || request.signal.aborted || error instanceof UnknownPhysicalOutcomeError) throw error
+        const outstanding = account.counts.missing.length > 0
+        const unknownOutcome = outstanding && !request.signal.aborted && !(error instanceof UnknownPhysicalOutcomeError)
+        const written = this.recordCommandMetering(accounting, account, { kind: 'failed', code })
+        // The classification is decided before the event is written, and a failed write does not change it.
+        if (!unknownOutcome) throw error
         throw new UnknownPhysicalOutcomeError(
-          `model command ${command} failed (${code}) after sending ${String(metering.missing.length)} request(s) whose usage the ledger does not hold: `
-          + (error instanceof Error ? error.message : String(error)),
+          `model command ${command} failed (${code}) after sending ${String(account.counts.missing.length)} request(s) `
+          + `whose usage the ledger does not hold: ${error instanceof Error ? error.message : String(error)}`,
+          written.written ? error : new AggregateError([error, written.error], 'the original failure and the refused metering event'),
         )
       },
     )
   }
 
   /**
+   * Decide, from the ledger's rows and the worker's admission calls, whether the account of a command is complete.
+   * @param counts - the ledger's rows for the command.
+   * @param admissionCalls - how many physical requests the worker asked to admit; each must have exactly one row.
+   * @returns the counts and whether every counted request has a row and none lacks usage.
+   */
+  private accountCommand(
+    counts: CommandAttempts,
+    admissionCalls: number,
+  ): { readonly counts: CommandAttempts; readonly admissionCalls: number; readonly unaccounted: number; readonly complete: boolean } {
+    const unaccounted = admissionCalls - counts.rows
+    // A command that returned without asking to admit any request has nothing the ledger could vouch for.
+    return { counts, admissionCalls, unaccounted, complete: counts.missing.length === 0 && unaccounted === 0 && admissionCalls > 0 }
+  }
+
+  /**
    * Record, apart from the terminal outcome of a command, what the ledger holds for its physical requests.
    * @param accounting - the run and node plan.
-   * @param attempts - the ledger's rows for the command.
-   * @param admissionCalls - how many physical requests the worker asked to admit; each must have exactly one row.
+   * @param account - the decided account of the command.
    * @param outcome - how the command ended.
-   * @returns the account; `complete` only when every counted request has a row and none lacks usage.
+   * @returns whether the event was written, or the error with which the store refused it.
    */
   private recordCommandMetering(
     accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
-    attempts: CommandAttempts,
-    admissionCalls: number,
+    account: ReturnType<OrchestrationDaemon['accountCommand']>,
     outcome: { readonly kind: 'returned'; readonly stopReason: string } | { readonly kind: 'failed'; readonly code: string },
-  ): { readonly complete: boolean; readonly missing: CommandAttempts['missing'] } {
-    const unaccounted = admissionCalls - attempts.rows
-    // A command that returned without asking to admit any request has nothing the ledger could vouch for.
-    const complete = attempts.missing.length === 0 && unaccounted === 0 && admissionCalls > 0
+  ): { readonly written: true } | { readonly written: false; readonly error: unknown } {
     const { record, plan } = accounting
-    this.store.appendEvents([event(record.snapshot.runId, 'evaluation.command.metering', {
-      commandId: attempts.command,
-      outcome,
-      metering: {
-        complete, source: 'ledger', admissionCalls, rows: attempts.rows, sent: attempts.sent, refused: attempts.refused, unaccounted,
-        observed: attempts.observed, missing: attempts.missing,
-      },
-    }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
-    return { complete, missing: attempts.missing }
+    const { counts } = account
+    try {
+      this.store.appendEvents([event(record.snapshot.runId, 'evaluation.command.metering', {
+        commandId: counts.command,
+        outcome,
+        metering: {
+          complete: account.complete, source: 'ledger', admissionCalls: account.admissionCalls, rows: counts.rows, sent: counts.sent,
+          refused: counts.refused, unaccounted: account.unaccounted, observed: counts.observed,
+          missing: counts.missing, attempts: counts.attempts,
+        },
+      }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
+      return { written: true }
+    } catch (error) {
+      // The store refused the event (for example because it is closing). The caller withholds the usage or keeps the unknown
+      // outcome and attaches this error; nothing is retried here.
+      return { written: false, error }
+    }
   }
 
   /** Refuse a dispatch that would send model requests the scope's ledger cannot see. */

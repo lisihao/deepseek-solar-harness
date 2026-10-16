@@ -433,6 +433,20 @@ export interface MissingAttempt {
   readonly bodyBytes: number
 }
 
+/** One attempt of a command as the ledger holds it, with the identities that relate it to the request it admitted. */
+export interface CommandAttemptRow {
+  readonly id: string
+  readonly seq: number
+  readonly round: number | null
+  readonly session: string | null
+  readonly state: EvaluationAttemptState
+  readonly bodySha256: string
+  readonly bodyBytes: number
+  /** The usage that settled the attempt; absent while it is reserved, unknown or refused. */
+  readonly usage?: EvaluationUsage
+  readonly refusal?: string
+}
+
 /** What the ledger holds for the attempts of one command. */
 export interface CommandAttempts {
   readonly command: string
@@ -444,6 +458,8 @@ export interface CommandAttempts {
   /** The usage the ledger holds for the settled attempts. It is a partial sum when `missing` is not empty. */
   readonly observed: EvaluationUsage
   readonly missing: readonly MissingAttempt[]
+  /** Every attempt of the command in admission order, so the account does not depend on parsing a label again. */
+  readonly attempts: readonly CommandAttemptRow[]
 }
 
 export class EvaluationLedger {
@@ -552,7 +568,16 @@ export class EvaluationLedger {
       }
     }
     const refused = rows.filter(attempt => attempt.state === 'refused').length
-    return { command, rows: rows.length, sent: rows.length - refused, refused, observed: { input, output }, missing }
+    const attempts = rows.map((attempt): CommandAttemptRow => {
+      const origin = parseAttemptLabel(attempt.label)
+      return {
+        id: attempt.id, seq: attempt.seq, round: origin?.round ?? null, session: origin?.session ?? null, state: attempt.state,
+        bodySha256: attempt.bodySha256, bodyBytes: attempt.bodyBytes,
+        ...attempt.usage === undefined ? {} : { usage: { ...attempt.usage } },
+        ...attempt.refusal === undefined ? {} : { refusal: attempt.refusal },
+      }
+    })
+    return { command, rows: rows.length, sent: rows.length - refused, refused, observed: { input, output }, missing, attempts }
   }
 
   /**
