@@ -1214,22 +1214,37 @@ function workbenchTaskContract(
   return { ...base, contractSha256: canonicalSha256(base) }
 }
 
-/** The reason with which an attempt's own deadline aborts it, so that a deadline can be told from a cancellation by the caller. */
-class AttemptDeadlineError extends Error {
+/**
+ * The reason with which an attempt is aborted while its run keeps running, so that such an abort can be told from the run's
+ * cancellation. Aborting with any other reason (a cancellation of the run, a shutdown, an interrupt of a child) is not one of these.
+ */
+class AttemptAbortReason extends Error {}
+
+/** The attempt's own deadline passed. */
+class AttemptDeadlineError extends AttemptAbortReason {
   constructor(timeoutMs: number) {
     super(`orchestration attempt exceeded ${String(timeoutMs)}ms`)
     this.name = 'AttemptDeadlineError'
   }
 }
 
+/** The runtime interrupted the root session of the attempt; the run is not cancelled and the node may be run again. */
+class RootInterruptedError extends AttemptAbortReason {
+  constructor() {
+    super('the root session of the attempt was interrupted')
+    this.name = 'RootInterruptedError'
+  }
+}
+
 /**
- * Whether a caller stopped the work: an abort that is not the attempt's own deadline. A deadline leaves the run running, and the
- * request it interrupted may still be in doubt, so it is not a cancellation.
+ * Whether the work was stopped together with its run: aborted for a reason other than the attempt's deadline or an interrupt of
+ * its root session, which leave the run running. A request that such an abort interrupted may still be in doubt, and the node
+ * would be run again, so it is not a cancellation.
  * @param signal - the signal the work ran under.
- * @returns `true` when the signal was aborted for any reason other than the attempt deadline.
+ * @returns `true` when the signal was aborted together with the run (or by an interrupt of one execution below the root).
  */
-function cancelledByCaller(signal: AbortSignal): boolean {
-  return signal.aborted && !(signal.reason instanceof AttemptDeadlineError)
+function abortedWithTheRun(signal: AbortSignal): boolean {
+  return signal.aborted && !(signal.reason instanceof AttemptAbortReason)
 }
 
 function attemptAbort(timeoutMs: number | undefined): {
@@ -4124,7 +4139,7 @@ export class OrchestrationDaemon {
         // A worker reports a failed request as a result that stopped with an error, not only by throwing. When such a command left
         // a request outstanding, the outcome of that request is unknown, as it is for a thrown failure.
         const failedStop = result.stopReason === 'error' || result.stopReason === 'aborted'
-        if (failedStop && isUnknownOutcome(account.counts.missing.length, cancelledByCaller(request.signal), false)) {
+        if (failedStop && isUnknownOutcome(account.counts.missing.length, abortedWithTheRun(request.signal), false)) {
           throw new UnknownPhysicalOutcomeError(
             `model command ${command} stopped with ${result.stopReason} after sending ${String(account.counts.missing.length)} request(s) `
             + 'whose usage the ledger does not hold',
@@ -4139,9 +4154,10 @@ export class OrchestrationDaemon {
       (error: unknown) => {
         const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN'
         const account = accountOf(ledger.attemptsOf(command), admissionCalls)
-        // A caller that cancelled the command keeps the error it gets today; only a command that nobody stopped is reclassified.
+        // A command stopped together with its run keeps the error it gets today; a deadline or an interrupt of the root, after which
+        // the node could be run again, is reclassified like a command that nobody stopped.
         const alreadyUnknown = error instanceof UnknownPhysicalOutcomeError
-        const unknownOutcome = isUnknownOutcome(account.counts.missing.length, cancelledByCaller(request.signal), alreadyUnknown)
+        const unknownOutcome = isUnknownOutcome(account.counts.missing.length, abortedWithTheRun(request.signal), alreadyUnknown)
         const written = this.recordCommandMetering(accounting, account, { kind: 'failed', code })
         // The classification is decided before the event is written, and a failed write does not change it.
         if (!unknownOutcome) throw error
@@ -4379,7 +4395,7 @@ export class OrchestrationDaemon {
       // A stop with a request of the session in doubt, which nobody cancelled, is decided before the state and the usage are written,
       // so a refused write cannot become the error the node is retried on; it is kept as an additional error.
       const unknownStop = (result.stopReason === 'error' || result.stopReason === 'aborted')
-        && !cancelledByCaller(signal) && this.sessionHoldsUnknownRequest(String(sessionId))
+        && !abortedWithTheRun(signal) && this.sessionHoldsUnknownRequest(String(sessionId))
       const accounted = accountAutonomousUsage(current, commandId, result.usage)
       let writeError: unknown
       try {
@@ -4462,7 +4478,7 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
-      if (continuation.status === 'indeterminate' && !cancelledByCaller(signal) && this.holdsUnknownRequest(commandId)) {
+      if (continuation.status === 'indeterminate' && !abortedWithTheRun(signal) && this.holdsUnknownRequest(commandId)) {
         throw new UnknownPhysicalOutcomeError(continuation.error ?? 'Autonomous continuation has a request of unknown outcome', continuation)
       }
       if (continuation.status !== 'settled') {
@@ -4550,7 +4566,7 @@ export class OrchestrationDaemon {
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
-      if (continuation.status === 'indeterminate' && !cancelledByCaller(signal) && this.holdsUnknownRequest(String(claim.commandId))) {
+      if (continuation.status === 'indeterminate' && !abortedWithTheRun(signal) && this.holdsUnknownRequest(String(claim.commandId))) {
         throw new UnknownPhysicalOutcomeError(continuation.error ?? 'RLM goal continuation has a request of unknown outcome', continuation)
       }
       if (continuation.status !== 'settled') {
@@ -4751,7 +4767,7 @@ export class OrchestrationDaemon {
             error: error instanceof Error ? error.message : String(error),
           }),
         ),
-        interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+        interrupt: (): Promise<void> => { controller.abort(new RootInterruptedError()); return Promise.resolve() },
       })
       const rootResult = await rootExecution
       await this.accountRlmGoalUsage(

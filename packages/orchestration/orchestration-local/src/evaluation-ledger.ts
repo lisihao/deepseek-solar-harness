@@ -481,10 +481,10 @@ export function accountOf(counts: CommandAttempts, admissionCalls: number): Comm
 }
 
 /**
- * Whether a command that ended badly must be reported as an unknown outcome: a request it sent is not accounted for, nobody
- * cancelled it, and it was not already reported so.
+ * Whether a command that ended badly must be reported as an unknown outcome: a request it sent is not accounted for, it was not
+ * stopped together with its run, and it was not already reported so.
  * @param missing - how many requests the ledger holds as reserved or unknown.
- * @param cancelled - whether the caller's own signal had aborted.
+ * @param cancelled - whether the command was stopped together with its run; an attempt deadline is not.
  * @param alreadyUnknown - whether the failure is already an unknown outcome.
  * @returns `true` to report it as an unknown outcome.
  */

@@ -3361,6 +3361,50 @@ describe('orchestration daemon', () => {
       expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toEqual(['settled', 'settled'])
     }, 20_000)
 
+    interface RuntimeInterrupt {
+      list(): Promise<readonly { sessionId: string; depth: number }[]>
+      interrupt(sessionId: string): Promise<void>
+    }
+
+    it.each([
+      ['its own open request', 'root'],
+      ['the open request of a goal continuation', 'goal'],
+    ] as const)('keeps a node unknown when an interrupt of the root session, which does not cancel the run, ends %s, and does not run it again', async (_name, where) => {
+      const f = await fixture(treeHandler())
+      let daemonOf: OrchestrationDaemon | undefined
+      const interruptRoot = (): void => {
+        const runtime = (daemonOf as unknown as { ctx: { rlmRuntime: RuntimeInterrupt } }).ctx.rlmRuntime
+        // The run's work is registered as active only after this request began, so the interrupt comes a little later.
+        setTimeout(() => {
+          void runtime.list().then(async (sessions) => {
+            await runtime.interrupt(sessions.find(entry => entry.depth === 0)?.sessionId ?? '')
+          })
+        }, 200)
+      }
+      const hold = async (request: ModelWorkerExecuteRequest, ticket: { abandon(): void }): Promise<never> => {
+        interruptRoot()
+        await new Promise<void>((resolve) => { request.signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+        ticket.abandon()
+        throw new Error('worker threw after the interrupt')
+      }
+      let worker: ProbeWorker
+      if (where === 'goal') {
+        worker = continuationWorker('goal', hold)
+      } else {
+        worker = new ProbeWorker()
+        worker.after = hold
+      }
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], {
+        retry: REPLAYABLE, prepare: (daemon) => { daemonOf = daemon },
+      })
+      // The run keeps running, so only the request's own state keeps the node from being run again.
+      expect(settled.nodes[0]?.state).toBe('indeterminate')
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    }, 20_000)
+
     it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {
       const f = await fixture(treeHandler(), { ...SCOPE, inputBound: 'proven-token-count' })
       await run(f, ROOT)
