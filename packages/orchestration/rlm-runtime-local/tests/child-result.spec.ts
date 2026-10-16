@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import {
   RlmCommandId,
+  RlmRuntimeError,
   RlmRuntimeSessionId,
   type RlmChildResultContentV1,
   type RlmRuntimeHostBindings,
@@ -36,6 +37,8 @@ interface SetupOptions {
   readonly behaviors?: Record<string, Behavior>
   readonly maxOutputBytes?: number
   readonly noReader?: boolean
+  /** The reader refuses with this message, as the daemon does for a damaged stored result. */
+  readonly readerError?: string
 }
 
 async function setup(options: SetupOptions = {}) {
@@ -63,6 +66,7 @@ async function setup(options: SetupOptions = {}) {
     },
     ...options.noReader === true ? {} : {
       readResult: (request) => {
+        if (options.readerError !== undefined) return Promise.reject(new RlmRuntimeError(options.readerError, 'RLM_UNAVAILABLE'))
         reads.push({ sessionId: String(request.sessionId), childSessionId: String(request.childSessionId), resultRef: request.resultRef })
         return Promise.resolve(store.get(request.resultRef))
       },
@@ -265,6 +269,16 @@ describe('reading the result of a direct child', () => {
     const missing = await read(vanished)
     expect(missing).toMatchObject({ status: 'not_found', resultRef: ref('result:vanished') })
     expect(missing).not.toHaveProperty('text')
+    await t.ctx.root.fiber.dispose()
+  })
+
+  it('passes on the error of a reader that found the stored result damaged, and neither reports a settled result nor a missing one', async () => {
+    const t = await setup({ readerError: 'The stored child result is damaged: its stop reason is missing' })
+    const { a } = await t.settledTree()
+    const failure = await t.run(t.root1, `await rlm.readChildResult(${JSON.stringify(a)})`)
+    expect(failure).toEqual({ error: { code: 'RLM_UNAVAILABLE', message: expect.stringContaining('is damaged') } })
+    const events = await t.service.readEvents({ sessionId: t.root1, after: 0, limit: 200 })
+    expect(events.filter(event => event.type === 'rlm.child.result.read')).toEqual([])
     await t.ctx.root.fiber.dispose()
   })
 
