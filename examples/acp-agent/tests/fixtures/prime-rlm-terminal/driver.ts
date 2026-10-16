@@ -27,8 +27,8 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
-import type { LogicalTaskGraphV1, OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
-import { messageText, startFakeDeepSeek, type FakeDeepSeek, type FakeMessage, type FakeReply } from './fake-deepseek.ts'
+import { OrchestrationArtifactRef, type LogicalTaskGraphV1, type OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
+import { messageText, startFakeDeepSeek, type FakeDeepSeek, type FakeMessage, type FakeReply, type FakeUsage } from './fake-deepseek.ts'
 
 const configPath = process.argv[2]
 const home = process.env.DSH_HOME
@@ -64,13 +64,34 @@ const BETA_TASK = 'Beta task: report the beta figure to your parent.'
 const BATCH_ROOT_TASK = 'Run scenario batched-messages. Final rule: reply with only {"verdict": "<text>"}.'
 const GAMMA_TASK = 'Gamma task: report the gamma figure to your parent.'
 const DELTA_TASK = 'Delta task: report the delta figure to your parent.'
+const EPSILON_TASK = 'Epsilon task: report the epsilon figure to your parent.'
 const GAMMA_FIGURE = 'gamma figure is 3'
 const DELTA_FIGURE = 'delta figure is 4'
+const EPSILON_FIGURE = 'epsilon figure is 5'
 /** Opens when the first child's message has been queued, so the second child's message is the second to arrive. */
 const gammaReported = Promise.withResolvers<undefined>()
 /** Opens when both children's messages have been queued, so the root's turn can end with both waiting. */
 const bothReported = Promise.withResolvers<undefined>()
+/** Opens when a third child's message has been queued while the batch is being continued, so a second continuation follows it. */
+const epsilonReported = Promise.withResolvers<undefined>()
 const batchChildrenDone = new Set<string>()
+/**
+ * The usage the fake reported for each tool round of the two continuations of the `batched-messages` scenario. `prompt` includes
+ * the cache hits, as on the wire; the worker's records are compared with the sums of these.
+ */
+const BATCH_ROUNDS: Record<'batch' | 'single', readonly FakeUsage[]> = {
+  batch: [
+    { promptTokens: 1_000, completionTokens: 40, cacheHitTokens: 600 },
+    { promptTokens: 1_200, completionTokens: 30, cacheHitTokens: 900 },
+    { promptTokens: 1_500, completionTokens: 25, cacheHitTokens: 1_200 },
+  ],
+  single: [
+    { promptTokens: 700, completionTokens: 20, cacheHitTokens: 100 },
+    { promptTokens: 800, completionTokens: 15, cacheHitTokens: 500 },
+  ],
+}
+/** The rounds the fake actually served, as `continuation` and the index of the round. */
+const servedRounds: Array<{ readonly continuation: string; readonly round: number; readonly usage: FakeUsage }> = []
 /** The raw prompts of the root's message continuations in the `batched-messages` scenario. */
 const batchPrompts: string[] = []
 
@@ -120,12 +141,28 @@ async function batchReply(messages: readonly FakeMessage[]): Promise<FakeReply> 
   if (first === undefined) throw new Error('fake DeepSeek received a request without messages')
   const text = taskText(first)
   const afterTool = messages.at(-1)?.role === 'tool'
-  const repl = (code: string): FakeReply => ({ kind: 'tool', name: 'typescript_repl', arguments: JSON.stringify({ code }) })
-  const answer = (output: string): FakeReply => ({ kind: 'text', text: output, finish: 'stop' })
+  const round = messages.filter(message => message.role === 'tool').length
+  const repl = (code: string, usage?: FakeUsage): FakeReply => ({ kind: 'tool', name: 'typescript_repl', arguments: JSON.stringify({ code }), ...usage === undefined ? {} : { usage } })
+  const answer = (output: string, usage?: FakeUsage): FakeReply => ({ kind: 'text', text: output, finish: 'stop', ...usage === undefined ? {} : { usage } })
   if (text.includes('Agent message from')) {
-    counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
-    batchPrompts.push(text)
-    return answer('batched continuation output')
+    // The continuation of the root for gamma's and delta's messages is the only one that names both figures. It spawns a third
+    // child in its first round and ends only once that child's message is queued, so a second continuation follows it.
+    const together = text.includes(GAMMA_FIGURE) && text.includes(DELTA_FIGURE)
+    const kind = together ? 'batch' : 'single'
+    const usage = BATCH_ROUNDS[kind][round]
+    if (usage === undefined) throw new Error(`unexpected round ${String(round)} of the ${kind} continuation`)
+    servedRounds.push({ continuation: kind, round, usage })
+    if (round === 0) {
+      counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
+      batchPrompts.push(text)
+    }
+    if (together) {
+      if (round === 0) return repl(`await rlm(${JSON.stringify(EPSILON_TASK)}, { name: "epsilon" }); "spawned epsilon"`, usage)
+      if (round === 1) return repl('(await agentMessage.read()).length', usage)
+      await epsilonReported.promise
+      return answer('batched continuation output', usage)
+    }
+    return round === 0 ? repl('"checked"', usage) : answer('epsilon continuation output', usage)
   }
   if (text.includes(BATCH_ROOT_TASK)) {
     if (afterTool) {
@@ -135,16 +172,21 @@ async function batchReply(messages: readonly FakeMessage[]): Promise<FakeReply> 
     counts.set('root', (counts.get('root') ?? 0) + 1)
     return repl(`const handles = [await rlm(${JSON.stringify(GAMMA_TASK)}, { name: "gamma" }), await rlm(${JSON.stringify(DELTA_TASK)}, { name: "delta" })]; "spawned"`)
   }
-  const isDelta = text.includes(DELTA_TASK)
+  const which = text.includes(EPSILON_TASK) ? 'epsilon' : text.includes(DELTA_TASK) ? 'delta' : 'gamma'
   if (afterTool) {
-    batchChildrenDone.add(isDelta ? 'delta' : 'gamma')
-    if (!isDelta) gammaReported.resolve(undefined)
+    if (which === 'epsilon') {
+      epsilonReported.resolve(undefined)
+      return answer('child done')
+    }
+    batchChildrenDone.add(which)
+    if (which === 'gamma') gammaReported.resolve(undefined)
     if (batchChildrenDone.size === 2) bothReported.resolve(undefined)
     return answer('child done')
   }
   counts.set('child', (counts.get('child') ?? 0) + 1)
-  if (isDelta) await gammaReported.promise
-  return repl(`await agentMessage.send(${JSON.stringify(isDelta ? DELTA_FIGURE : GAMMA_FIGURE)}, { receiverRole: "parent", mode: "auto" }); "sent"`)
+  if (which === 'delta') await gammaReported.promise
+  const figure = which === 'epsilon' ? EPSILON_FIGURE : which === 'delta' ? DELTA_FIGURE : GAMMA_FIGURE
+  return repl(`await agentMessage.send(${JSON.stringify(figure)}, { receiverRole: "parent", mode: "auto" }); "sent"`)
 }
 
 /** Answers the requests of the `context-prompts` scenario from their content, and keeps the prompts it reports. */
@@ -300,7 +342,9 @@ function graph(workspace: string, scenario: Scenario): LogicalTaskGraphV1 {
       approvedSecretRefs: [], readScopes: ['src'], writeScopes: [],
       acceptance: [{ id: 'done', description: 'operator completes', kind: 'operator-completed' }],
       retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
-      ...scenario.autonomous || scenario.context === true || scenario.batch === true ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } } : {},
+      ...scenario.batch === true
+        ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 3, maxTurns: 12 } }
+        : scenario.autonomous || scenario.context === true ? { rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 } } : {},
       ...scenario.autonomous
         ? {
           // Only the built-in acceptance check: the production daemon takes no custom evaluators.
@@ -432,8 +476,9 @@ type RunEvents = Awaited<ReturnType<Booted['orchestrations']['readEvents']>>['ev
  * messages by the order they arrived in, and the batch command by its first message with the digest left out.
  * @param runId - the run; the runtime state holds the messages of every scenario, and only this run's are reported.
  * @param events - the run's events.
+ * @param until - the end of the scenario's time.
  */
-async function batchTranscript(runId: OrchestrationRunId, events: RunEvents) {
+async function batchTranscript(runId: OrchestrationRunId, events: RunEvents, until: number) {
   const state = JSON.parse(await readFile(join(isolatedHome, 'orchestrations', 'rlm-runtime', 'state.json'), 'utf8')) as {
     messages: Array<{ messageId: string; toSessionId: string; deliveryStatus: string }>
     events: Array<{ type: string; sessionId: string; data: Record<string, unknown> }>
@@ -446,6 +491,21 @@ async function batchTranscript(runId: OrchestrationRunId, events: RunEvents) {
   const command = (id: unknown): string => String(id).replace(/^(rlm-message-[0-9a-f-]{36}):batch-(\d+)-[0-9a-f]{8}:deliver$/u, (_whole, first: string, size: string) => `${label(first)}:batch-${size}-<digest>:deliver`)
     .replace(/^(rlm-message-[0-9a-f-]{36}):deliver$/u, (_whole, first: string) => `${label(first)}:deliver`)
   const usage = events.filter(event => event.type === 'rlm.usage' && event.data.source === 'continuation')
+  const settledEvents = events.filter(event => event.type === 'rlm.message.continuation.settled')
+  // The continuation artifacts as the artifact service returns them: the command, the messages, and what the model answered.
+  const artifacts = []
+  for (const event of settledEvents) {
+    const artifact = await rpc('readArtifact', service().readArtifact(OrchestrationArtifactRef(String(event.data.artifactRef))), until) as {
+      commandId: string
+      messageIds: string[]
+      stopReason: string
+      output: Array<{ type: string; text?: string }>
+    }
+    artifacts.push({
+      command: command(artifact.commandId), messages: artifact.messageIds.map(label), stopReason: artifact.stopReason,
+      answer: artifact.output.filter(block => block.type === 'text').map(block => block.text ?? '').join(''),
+    })
+  }
   return {
     messagesDelivered: messages.map(message => message.deliveryStatus),
     runtimeEvents: state.events
@@ -458,8 +518,23 @@ async function batchTranscript(runId: OrchestrationRunId, events: RunEvents) {
       type: event.type, messages: (event.data.messageIds as string[]).map(label), command: command(event.data.commandId),
     })),
     heldOrInFlightBatches: state.messageBatchDispatches.filter(record => ofRun(record.sessionId)),
+    continuationArtifacts: artifacts,
+    artifactRefsDistinct: new Set(settledEvents.map(event => event.data.artifactRef)).size === settledEvents.length,
+    // The node's result is the output of the last continuation, not the root's own answer.
+    nodeOutput: events.filter(event => event.type === 'node.evidence.accepted').map(event => event.data.outputPreview),
+    fakeRounds: servedRounds,
+    fakeRoundTotals: Object.fromEntries((['batch', 'single'] as const).map((kind) => {
+      const rounds = servedRounds.filter(served => served.continuation === kind)
+      return [kind, {
+        uncachedInput: rounds.reduce((sum, served) => sum + served.usage.promptTokens - served.usage.cacheHitTokens, 0),
+        output: rounds.reduce((sum, served) => sum + served.usage.completionTokens, 0),
+        cacheRead: rounds.reduce((sum, served) => sum + served.usage.cacheHitTokens, 0),
+        requests: rounds.length,
+      }]
+    })),
     continuationUsage: usage.map(event => ({
       command: command(event.data.sourceCommandId), inputTokens: event.data.inputTokens, outputTokens: event.data.outputTokens,
+      cacheReadInputTokens: event.data.cacheReadInputTokens,
     })),
     continuationPrompts: batchPrompts.map(prompt => prompt
       .replaceAll(/rlm-session-[0-9a-f-]{36}|rlm:orch:run-[0-9a-f-]{36}:rlm:1/gu, '<session id>')
@@ -519,7 +594,7 @@ async function run(scenario: Scenario) {
         childContinuationPrompts: captured.childContinuations,
       }
       : {},
-    ...scenario.batch === true ? await batchTranscript(started.runId, events) : {},
+    ...scenario.batch === true ? await batchTranscript(started.runId, events, until) : {},
   }
 }
 

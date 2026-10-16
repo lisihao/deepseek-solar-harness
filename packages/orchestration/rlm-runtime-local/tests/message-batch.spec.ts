@@ -462,7 +462,7 @@ describe('message batches', () => {
     await t.ctx.root.fiber.dispose()
   })
 
-  it('keeps each execution that produced the same result artifact as its own command', async () => {
+  it('writes the terminal events of two executions that produced the same result artifact, each under its own command (it carries no usage)', async () => {
     const t = await setup()
     await t.send('m1')
     t.release()
