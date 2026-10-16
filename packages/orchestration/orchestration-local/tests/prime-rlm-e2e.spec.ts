@@ -787,6 +787,7 @@ describe('what a Resident root and a Resident child are given', () => {
       readonly fullSha256: string
       readonly count: number
       readonly ref: string
+      readonly status: string
       readonly parts: ReadonlyArray<{ readonly text: string; readonly segmentSha256: string; readonly offset: number }>
     }
     const read: { value: Read | undefined } = { value: undefined }
@@ -802,15 +803,17 @@ describe('what a Resident root and a Resident child are given', () => {
       }
       const result = await callTypescriptRepl(request, `${id}:read`, [
         'const kid = (await rlm.listSubagents())[0];',
-        'let offset = 0, text = "", count = 0, fullSha256 = "", ref = ""; const parts = [];',
+        'let offset = 0, text = "", count = 0, fullSha256 = "", ref = "", status = ""; const parts = [];',
         'for (;;) {',
         '  const part = await rlm.readChildResult(kid, { offset, limit: 40 });',
+        '  status = part.status;',
+        '  if (status !== "settled") break;',
         '  text += part.text; count += 1; fullSha256 = part.fullSha256; ref = part.resultRef;',
         '  parts.push({ text: part.text, segmentSha256: part.segmentSha256, offset: part.offset });',
         '  if (part.nextOffset === null) break;',
         '  offset = part.nextOffset;',
         '}',
-        '({ text, count, fullSha256, ref, parts })',
+        '({ text, count, fullSha256, ref, status, parts })',
       ].join('\n'))
       read.value = result.value as Read
     }
@@ -827,6 +830,7 @@ describe('what a Resident root and a Resident child are given', () => {
     const ref = String(settled?.data.artifactRef) as Parameters<typeof fixture.client.readArtifact>[0]
     const stored = await fixture.client.readArtifact(ref) as { output: Array<{ text: string }>; executionId: string }
     const whole = stored.output.map(block => block.text).join('\n')
+    expect(read.value?.status).toBe('settled')
     expect(read.value?.text).toBe(whole)
     expect(read.value?.text).toMatch(/^offline completed .*:rlm:rlm-child-/u)
     expect(read.value?.count).toBeGreaterThan(1)
