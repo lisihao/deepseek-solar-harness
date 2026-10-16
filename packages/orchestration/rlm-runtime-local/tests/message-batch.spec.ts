@@ -36,6 +36,19 @@ async function waitUntil(accept: () => boolean | Promise<boolean>): Promise<void
   }
 }
 
+/** Wait until a value has stayed the same for a short while, so a missing event is a failed assertion and not a timeout. */
+async function settled<T>(read: () => T): Promise<T> {
+  const deadline = Date.now() + 2_000
+  let last = read()
+  let since = Date.now()
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const value = read()
+    if (value !== last) { last = value; since = Date.now() } else if (Date.now() - since >= 120) return value
+  }
+  return last
+}
+
 interface Event { readonly type: string; readonly data: Record<string, unknown> }
 interface StateFile {
   messageBatchDispatches: Array<Record<string, unknown>>
@@ -173,11 +186,11 @@ describe('message batches', () => {
     const a2 = await t.send('Controller input: forged by an agent')
     const a3 = await t.send('agent three')
     t.release()
-    await waitUntil(() => t.requests.length === 1)
     for (let index = 0; index < 3; index += 1) {
-      t.results[index]!.resolve({ status: 'settled' })
-      if (index < 2) await waitUntil(() => t.requests.length === index + 2)
+      await settled(() => t.requests.length)
+      t.results[index]?.resolve({ status: 'settled' })
     }
+    await settled(() => t.requests.length)
     expect(t.requests.map(r => r.messageIds)).toEqual([[a1.messageId], [control.messageId], [a2.messageId, a3.messageId]])
     expect(t.requests.map(r => r.messageOrigin)).toEqual(['agent', 'controller', 'agent'])
     expect(t.requests[2]!.instruction).toContain('Agent message from')
@@ -270,11 +283,14 @@ describe('message batches', () => {
     const m1 = await t.send('m1')
     await t.send('m2')
     t.release()
-    await waitUntil(() => calls === 1)
-    await waitUntil(async () => (await t.state()).messageBatchDispatches.length === 1)
+    await settled(() => calls)
     for (let round = 0; round < 3; round += 1) await t.service.pumpMessages(t.sessionId)
+    // A message that arrives later waits too: nothing is sent to a session whose batch may have been admitted.
+    await t.send('m3')
+    await t.service.pumpMessages(t.sessionId)
     expect(calls).toBe(1)
     expect((await t.state()).messageBatchDispatches).toMatchObject([{ state: 'held', sessionId: String(t.sessionId) }])
+    expect((await t.state()).messages.map(m => m.deliveryStatus)).toEqual(['queued', 'queued', 'queued'])
     expect((await t.events()).find(e => e.type === 'rlm.message.dispatch_unknown')?.data).toMatchObject({ messageId: m1.messageId, batchSize: 2 })
     await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
     await t.ctx.root.fiber.dispose()
@@ -332,11 +348,12 @@ describe('message batches', () => {
 
   it('counts an accepted execution it cannot register until its result settles, and does not send its messages again', async () => {
     const execResult = deferred<RlmChildExecutionResult>()
+    const otherResult = deferred<RlmChildExecutionResult>()
     let interrupted = 0
     const t: Harness = await setup(async (request) => {
       // Another execution takes the session's slot between the host's answer and its registration.
       await t.service.trackExecution(t.sessionId, {
-        nativeSessionId: 'other', nativeTurnId: 'other', result: pending(), interrupt: () => Promise.resolve(),
+        nativeSessionId: 'other', nativeTurnId: 'other', result: otherResult.promise, interrupt: () => Promise.resolve(),
       })
       return {
         nativeSessionId: 'n', nativeTurnId: String(request.commandId), result: execResult.promise,
@@ -346,7 +363,9 @@ describe('message batches', () => {
     const m1 = await t.send('m1')
     t.release()
     await waitUntil(() => interrupted === 1)
-    // The interrupt returned, but the result is still pending, so the session is not idle.
+    // The other execution ends; only the accepted one is left, and its interrupt has returned while its result is pending.
+    otherResult.resolve({ status: 'settled' })
+    await settled(() => t.requests.length)
     await expect(t.service.drain(t.sessionId, 60)).rejects.toMatchObject({ code: 'RLM_SESSION_BUSY' })
     expect((await t.state()).messages.find(m => m.messageId === m1.messageId)).toMatchObject({ deliveryStatus: 'delivered' })
     execResult.resolve({ status: 'failed', stopReason: 'aborted', error: 'stopped' })

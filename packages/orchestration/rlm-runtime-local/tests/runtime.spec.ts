@@ -638,7 +638,9 @@ describe('LocalRlmRuntime', () => {
       let outcome: unknown
       try {
         const context = new Context()
-        outcome = new LocalRlmRuntime(context, root)
+        // The instance itself is not the outcome: a failing assertion would print its members, and printing a service calls it.
+        void new LocalRlmRuntime(context, root)
+        outcome = 'loaded'
         await context.root.fiber.dispose()
       } catch (error) {
         outcome = error
@@ -668,7 +670,7 @@ describe('LocalRlmRuntime', () => {
       const state = await freshState()
       state.messages = [message('m1', { deliveryStatus: 'delivered' }), message('m2')]
       state.messageBatchDispatches = [record(['m1'], { state: 'accepted' }), record(['m2'])]
-      expect((await load(state)).outcome).toBeInstanceOf(LocalRlmRuntime)
+      expect((await load(state)).outcome).toBe('loaded')
     })
 
     it.each([
