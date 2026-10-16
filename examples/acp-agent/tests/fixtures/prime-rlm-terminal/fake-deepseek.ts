@@ -24,8 +24,12 @@ export interface FakeUsage {
 
 /** What the fake sends back for one request; `usage` defaults to 3 prompt and 2 completion tokens and no cache hits. */
 export type FakeReply =
-  | { readonly kind: 'tool'; readonly name: string; readonly arguments: string; readonly usage?: FakeUsage }
-  | { readonly kind: 'text'; readonly text: string; readonly finish: 'stop' | 'length'; readonly usage?: FakeUsage }
+  | { readonly kind: 'tool'; readonly name: string; readonly arguments: string; readonly usage?: FakeUsage; readonly omitUsage?: true }
+  | { readonly kind: 'text'; readonly text: string; readonly finish: 'stop' | 'length'; readonly usage?: FakeUsage; readonly omitUsage?: true }
+  /** A reply that finishes with `tool_calls` and carries no call, after reporting usage; the worker rejects it. */
+  | { readonly kind: 'empty-tool-calls'; readonly usage?: FakeUsage; readonly omitUsage?: true }
+  /** An HTTP error response instead of a stream. */
+  | { readonly kind: 'http-error'; readonly status: number }
 
 /** One chat-completions request body as the adapter sent it. */
 export interface FakeBody {
@@ -35,8 +39,8 @@ export interface FakeBody {
   readonly [key: string]: unknown
 }
 
-/** Decides the reply for one request; it may wait, for example for a gate the driver opens later. */
-export type FakeHandler = (messages: readonly FakeMessage[], body: FakeBody) => FakeReply | Promise<FakeReply>
+/** Decides the reply for one request; it may wait, for example for a gate the driver opens later. `raw` is this request as it arrived. */
+export type FakeHandler = (messages: readonly FakeMessage[], body: FakeBody, raw: FakeRawRequest) => FakeReply | Promise<FakeReply>
 
 /**
  * One chat-completions request exactly as it arrived: the body bytes before any parsing, their digest, the order it arrived in
@@ -83,6 +87,11 @@ let toolCallCounter = 0
 
 /** Writes the reply and returns the id of the tool call it carries, when it carries one. */
 function writeReply(response: ServerResponse, reply: FakeReply): string | undefined {
+  if (reply.kind === 'http-error') {
+    response.writeHead(reply.status, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ error: { message: `fake DeepSeek answers HTTP ${String(reply.status)}`, type: 'fake_http_error' } }))
+    return undefined
+  }
   const usage = reply.usage === undefined
     ? { prompt_tokens: 3, completion_tokens: 2 }
     : {
@@ -92,7 +101,10 @@ function writeReply(response: ServerResponse, reply: FakeReply): string | undefi
     }
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' })
   let issued: string | undefined
-  if (reply.kind === 'tool') {
+  const finalUsage = 'omitUsage' in reply && reply.omitUsage !== undefined ? {} : { usage }
+  if (reply.kind === 'empty-tool-calls') {
+    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: 'tool_calls' }], ...finalUsage })
+  } else if (reply.kind === 'tool') {
     const midpoint = Math.max(1, Math.floor(reply.arguments.length / 2))
     // Each call has its own id: the runtime treats a repeated tool call id of one session as a conflicting repeat of the first cell.
     toolCallCounter += 1
@@ -101,10 +113,10 @@ function writeReply(response: ServerResponse, reply: FakeReply): string | undefi
     const second = { index: 0, function: { arguments: reply.arguments.slice(midpoint) } }
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [first] }, finish_reason: null }] })
     sse(response, { choices: [{ index: 0, delta: { tool_calls: [second] }, finish_reason: null }] })
-    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: 'tool_calls' }], usage })
+    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: 'tool_calls' }], ...finalUsage })
   } else {
     sse(response, { choices: [{ index: 0, delta: { content: reply.text }, finish_reason: null }] })
-    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: reply.finish }], usage })
+    sse(response, { choices: [{ index: 0, delta: { content: '' }, finish_reason: reply.finish }], ...finalUsage })
   }
   sse(response, '[DONE]')
   response.end()
@@ -145,7 +157,7 @@ export async function startFakeDeepSeek(handler: FakeHandler): Promise<FakeDeepS
         raw.push(record)
         requests.push(messages)
         bodies.push(parsed)
-        const issued = writeReply(response, await handler(messages, parsed))
+        const issued = writeReply(response, await handler(messages, parsed, record))
         if (issued !== undefined) record.issuedToolCallId = issued
         return
       }

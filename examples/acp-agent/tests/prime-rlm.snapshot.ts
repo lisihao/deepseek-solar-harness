@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import type { ScenarioName } from './fixtures/prime-rlm-evaluation/scenarios.ts'
 import { expect, it } from 'vitest'
 import { runLoaderSmoke } from '@deepseek-ai/dsh-loader-smoke'
 
@@ -61,11 +62,25 @@ it('snapshot: prime-rlm-terminal keeps a non-success RLM result from being overw
 
 const evidenceDirectory = process.env.DSH_EVALUATION_EVIDENCE_DIR
 
-it('snapshot: prime-rlm-evaluation admits every physical request of an RLM tree into one ledger and sends nothing past its limit', async () => {
+/** What each scenario of the evaluation fixture shows; the `tree` one is the original scenario of the ledger. */
+const EVALUATION_SCENARIOS: ReadonlyArray<readonly [ScenarioName, string]> = [
+  ['tree', 'admits every physical request of an RLM tree into one ledger and sends nothing past its limit'],
+  ['integration', 'meters a root, two children and a batched continuation that reads a child result, each request reserved before it is sent'],
+  ['refuse-first', 'sends nothing when the first request is refused, and reports the refusal without requeueing or a busy error'],
+  ['refuse-later', 'sends nothing past a refused request of the batched continuation, which fails without requeueing its messages'],
+  ['missing-usage', 'withholds the usage of a command when a request reports none, and records the missing request apart from the outcome'],
+  ['unknown-no-replay', 'does not replay a node whose failed command left a request of unknown outcome, although its retry policy lists the error code'],
+  ['unknown-error-finish', 'reports a command whose request ended in an HTTP error with an unknown outcome and does not retry the node'],
+  ['known-retry', 'meters the second attempt of a node apart from the first when a known failure is retried'],
+  ['zero-child', 'meters a root that creates no child'],
+  ['ordinary', 'sends the same root in a home without a scope with no ledger, no scope fields and the usage it always published'],
+]
+
+it.each(EVALUATION_SCENARIOS)('snapshot: prime-rlm-evaluation scenario %s %s', async (name) => {
   const driver = fileURLToPath(new URL('./fixtures/prime-rlm-evaluation/driver.ts', import.meta.url))
-  const expected = new URL('./fixtures/prime-rlm-evaluation/expected.json', import.meta.url)
+  const expected = new URL(`./fixtures/prime-rlm-evaluation/${name === 'tree' ? 'expected.json' : `expected-${name}.json`}`, import.meta.url)
   const { stdout } = await runLoaderSmoke({
-    label: 'prime-rlm-evaluation keyless example',
+    label: `prime-rlm-evaluation keyless example, scenario ${name}`,
     tempDirPrefix: 'dsh-prime-rlm-evaluation-snapshot-',
     binScript: driver,
     libBinScript: driver,
@@ -77,12 +92,12 @@ it('snapshot: prime-rlm-evaluation admits every physical request of an RLM tree 
     // scheduling. A normal run takes about 8 s. The limit leaves room beyond the budgets so the driver can fail by stage and
     // finish its cleanup before the launcher's SIGKILL, which would skip it.
     processTimeoutMs: 100_000,
-    // Set only to collect the driver's reconcilable files; the snapshot itself does not depend on it.
-    env: evidenceDirectory === undefined ? {} : { DSH_EVALUATION_EVIDENCE_DIR: evidenceDirectory },
+    // The evidence directory is set only to collect the driver's reconcilable files; the snapshot does not depend on it.
+    env: { DSH_EVALUATION_SCENARIO: name, ...evidenceDirectory === undefined ? {} : { DSH_EVALUATION_EVIDENCE_DIR: evidenceDirectory } },
   })
   if (process.env.DSH_SNAPSHOT === 'refresh') await writeFile(expected, stdout)
   expect(stdout).toBe(await readFile(expected, 'utf8'))
-})
+}, 120_000)
 
 const execFileAsync = promisify(execFile)
 

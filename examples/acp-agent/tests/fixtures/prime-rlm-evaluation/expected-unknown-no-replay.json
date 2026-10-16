@@ -1,0 +1,71 @@
+{
+  "scenario": "unknown-no-replay",
+  "scoped": true,
+  "run": "indeterminate",
+  "nodes": [
+    {
+      "state": "indeterminate",
+      "attempt": 1,
+      "blockers": [
+        "NODE_INDETERMINATE"
+      ]
+    }
+  ],
+  "outbound": 1,
+  "rowsAdmitted": 1,
+  "refusals": [],
+  "everyRequestJoinsOneRowAndEveryRowOneRequest": true,
+  "everyRequestWasReservedBeforeItArrived": true,
+  "ledgerStates": [
+    "unknown"
+  ],
+  "requests": [
+    {
+      "who": "root",
+      "attempt": 1,
+      "round": 0,
+      "joinedRow": true,
+      "rowState": "unknown",
+      "reservedBeforeSend": true,
+      "body": {
+        "model": "deepseek-v4-flash",
+        "maxTokens": 100,
+        "thinking": "enabled",
+        "effort": "high"
+      }
+    }
+  ],
+  "metering": [
+    {
+      "who": "root",
+      "attempt": 1,
+      "outcome": {
+        "kind": "failed",
+        "code": "MODEL_WORKER_INVALID"
+      },
+      "complete": false,
+      "admissionCalls": 1,
+      "rows": 1,
+      "sent": 1,
+      "refused": 0,
+      "unaccounted": 0,
+      "observed": {
+        "input": 0,
+        "output": 0
+      },
+      "missingRounds": [
+        "0:unknown"
+      ],
+      "listedAttemptsAreTheLedgersRows": true
+    }
+  ],
+  "rlmUsageEvents": [],
+  "continuationEvents": [],
+  "continuationCommands": 0,
+  "messageStatuses": [],
+  "retryScheduled": 0,
+  "namesDispatchNotAdmitted": false,
+  "namesOperatorBusy": false,
+  "namesDispatchUnknown": false,
+  "daemonsStopped": true
+}

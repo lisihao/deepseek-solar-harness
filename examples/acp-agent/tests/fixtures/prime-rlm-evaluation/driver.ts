@@ -19,12 +19,15 @@
  */
 
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { boot, resolveConfigPath } from '@deepseek-ai/dsh-app-boot'
 import type { LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import { messageText, startFakeDeepSeek, type FakeDeepSeek, type FakeMessage, type FakeReply } from '../prime-rlm-terminal/fake-deepseek.ts'
+import { SCENARIO_NAMES, scenarioOf, type Scenario, type ScenarioName } from './scenarios.ts'
+import { scenarioTranscript } from './transcript.ts'
 
 const configPath = process.argv[2]
 const home = process.env.DSH_HOME
@@ -34,6 +37,10 @@ const isolatedHome: string = home
 process.env.HOME = isolatedHome
 process.env.PATH = '/usr/bin:/bin'
 process.env.DEEPSEEK_API_KEY = 'fixture-not-a-key'
+
+const requestedScenario = process.env.DSH_EVALUATION_SCENARIO ?? 'tree'
+if (!(SCENARIO_NAMES as readonly string[]).includes(requestedScenario)) throw new Error(`unknown prime-rlm-evaluation scenario ${requestedScenario}`)
+const scenario: Scenario = scenarioOf(requestedScenario as ScenarioName)
 
 const ROOT = 'EVAL-ROOT: combine the results.'
 const KID = 'EVAL-KID: ask your own child.'
@@ -91,7 +98,7 @@ function handle(messages: readonly FakeMessage[]): FakeReply {
   return repl(`await rlm(${JSON.stringify(KID)}, { name: "kid" }); "spawned"`)
 }
 
-function graph(workspace: string): LogicalTaskGraphV1 {
+function graph(workspace: string, retry: Scenario['retry']): LogicalTaskGraphV1 {
   return {
     version: 1, title: 'keyless evaluation graph', workspace, maxParallel: 1, risk: 'low',
     nodes: [{
@@ -101,7 +108,7 @@ function graph(workspace: string): LogicalTaskGraphV1 {
       effectBudget: { read: [], write: [], execute: [], network: [], cost: [], risk: [] },
       approvedSecretRefs: [], readScopes: ['src'], writeScopes: [],
       acceptance: [{ id: 'done', description: 'operator completes', kind: 'operator-completed' }],
-      retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
+      retryPolicy: { maxAttempts: retry.maxAttempts, backoffMs: 0, retryableCodes: [...retry.retryableCodes] },
       rlm: { mode: 'enabled', maxDepth: 2, maxChildren: 2, maxTurns: 4 },
     }],
   }
@@ -197,14 +204,23 @@ let transcript: unknown
 try {
   const root = join(isolatedHome, 'orchestrations')
   await mkdir(root, { recursive: true })
-  await writeFile(join(root, 'evaluation-scope.json'), JSON.stringify({
-    version: 1, scopeId: 'keyless-eval', model: 'deepseek-v4-flash', inputBound: 'request-bytes-audited',
-    limits: {
-      inputTokens: 5_000_000, outputTokens: 5_000_000, httpAttempts: ADMITTED_LIMIT, concurrentRequests: 8, maxOutputTokensPerRequest: 100,
-    },
-    generation: { thinking: 'enabled', reasoningEffort: 'high' },
-  }))
-  owned.fake = startFakeDeepSeek(handle)
+  if (scenario.scoped) {
+    await writeFile(join(root, 'evaluation-scope.json'), JSON.stringify({
+      version: 1, scopeId: 'keyless-eval', model: 'deepseek-v4-flash', inputBound: 'request-bytes-audited',
+      limits: scenario.limits,
+      generation: { thinking: 'enabled', reasoningEffort: 'high' },
+    }))
+  }
+  // The ledger as the daemon had written it when this request arrived: the request must already be reserved there.
+  const reservedWhenReceived = new Map<number, boolean>()
+  const ledgerPath = join(root, 'evaluation-ledger.json')
+  owned.fake = startFakeDeepSeek((messages, body, raw) => {
+    if (scenario.scoped) {
+      const ledgerNow = JSON.parse(readFileSync(ledgerPath, 'utf8')) as { attempts: Attempt[] }
+      reservedWhenReceived.set(raw.ordinal, ledgerNow.attempts.some(attempt => attempt.bodySha256 === raw.sha256 && attempt.state === 'reserved'))
+    }
+    return scenario.handler === undefined ? handle(messages) : scenario.handler(messages, body, raw)
+  })
   const fake = await within('fake DeepSeek start', owned.fake, FAKE_MS)
   process.env.DEEPSEEK_BASE_URL = fake.baseURL
   owned.booted = boot('prime-rlm-evaluation-keyless', resolveConfigPath(configPath, undefined))
@@ -234,7 +250,7 @@ try {
   const compilation = await rpc('compile', service().compile({
     intent: { request: 'evaluation scope' },
     admission: { policy: 'codex', route: 'taskgraph', sourceSessionId: 'evaluation', rlm: 'enabled', continualHarness: 'off', optimization: 'balanced' },
-    graph: graph(workspace),
+    graph: graph(workspace, scenario.retry),
   }), runUntil)
   const started = await rpc(
     'start', service().start({ commandId: `start:${compilation.compilationId}`, compilationId: compilation.compilationId }), runUntil,
@@ -242,77 +258,94 @@ try {
   const limit = runUntil
   for (;;) {
     const snapshot = await rpc('inspect', service().inspect(started.runId), runUntil)
-    if (['completed', 'failed'].includes(snapshot.state)) break
+    if (['completed', 'failed', 'indeterminate'].includes(snapshot.state)) break
     if (Date.now() >= limit) throw new Error(`the run did not settle within ${String(RUN_MS)} ms (state ${snapshot.state})`)
     await new Promise(resolve => setTimeout(resolve, 50))
   }
 
-  const ledger = JSON.parse(await readFile(join(root, 'evaluation-ledger.json'), 'utf8')) as { attempts: Attempt[] }
-  const admitted = ledger.attempts.filter(attempt => attempt.state !== 'refused')
-  const received = fake.raw.map(({ body, ordinal, sha256 }) => ({ ordinal, sha256, bytes: Buffer.byteLength(body, 'utf8'), parsed: JSON.parse(body) as {
-    model: string
-    max_tokens: number
-    thinking: { type: string }
-    reasoning_effort: string
-  } }))
-  const hashes = admitted.map(attempt => attempt.bodySha256).sort()
-  // When asked, write what an auditor can reconcile by hand: each received request with the ledger attempt it joins to and the
-  // session that sent it, the final ledger, the sessions of the run, and the outbound counts. The transcript below stays
-  // order-insensitive; these files are not part of the snapshot.
-  const evidenceDirectory = process.env.DSH_EVALUATION_EVIDENCE_DIR
-  if (evidenceDirectory !== undefined) {
-    const runtime = JSON.parse(await readFile(join(root, 'rlm-runtime', 'state.json'), 'utf8')) as {
-      sessions: { snapshot: { sessionId: string; parentSessionId?: string; depth: number } }[]
-    }
-    const tree = runtime.sessions.map(entry => ({
-      sessionId: entry.snapshot.sessionId, parentSessionId: entry.snapshot.parentSessionId ?? null, depth: entry.snapshot.depth,
-    }))
-    await mkdir(evidenceDirectory, { recursive: true })
-    const rows = received.map((request, index) => {
-      const attempt = admitted.find(value => value.bodySha256 === request.sha256)
-      const session = attempt?.label.split('@').at(1)
-      return {
-        index, sha256: request.sha256, bytes: request.bytes, ...request.parsed,
-        ledgerAttemptId: (attempt as unknown as { id?: string } | undefined)?.id, label: attempt?.label,
-        session, depth: tree.find(entry => entry.sessionId === session)?.depth,
+  if (scenario.name === 'tree') {
+    const ledger = JSON.parse(await readFile(join(root, 'evaluation-ledger.json'), 'utf8')) as { attempts: Attempt[] }
+    const admitted = ledger.attempts.filter(attempt => attempt.state !== 'refused')
+    const received = fake.raw.map(({ body, ordinal, sha256 }) => ({ ordinal, sha256, bytes: Buffer.byteLength(body, 'utf8'), parsed: JSON.parse(body) as {
+      model: string
+      max_tokens: number
+      thinking: { type: string }
+      reasoning_effort: string
+    } }))
+    const hashes = admitted.map(attempt => attempt.bodySha256).sort()
+    // When asked, write what an auditor can reconcile by hand: each received request with the ledger attempt it joins to and the
+    // session that sent it, the final ledger, the sessions of the run, and the outbound counts. The transcript below stays
+    // order-insensitive; these files are not part of the snapshot.
+    const evidenceDirectory = process.env.DSH_EVALUATION_EVIDENCE_DIR
+    if (evidenceDirectory !== undefined) {
+      const runtime = JSON.parse(await readFile(join(root, 'rlm-runtime', 'state.json'), 'utf8')) as {
+        sessions: { snapshot: { sessionId: string; parentSessionId?: string; depth: number } }[]
       }
-    })
-    await writeFile(join(evidenceDirectory, 'received-requests.json'), `${JSON.stringify(rows, null, 2)}\n`)
-    await writeFile(join(evidenceDirectory, 'ledger-final.json'), `${JSON.stringify(ledger, null, 2)}\n`)
-    await writeFile(join(evidenceDirectory, 'sessions.json'), `${JSON.stringify(tree, null, 2)}\n`)
-    await writeFile(join(evidenceDirectory, 'outbound.json'), `${JSON.stringify({
-      endpointOrigin: new URL(fake.baseURL).origin,
-      requestsReceivedByEndpoint: received.length,
+      const tree = runtime.sessions.map(entry => ({
+        sessionId: entry.snapshot.sessionId, parentSessionId: entry.snapshot.parentSessionId ?? null, depth: entry.snapshot.depth,
+      }))
+      await mkdir(evidenceDirectory, { recursive: true })
+      const rows = received.map((request, index) => {
+        const attempt = admitted.find(value => value.bodySha256 === request.sha256)
+        const session = attempt?.label.split('@').at(1)
+        return {
+          index, sha256: request.sha256, bytes: request.bytes, ...request.parsed,
+          ledgerAttemptId: (attempt as unknown as { id?: string } | undefined)?.id, label: attempt?.label,
+          session, depth: tree.find(entry => entry.sessionId === session)?.depth,
+        }
+      })
+      await writeFile(join(evidenceDirectory, 'received-requests.json'), `${JSON.stringify(rows, null, 2)}\n`)
+      await writeFile(join(evidenceDirectory, 'ledger-final.json'), `${JSON.stringify(ledger, null, 2)}\n`)
+      await writeFile(join(evidenceDirectory, 'sessions.json'), `${JSON.stringify(tree, null, 2)}\n`)
+      await writeFile(join(evidenceDirectory, 'outbound.json'), `${JSON.stringify({
+        endpointOrigin: new URL(fake.baseURL).origin,
+        requestsReceivedByEndpoint: received.length,
+        admittedAttempts: admitted.length,
+        refusedAttempts: ledger.attempts.length - admitted.length,
+        refusals: ledger.attempts.filter(attempt => attempt.state === 'refused').map(attempt => ({ label: attempt.label, reason: attempt.refusal })),
+        note: 'Production daemon process started by the Loader client; its only endpoint is the loopback server and its credential is a fixture value. This process cannot see the daemon\'s own fetches.',
+      }, null, 2)}\n`)
+    }
+    // Order-insensitive: the concurrent requests of a tree do not arrive in a fixed sequence.
+    const unique = <T>(values: readonly T[]): T[] => [...new Set(values)].sort()
+    transcript = {
+      scope: { httpAttempts: ADMITTED_LIMIT, maxOutputTokensPerRequest: 100, inputBound: 'request-bytes-audited' },
+      outboundRequests: received.length,
       admittedAttempts: admitted.length,
-      refusedAttempts: ledger.attempts.length - admitted.length,
-      refusals: ledger.attempts.filter(attempt => attempt.state === 'refused').map(attempt => ({ label: attempt.label, reason: attempt.refusal })),
-      note: 'Production daemon process started by the Loader client; its only endpoint is the loopback server and its credential is a fixture value. This process cannot see the daemon\'s own fetches.',
-    }, null, 2)}\n`)
-  }
-  // Order-insensitive: the concurrent requests of a tree do not arrive in a fixed sequence.
-  const unique = <T>(values: readonly T[]): T[] => [...new Set(values)].sort()
-  transcript = {
-    scope: { httpAttempts: ADMITTED_LIMIT, maxOutputTokensPerRequest: 100, inputBound: 'request-bytes-audited' },
-    outboundRequests: received.length,
-    admittedAttempts: admitted.length,
-    everyRequestJoinsOneAdmittedAttempt: JSON.stringify(received.map(request => request.sha256).sort()) === JSON.stringify(hashes)
-      && new Set(hashes).size === hashes.length,
-    everyBodyLengthMatches: received.every(request => admitted.some(
-      attempt => attempt.bodySha256 === request.sha256 && attempt.bodyBytes === request.bytes,
-    )),
-    attemptStates: unique(admitted.map(attempt => attempt.state)),
-    refusals: unique(ledger.attempts.filter(attempt => attempt.state === 'refused').map(attempt => attempt.refusal)),
-    wire: {
-      models: unique(received.map(request => request.parsed.model)),
-      maxTokens: unique(received.map(request => request.parsed.max_tokens)),
-      thinking: unique(received.map(request => request.parsed.thinking.type)),
-      reasoningEffort: unique(received.map(request => request.parsed.reasoning_effort)),
-    },
-    requestsByKind: {
-      rootTurns: admitted.filter(attempt => attempt.label.includes(':rlm:root#')).length > 0,
-      continuations: admitted.filter(attempt => attempt.label.includes(':deliver#')).length > 0,
-      children: admitted.filter(attempt => !attempt.label.includes(':rlm:root#') && !attempt.label.includes(':deliver#')).length > 0,
-    },
+      everyRequestJoinsOneAdmittedAttempt: JSON.stringify(received.map(request => request.sha256).sort()) === JSON.stringify(hashes)
+        && new Set(hashes).size === hashes.length,
+      everyBodyLengthMatches: received.every(request => admitted.some(
+        attempt => attempt.bodySha256 === request.sha256 && attempt.bodyBytes === request.bytes,
+      )),
+      attemptStates: unique(admitted.map(attempt => attempt.state)),
+      refusals: unique(ledger.attempts.filter(attempt => attempt.state === 'refused').map(attempt => attempt.refusal)),
+      wire: {
+        models: unique(received.map(request => request.parsed.model)),
+        maxTokens: unique(received.map(request => request.parsed.max_tokens)),
+        thinking: unique(received.map(request => request.parsed.thinking.type)),
+        reasoningEffort: unique(received.map(request => request.parsed.reasoning_effort)),
+      },
+      requestsByKind: {
+        rootTurns: admitted.filter(attempt => attempt.label.includes(':rlm:root#')).length > 0,
+        continuations: admitted.filter(attempt => attempt.label.includes(':deliver#')).length > 0,
+        children: admitted.filter(attempt => !attempt.label.includes(':rlm:root#') && !attempt.label.includes(':deliver#')).length > 0,
+      },
+    }
+  } else {
+    // Late events of a refused or failed command land just after the run is terminal; the wait is for them, not for a result.
+    await new Promise(resolve => setTimeout(resolve, 400))
+    const final = await rpc('inspect', service().inspect(started.runId), runUntil)
+    const events = (await rpc('readEvents', service().readEvents({ runId: started.runId, limit: 500 }), runUntil)).events
+    const runtime = JSON.parse(await readFile(join(root, 'rlm-runtime', 'state.json'), 'utf8')) as { messages: Array<{ deliveryStatus: string }> }
+    transcript = scenarioTranscript({
+      scenario,
+      snapshot: final,
+      events,
+      raw: fake.raw,
+      ledger: scenario.scoped ? JSON.parse(await readFile(ledgerPath, 'utf8')) as { attempts: Attempt[] } : undefined,
+      reservedWhenReceived,
+      messageStatuses: runtime.messages.map(message => message.deliveryStatus),
+    })
   }
 } catch (error) {
   bodyError = error
