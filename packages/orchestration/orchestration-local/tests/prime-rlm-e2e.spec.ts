@@ -724,6 +724,53 @@ describe('what a Resident root and a Resident child are given', () => {
     expect(child?.nativeToolPolicy).toBe('disabled')
   })
 
+  it('lets the root read its child\'s stored result in segments through the real daemon, and returns the same text as the store holds', async () => {
+    const fixture = await e2eHarness('dsh-prime-read-result-')
+    interface Read { readonly text: string; readonly fullSha256: string; readonly count: number; readonly ref: string }
+    const read: { value: Read | undefined } = { value: undefined }
+    fixture.resident.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined || !request.commandId.endsWith(':rlm:root')) return
+      const id = request.commandId
+      await callTypescriptRepl(request, `${id}:spawn`, 'await rlm("Reader task.", { name: "reader" }); "spawned"')
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const summaries = await callTypescriptRepl(request, `${id}:poll-${String(attempt)}`, 'await rlm.childSummaries()')
+        const first = (summaries.value as Array<{ lifecycle?: string }> | undefined)?.[0]
+        if (first?.lifecycle === 'settled') break
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const result = await callTypescriptRepl(request, `${id}:read`, [
+        'const kid = (await rlm.listSubagents())[0];',
+        'let offset = 0, text = "", count = 0, fullSha256 = "", ref = "";',
+        'for (;;) {',
+        '  const part = await rlm.readChildResult(kid, { offset, limit: 40 });',
+        '  text += part.text; count += 1; fullSha256 = part.fullSha256; ref = part.resultRef;',
+        '  if (part.nextOffset === null) break;',
+        '  offset = part.nextOffset;',
+        '}',
+        '({ text, count, fullSha256, ref })',
+      ].join('\n'))
+      read.value = result.value as Read
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: 'Read a child result.' },
+      admission: admission({ sourceSessionId: 'read-result-rlm', rlm: 'enabled' }),
+      graph: taskGraph(fixture.workspace, [node('reader-node', 'Read a child result.', { operatorId: 'codex' })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    await eventually(() => Promise.resolve(read.value), value => value !== undefined)
+    const events = await fixture.client.readEvents({ runId: run.runId, limit: 300 })
+    const settled = events.events.find(event => event.type === 'rlm.child.settled')
+    const ref = String(settled?.data.artifactRef) as Parameters<typeof fixture.client.readArtifact>[0]
+    const stored = await fixture.client.readArtifact(ref) as { output: Array<{ text: string }>; executionId: string }
+    const whole = stored.output.map(block => block.text).join('\n')
+    expect(read.value?.text).toBe(whole)
+    expect(read.value?.text).toMatch(/^offline completed .*:rlm:rlm-child-/u)
+    expect(read.value?.count).toBeGreaterThan(1)
+    expect(read.value?.fullSha256).toBe(createHash('sha256').update(whole, 'utf8').digest('hex'))
+    expect(read.value?.ref).toBe(settled?.data.artifactRef)
+  })
+
   it('shows the child\'s REPL its own task and none of the root\'s private note', async () => {
     const { context } = await capture()
     expect(context?.task).toBe(CHILD_TASK)

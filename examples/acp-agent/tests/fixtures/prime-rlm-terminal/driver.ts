@@ -111,6 +111,21 @@ const CHILD_TAIL = 'Final rule: end the report with the exact token CHILD-TAIL-R
 // Long enough to cross any small cap on a task, with the only statement of the output rule on its last line.
 const CAPTURE_CHILD_TASK = `Inspector task: read your context and report what it says. ${'Detail line of the inspector task. '.repeat(160)}${CHILD_TAIL}`
 const CAPTURE_FIGURE = 'inspector figure is 6'
+// The child's final answer: several segments long, with multi-byte characters, and a last line that must come back whole.
+const RESULT_TAIL = 'END-OF-THE-CHILD-RESULT'
+const CAPTURE_CHILD_ANSWER = `${'Result line with 漢字 and 😀 inside it. '.repeat(24)}${RESULT_TAIL}`
+// What the root's continuation runs to read that answer from the stored result of its child, 300 code units at a time.
+const READ_RESULT_CODE = [
+  'const kid = (await rlm.listSubagents())[0];',
+  'let offset = 0; let text = ""; const lengths = []; let fullSha256 = "";',
+  'for (;;) {',
+  '  const part = await rlm.readChildResult(kid, { offset, limit: 300 });',
+  '  text += part.text; lengths.push(part.length); fullSha256 = part.fullSha256;',
+  '  if (part.nextOffset === null) break;',
+  '  offset = part.nextOffset;',
+  '}',
+  'JSON.stringify({ text, lengths, fullSha256 })',
+].join('\n')
 /** Opens when the child has sent its message, so the root's turn ends with that message waiting. */
 const captureChildDone = Promise.withResolvers<undefined>()
 type CaptureWho = 'root' | 'child' | 'continuation'
@@ -225,7 +240,10 @@ async function captureReply(messages: readonly FakeMessage[], body: FakeBody): P
   const record = (who: CaptureWho): void => { capturedRequests.push({ who, round, body }) }
   if (text.includes('Agent message from')) {
     record('continuation')
-    counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
+    if (round === 0) {
+      counts.set('deliver', (counts.get('deliver') ?? 0) + 1)
+      return repl(READ_RESULT_CODE)
+    }
     return answer('capture continuation output')
   }
   if (text.includes(CAPTURE_ROOT_TASK)) {
@@ -246,7 +264,7 @@ async function captureReply(messages: readonly FakeMessage[], body: FakeBody): P
     return repl(`await agentMessage.send(${JSON.stringify(CAPTURE_FIGURE)}, { receiverRole: "parent", mode: "auto" }); "sent"`)
   }
   captureChildDone.resolve(undefined)
-  return answer('child done')
+  return answer(CAPTURE_CHILD_ANSWER)
 }
 
 /** Answers the requests of the `context-prompts` scenario from their content, and keeps the prompts it reports. */
@@ -545,6 +563,23 @@ function normalizedBody(body: FakeBody): string {
     .replaceAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, '<time>')
 }
 
+/** What the root's continuation read back from its child's stored result, taken from the tool result of its next request. */
+function resultReadBack() {
+  const next = capturedRequests.find(request => request.who === 'continuation' && request.round === 1)
+  const tool = next?.body.messages?.filter(message => message.role === 'tool').at(-1)
+  if (tool === undefined) return null
+  const cell = JSON.parse(messageText(tool)) as { readonly value?: unknown }
+  if (typeof cell.value !== 'string') return null
+  const read = JSON.parse(cell.value) as { readonly text: string; readonly lengths: readonly number[]; readonly fullSha256: string }
+  return {
+    segments: read.lengths.length,
+    lengths: read.lengths,
+    textEqualsStored: read.text === CAPTURE_CHILD_ANSWER,
+    tailKept: read.text.endsWith(RESULT_TAIL),
+    fullSha256MatchesStored: read.fullSha256 === createHash('sha256').update(CAPTURE_CHILD_ANSWER, 'utf8').digest('hex'),
+  }
+}
+
 /** The `context` value a child's REPL printed, read back from the tool result of its next request. */
 function childContextSeen(): Record<string, unknown> | undefined {
   const next = capturedRequests.find(request => request.who === 'child' && request.round === 1)
@@ -585,6 +620,7 @@ async function captureTranscript() {
   }
   return {
     requests: rows,
+    resultRead: resultReadBack(),
     childContext: context === undefined ? null : {
       keys: Object.keys(context).sort(),
       taskIsTheChildsOwn: context.task === CAPTURE_CHILD_TASK,

@@ -2,6 +2,7 @@ import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
 import { describe, expect, it } from 'vitest'
 import {
   assertMessageContinuationNamesMessages,
+  childResultFromArtifact,
   MAX_CONTINUATION_VARIABLE_NAMES,
   refusalBeforeAdmission,
   rlmContinuationPrompt,
@@ -202,5 +203,32 @@ describe('the facts of a continuation that delivers several messages', () => {
     expect(rlmMessageContinuationFacts(session, roster, 'agent', 2)).toContain('The messages above are delivered in full; do not call agentMessage.read to fetch them again.')
     expect(rlmMessageContinuationFacts(session, roster, 'agent')).toContain('The message above is delivered in full; do not call agentMessage.read to fetch it again.')
     expect(rlmMessageContinuationFacts(session, roster, 'agent', 1)).toBe(rlmMessageContinuationFacts(session, roster, 'agent'))
+  })
+})
+
+describe('the item a child result reference names', () => {
+  const expected = { runId: 'run-1', nodeId: 'node-1', childSessionId: 'rlm-session-child' }
+  const stored = {
+    kind: 'prime-rlm-child-result', runId: 'run-1', nodeId: 'node-1', childSessionId: 'rlm-session-child', executionId: 'exec-1',
+    stopReason: 'completed', output: [{ type: 'text', text: 'answer' }],
+  }
+
+  it('is read as a result when it is a child result of this run, node, and child session', () => {
+    expect(childResultFromArtifact(stored, expected)).toEqual({
+      kind: 'prime-rlm-child-result', commandId: 'exec-1', stopReason: 'completed', output: [{ type: 'text', text: 'answer' }],
+    })
+  })
+
+  it.each([
+    ['another kind of item', { ...stored, kind: 'prime-rlm-message-continuation' }],
+    ['a result of another run', { ...stored, runId: 'run-2' }],
+    ['a result of another node', { ...stored, nodeId: 'node-2' }],
+    ['a result of another child session', { ...stored, childSessionId: 'rlm-session-other' }],
+    ['an item without an execution', { ...stored, executionId: undefined }],
+    ['an item whose output is not a list', { ...stored, output: 'answer' }],
+    ['a value that is not an object', 'sha256:abc'],
+    ['nothing', null],
+  ])('is not a result: %s', (_name, item) => {
+    expect(childResultFromArtifact(item, expected)).toBeUndefined()
   })
 })

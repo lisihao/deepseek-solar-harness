@@ -1,7 +1,13 @@
 /** What an RLM execution ends in after its last continuation, and the prompt of each continuation. */
 import { OrchestrationError } from '@deepseek-ai/dsh-orchestration'
 import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
-import { RlmRuntimeError, type RlmChildExecutionResult, type RlmFamilyRosterV1, type RlmRuntimeSessionSnapshotV1 } from '@deepseek-ai/dsh-rlm-runtime'
+import {
+  RlmRuntimeError,
+  type RlmChildExecutionResult,
+  type RlmChildResultContentV1,
+  type RlmFamilyRosterV1,
+  type RlmRuntimeSessionSnapshotV1,
+} from '@deepseek-ai/dsh-rlm-runtime'
 
 /**
  * The operator result an RLM execution ends in after its last continuation. A continuation that did not settle keeps
@@ -158,4 +164,25 @@ export function assertMessageContinuationNamesMessages(
 export function refusalBeforeAdmission(source: string, error: unknown): unknown {
   if (source !== 'message') return error
   return new RlmRuntimeError(error instanceof Error ? error.message : String(error), 'RLM_DISPATCH_NOT_ADMITTED')
+}
+
+/**
+ * The child result a stored artifact holds, if it is one. The artifact store is shared by every run, so a reference alone does not
+ * say what it names: the item must be a child result of this run, this node, and this child session.
+ * @param stored - what the store returned for the reference.
+ * @param expected - the run, node, and child session the caller was authorized for.
+ * @returns the result content, or `undefined` when the item is anything else.
+ */
+export function childResultFromArtifact(
+  stored: unknown,
+  expected: { readonly runId: string; readonly nodeId: string; readonly childSessionId: string },
+): RlmChildResultContentV1 | undefined {
+  if (stored === null || typeof stored !== 'object') return undefined
+  const item = stored as Partial<Record<'kind' | 'runId' | 'nodeId' | 'childSessionId' | 'executionId' | 'stopReason' | 'output', unknown>>
+  if (item.kind !== 'prime-rlm-child-result' || item.runId !== expected.runId || item.nodeId !== expected.nodeId
+    || item.childSessionId !== expected.childSessionId || typeof item.executionId !== 'string' || !Array.isArray(item.output)) return undefined
+  return {
+    kind: item.kind, commandId: item.executionId,
+    stopReason: item.stopReason as RlmChildResultContentV1['stopReason'], output: item.output as RlmChildResultContentV1['output'],
+  }
 }

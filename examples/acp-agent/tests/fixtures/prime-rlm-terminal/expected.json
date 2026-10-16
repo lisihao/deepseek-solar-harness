@@ -270,7 +270,7 @@
         "containsRootMarker": true,
         "containsRootTail": true,
         "containsChildTail": false,
-        "bodySha256": "28c0e694f7414e3cc856a134fee25e2d79e4e7b6afc5b447956843d610e12864"
+        "bodySha256": "237c537d90b11598145b03693d44b6b2bb35f73e72ea1ad3dfcc93d2c61bf4eb"
       },
       {
         "who": "root",
@@ -284,7 +284,7 @@
         "containsRootMarker": true,
         "containsRootTail": true,
         "containsChildTail": true,
-        "bodySha256": "5bf1125a0906856959bb8844630566b07a3000dc11f253497a0b5339542184b4"
+        "bodySha256": "bdd159fac0bee4d516c97951ad906b274d3fa221ee6a03ca2500c37e477b85f2"
       },
       {
         "who": "child",
@@ -296,7 +296,7 @@
         "containsRootMarker": false,
         "containsRootTail": false,
         "containsChildTail": true,
-        "bodySha256": "80d6eb6d926077a3c7f6bf3bbaf6000defab6b34cb62e50315e02f56a7dbfe0d"
+        "bodySha256": "a72b5112c3abe7973cee394a89cbbc4686fe7ae865dc7da03f488e3130e1503a"
       },
       {
         "who": "child",
@@ -310,7 +310,7 @@
         "containsRootMarker": false,
         "containsRootTail": false,
         "containsChildTail": true,
-        "bodySha256": "8f5e3ddbbc786b07e2f692a34c9453d129652da7813febff658f5f71ef91ea69"
+        "bodySha256": "08cc79e63414bea062c8963c4f54d8f3dfae13c9b7e3c96881c839f92c2b1038"
       },
       {
         "who": "child",
@@ -326,7 +326,7 @@
         "containsRootMarker": false,
         "containsRootTail": false,
         "containsChildTail": true,
-        "bodySha256": "0d45c2835151f837dee6d0c8c07229478efe48ef40406f5e67a38c8215cea4ed"
+        "bodySha256": "2ada669f0dd3b41bedfa11e7f318d569f4f4cdf33dd49ff35dd1f337ea73de44"
       },
       {
         "who": "continuation",
@@ -338,9 +338,35 @@
         "containsRootMarker": true,
         "containsRootTail": true,
         "containsChildTail": false,
-        "bodySha256": "966da1030d5fae609a225f4e0703904c2ddd1599d1cf43bebaca27edbd4f41f1"
+        "bodySha256": "59c5c37ed8672f4f11f79138cf26b5e4a23ff03762ece127b66f6ef5b3d93d4b"
+      },
+      {
+        "who": "continuation",
+        "round": 1,
+        "roles": [
+          "user",
+          "assistant",
+          "tool"
+        ],
+        "tools": 1,
+        "containsRootMarker": true,
+        "containsRootTail": true,
+        "containsChildTail": false,
+        "bodySha256": "1f909fff24eae91c95ad41d13ddf19117c006472f39b6f5805de376a3f84e68d"
       }
     ],
+    "resultRead": {
+      "segments": 4,
+      "lengths": [
+        300,
+        300,
+        300,
+        35
+      ],
+      "textEqualsStored": true,
+      "tailKept": true,
+      "fullSha256MatchesStored": true
+    },
     "childContext": {
       "keys": [
         "capabilityPlanRef",

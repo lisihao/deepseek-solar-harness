@@ -35,6 +35,8 @@ export interface KernelHooks {
   /** The host validates Prime's runtime option surface; the Worker boundary is untrusted. */
   spawn(task: string, options?: unknown): Promise<RlmChildHandleV1>
   listChildren(): Promise<unknown>
+  childSummaries(): Promise<unknown>
+  readChildResult(child: unknown, options?: unknown): Promise<unknown>
   deleteChild(child: unknown): Promise<void>
   sendMessage(text: string, options: { readonly receiverRole: 'parent' | 'child' | 'sibling'; readonly receiverName?: string; readonly mode?: 'auto' | 'steer' | 'follow_up'; readonly artifactRefs?: readonly string[] }): Promise<unknown>
   broadcastMessage(text: string, options?: { readonly mode?: 'auto' | 'steer' | 'follow_up'; readonly artifactRefs?: readonly string[] }): Promise<unknown>
@@ -128,6 +130,8 @@ Object.assign(server.context, {
 const rlm = Object.assign((task, options) => host('spawn', [task, options]), {
   listSubagents: () => host('listChildren', []),
   list_subagents: () => host('listChildren', []),
+  childSummaries: () => host('childSummaries', []),
+  readChildResult: (child, options) => host('readChildResult', [child, options]),
   deleteSubagent: child => host('deleteChild', [child]),
   delete_subagent: child => host('deleteChild', [child]),
 });
@@ -508,6 +512,8 @@ export class PersistentTypeScriptKernel {
     switch (method) {
       case 'spawn': return this.hooks.spawn(args[0] as string, args[1])
       case 'listChildren': return this.hooks.listChildren()
+      case 'childSummaries': return this.hooks.childSummaries()
+      case 'readChildResult': return this.hooks.readChildResult(args[0], args[1])
       case 'deleteChild': return this.hooks.deleteChild(args[0])
       case 'sendMessage': return this.hooks.sendMessage(args[0] as string, args[1] as Parameters<KernelHooks['sendMessage']>[1])
       case 'broadcastMessage': return this.hooks.broadcastMessage(args[0] as string, args[1] as Parameters<KernelHooks['broadcastMessage']>[1])

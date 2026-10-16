@@ -20,6 +20,7 @@ import RlmRuntimeService, {
   type RlmChildExecutionResult,
   type RlmChildExecutionOptionsV1,
   type RlmChildHandleV1,
+  type RlmChildResultContentV1,
   type RlmChildModelOriginV1,
   type RlmChildModelPolicyV1,
   type RlmManagedSkillBindingV1,
@@ -314,6 +315,25 @@ function childContext(parent: Readonly<Record<string, RlmJsonValue>>, task: stri
   }
   context.task = task
   return context
+}
+
+/** Most UTF-16 code units of a child's result preview that `childSummaries` returns. A fixed size of a summary, not a setting. */
+const CHILD_SUMMARY_PREVIEW_UNITS = 200
+
+/**
+ * The text of a child's result as `readChildResult` offers it: its text blocks in order, joined by one newline. Other blocks are
+ * not text and are counted, not rendered. Offsets, lengths, and both hashes refer to this rendering.
+ * @param output - the stored output blocks of the child.
+ * @returns the rendering and the number of blocks left out of it.
+ */
+function renderChildOutput(output: RlmChildResultContentV1['output']): { readonly text: string; readonly omittedBlocks: number } {
+  const texts: string[] = []
+  let omittedBlocks = 0
+  for (const block of output) {
+    if (block.type === 'text') texts.push(block.text)
+    else omittedBlocks += 1
+  }
+  return { text: texts.join('\n'), omittedBlocks }
 }
 
 function now(): string { return new Date().toISOString() }
@@ -1740,6 +1760,16 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         const { outputPreview: _outputPreview, ...status } = child
         return status
       }),
+      childSummaries: async () => (await this.listChildren(session.snapshot.sessionId)).map((child) => {
+        const preview = child.outputPreview?.slice(0, CHILD_SUMMARY_PREVIEW_UNITS)
+        return {
+          rlmChildId: child.rlmChildId, name: child.name, depth: child.depth, lifecycle: child.lifecycle,
+          ...child.resultRef === undefined ? {} : { resultRef: child.resultRef },
+          ...child.error === undefined ? {} : { error: child.error },
+          ...preview === undefined ? {} : { preview, previewTruncated: (child.outputPreview?.length ?? 0) > preview.length },
+        }
+      }),
+      readChildResult: (child, options) => this.readChildResult(session.snapshot.sessionId, child, options),
       deleteChild: async (child) => {
         const value = child as Partial<RlmChildHandleV1 & RlmChildSnapshotV1>
         if (value.rlmChildId === undefined) throw new RlmRuntimeError('deleteSubagent requires a child handle or snapshot', 'RLM_INVALID')
@@ -2083,6 +2113,104 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       const interruptFailure = await this.countAndInterruptExecution(sessionId, execution)
       if (interruptFailure !== '') throw new RlmRuntimeError(`an accepted continuation could not be interrupted${interruptFailure}`, 'RLM_UNAVAILABLE')
     }
+  }
+
+  /**
+   * One segment of the stored result of a direct child, for the model's `rlm.readChildResult`. Only the child's parent may read
+   * it, and only the result the child's own record names; a reference alone is never enough. A child that has not settled, was
+   * indeterminate, or recorded no result is reported as such, never as an empty success.
+   */
+  private async readChildResult(callerId: RlmRuntimeSessionId, childArg: unknown, optionsArg: unknown): Promise<RlmJsonValue> {
+    const caller = this.requireSession(callerId)
+    this.requireOpen(callerId, 'read a child result')
+    const options = optionsArg === undefined ? {} : optionsArg
+    if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+      throw new RlmRuntimeError('readChildResult options must be an object', 'RLM_INVALID')
+    }
+    const unknownKeys = Object.keys(options).filter(key => key !== 'offset' && key !== 'limit' && key !== 'resultRef')
+    if (unknownKeys.length > 0) throw new RlmRuntimeError(`Unsupported readChildResult options: ${unknownKeys.sort().join(', ')}`, 'RLM_INVALID')
+    const { offset = 0, limit, resultRef } = options as { offset?: unknown; limit?: unknown; resultRef?: unknown }
+    if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) {
+      throw new RlmRuntimeError('readChildResult offset must be a non-negative integer number of UTF-16 code units', 'RLM_INVALID')
+    }
+    if (limit !== undefined && (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1)) {
+      throw new RlmRuntimeError('readChildResult limit must be a positive integer number of UTF-16 code units', 'RLM_INVALID')
+    }
+    const childId = typeof childArg === 'string' ? childArg : (childArg as { rlmChildId?: unknown } | null)?.rlmChildId
+    if (typeof childId !== 'string' || childId.length === 0) {
+      throw new RlmRuntimeError('readChildResult requires a child handle, a child snapshot, or a child id', 'RLM_INVALID')
+    }
+    const child = caller.snapshot.children.find(value => value.rlmChildId === childId)
+    if (child === undefined) {
+      throw new RlmRuntimeError('A result can be read only by the direct parent of the child that produced it', 'RLM_FAMILY_VIOLATION')
+    }
+    if (child.lifecycle === 'deleted' || this.isClosed(child.sessionId)) {
+      throw new RlmRuntimeError('RLM child was deleted; its result cannot be read', 'RLM_UNAVAILABLE')
+    }
+    if (resultRef !== undefined && resultRef !== child.resultRef) {
+      throw new RlmRuntimeError('resultRef is not the result recorded for this child', 'RLM_FAMILY_VIOLATION')
+    }
+    const base = { version: 1, childId, childSessionId: String(child.sessionId), lifecycle: child.lifecycle } as const
+    if (child.lifecycle === 'accepted' || child.lifecycle === 'running') return { ...base, status: 'not_settled' }
+    if (child.lifecycle === 'indeterminate') {
+      return { ...base, status: 'indeterminate', ...child.error === undefined ? {} : { error: child.error } }
+    }
+    if (child.resultRef === undefined) {
+      return { ...base, status: 'not_found', reason: 'the child recorded no result', ...child.error === undefined ? {} : { error: child.error } }
+    }
+    const host = this.bindings.get(String(callerId))
+    if (host?.readResult === undefined) throw new RlmRuntimeError('RLM host cannot read child results', 'RLM_UNAVAILABLE')
+    const content = await host.readResult({
+      sessionId: callerId, childId: child.rlmChildId, childSessionId: child.sessionId, resultRef: child.resultRef,
+    })
+    if (content === undefined) return { ...base, status: 'not_found', resultRef: child.resultRef, reason: 'the host holds no such result' }
+    const { text, omittedBlocks } = renderChildOutput(content.output)
+    if (offset > text.length) {
+      throw new RlmRuntimeError(
+        `readChildResult offset ${String(offset)} is past the end of the result (${String(text.length)} code units)`, 'RLM_INVALID',
+      )
+    }
+    const low = text.charCodeAt(offset)
+    if (offset > 0 && offset < text.length && low >= 0xDC00 && low <= 0xDFFF) {
+      throw new RlmRuntimeError('readChildResult offset falls inside a surrogate pair', 'RLM_INVALID')
+    }
+    const storedRef = child.resultRef
+    const buildResult = (end: number) => {
+      const segment = text.slice(offset, end)
+      return {
+        ...base,
+        status: child.lifecycle === 'failed' ? 'failed' : 'settled',
+        ...child.error === undefined ? {} : { error: child.error },
+        resultRef: storedRef, kind: content.kind, commandId: content.commandId, stopReason: content.stopReason,
+        unit: 'utf16-code-units', offset, length: segment.length, totalUnits: text.length,
+        complete: offset === 0 && end === text.length, truncated: end < text.length, nextOffset: end < text.length ? end : null,
+        segmentSha256: createHash('sha256').update(segment, 'utf8').digest('hex'),
+        fullSha256: createHash('sha256').update(text, 'utf8').digest('hex'),
+        omittedBlocks, isData: true, text: segment,
+      } as const
+    }
+    // A segment never ends between the halves of a surrogate pair. The object returned is the cell's value; the cell's recorded
+    // output holds that value and a text rendering of it, and both count against the output limit, so the object is kept to a third
+    // of the limit in UTF-8 bytes.
+    const whole = (end: number): number => {
+      const last = text.charCodeAt(end - 1)
+      return end < text.length && end > offset && last >= 0xD800 && last <= 0xDBFF ? end - 1 : end
+    }
+    let end = whole(Math.min(text.length, offset + (limit === undefined ? text.length - offset : limit)))
+    const budget = Math.floor(caller.snapshot.limits.maxOutputBytes / 3)
+    while (end > offset && Buffer.byteLength(JSON.stringify(buildResult(end)), 'utf8') > budget) {
+      end = whole(offset + Math.floor((end - offset) * 0.9))
+    }
+    if (end <= offset && offset < text.length) {
+      throw new RlmRuntimeError('The output limit is too small for one code point of this result', 'RLM_OUTPUT_LIMIT')
+    }
+    const result = buildResult(end)
+    const { segmentSha256, fullSha256 } = result
+    this.appendEvent(callerId, 'rlm.child.result.read', {
+      childId, commandId: content.commandId, resultRef: result.resultRef, offset, length: result.length, totalUnits: text.length,
+      complete: result.complete, truncated: result.truncated, segmentSha256, fullSha256, status: result.status,
+    })
+    return result
   }
 
   private acceptBridgeSocket(socket: Socket): void {

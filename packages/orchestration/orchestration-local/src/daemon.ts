@@ -141,6 +141,7 @@ import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
 import {
   assertMessageContinuationNamesMessages,
+  childResultFromArtifact,
   refusalBeforeAdmission,
   rlmContinuationPrompt,
   rlmContinuationResult,
@@ -3707,6 +3708,21 @@ export class OrchestrationDaemon {
       dispatchContinuation: request => this.dispatchRlmContinuation(
         record, spec, plan, request, cancellation, physicalRuns,
       ),
+      readResult: ({ childSessionId, resultRef }) => {
+        // The runtime has checked who may ask and which reference is the child's. The store is shared by every run, so what comes
+        // back is also checked to be a child result of this session in this node of this run.
+        let stored: unknown
+        try {
+          stored = this.store.readArtifact(OrchestrationArtifactRef(resultRef))
+        } catch (error) {
+          // Only a reference with no stored file is "not held"; an invalid reference or a damaged file is a failure to report.
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Promise.resolve(undefined)
+          throw error
+        }
+        return Promise.resolve(childResultFromArtifact(stored, {
+          runId, nodeId: spec.id, childSessionId: String(childSessionId),
+        }))
+      },
       hostRequest: async ({ sessionId, method, params, sealedSkill }) => {
         const isRootSession = String(sessionId) === `rlm:${String(plan.executionId)}`
         if (method === 'compact.status') {
