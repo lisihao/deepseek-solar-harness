@@ -335,6 +335,11 @@
       "name": "Evaluation scope ledger: admission at the physical request, scope generation limits, and the owner-locked request ledger (llm, llm-deepseek, model-worker, model-worker-deepseek and orchestration-local sealed together; no version change)",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "3bb78b6ce6"
+    },
+    {
+      "name": "Evaluation ledger: guarded lock takeover, no writes after close, no redirects under an admission, totals checked before recovery, and corrected bound wording (llm, llm-deepseek and orchestration-local resealed; no version change)",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "1d8704dcbc"
     }
   ],
   "sourcePackages": {
@@ -509,14 +514,14 @@
     "dsh-packages/deepseek-ai-dsh-host-webserver-0.1.0-rc.5.tgz": "6349e28b2ad740163df7558cfa73738f09768bf38d950ef4b9aa1bdbd33100c8",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "8f1658c79dca2f4426da492889be2b1d4b6d7df497437b0e21c227f246b3e2af",
     "dsh-packages/deepseek-ai-dsh-kennel-review-0.1.0-rc.5.tgz": "162962c8cdcd606c8742d2646564d12ed2d8b3132f8222e43c40fb0ba0ca69dc",
-    "dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz": "af6e02de031e6ad3b7aa01aa225444975b749d67f29c27b56b29e54c517ae2f5",
-    "dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz": "152ba4b987bd7a0a3bc508fda6ab19718ca54bbf71f57688700f2d15ad3c5d09",
+    "dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz": "314c21de00a0b12360d4e753fb4467ac45dbd2528260b3266843edfd0de07257",
+    "dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz": "d36ce0433773dc58971fc34ca762a73c95c40c6a43c14262072a8e6560e5c8d8",
     "dsh-packages/deepseek-ai-dsh-model-allocation-0.1.0-rc.5.tgz": "aec7a9e7ce751652cf4733b7f76a1d3b8e9059bd02f6fed41f3663767d871ae0",
     "dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz": "2b81dcdd91882499928b9e3cc193c01eea2a114f6b49dfc0ce75bdd617fc0c68",
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "87bebe7ffe31501a109b9f5d172fdf839a311347b0a8a4e6f0cf793880aea92b",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "71b91e5233f218e5d31c56724b1eb885ff73e367bc54499af83a4e082e69a06f",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "ae7f77c743f1664388595ac06cf3c53d2ee17484d3791ae4ef79f32c411a0fba",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "af6f15649edb3ef916bf7cfa5fd22c8df5cbc79a8a50514f9cfd2390555f4001",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "c09de9bf845a47be4a0385db074db17567ca867be713beff241ede1bd776bae4",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "2ef397368e994f1f5fb22958ff64f110e696e77bcdd2702c3d2f58e13821f36b",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "ff739e592e964c0af34c4b13b9598d61aeba26090e6b41ccabaaee4296a0da2b",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "70c32494b88d6ad6cbc68dfca97cb9644f92bd69c66b3a1ec28a4ee5b8fff11d",
