@@ -3405,6 +3405,19 @@ describe('orchestration daemon', () => {
       expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
     }, 20_000)
 
+    it('does not run a node again when its message continuation, without Autonomous Mode, ends with a request of unknown outcome', async () => {
+      const f = await fixture(treeHandler())
+      const worker = continuationWorker('message', (_request, ticket) => {
+        ticket.abandon()
+        return Promise.resolve({ output: [], stopReason: 'error' })
+      })
+      const { settled, client, runId } = await run(f, ROOT, false, true, [worker], { retry: REPLAYABLE })
+      expect(settled.nodes[0]?.attempt).toBe(1)
+      expect((await client.readEvents({ runId, limit: 400 })).events.filter(entry => entry.type === 'node.retry_scheduled')).toEqual([])
+      expect(worker.requests.filter(isRoot)).toHaveLength(1)
+      expect(ledgerOf(f).attempts.map(attempt => attempt.state)).toContain('unknown')
+    }, 20_000)
+
     it('admits nothing when the scope asks for an input bound proven before sending, which this build cannot give', async () => {
       const f = await fixture(treeHandler(), { ...SCOPE, inputBound: 'proven-token-count' })
       await run(f, ROOT)
