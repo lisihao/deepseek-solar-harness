@@ -222,6 +222,23 @@ describe('message batches', () => {
     await t.ctx.root.fiber.dispose()
   })
 
+  it('has written the batch to the state file, with its members still queued, when the host is called', async () => {
+    const onDisk: Array<{ records: Array<Record<string, unknown>>; statuses: unknown[] }> = []
+    const t: Harness = await setup(async () => {
+      const disk = await t.state()
+      onDisk.push({ records: disk.messageBatchDispatches, statuses: disk.messages.map(message => message.deliveryStatus) })
+      return noExecution()
+    })
+    const m1 = await t.send('m1')
+    const m2 = await t.send('m2')
+    t.release()
+    await waitUntil(() => onDisk.length === 1)
+    expect(onDisk[0]!.records).toMatchObject([{ state: 'intended', messageIds: [m1.messageId, m2.messageId], sessionId: String(t.sessionId) }])
+    expect(onDisk[0]!.statuses).toEqual(['queued', 'queued'])
+    await waitUntil(async () => (await t.state()).messages.every(message => message.deliveryStatus === 'delivered'))
+    await t.ctx.root.fiber.dispose()
+  })
+
   it('keeps the members queued when the host refuses before creating an execution, and retries them under the command of their own set', async () => {
     const commands: string[] = []
     const t = await setup((request) => {

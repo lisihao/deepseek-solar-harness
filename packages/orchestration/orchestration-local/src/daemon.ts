@@ -53,7 +53,6 @@ import {
 import {
   RLM_TYPESCRIPT_REPL_TOOL_SCHEMA,
   RlmCommandId,
-  RlmRuntimeError,
   RlmRuntimeSessionId,
   type RlmChildExecution,
   type RlmChildExecutionResult,
@@ -140,7 +139,14 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
-import { rlmContinuationPrompt, rlmContinuationResult, rlmMessageContinuationFacts, rlmResultSucceeded } from './rlm-continuation.ts'
+import {
+  assertMessageContinuationNamesMessages,
+  refusalBeforeAdmission,
+  rlmContinuationPrompt,
+  rlmContinuationResult,
+  rlmMessageContinuationFacts,
+  rlmResultSucceeded,
+} from './rlm-continuation.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
@@ -3959,9 +3965,7 @@ export class OrchestrationDaemon {
     let bridge: Awaited<ReturnType<typeof this.ctx.rlmRuntime.modelToolBridge>>
     let prompt: ContentBlock[]
     try {
-      if (request.source === 'message' && (request.messageIds === undefined || request.messageIds.length === 0)) {
-        throw new OrchestrationError('a message continuation must name the messages it delivers', 'GRAPH_INVALID')
-      }
+      assertMessageContinuationNamesMessages(request)
       execution = cancellation.begin(String(request.sessionId))
       executionId = PhysicalOperatorExecutionId(String(request.commandId))
       bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
@@ -3976,8 +3980,7 @@ export class OrchestrationDaemon {
         : undefined
       prompt = [{ type: 'text', text: rlmContinuationPrompt(request, inspection) }]
     } catch (error) {
-      if (request.source !== 'message') throw error
-      throw new RlmRuntimeError(error instanceof Error ? error.message : String(error), 'RLM_DISPATCH_NOT_ADMITTED')
+      throw refusalBeforeAdmission(request.source, error)
     }
     const settle = async (
       result: PhysicalOperatorResult,

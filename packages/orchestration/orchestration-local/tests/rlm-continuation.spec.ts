@@ -1,7 +1,9 @@
 import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
 import { describe, expect, it } from 'vitest'
 import {
+  assertMessageContinuationNamesMessages,
   MAX_CONTINUATION_VARIABLE_NAMES,
+  refusalBeforeAdmission,
   rlmContinuationPrompt,
   rlmContinuationResult,
   rlmMessageContinuationFacts,
@@ -167,5 +169,38 @@ describe('RLM message continuation facts', () => {
     expect(facts).toContain('reuse the existing binding, choose a new name, or keep temporary values inside a block or function')
     expect(facts).toContain('do not call agentMessage.read to fetch it again')
     expect(facts).not.toMatch(/reassign|assign to/u)
+  })
+})
+
+describe('a continuation that fails before any execution exists', () => {
+  it('reports a message continuation\'s failure as a refusal that admitted nothing, and leaves every other failure alone', () => {
+    const failure = new Error('bridge is not ready')
+    expect(refusalBeforeAdmission('message', failure)).toMatchObject({ code: 'RLM_DISPATCH_NOT_ADMITTED', message: 'bridge is not ready' })
+    expect(refusalBeforeAdmission('message', 'plain text')).toMatchObject({ code: 'RLM_DISPATCH_NOT_ADMITTED', message: 'plain text' })
+    for (const source of ['goal', 'heartbeat', 'autonomous']) expect(refusalBeforeAdmission(source, failure)).toBe(failure)
+  })
+
+  it('requires a message continuation to name its messages, and asks nothing of the other sources', () => {
+    expect(() => { assertMessageContinuationNamesMessages({ source: 'message' }) }).toThrow('must name the messages')
+    expect(() => { assertMessageContinuationNamesMessages({ source: 'message', messageIds: [] }) }).toThrow('must name the messages')
+    expect(() => { assertMessageContinuationNamesMessages({ source: 'message', messageIds: ['m1'] }) }).not.toThrow()
+    expect(() => { assertMessageContinuationNamesMessages({ source: 'goal' }) }).not.toThrow()
+  })
+
+  it('says "messages" when several are delivered and keeps the single-message text byte for byte', () => {
+    const request = { source: 'message' as const, instruction: 'x', deliveryMode: 'steer' as const }
+    expect(rlmContinuationPrompt({ ...request, messageIds: ['a'] })).toBe(rlmContinuationPrompt(request))
+    expect(rlmContinuationPrompt({ ...request, messageIds: ['a', 'b'] })).toContain('Process the queued family messages using steer ordering')
+    expect(rlmContinuationPrompt(request)).toContain('Process the queued family message using steer ordering')
+  })
+})
+
+describe('the facts of a continuation that delivers several messages', () => {
+  const session: Session = { task: 't', restorableVariables: [], degradedVariables: [] }
+  const roster: Roster = { entries: [] }
+  it('say the messages are delivered in full, and say the single message as before', () => {
+    expect(rlmMessageContinuationFacts(session, roster, 'agent', 2)).toContain('The messages above are delivered in full; do not call agentMessage.read to fetch them again.')
+    expect(rlmMessageContinuationFacts(session, roster, 'agent')).toContain('The message above is delivered in full; do not call agentMessage.read to fetch it again.')
+    expect(rlmMessageContinuationFacts(session, roster, 'agent', 1)).toBe(rlmMessageContinuationFacts(session, roster, 'agent'))
   })
 })
