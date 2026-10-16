@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
-  assertLossless, assertRestores, CaptureError, correlate, correlateResident, project, projectionSha256, projectResident,
+  assertLossless, assertRestores, CaptureError, correlate, correlateResident, dispatchOf, project, projectionSha256, projectResident,
   serializeRequest, Tokens,
   type CaptureWho, type ProductionRecords, type DispatchFacts,
 } from './fixtures/prime-rlm-terminal/capture.ts'
@@ -133,6 +133,18 @@ describe('correlating requests with the production dispatch records', () => {
     fails(scenario(), other, 'the runtime kept')
   })
 
+  it('names a dispatch only for the session and the command the records name together', () => {
+    expect(dispatchOf(ROOT_SESSION, ROOT_COMMAND, facts())).toBe('root')
+    expect(dispatchOf(CHILD_SESSION, CHILD_COMMAND, facts())).toBe('child')
+    expect(dispatchOf(ROOT_SESSION, DELIVER_COMMAND, facts())).toBe('continuation')
+    const other = 'rlm-session-99999999-9999-4999-8999-999999999999'
+    const mismatched = [[other, ROOT_COMMAND], [other, CHILD_COMMAND], [other, DELIVER_COMMAND], [ROOT_SESSION, CHILD_COMMAND]] as const
+    for (const [session, command] of mismatched) {
+      expect(() => dispatchOf(session, command, facts())).toThrow('matches 0 dispatch records')
+    }
+    expect(() => dispatchOf(undefined, ROOT_COMMAND, facts())).toThrow(CaptureError)
+  })
+
   it('fails when the recorded dispatch of the root, or of the child, is missing or names another session', () => {
     fails(scenario(), production(), 'matches 0 dispatch records', hint, { ...facts(), started: [] })
     fails(scenario(), production(), 'matches 0 dispatch records', hint, { ...facts(), dispatched: [] })
@@ -178,6 +190,12 @@ describe('projecting a request', () => {
     expect(tokens.table()['<uuid-2>']).toBe(B)
     assertLossless(raw, projection, tokens)
     expect(projectionSha256(projection)).toMatch(/^[0-9a-f]{64}$/u)
+  })
+
+  it('fails when a request is not the serialization of its own parsed body, so the projection cannot be compared with its bytes', () => {
+    const { raw, projection, tokens } = run(A, B)
+    const spaced = { ...raw, body: JSON.stringify(JSON.parse(raw.body), null, 1) }
+    expect(() => { assertLossless(spaced, projection, tokens) }).toThrow('is not the serialization of its own parsed body')
   })
 
   it('keeps the task text, an id or digest that appears in it, and the tool schema as they are', () => {
