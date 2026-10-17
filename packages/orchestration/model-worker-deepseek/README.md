@@ -8,6 +8,10 @@ Optional DeepSeek official API worker for sealed nodes. Its offers are metered a
 
 When the request carries an evaluation block, every `ctx.llm.stream` call of the worker (the plain call, and each round of the tool loop) names the scope's model, sets `maxTokens` to the scope's ceiling lowered to the output tokens still available (never below 1, so an exhausted scope is refused by admission and no request falls back to the adapter default of 256000), sets the scope's reasoning effort, and carries a fresh admission labelled with the logical command, the round, and the session that sends it (`<command>#round<N>@<session>`, or `<command>#plain`). The assistant message kept in the tool loop's history names the scope's model. Without an evaluation block nothing is added.
 
+## Physical request evidence
+
+When `physicalRequestObserver` is present, the worker composes it with the existing per-HTTP-request admission. Each tool round retains every transport attempt: a later successful response does not clear an earlier unknown request. Scope refusal is reported before dispatch; abort, connection closure, and a normal return after cancellation do not prove a provider terminal response. Normal provider finish can confirm completion without usage, while the missing usage stays absent. A tool-processing failure after completed responses does not turn those responses into unknown requests. Observation alone neither enables an evaluation scope nor changes its generation or accounting policy.
+
 ## Model Experience
 
 Indirectly, through the sealed node prompt sent to the selected DeepSeek model.

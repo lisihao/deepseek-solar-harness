@@ -183,9 +183,10 @@ export class PhysicalOperatorRuntime extends Service {
    * provider startup and released exactly once when the result settles.
    * @param id - stable operator identity to execute.
    * @param request - caller-owned task, parent, and cancellation signal.
+   * @param beforeProviderDispatch - process-local observation after registry admission, immediately before invoking the Provider.
    * @returns the accepted, holder-owned execution handle.
    */
-  async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun> {
+  async start(id: string, request: PhysicalOperatorStartRequest, beforeProviderDispatch?: () => void): Promise<PhysicalOperatorRun> {
     if (request.signal.aborted) {
       throw new PhysicalOperatorError('physical operator start was already aborted', 'OPERATOR_ABORTED')
     }
@@ -225,6 +226,7 @@ export class PhysicalOperatorRuntime extends Service {
     }
     let providerRun: PhysicalOperatorProviderRun
     try {
+      beforeProviderDispatch?.()
       providerRun = await operator.start(providerRequest)
     } catch (error) {
       this.release(stableId)

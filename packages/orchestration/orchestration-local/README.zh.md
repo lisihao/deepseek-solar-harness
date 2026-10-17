@@ -8,6 +8,8 @@
 
 daemon 承载确定性的 direct Intent 提供方、basic Context 提供方、所有者本地内容寻址 Capsule Registry、配额感知模型分配器、持久 Continuous Harness Provider、Graph 校验器、冲突感知 Scheduler、不可变 ExecutionPlan Compiler，以及派发 Resident Claude Code 或 Codex turn 的私有物理算子 composition。状态位于 `<DSH_HOME>/orchestrations`；socket 仅所有者可用，数据库使用 WAL。
 
+`operator.context.received` 引用 version 为 1、kind 为 `operator-context-envelope` 的 artifact，其中 `envelopeJson` 字符串保留精确的 envelope 表示。物化前须解码该字符串并校验 envelope 摘要。CAS 身份覆盖 artifact；直接规范化嵌套 envelope 可能改变其既有摘要。
+
 Scheduler 会在 Graph 的 `maxParallel` 上限内启动彼此独立的节点，不设置阶段级 barrier。依赖、重叠的写入/effect scope 和 worker 上限只会串行化受影响节点；每个等待原因都会随 Run 持久化。每次 Attempt 都会获得内置 `context.clean-task` 指令 Capsule 和新的 Resident lane，因此复用的 Codex 或 Claude Code 宿主不会继承旧原生 thread，也不会 fork 父对话历史。
 
 分配器把产品报告的每个额度窗口都视为必须同时满足的约束，优先使用资格合格的原生订阅池，并且只在所选优化目标允许时使用按量 API 容量。实时容量建议会把 Scheduler 上限降到 `maxParallel` 以下；套餐暂时繁忙时等待，不会静默消耗付费 API。临近重置且仍可用的额度会被优先利用。节点声明的 fallback 算子只会在首选算子未通过可用性、认证、模型或配额资格检查后，从同一实时目录中解析；已封存的分配产物和事件会保留请求的算子／模型与原因码。
@@ -73,6 +75,8 @@ scope 只计量 API worker 的请求。在它之下，daemon 拒绝任何其他 
 scope 下的模型命令结束时，daemon 从账本读回它的请求，并在命令如何结束（带 stop reason 的返回，或带代码的失败）之外，另行记录一个 `evaluation.command.metering` 事件：worker 发起的准入次数、账本中该命令的行、已发出和被拒绝的数量、账本为已结算请求持有的用量、缺少用量的请求，以及每一行的 id、序号、回合、会话、状态和 body 哈希。当每次准入调用都有一行、没有 reserved 或 unknown 的行、且 worker 至少请求过一次准入时，账目才完整（只有请求被拒绝的命令，账目也是完整的，什么都没发出）。该事件是命令结束那一刻的账目；之后对迟到收据的对账改变账本，不改变事件。账目不完整时，worker 结果里的用量被扣下、不发布（已知部分在事件里，缺失的请求不按零计），因此没有消费方会把已知回合之和当作命令成本；`rlm.autonomous.usage` 对没有用量的命令写 `0`，那不是账单。一个无人取消的命令，如果抛出，或返回以 `error` 或 `aborted` 停止的结果，而账本把它的某个请求记为 reserved 或 unknown，就报告为 `COMMAND_INDETERMINATE`：它的节点、child 或 continuation 成员为 `indeterminate`，读取 continuation、goal 或 Autonomous 回合的消费方依据账本证据保持这个身份，不把它映射成可重试的代码，所以列出这些消费方可能以之结束的代码的重试策略不会重放它。被 store 拒绝的失败通知或 metering 写入不会替换该错误。调用者取消了该执行时，续跑消费方保留原来的错误，运行保持 `cancelled`，该请求在账本里仍为 `unknown`。attempt 自己的截止时间（`timeoutMs`）和 runtime 对 root 会话的中断不属于这种取消：被它们留下未知状态的请求是未知结局，节点不会再次运行；所有请求都已结算之后才到的截止时间是普通失败，策略可以重试。Autonomous root 回合的未知停止在写其状态和用量事件之前就已判定，所以那里被拒绝的写入放进 cause。准入被拒绝既不映射为 `RLM_DISPATCH_NOT_ADMITTED`，也不排队；它体现在账本行的原因和 metering 事件的行里；worker 把它报告为以 `error` 停止的结果并丢掉代码，所以它不出现在任何 orchestration 事件里，被拒绝的请求结束 root 的最后一个命令时，节点的 blocker 是 `OPERATOR_STOPPED`。账本的 `unknown` 与 runtime 的 `held` 是两份独立记录，没有任何东西对账。scope 之外这些都不适用。
 
 `inputBound` 说明发送前如何约束输入 token。`request-bytes-audited` 预留请求体字节数，并在之后用 provider 报告的 usage 核对。它不是证明：只有分词器是字节级的、且聊天模板增加的内容不超过 JSON 结构时，字节数才是 token 数的上界；超出预留的请求只能在发送之后才被发现。`proven-token-count` 要求发送前就被证明的上界，本构建没有，所以要求它的 scope 不准入任何请求。该拒绝作为安全拒绝被测试；它并不意味着可以运行正式评测。官方 Chat Completions 页面把 `max_tokens` 定义为生成 token 的最大数，并把 reasoning token 列在 completion 明细之内，但没有说明上限包含它，也没有找到对整个请求的发送前计数。
+
+独立 RLM 使用同一 daemon 和 Scheduler。必须明确配置 `standaloneRlmOperatorIds`；协议 v8 核对客户端与 daemon 的同一排除清单。Schema 8 在新增持久命令输入及唯一 run 关联前备份 schema 7。收到的 envelope JSON 与规范化相等性哈希分别保留。重新连接只观察原命令；重启封锁未解决的独立身份，不重放；物理效果未知时，在取得实际结算证据前阻止业务重试。
 
 ## Model Experience
 

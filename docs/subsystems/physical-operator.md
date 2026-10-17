@@ -20,6 +20,10 @@ Registration lifetime and execution lifetime are intentionally separate. Removin
 
 Only `completed` is successful. Cancellation, refusal, token exhaustion, and provider failure remain explicit stop reasons or infrastructure rejections. The physical Service Definition does not queue, retry, persist, or roll back work. Resident persistence is isolated behind its own Service Definition and single-writer daemon; protocol v4 remains fail-fast and never auto-replays indeterminate commands.
 
+## Trusted standalone RLM Host
+
+The [standalone RLM Provider](../../packages/physical-operator/physical-operator-rlm/README.md) publishes `ctx.standaloneRlmHost` only after its exact wrapper instance is registered. An embedding Host depends on this capability before registering the live root it owns. `StandaloneRlmRootPolicy` supplies the explicit bottom driver/model, read scopes, context budget, enabled recursion ceilings, and retry policy. Discovery grants no eligibility; this initial composition supports one wrapper binding per context and one read-only text analysis leaf through the existing orchestration execution owner.
+
 ## Command refusal
 
 ```ts public-api
@@ -84,9 +88,10 @@ async residentCatalogs(options?: PhysicalOperatorResidentCatalogOptions): Promis
  * provider startup and released exactly once when the result settles.
  * @param id - stable operator identity to execute.
  * @param request - caller-owned task, parent, and cancellation signal.
+ * @param beforeProviderDispatch - process-local observation after registry admission, immediately before invoking the Provider.
  * @returns the accepted, holder-owned execution handle.
  */
-async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>
+async start(id: string, request: PhysicalOperatorStartRequest, beforeProviderDispatch?: () => void): Promise<PhysicalOperatorRun>
 ```
 
 Source: [`packages/physical-operator/physical-operator/src/index.ts:102`](../../packages/physical-operator/physical-operator/src/index.ts)
@@ -204,6 +209,27 @@ abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): 
 ```
 
 Source: [`packages/physical-operator/resident-operator/src/index.ts:518`](../../packages/physical-operator/resident-operator/src/index.ts)
+
+<a id="ctxstandalonerlmhost--standalonerlmhostbinding"></a>
+
+### `ctx.standaloneRlmHost` — `StandaloneRlmHostBinding`
+
+Host registration capability published only by an active, registered wrapper instance.
+
+```ts cordis-catalog
+/**
+ * Bind the exact root returned by this embedding Host.
+ * @param host - lifecycle owning the explicit grant.
+ * @param agent - exact live top-level Agent instance.
+ * @param policy - explicit versioned driver, scope and execution limits.
+ * @returns disposer that revokes this grant.
+ */
+registerRoot(host: Context, agent: Agent, policy: StandaloneRlmRootPolicy): () => Promise<void>
+```
+
+Types: [Agent](core.md)
+
+Source: [`packages/physical-operator/physical-operator-rlm/src/index.ts:55`](../../packages/physical-operator/physical-operator-rlm/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

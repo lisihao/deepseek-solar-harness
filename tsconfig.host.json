@@ -285,6 +285,7 @@
     { "path": "./packages/physical-operator/physical-operator" },
     { "path": "./packages/physical-operator/physical-operator-chatgpt-web" },
     { "path": "./packages/physical-operator/physical-operator-resident" },
+    { "path": "./packages/physical-operator/physical-operator-rlm" },
     { "path": "./packages/physical-operator/physical-operator-subagent" },
     { "path": "./packages/physical-operator/resident-operator" },
     { "path": "./packages/physical-operator/resident-operator-local" },

@@ -30,3 +30,7 @@ pnpm exec vitest run --config vitest.e2e.config.ts packages/e2b/e2b/tests/compos
 ## 高级配置
 
 [`advanced.cordis.yml`](advanced.cordis.yml) 在测试组装中添加 Code Mode 和 Cordis 工具。
+
+## Keyless 独立 RLM
+
+[`standalone-rlm.cordis.yml`](standalone-rlm.cordis.yml) 将明确拥有的 root、独立 RLM Provider 与既有执行所有者组装在一起。API 和 Codex 快照场景只替换外部传输；不使用凭据，经过真实 Loader、工具、daemon 和 RLM 核心。运行 `pnpm run test:snapshot -- examples/headless-agent/tests/standalone-rlm.snapshot.ts`；完成 host 构建后，设置 `DSH_EXAMPLE_MODE=lib`，以 plain Node 检查构建包的 exports。此夹具不构成通用 CLI 或 Desktop Host 集成。

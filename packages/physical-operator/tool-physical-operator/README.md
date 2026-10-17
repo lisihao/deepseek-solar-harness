@@ -35,6 +35,8 @@ The Resident daemon locks a lane to the first profile it accepts, so each native
 
 Each admitted `run` builds a sealed operator-context envelope from the active runtime snapshot and a template selected for the delegated prompt itself. It never reuses a template attached to an earlier parent task. The Session records the exact envelope and delegated template receipt with the Provider receipt so the child input can be reconstructed after replay.
 
+A Provider may implement `prepareToolCall` to bind the fully assembled request and exact logged tool-call id before dispatch. The standalone RLM Provider requires this binding and an explicit grant for the owning Host's live root; ordinary discovery or selecting its id does not authorize unrelated Agents. Providers without this hook retain their existing tool behavior.
+
 ## Model Experience
 
 ### Tool schema

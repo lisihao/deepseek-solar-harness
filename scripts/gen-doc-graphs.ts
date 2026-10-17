@@ -213,9 +213,16 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'physical-operator',
     title: 'Physical operator registry',
     mode: 'seam',
-    implementations: ['physical-operator-subagent', 'physical-operator-resident'],
+    implementations: ['physical-operator-subagent', 'physical-operator-resident', 'physical-operator-rlm'],
     consumers: ['tool-physical-operator'],
     note: 'Stable deployment-owned operator ids, explicit execution lifetime, live availability, fail-fast capacity admission, and paired lifecycle events; providers keep subagent and resident transports outside the consumer.',
+  },
+  {
+    key: 'standaloneRlmHost',
+    pkg: 'physical-operator-rlm',
+    title: 'Instance-specific standalone RLM Host registration',
+    mode: 'core',
+    note: 'The registered wrapper publishes this binding for its explicitly owned root Host; default discovery grants no eligibility and the orchestration daemon remains the execution owner.',
   },
   {
     key: 'residentOperators',

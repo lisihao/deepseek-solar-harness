@@ -12,6 +12,8 @@ Accepted executions survive provider-plugin disposal. Re-registering the same op
 
 Callers may attach a versioned operator-context envelope containing the exact current system prompt, current task, named runtime contexts, and durable provenance. Every Provider must materialize all fields and return a digest-bound receipt. Missing, mismatched, or rejected receipts fail admission and release capacity; local, remote, Web, Resident, and subagent transports cannot silently substitute a generic prompt.
 
+Trusted callers may pass a process-local `beforeProviderDispatch` observer to `start()`. The runtime calls it after identity, mode, availability and capacity checks, immediately before invoking the Provider. A registry refusal before that point proves no Provider invocation; a later failure alone cannot prove no external effect.
+
 | Error code | Meaning |
 |---|---|
 | `NO_OPERATOR` | The requested stable id is not registered. |

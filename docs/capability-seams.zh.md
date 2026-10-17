@@ -65,6 +65,8 @@ flowchart LR
   svc_physicalOperators["ctx.physicalOperators<br/>Physical operator registry"]
   pkg_physical_operator_subagent["physical-operator-subagent"]
   pkg_physical_operator_resident["physical-operator-resident"]
+  pkg_physical_operator_rlm["physical-operator-rlm"]
+  svc_standaloneRlmHost["ctx.standaloneRlmHost<br/>Instance-specific standalone RLM Host registration"]
   pkg_resident_operator["resident-operator"]
   svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
   pkg_resident_operator_local["resident-operator-local"]
@@ -322,6 +324,8 @@ flowchart LR
   pkg_permission_presets --> svc_permissionPresets
   pkg_physical_operator --> svc_physicalOperators
   pkg_physical_operator_resident --> svc_physicalOperators
+  pkg_physical_operator_rlm --> svc_physicalOperators
+  pkg_physical_operator_rlm --> svc_standaloneRlmHost
   pkg_physical_operator_subagent --> svc_physicalOperators
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
@@ -552,7 +556,8 @@ flowchart LR
 | `ctx.settings` | `seam` | [`settings`](../packages/settings/settings) | [`settings-file`](../packages/settings/settings-file) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | 插件注册命名空间 schema 并解析分层值；提供方存储原始文档。LLM（大语言模型）适配器在用户分区下将其入口配置注册为组合基础；Web 网关提供经过脱敏的分层描述符，并写入用户层。 |
 | `ctx.credentials` | `seam` | [`credentials`](../packages/credentials/credentials) | [`credentials-local`](../packages/credentials/credentials-local) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | 配置携带对机密信息的引用；提供方拥有实际值。消费方按操作解析，因此轮换后的凭据会在紧接着的下一次请求中生效；Web 网关提供不含实际值的视图和只写存储。 |
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | 该 seam 捕获会话记录、进行脱敏并交给一个后端；没有其他组件消费该服务，其输出会离开当前进程。 |
-| `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | 提供部署方拥有的稳定算子 ID、显式执行生命周期、实时可用性、快速失败容量准入和成对生命周期事件；Provider 将 subagent 与 Resident 传输保持在 Consumer 边界之外。 |
+| `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident), [`physical-operator-rlm`](../packages/physical-operator/physical-operator-rlm) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | 提供部署方拥有的稳定算子 ID、显式执行生命周期、实时可用性、快速失败容量准入和成对生命周期事件；Provider 将 subagent 与 Resident 传输保持在 Consumer 边界之外。 |
+| `ctx.standaloneRlmHost` | `core` | [`physical-operator-rlm`](../packages/physical-operator/physical-operator-rlm) | - | - | - | 已注册的包装实例为明确拥有 root 的 Host 发布此绑定；默认发现不授予资格，编排 daemon 仍是执行所有者。 |
 | `ctx.residentOperators` | `seam` | [`resident-operator`](../packages/physical-operator/resident-operator) | [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | - | 通过 daemon 唯一持有的 Session、Receipt、Lease、Event 和 Artifact 存储提供可信管理与持久 turn 执行；模型执行仍从 ctx.physicalOperators 进入。 |
 | `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 把不可变原始请求编译为带确定性溯源的版本化 Intent IR；它们不能创建 Run 或派发算子。 |
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 在 token、溯源、脱敏和降级策略下投影认证过的来源，但不成为事实源。 |

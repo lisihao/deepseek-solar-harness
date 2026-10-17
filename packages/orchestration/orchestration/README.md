@@ -16,6 +16,8 @@ The `gouzi` module defines the records that tie a long-lived execution member to
 
 Verification nodes may declare `model-verdict` acceptance: a normal operator completion alone is insufficient. The Provider validates strict JSON containing affirmative `accepted`, a nonempty `reason`, and a nonempty list of nonempty string `evidence` entries. Missing, negative, or invalid verdicts fail acceptance. Directory-snapshot delivery and its persistent application state belong to the [local Provider](../orchestration-local/README.md#directory-snapshot-delivery).
 
+The optional `standaloneRlm` control accepts a fully bound standalone request and exposes start, inspect, and cancel for that same command. A Provider without this control does not support standalone execution. Command acceptance, the single certified business run, RLM execution, and usage settlement remain with the existing orchestration owner; the outer physical operator adds no second scheduler or billable usage total.
+
 ## Model Experience
 
 Indirectly, through the model-facing orchestration Consumer. This Service Definition does not register tools or prompt text.

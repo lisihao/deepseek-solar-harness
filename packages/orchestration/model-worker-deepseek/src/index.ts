@@ -13,7 +13,7 @@ import {
   type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
-import { ModelWorkerError, type ModelWorkerExecuteRequest, type ModelWorkerProvider, type ModelWorkerResult, type ModelWorkerToolBridgeV1 } from '@deepseek-ai/dsh-model-worker'
+import { ModelWorkerError, type ModelWorkerExecuteRequest, type ModelWorkerPhysicalRequestEvidence, type ModelWorkerProvider, type ModelWorkerResult, type ModelWorkerToolBridgeV1 } from '@deepseek-ai/dsh-model-worker'
 import { requestLocalJsonRpc } from '@deepseek-ai/dsh-sdk-protocol'
 
 export const name = 'model-worker-deepseek'
@@ -27,6 +27,7 @@ const MODELS = Object.freeze([
 /** Last-resort DeepSeek API Provider used only after subscription offers. */
 export class DeepSeekModelWorker implements ModelWorkerProvider {
   readonly id = DEEPSEEK_WORKER_ID
+  readonly observesPhysicalRequests = true
   private activeCount = 0
 
   constructor(private readonly ctx: Context) {}
@@ -68,14 +69,13 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
   }
 
   private async generate(request: ModelWorkerExecuteRequest, messages: Message[]): Promise<ModelWorkerResult> {
-    const assembler = new BlockAssembler()
-    for await (const chunk of this.ctx.llm.stream({
+    const assembler = await this.collectResponse(request, {
       provider: 'deepseek-official',
       model: request.evaluation?.model ?? request.model,
       messages,
       signal: request.signal,
       ...evaluationOptions(request, `${request.commandId}#plain`),
-    })) assembler.push(chunk)
+    })
     const finish = assembler.finish
     const stopReason = finish.kind === 'stop' ? 'completed' as const
       : finish.kind === 'max-tokens' ? 'max-tokens' as const
@@ -99,15 +99,14 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
     let usage: TokenUsage | undefined
     const maxToolRounds = Math.max(4, Math.min((request.rlmPlan?.maxTurns ?? 8) * 4, 64))
     for (let round = 0; round <= maxToolRounds; round += 1) {
-      const assembler = new BlockAssembler()
-      for await (const chunk of this.ctx.llm.stream({
+      const assembler = await this.collectResponse(request, {
         provider: 'deepseek-official',
         model: request.evaluation?.model ?? request.model,
         messages,
         tools: bridge.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: { ...tool.inputSchema } })),
         signal: request.signal,
         ...evaluationOptions(request, `${request.commandId}#round${String(round)}@${bridge.sessionId}`),
-      })) assembler.push(chunk)
+      })
       usage = mergeUsage(usage, assembler.usage)
       const blocks = assembler.blocks()
       if (assembler.finish.kind !== 'tool-calls') {
@@ -153,6 +152,58 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
       }
     }
     throw new ModelWorkerError('DeepSeek RLM tool loop terminated unexpectedly', 'MODEL_WORKER_INVALID')
+  }
+
+  /** Collect one tool round while retaining each physical transport attempt's evidence. */
+  private async collectResponse(request: ModelWorkerExecuteRequest, options: GenerateOptions): Promise<BlockAssembler> {
+    const observer = request.physicalRequestObserver
+    const assembler = new BlockAssembler()
+    let latest: { evidence: ModelWorkerPhysicalRequestEvidence; terminal: boolean; abandoned: boolean } | undefined
+    const observedOptions: GenerateOptions = observer === undefined ? options : {
+      ...options,
+      admission: (facts) => {
+        const physical = { evidence: observer(facts), terminal: false, abandoned: false }
+        const reservation = (() => {
+          try { return options.admission?.(facts) } catch (error) {
+            physical.evidence.notSent()
+            throw error
+          }
+        })()
+        if (request.signal.aborted) {
+          physical.evidence.notSent()
+          reservation?.abandon()
+          throw request.signal.reason
+        }
+        physical.evidence.dispatching()
+        latest = physical
+        return {
+          settle: (usage) => {
+            reservation?.settle(usage)
+          },
+          abandon: () => {
+            if (!physical.terminal) {
+              physical.evidence.unknown()
+              physical.abandoned = true
+            }
+            reservation?.abandon()
+          },
+        }
+      },
+    }
+    try {
+      for await (const chunk of this.ctx.llm.stream(observedOptions)) {
+        // Normal provider finish is [DONE]-backed even when usage is absent. Normalized transport failures are not.
+        if (chunk.type === 'finish' && ['stop', 'max-tokens', 'tool-calls', 'refusal'].includes(chunk.reason.kind)
+          && !request.signal.aborted && latest !== undefined && !latest.abandoned && !latest.terminal) {
+          latest.evidence.terminalResponse()
+          latest.terminal = true
+        }
+        assembler.push(chunk)
+      }
+    } finally {
+      if (latest !== undefined && !latest.terminal && !latest.abandoned) latest.evidence.unknown()
+    }
+    return assembler
   }
 }
 

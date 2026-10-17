@@ -27,8 +27,11 @@ import OrchestrationService, {
   type OrchestrationRunId,
   type OrchestrationRunSnapshot,
   type OrchestrationStartRequest,
+  type StandaloneRlmControl,
 } from '@deepseek-ai/dsh-orchestration'
 import { OrchestrationDaemonClient } from './client.ts'
+import { canonicalSha256 } from './canonical.ts'
+import { STANDALONE_RLM_START_METHOD } from './store.ts'
 import { mountRemoteOperatorHost, type RemoteHostConfig } from './remote-host.ts'
 
 export { OrchestrationDaemonClient, startDetachedOrchestrationDaemon } from './client.ts'
@@ -56,6 +59,8 @@ export const name = 'orchestration-local'
 /* jscpd:ignore-start */
 /** Local daemon client configuration. */
 export interface Config extends RemoteHostConfig {
+  /** Exact standalone wrapper identities; the daemon rejects these at every physical leaf. */
+  readonly standaloneRlmOperatorIds?: string[]
   /** Start an independent daemon when no compatible socket is available. */
   readonly autoStart?: boolean
   /** Maximum handshake and per-request connection wait in milliseconds. */
@@ -71,6 +76,7 @@ export interface Config extends RemoteHostConfig {
 }
 
 export const Config: z<Config> = z.object({
+  standaloneRlmOperatorIds: z.array(z.string()).default([]),
   autoStart: z.boolean().default(true),
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
   residentDriverModules: z.array(z.string()).default([]),
@@ -88,6 +94,13 @@ export const Config: z<Config> = z.object({
 
 class LocalOrchestrationService extends OrchestrationService {
   private readonly client: OrchestrationDaemonClient
+  override readonly standaloneRlm: StandaloneRlmControl = {
+    requestFingerprint: request => canonicalSha256({ method: STANDALONE_RLM_START_METHOD, request }),
+    operatorIds: () => this.client.standaloneOperatorIds(),
+    start: (request, beforeSend) => this.client.startStandalone(request, beforeSend),
+    inspect: executionId => this.client.inspectStandalone(executionId),
+    cancel: (executionId, requestSha256) => this.client.cancelStandalone(executionId, requestSha256),
+  }
   override readonly gouzi: GouziControl = {
     list: () => this.client.gouziList(),
     executionOperators: () => this.client.gouziExecutionOperators(),
@@ -108,6 +121,7 @@ class LocalOrchestrationService extends OrchestrationService {
       autoStart: config.autoStart,
       connectTimeoutMs: config.connectTimeoutMs,
       headlessNodeExecutable: config.headlessNodeExecutable,
+      standaloneRlmOperatorIds: config.standaloneRlmOperatorIds,
       residentDriverModules: config.residentDriverModules.map((module) => {
         if (ctx.baseUrl === undefined) throw new Error('orchestration-local requires ctx.baseUrl to resolve Resident Driver modules')
         return createRequire(ctx.baseUrl).resolve(module)

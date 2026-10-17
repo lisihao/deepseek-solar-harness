@@ -18,10 +18,13 @@ import {
   GouziId,
   GouziOwnerId,
   OrchestrationArtifactRef,
+  StandaloneRlmStartRejected,
   type LogicalTaskGraphV1,
   type OrchestrationExecutionEvidenceV1,
 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
+import { PhysicalOperatorExecutionId, PhysicalOperatorId } from '@deepseek-ai/dsh-physical-operator'
+import type { StandaloneRlmStartRequest } from '@deepseek-ai/dsh-orchestration'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
@@ -31,6 +34,20 @@ import type { EvaluationLedgerState } from '../src/evaluation-ledger.ts'
 import { refuseNonLoopbackFetch, startFakeDeepSeekHttp, type FakeAnswer, type FakeDeepSeekHttp, type FakeHandler } from './fake-deepseek-http.ts'
 import { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from '../src/store.ts'
 import type { RemotePhysicalOperatorServer } from '../src/remote-physical-operator.ts'
+import type { RlmDispatchSettlementTracker } from '../src/rlm-dispatch-settlement.ts'
+
+interface StandaloneAttemptEvidence {
+  readonly runId: string
+  readonly tracker: {
+    snapshot: RlmDispatchSettlementTracker['snapshot']
+    readonly commands: ReadonlyMap<string, unknown>
+  }
+}
+
+function standaloneTrackers(daemon: OrchestrationDaemon): StandaloneAttemptEvidence[] {
+  const owner = daemon as unknown as { standaloneSettlements: Map<string, StandaloneAttemptEvidence> }
+  return [...owner.standaloneSettlements.values()]
+}
 
 const cleanup: Array<() => Promise<void>> = []
 const run = promisify(execFile)
@@ -315,6 +332,54 @@ class KeylessModelWorker implements ModelWorkerProvider {
   }
 }
 
+class SettlementAwareKeylessWorker extends KeylessModelWorker {
+  readonly observesPhysicalRequests = true
+  unknown = false
+
+  override async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
+    const body = JSON.stringify({ model: request.model, prompt: request.prompt })
+    const ticket = request.physicalRequestObserver?.({
+      model: request.model, bodyBytes: Buffer.byteLength(body), bodySha256: canonicalSha256(body),
+      maxOutputTokens: undefined, thinking: undefined, reasoningEffort: undefined, hasNonTextContent: false,
+    })
+    ticket?.dispatching()
+    const result = await super.execute(request)
+    if (this.unknown) {
+      ticket?.unknown()
+      throw Object.assign(new Error('fixture lost the physical terminal response'), { code: 'UNKNOWN' })
+    }
+    ticket?.terminalResponse()
+    return result
+  }
+}
+
+function standaloneRequestFixture(workspace: string, driver: StandaloneRlmStartRequest['input']['driver']): StandaloneRlmStartRequest {
+  const base = graph(workspace)
+  const blocks = [{ type: 'text' as const, text: 'first original block' }, { type: 'text' as const, text: 'second original block' }]
+  const task = blocks.map(block => block.text).join('\n')
+  return {
+    input: {
+      version: 1, operatorId: PhysicalOperatorId('standalone-wrapper'), executionId: PhysicalOperatorExecutionId('standalone-command'),
+      prompt: blocks, driver,
+    },
+    compile: {
+      intent: { request: task },
+      graph: {
+        ...base, maxParallel: 1,
+        nodes: [{
+          ...base.nodes[0]!, role: 'recursive synthesis', task, readScopes: [], writeScopes: [],
+          rlm: { mode: 'enabled', maxDepth: 2, maxChildren: 3, maxTurns: 4 },
+          retryPolicy: { maxAttempts: 3, backoffMs: 0, retryableCodes: ['UNKNOWN', 'COMMAND_INDETERMINATE'] },
+          operator: {
+            preferredIds: [driver.operatorId], fallbackIds: [],
+            profile: { model: driver.model, ...driver.kind !== 'resident' || driver.effort === undefined ? {} : { effort: driver.effort } },
+          },
+        }],
+      },
+    },
+  }
+}
+
 class ExternalWebAdvisorWorker implements ModelWorkerProvider {
   readonly id = 'chatgpt-web'
   available = true
@@ -533,6 +598,224 @@ async function heldRlmRun(
 }
 
 describe('orchestration daemon', () => {
+  async function standaloneHarness(residentMode = false, schedulerIntervalMs = 10, residentMaxConcurrency = 4) {
+    const home = await mkdtemp(join(tmpdir(), 'oc-standalone-'))
+    const root = join(home, 'orchestrations')
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const resident = new FakeResidentClient()
+    resident.maxConcurrency = residentMaxConcurrency
+    resident.available = residentMode
+    const inspect = resident.inspectTurn.bind(resident)
+    resident.inspectTurn = async turnId => ({ ...await inspect(turnId), sessionId: 'session:codex' })
+    const worker = new SettlementAwareKeylessWorker()
+    const daemon = new OrchestrationDaemon({
+      root, dshHome: home, residentClient: resident as unknown as ResidentDaemonClient,
+      modelWorkerProviders: residentMode ? [] : [worker], standaloneRlmOperatorIds: ['standalone-wrapper'], schedulerIntervalMs,
+    })
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({
+      root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000, standaloneRlmOperatorIds: ['standalone-wrapper'],
+    })
+    const request = standaloneRequestFixture(workspace, residentMode
+      ? { kind: 'resident', operatorId: PhysicalOperatorId('codex'), model: 'gpt-5.6-sol', effort: 'high' }
+      : { kind: 'model-worker', operatorId: PhysicalOperatorId(worker.id), model: 'deepseek-fixture-low' })
+    return { home, root, worker, resident, daemon, client, request }
+  }
+
+  it('standalone C starts at most one real daemon run and forwards all original text blocks through the shared core', async () => {
+    const f = await standaloneHarness()
+    const [first, duplicate] = await Promise.all([f.client.startStandalone(f.request), f.client.startStandalone(f.request)])
+    expect(first.run?.runId).toBe(duplicate.run?.runId)
+    const final = await eventually(() => f.client.inspectStandalone(f.request.input.executionId), value => value.settlement === 'settled')
+    expect(final.state).toBe('settled')
+    expect(final.result?.output).toHaveLength(1)
+    expect(final.result?.output[0]).toMatchObject({ type: 'text' })
+    expect(JSON.stringify(final.result?.output)).toContain(':rlm:root')
+    expect(final.result?.usage).toBeUndefined()
+    expect(f.worker.requests).toHaveLength(1)
+    const sentText = f.worker.requests[0]!.prompt.map(block => block.type === 'text' ? block.text : '').join('\n')
+    expect(sentText).toContain('first original block')
+    expect(sentText).toContain('second original block')
+    expect(sentText.indexOf('first original block')).toBeLessThan(sentText.indexOf('second original block'))
+    expect(f.daemon.store.commandReceipt(f.request.input.executionId)?.standaloneRequest).toEqual(f.request)
+    expect(await f.client.list()).toHaveLength(1)
+    const events = await f.client.readEvents({ runId: final.run!.runId, limit: 500 })
+    expect(events.events.some(value => value.type === 'rlm.execution.started')).toBe(true)
+    const prompt = [{ type: 'text' as const, text: 'different complete input B' }]
+    const conflict = { ...f.request, input: { ...f.request.input, prompt }, compile: {
+      intent: { request: prompt[0]!.text }, graph: { ...f.request.compile.graph,
+        nodes: [{ ...f.request.compile.graph.nodes[0]!, task: prompt[0]!.text }] },
+    } }
+    await expect(f.client.startStandalone(conflict)).rejects.toBeInstanceOf(StandaloneRlmStartRejected)
+    expect(await f.client.inspectStandalone(f.request.input.executionId)).toEqual(final)
+    expect(f.worker.requests).toHaveLength(1)
+  })
+
+  it('standalone C fences an atomically linked pending run on the real recovered Scheduler', async () => {
+    const f = await standaloneHarness(false, 60_000)
+    const create = f.daemon.store.createStandaloneRunForCommand.bind(f.daemon.store)
+    vi.spyOn(f.daemon.store, 'createStandaloneRunForCommand').mockImplementation((...args) => {
+      create(...args)
+      throw new Error('fixture loses the return immediately after the atomic run commit')
+    })
+    await expect(f.client.startStandalone(f.request)).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    const original = f.daemon.store.standaloneCommandForRun(f.daemon.store.listRuns()[0]!.snapshot.runId)!
+    expect(f.daemon.store.listRuns()[0]!.snapshot.nodes[0]?.state).toBe('pending')
+    expect(f.worker.requests).toHaveLength(0)
+    await f.daemon.close()
+    const recovered = new OrchestrationDaemon({
+      root: f.root, dshHome: f.home, residentClient: f.resident as unknown as ResidentDaemonClient,
+      modelWorkerProviders: [f.worker], standaloneRlmOperatorIds: ['standalone-wrapper'], schedulerIntervalMs: 5,
+    })
+    await recovered.start()
+    cleanup.push(() => recovered.close())
+    const seen = await f.client.inspectStandalone(f.request.input.executionId)
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(await f.client.inspectStandalone(f.request.input.executionId)).toMatchObject({
+      executionId: original.commandId, requestSha256: original.requestSha256, state: 'indeterminate', settlement: 'unknown',
+      run: { runId: original.runId, nodes: [{ state: 'pending', attempt: 0 }] },
+    })
+    expect(f.worker.requests).toHaveLength(0)
+    expect(seen.run?.runId).toBe(original.runId)
+    // The same real Scheduler still executes an independent ordinary TaskGraph.
+    const ordinary = await f.client.compile(f.request.compile)
+    const ordinaryRun = await startCompilation(f.client, ordinary.compilationId, 'ordinary-after-standalone-recovery')
+    await eventually(() => f.client.inspect(String(ordinaryRun.runId)), value => value.state === 'completed')
+    expect(f.worker.requests).toHaveLength(1)
+    expect(f.worker.requests[0]!.commandId).not.toContain(String(original.runId))
+  })
+
+  it('standalone C fences recovered Resident attempts before reattach, retry, child or continuation consumers', async () => {
+    const f = await standaloneHarness(true)
+    f.resident.defer = true
+    const node = f.request.compile.graph.nodes[0]!
+    const input = { ...f.request, compile: { ...f.request.compile, graph: { ...f.request.compile.graph,
+      nodes: [{ ...node, retryPolicy: { maxAttempts: 3, backoffMs: 0, retryableCodes: ['SESSION_UNAVAILABLE', 'RUNTIME_UNAVAILABLE'] } }],
+    } } }
+    await f.client.startStandalone(input)
+    const before = await eventually(() => f.client.inspectStandalone(input.input.executionId), value => value.run?.nodes[0]?.state === 'running' && f.resident.starts.length === 1)
+    await expect(f.client.cancelStandalone(input.input.executionId, '0'.repeat(64))).rejects.toBeInstanceOf(StandaloneRlmStartRejected)
+    expect((await f.client.inspectStandalone(input.input.executionId)).run?.state).toBe('running')
+    await f.daemon.close()
+    const nextResident = new FakeResidentClient()
+    const reattach = vi.spyOn(nextResident, 'inspectTurn').mockRejectedValue(Object.assign(new Error('retryable lost native turn'), { code: 'SESSION_UNAVAILABLE' }))
+    const recovered = new OrchestrationDaemon({
+      root: f.root, dshHome: f.home, residentClient: nextResident as unknown as ResidentDaemonClient,
+      modelWorkerProviders: [], standaloneRlmOperatorIds: ['standalone-wrapper'], schedulerIntervalMs: 5,
+    })
+    await recovered.start()
+    cleanup.push(() => recovered.close())
+    await new Promise(resolve => setTimeout(resolve, 60))
+    const after = await f.client.inspectStandalone(input.input.executionId)
+    expect(after).toMatchObject({ executionId: before.executionId, requestSha256: before.requestSha256,
+      state: 'indeterminate', settlement: 'unknown', run: { runId: before.run!.runId } })
+    expect(reattach).not.toHaveBeenCalled()
+    expect(nextResident.starts).toHaveLength(0)
+    expect(f.resident.starts).toHaveLength(1)
+    const events = await f.client.readEvents({ runId: before.run!.runId, limit: 500 })
+    expect(events.events.filter(value => value.type === 'node.retry_scheduled')).toEqual([])
+    f.resident.resolveAllDeferred()
+  })
+
+  it('standalone C settles a real registry worker qualification refusal with zero Provider calls', async () => {
+    const f = await standaloneHarness()
+    Object.defineProperty(f.worker, 'observesPhysicalRequests', { value: false })
+    await f.client.startStandalone(f.request)
+    const final = await eventually(() => f.client.inspectStandalone(f.request.input.executionId), value => value.settlement === 'settled')
+    expect(final.run?.state).toBe('failed')
+    expect(f.worker.requests).toHaveLength(0)
+    expect(final.state).toBe('failed')
+    const trackers = standaloneTrackers(f.daemon)
+    expect(trackers).toHaveLength(1)
+    expect(trackers[0]!.tracker.snapshot()).toMatchObject({ settled: true, unknownRequests: 0 })
+  })
+
+  it('standalone C settles actual Resident registry capacity rejection before Provider dispatch', async () => {
+    const f = await standaloneHarness(true, 10, 1)
+    f.resident.defer = true
+    const runtime = (f.daemon as unknown as { ctx: Context }).ctx.physicalOperators
+    const start = runtime.start.bind(runtime)
+    let held: Awaited<ReturnType<typeof start>> | undefined
+    vi.spyOn(runtime, 'start').mockImplementation(async (id, request, observer) => {
+      if (held === undefined) {
+        const holderInput = { ...request }
+        delete holderInput.contextEnvelope
+        held = await start(id, { ...holderInput,
+          executionId: PhysicalOperatorExecutionId('unrelated-capacity-holder'), signal: new AbortController().signal })
+      }
+      return start(id, request, observer)
+    })
+    await f.client.startStandalone(f.request)
+    const final = await eventually(() => f.client.inspectStandalone(f.request.input.executionId), value => value.settlement === 'settled')
+    expect(final.state).toBe('failed')
+    expect(final.run?.state).toBe('failed')
+    expect(f.resident.requests.map(request => request.commandId)).toEqual(['unrelated-capacity-holder'])
+    const trackers = standaloneTrackers(f.daemon)
+    expect(trackers[0]!.tracker.snapshot()).toMatchObject({ settled: true, unknownRequests: 0 })
+    f.resident.resolveAllDeferred()
+    await held?.result
+    await held?.dispose()
+  })
+
+  it('standalone C owns a real recursive child and settles both physical commands once', async () => {
+    const f = await standaloneHarness()
+    f.worker.onExecute = async (request) => {
+      if (request.commandId.endsWith(':rlm:root')) await callRlmTool(request, 'standalone-child-spawn', 'await rlm("bounded child analysis", { name: "owned-child" }); "spawned"')
+    }
+    await f.client.startStandalone(f.request)
+    const final = await eventually(() => f.client.inspectStandalone(f.request.input.executionId), value => value.settlement === 'settled')
+    expect(final.state).toBe('settled')
+    expect(f.worker.requests).toHaveLength(2)
+    const trackers = standaloneTrackers(f.daemon)
+    expect(trackers).toHaveLength(1)
+    expect(trackers[0]!.tracker.snapshot()).toMatchObject({ settled: true, commandCount: 2, requestCount: 2 })
+    expect(f.daemon.store.listRuns()).toHaveLength(1)
+    expect(trackers[0]!.runId).toBe(String(final.run!.runId))
+    expect(new Set(trackers[0]!.tracker.commands.keys())).toEqual(new Set(f.worker.requests.map(request => request.commandId)))
+    const events = await f.client.readEvents({ runId: final.run!.runId, limit: 500 })
+    expect(events.events.find(value => value.type === 'rlm.execution.settled')?.data).toMatchObject({ childCount: 1 })
+  })
+
+  it('standalone C classifies an unknown API request before retry despite remaining retry attempts', async () => {
+    const f = await standaloneHarness()
+    f.worker.unknown = true
+    await f.client.startStandalone(f.request)
+    const final = await eventually(() => f.client.inspectStandalone(f.request.input.executionId), value => value.run?.state === 'indeterminate')
+    expect(final.settlement).toBe('unknown')
+    expect(final.result).toBeUndefined()
+    expect(f.worker.requests).toHaveLength(1)
+    expect(final.run?.nodes[0]?.attempt).toBe(1)
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(f.worker.requests).toHaveLength(1)
+    expect(f.daemon.store.unfinishedStandaloneCommands()).toHaveLength(1)
+  })
+
+  it('standalone C requires the exact Resident turn terminal identity before final settlement', async () => {
+    const f = await standaloneHarness(true)
+    await f.client.startStandalone(f.request)
+    const final = await eventually(() => f.client.inspectStandalone(f.request.input.executionId), value => value.settlement === 'settled')
+    expect(final.state).toBe('settled')
+    expect(f.resident.starts).toHaveLength(1)
+    expect(f.resident.requests[0]?.profile).toMatchObject({ model: 'gpt-5.6-sol', effort: 'high' })
+    expect(f.worker.requests).toHaveLength(0)
+  })
+
+  it('standalone C checks the Host guard after connection and rejects explicit wrapper selection before any dispatch', async () => {
+    const f = await standaloneHarness()
+    await expect(f.client.startStandalone(f.request, () => { throw new Error('Host revoked before wire send') }))
+      .rejects.toThrow('Host revoked')
+    expect(f.daemon.store.commandReceipt(f.request.input.executionId)).toBeUndefined()
+    const node = f.request.compile.graph.nodes[0]!
+    await expect(f.client.compile({
+      ...f.request.compile,
+      graph: { ...f.request.compile.graph, nodes: [{ ...node, operator: { preferredIds: ['standalone-wrapper'] } }] },
+    })).rejects.toThrow('cannot execute as a bottom-level operator')
+    expect(f.worker.requests).toHaveLength(0)
+    expect(f.resident.starts).toHaveLength(0)
+  })
+
   it('starts and accepts clients when the durable root exceeds Unix socket limits', async () => {
     const home = await mkdtemp(join(tmpdir(), 'oc-long-root-'))
     const root = join(home, 'orchestration-root-'.repeat(10))

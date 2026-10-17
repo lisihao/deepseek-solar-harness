@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,17 +12,25 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import apply, { DEEPSEEK_WORKER_ID } from '../src/index.ts'
 
 class FixtureAdapter extends LlmAdapter {
+  override readonly enforcesAdmission = true
   readonly requests: GenerateOptions[] = []
 
   override providerInfo() { return { id: 'deepseek-official', name: 'DeepSeek fixture' } }
 
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
+    const payload = JSON.stringify({ model: options.model, messages: options.messages })
+    const ticket = options.admission?.({
+      model: options.model, bodyBytes: Buffer.byteLength(payload),
+      bodySha256: createHash('sha256').update(payload).digest('hex'),
+      maxOutputTokens: options.maxTokens, thinking: undefined, reasoningEffort: undefined, hasNonTextContent: false,
+    })
     if (options.tools !== undefined && this.requests.length === 1) {
       const id = CallId('fixture-tool-call')
       yield { type: 'block-start', index: 0, blockType: 'tool-call' }
       yield { type: 'tool-call-delta', index: 0, id, name: 'typescript_repl', argumentsDelta: '{"code":"1 + 1"}' }
       yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name: 'typescript_repl', arguments: '{"code":"1 + 1"}' } }
+      ticket?.settle({ inputTokens: 8, outputTokens: 1 })
       yield { type: 'usage', usage: { inputTokens: 8, outputTokens: 1 } }
       yield { type: 'finish', reason: { kind: 'tool-calls' } }
       return
@@ -30,6 +39,7 @@ class FixtureAdapter extends LlmAdapter {
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text }
     yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+    ticket?.settle({ inputTokens: 10, outputTokens: 2 })
     yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 2 } }
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
@@ -63,6 +73,7 @@ describe('DeepSeekModelWorker', () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-deepseek-tool-'))
     const socketPath = localIpcAddress(directory, 'bridge')
     const bridgeRequests: Array<{ method: string; params: Record<string, unknown> }> = []
+    const physicalEvidence: string[][] = []
     const server = createServer((socket) => {
       const transport = new JsonRpcLineTransport(socket, socket)
       transport.onRequest((method, params) => {
@@ -80,6 +91,16 @@ describe('DeepSeekModelWorker', () => {
         commandId: 'command', workerId: DEEPSEEK_WORKER_ID, model: 'deepseek-v4-pro',
         prompt: [{ type: 'text', text: 'analyze alternatives' }],
         signal: new AbortController().signal,
+        physicalRequestObserver: () => {
+          const events: string[] = []
+          physicalEvidence.push(events)
+          return {
+            dispatching: () => { events.push('dispatching') },
+            notSent: () => { events.push('not-sent') },
+            terminalResponse: () => { events.push('terminal') },
+            unknown: () => { events.push('unknown') },
+          }
+        },
         rlmPlan: {
           version: 1, enabled: true, fidelity: 'dsh-optimized', strategyId: 'test', strategyVersion: '1', reason: 'test',
           instruction: 'bounded test', maxDepth: 2, maxChildren: 3, maxTurns: 6, planSha256: 'test',
@@ -92,6 +113,7 @@ describe('DeepSeekModelWorker', () => {
       expect(result.stopReason).toBe('completed')
       expect(result.usage).toMatchObject({ inputTokens: 18, outputTokens: 3 })
       expect(adapter.requests).toHaveLength(2)
+      expect(physicalEvidence).toEqual([['dispatching', 'terminal'], ['dispatching', 'terminal']])
       expect(adapter.requests[0]?.tools?.[0]?.name).toBe('typescript_repl')
       expect(adapter.requests[1]?.messages.map(message => message.role)).toEqual(['user', 'assistant', 'user'])
       expect(adapter.requests[1]?.messages[2]?.content[0]).toMatchObject({ type: 'tool-result', isError: false })

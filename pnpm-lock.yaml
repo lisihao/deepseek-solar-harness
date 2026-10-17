@@ -608,6 +608,9 @@ importers:
       '@deepseek-ai/dsh-physical-operator-resident':
         specifier: workspace:*
         version: link:../packages/physical-operator/physical-operator-resident
+      '@deepseek-ai/dsh-physical-operator-rlm':
+        specifier: workspace:*
+        version: link:../packages/physical-operator/physical-operator-rlm
       '@deepseek-ai/dsh-physical-operator-subagent':
         specifier: workspace:*
         version: link:../packages/physical-operator/physical-operator-subagent
@@ -6976,6 +6979,70 @@ importers:
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:^
         version: link:../../core/system-prompt
+
+  packages/physical-operator/physical-operator-rlm:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-agent-loop':
+        specifier: workspace:^
+        version: link:../../core/agent-loop
+      '@deepseek-ai/dsh-app-boot':
+        specifier: workspace:^
+        version: link:../../boot/app-boot
+      '@deepseek-ai/dsh-commands':
+        specifier: workspace:^
+        version: link:../../interaction/commands
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-loader-smoke':
+        specifier: workspace:^
+        version: link:../../test-support/loader-smoke
+      '@deepseek-ai/dsh-model-allocation':
+        specifier: workspace:^
+        version: link:../../orchestration/model-allocation
+      '@deepseek-ai/dsh-model-worker-deepseek':
+        specifier: workspace:^
+        version: link:../../orchestration/model-worker-deepseek
+      '@deepseek-ai/dsh-orchestration':
+        specifier: workspace:^
+        version: link:../../orchestration/orchestration
+      '@deepseek-ai/dsh-orchestration-local':
+        specifier: workspace:^
+        version: link:../../orchestration/orchestration-local
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../physical-operator
+      '@deepseek-ai/dsh-resident-operator-local':
+        specifier: workspace:^
+        version: link:../resident-operator-local
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:^
+        version: link:../../session/session-projection
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-tool-physical-operator':
+        specifier: workspace:^
+        version: link:../tool-physical-operator
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
 
   packages/physical-operator/physical-operator-subagent:
     dependencies:

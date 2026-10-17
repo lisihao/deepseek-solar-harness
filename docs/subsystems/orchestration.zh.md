@@ -521,7 +521,7 @@ async offers(): Promise<ModelExecutionOffer[]>
 execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 ```
 
-Source: [`packages/orchestration/model-worker/src/index.ts:85`](../../packages/orchestration/model-worker/src/index.ts)
+Source: [`packages/orchestration/model-worker/src/index.ts:109`](../../packages/orchestration/model-worker/src/index.ts)
 
 <a id="ctxorchestrationrecipients--orchestrationrecipientresolver"></a>
 
@@ -659,7 +659,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:707`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:783`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

@@ -28,6 +28,7 @@ import {
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 import type { IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
+import type { PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import { canonicalJson, canonicalSha256 } from './canonical.ts'
 import type { AutonomousRuntimeStateV1 } from './autonomous.ts'
 import { GouziRegistry } from './gouzi-registry.ts'
@@ -37,10 +38,18 @@ import type {
 } from './cluster.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 7
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 8
+
+/** Method identity shared by standalone acceptance, recovery and run association. */
+export const STANDALONE_RLM_START_METHOD = 'orchestration.standalone_rlm.start'
+
+/** Durable progress of asynchronous standalone compilation and run creation. */
+export type StandaloneRlmCommandPhase = 'accepted' | 'compiled' | 'started'
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
+  /** Exact command that created this run in the standalone atomic transaction. */
+  readonly standaloneRlmCommandId?: PhysicalOperatorExecutionId
   readonly snapshot: OrchestrationRunSnapshot
   readonly graph: LogicalTaskGraphV1
   readonly intent: IntentIRV1
@@ -89,6 +98,11 @@ export interface OrchestrationCommandReceipt {
   readonly requestSha256: string
   readonly state: 'accepted' | 'settled' | 'failed' | 'indeterminate'
   readonly response?: unknown
+  /** Original standalone request; absent for ordinary synchronous commands. */
+  readonly standaloneRequest?: Readonly<Record<string, unknown>>
+  readonly standalonePhase?: StandaloneRlmCommandPhase
+  readonly compilationId?: string
+  readonly runId?: OrchestrationRunId
   readonly errorCode?: string
   readonly errorMessage?: string
   readonly createdAt: string
@@ -105,7 +119,7 @@ const REPLICA_TABLES = Object.freeze({
   context_packets: ['artifact_ref', 'run_id', 'node_id', 'attempt', 'generation', 'created_at'],
   node_execution_plans: ['artifact_ref', 'run_id', 'node_id', 'attempt', 'generation', 'created_at'],
   capability_updates: ['update_id', 'run_id', 'node_id', 'generation', 'state', 'update_sha256', 'payload_json', 'created_at'],
-  command_receipts: ['command_id', 'method', 'request_sha256', 'state', 'response_json', 'error_code', 'error_message', 'created_at', 'updated_at'],
+  command_receipts: ['command_id', 'method', 'request_sha256', 'state', 'response_json', 'error_code', 'error_message', 'created_at', 'updated_at', 'request_json', 'standalone_phase', 'compilation_id', 'run_id'],
   autonomous_states: ['run_id', 'node_id', 'attempt', 'payload_json', 'updated_at'],
 } as const)
 
@@ -156,6 +170,14 @@ const GOUZI_MODEL_COLUMN = 'ALTER TABLE gouzi_members ADD COLUMN model TEXT;'
  * made just before the first migration to this schema.
  */
 const GOUZI_PROFILE_COLUMN = 'ALTER TABLE gouzi_members ADD COLUMN profile TEXT;'
+
+const STANDALONE_COMMAND_COLUMNS = [
+  'ALTER TABLE command_receipts ADD COLUMN request_json TEXT;',
+  "ALTER TABLE command_receipts ADD COLUMN standalone_phase TEXT CHECK (standalone_phase IN ('accepted', 'compiled', 'started'));",
+  'ALTER TABLE command_receipts ADD COLUMN compilation_id TEXT REFERENCES compilations(compilation_id);',
+  'ALTER TABLE command_receipts ADD COLUMN run_id TEXT REFERENCES runs(run_id);',
+  'CREATE UNIQUE INDEX standalone_command_run ON command_receipts(run_id) WHERE run_id IS NOT NULL;',
+].join('\n')
 
 function makePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
@@ -232,7 +254,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         'ORCHESTRATION_UNAVAILABLE',
       )
     }
-    if (version > 0 && version < 7) this.backUpBeforeSchema7(path, version)
+    if (version > 0 && version < 7) this.backUpBeforeSchema(path, version, 7)
     if (version === 0) this.createSchema()
     else if (version === 1) {
       this.migrateSchema1To2()
@@ -260,6 +282,10 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       this.migrateSchema5To6()
       this.migrateSchema6To7()
     } else if (version === 6) this.migrateSchema6To7()
+    if (version > 0 && version < 8) {
+      this.backUpBeforeSchema(path, 7, 8)
+      this.migrateSchema7To8()
+    }
     this.gouzi = new GouziRegistry(this.db)
     this.clusterTracking = true
   }
@@ -349,14 +375,16 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
    * @param events - initial append-only events.
    */
   createRun(record: RuntimeRunRecord, events: readonly Omit<OrchestrationEvent, 'sequence'>[]): void {
-    this.transaction(() => {
-      this.db.prepare('INSERT INTO runs (run_id, payload_json, state, revision, updated_at) VALUES (?, ?, ?, ?, ?)')
-        .run(
-          String(record.snapshot.runId), canonicalJson(record), record.snapshot.state,
-          record.snapshot.revision, record.snapshot.updatedAt,
-        )
-      for (const event of events) this.insertEvent(event)
-    })
+    this.transaction(() => { this.insertRun(record, events) })
+  }
+
+  private insertRun(record: RuntimeRunRecord, events: readonly Omit<OrchestrationEvent, 'sequence'>[]): void {
+    this.db.prepare('INSERT INTO runs (run_id, payload_json, state, revision, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(
+        String(record.snapshot.runId), canonicalJson(record), record.snapshot.state,
+        record.snapshot.revision, record.snapshot.updatedAt,
+      )
+    for (const entry of events) this.insertEvent(entry)
   }
 
   /**
@@ -579,10 +607,26 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
     const response = optionalDatabaseString(row.response_json, 'response_json')
     const errorCode = optionalDatabaseString(row.error_code, 'error_code')
     const errorMessage = optionalDatabaseString(row.error_message, 'error_message')
+    const request = optionalDatabaseString(row.request_json, 'request_json')
+    const phase = optionalDatabaseString(row.standalone_phase, 'standalone_phase')
+    const compilationId = optionalDatabaseString(row.compilation_id, 'compilation_id')
+    const runId = optionalDatabaseString(row.run_id, 'run_id')
+    if (phase !== undefined && phase !== 'accepted' && phase !== 'compiled' && phase !== 'started') {
+      throw new OrchestrationError('invalid standalone command phase in orchestration state', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    const standaloneRequest = request === undefined ? undefined : JSON.parse(request) as unknown
+    if (standaloneRequest !== undefined
+      && (typeof standaloneRequest !== 'object' || standaloneRequest === null || Array.isArray(standaloneRequest))) {
+      throw new OrchestrationError('invalid standalone command request in orchestration state', 'ORCHESTRATION_UNAVAILABLE')
+    }
     return {
       commandId: String(row.command_id), method: String(row.method), requestSha256: String(row.request_sha256),
       state: String(row.state) as OrchestrationCommandReceipt['state'],
       ...response === undefined ? {} : { response: JSON.parse(response) as unknown },
+      ...standaloneRequest === undefined ? {} : { standaloneRequest: standaloneRequest as Readonly<Record<string, unknown>> },
+      ...phase === undefined ? {} : { standalonePhase: phase },
+      ...compilationId === undefined ? {} : { compilationId },
+      ...runId === undefined ? {} : { runId: OrchestrationRunId(runId) },
       ...errorCode === undefined ? {} : { errorCode },
       ...errorMessage === undefined ? {} : { errorMessage },
       createdAt: String(row.created_at), updatedAt: String(row.updated_at),
@@ -604,6 +648,95 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
         VALUES (?, ?, ?, 'accepted', ?, ?)
       `).run(commandId, method, requestSha256, time, time)
     })
+  }
+
+  /**
+   * Persist a standalone identity and its complete input before asynchronous compilation.
+   * @param commandId - stable outer execution identity.
+   * @param request - validated, immutable JSON input.
+   */
+  acceptStandaloneCommand(commandId: PhysicalOperatorExecutionId, request: Readonly<Record<string, unknown>>): void {
+    // Envelope digests cover their original JSON field order; canonical hashing remains separate from storage.
+    const encoded = JSON.stringify(request)
+    const digest = canonicalSha256({ method: STANDALONE_RLM_START_METHOD, request })
+    const time = new Date().toISOString()
+    this.transaction(() => {
+      this.db.prepare(
+        'INSERT INTO command_receipts (command_id, method, request_sha256, state, request_json, standalone_phase, created_at, updated_at)'
+        + " VALUES (?, ?, ?, 'accepted', ?, 'accepted', ?, ?)",
+      ).run(commandId, STANDALONE_RLM_START_METHOD, digest, encoded, time, time)
+    })
+  }
+
+  /**
+   * Link one completed compilation without creating or dispatching a run.
+   * @param commandId - already accepted outer execution identity.
+   * @param compilationId - existing immutable compilation.
+   */
+  linkStandaloneCompilation(commandId: PhysicalOperatorExecutionId, compilationId: string): void {
+    this.transaction(() => {
+      const result = this.db.prepare(
+        "UPDATE command_receipts SET compilation_id = ?, standalone_phase = 'compiled', updated_at = ?"
+        + " WHERE command_id = ? AND method = ? AND state = 'accepted' AND standalone_phase = 'accepted'"
+        + ' AND compilation_id IS NULL AND run_id IS NULL',
+      ).run(compilationId, new Date().toISOString(), commandId, STANDALONE_RLM_START_METHOD)
+      if (Number(result.changes) !== 1) {
+        throw new OrchestrationError('standalone compilation cannot replace an existing command association', 'COMMAND_CONFLICT')
+      }
+    })
+  }
+
+  /**
+   * Atomically create the initial run/events and bind the command to that run.
+   * @param commandId - accepted standalone command still in the compiled phase.
+   * @param compilationId - exact compilation already linked to the command.
+   * @param record - initial run produced from that compilation.
+   * @param events - initial events committed with the run.
+   */
+  createStandaloneRunForCommand(
+    commandId: PhysicalOperatorExecutionId,
+    compilationId: string,
+    record: RuntimeRunRecord,
+    events: readonly Omit<OrchestrationEvent, 'sequence'>[],
+  ): void {
+    this.transaction(() => {
+      this.insertRun(record, events)
+      const result = this.db.prepare(
+        "UPDATE command_receipts SET run_id = ?, standalone_phase = 'started', updated_at = ?"
+        + " WHERE command_id = ? AND method = ? AND state = 'accepted' AND standalone_phase = 'compiled'"
+        + ' AND compilation_id = ? AND run_id IS NULL',
+      ).run(String(record.snapshot.runId), new Date().toISOString(), commandId, STANDALONE_RLM_START_METHOD, compilationId)
+      if (Number(result.changes) !== 1) {
+        throw new OrchestrationError('standalone run requires one unmatched compiled command', 'COMMAND_CONFLICT')
+      }
+    })
+  }
+
+  /**
+   * Read unresolved standalone commands before admitting new standalone work after recovery.
+   * @returns durable accepted or indeterminate standalone identities.
+   */
+  unfinishedStandaloneCommands(): OrchestrationCommandReceipt[] {
+    const rows = this.db.prepare(
+      "SELECT command_id FROM command_receipts WHERE method = ? AND state IN ('accepted', 'indeterminate')",
+    ).all(STANDALONE_RLM_START_METHOD) as Array<{ command_id: string }>
+    return rows.map((row) => {
+      const receipt = this.commandReceipt(row.command_id)
+      if (receipt === undefined) throw new OrchestrationError('standalone command row disappeared during read', 'COMMAND_INDETERMINATE')
+      return receipt
+    })
+  }
+
+  /**
+   * Find the command that authoritatively owns a standalone business run.
+   * @param runId - exact run identity.
+   * @returns its standalone command receipt, or undefined for an ordinary run.
+   */
+  standaloneCommandForRun(runId: OrchestrationRunId): OrchestrationCommandReceipt | undefined {
+    const row = this.db.prepare(
+      'SELECT command_id FROM command_receipts WHERE method = ? AND run_id = ?',
+    ).get(STANDALONE_RLM_START_METHOD, String(runId)) as { command_id: string } | undefined
+    return row === undefined ? undefined : this.commandReceipt(row.command_id)
   }
 
   /**
@@ -919,6 +1052,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       ${GOUZI_TABLES}
       ${GOUZI_MODEL_COLUMN}
       ${GOUZI_PROFILE_COLUMN}
+      ${STANDALONE_COMMAND_COLUMNS}
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
   }
@@ -1006,8 +1140,14 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
     })
   }
 
+  private migrateSchema7To8(): void {
+    this.transaction(() => {
+      this.db.exec(STANDALONE_COMMAND_COLUMNS + '\nPRAGMA user_version = 8;')
+    })
+  }
+
   /**
-   * Keep one copy of the state from before the first migration to schema 7. A program that only knows an older
+   * Keep one copy of the state before its first migration to the specified schema. A program that only knows an older
    * schema refuses the migrated file, so this copy is what a manual rollback restores. An existing copy is kept: it
    * holds the state from before the migration, which a later start must not overwrite.
    *
@@ -1018,9 +1158,10 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
    * A copy that cannot be made or checked stops the start before anything is migrated.
    * @param path - the state file.
    * @param version - the schema version the file has before migration.
+   * @param targetVersion - forward-only schema the copy precedes.
    */
-  private backUpBeforeSchema7(path: string, version: number): void {
-    const backup = `${path}.before-schema-7`
+  private backUpBeforeSchema(path: string, version: number, targetVersion: number): void {
+    const backup = path + '.before-schema-' + String(targetVersion)
     if (existsSync(backup)) return
     const partial = `${backup}.partial`
     try {
@@ -1042,7 +1183,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
       // The constructor fails, so no caller holds a handle to close.
       this.db.close()
       throw new OrchestrationError(
-        `orchestration state could not be backed up before migrating to schema 7: ${String(error)}`,
+        `orchestration state could not be backed up before migrating to schema ${String(targetVersion)}: ${String(error)}`,
         'ORCHESTRATION_UNAVAILABLE',
       )
     }

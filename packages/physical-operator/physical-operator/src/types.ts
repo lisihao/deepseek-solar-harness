@@ -326,6 +326,12 @@ export interface PhysicalOperatorRun extends PhysicalOperatorProviderRun {
 
 /** Trusted same-process implementation for one registered physical operator. */
 export interface PhysicalOperator {
+  /**
+   * Bind a tool Consumer's complete immutable input before start when positive Host authorization is required.
+   * @param request - exact input the Consumer will pass to start.
+   * @param toolCallId - real calling tool identity, retained only in process.
+   */
+  prepareToolCall?(request: PhysicalOperatorStartRequest, toolCallId: string): void
   /** Immutable discovery and capacity contract. */
   readonly descriptor: PhysicalOperatorDescriptor
   /** Resolve current transport or deployment availability, optionally for one requested lifetime. */

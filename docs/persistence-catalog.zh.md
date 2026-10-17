@@ -855,7 +855,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:144`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -886,7 +886,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:109`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:110`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -900,7 +900,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:139`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:140`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -914,7 +914,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:92`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:93`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -928,7 +928,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:94`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:95`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -946,7 +946,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:156`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:157`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -965,7 +965,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:99`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:100`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -986,7 +986,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:172`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:173`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -1003,7 +1003,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:131`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:132`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -1022,7 +1022,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:200`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:201`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -1047,7 +1047,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:184`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:185`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -1063,7 +1063,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:165`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源： [`packages/physical-operator/tool-physical-operator/src/index.ts:166`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

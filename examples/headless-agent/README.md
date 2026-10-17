@@ -30,3 +30,7 @@ The overlay creates the same absolute cwd inside the sandbox, but it does not up
 ## Advanced configuration
 
 [`advanced.cordis.yml`](advanced.cordis.yml) adds Code Mode and the Cordis tools to the test composition.
+
+## Keyless standalone RLM
+
+[`standalone-rlm.cordis.yml`](standalone-rlm.cordis.yml) composes an explicitly owned root with the standalone RLM Provider and the existing execution owner. Its API and Codex snapshot scenarios replace only the external transports; they exercise the real Loader, tool, daemon, and RLM core without credentials. Run `pnpm run test:snapshot -- examples/headless-agent/tests/standalone-rlm.snapshot.ts`; after the host build, set `DSH_EXAMPLE_MODE=lib` to check built package exports under plain Node. This fixture is not a general CLI or Desktop Host integration.

@@ -1806,6 +1806,8 @@ Source: [`packages/llm/model-catalog-local/src/index.ts:38`](../packages/llm/mod
 ```ts config-catalog
 /** Local daemon client configuration. */
 export interface Config extends RemoteHostConfig {
+  /** Exact standalone wrapper identities; the daemon rejects these at every physical leaf. */
+  readonly standaloneRlmOperatorIds?: string[]
   /** Start an independent daemon when no compatible socket is available. */
   readonly autoStart?: boolean
   /** Maximum handshake and per-request connection wait in milliseconds. */
@@ -1837,7 +1839,7 @@ export interface RemoteHostConfig {
 }
 ```
 
-Source: [`packages/orchestration/orchestration-local/src/index.ts:58`](../packages/orchestration/orchestration-local/src/index.ts)
+Source: [`packages/orchestration/orchestration-local/src/index.ts:61`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -1973,6 +1975,30 @@ export interface OperatorConfig {
 ```
 
 Source: [`packages/physical-operator/physical-operator-resident/src/index.ts:50`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+
+<a id="deepseek-aidsh-physical-operator-rlm"></a>
+
+## `@deepseek-ai/dsh-physical-operator-rlm`
+
+Requires: `physicalOperators` · `orchestrations` · `agents`
+
+```ts config-catalog
+/** Explicit deployment settings; model and scope authority comes only from a registered Host policy. */
+export interface Config {
+  /** Stable outer wrapper id; the daemon exclusion manifest must contain the same value. */
+  readonly id: string
+  /** Operator name shown in model-visible discovery. */
+  readonly displayName: string
+  /** Deployment-owned description of the bounded analysis capability. */
+  readonly description: string
+  /** Maximum simultaneously held outer executions, including unresolved physical effects. */
+  readonly maxConcurrency: number
+  /** Positive interval in milliseconds between observations of the same accepted command. */
+  readonly pollIntervalMs: number
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-rlm/src/index.ts:19`](../packages/physical-operator/physical-operator-rlm/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
@@ -3298,7 +3324,7 @@ export interface LatestModelEntries {
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:219`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:220`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 

@@ -35,6 +35,8 @@ Resident daemon 会把 lane 锁定在它接受的第一个 profile 上，所以�
 
 每次获准的 `run` 都会从当前运行时快照和为委派提示词自身选出的模板构建密封算子上下文信封，绝不会复用附着在更早父任务上的模板。Session 会把精确的信封和委派模板回执与 Provider 回执一并记录，以便回放时重建子任务输入。
 
+Provider 可以实现 `prepareToolCall`，在派发前绑定完整组装的请求与已记录的精确工具调用 id。独立 RLM Provider 必须具备此绑定，以及所属 Host 对存活 root 的明确授权；普通发现或选择该 id 不会授权无关 Agent。没有此钩子的 Provider 保留既有工具行为。
+
 ## 模型体验
 
 ### 工具 schema

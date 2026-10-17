@@ -16,6 +16,8 @@ RLM 节点可以选择启用与 Prime 兼容的 Autonomous Mode。Graph 或 Run 
 
 验证节点可以声明 `model-verdict` 验收：算子正常完成本身不足以通过。Provider 校验严格 JSON，要求肯定的 `accepted`、非空 `reason` 及由非空字符串组成的非空 `evidence` 列表。结论缺失、否定或无效时验收失败。目录快照交付及其持久应用状态归[本地 Provider](../orchestration-local/README.md#directory-snapshot-delivery)所有。
 
+可选的 `standaloneRlm` 控制接纳完整绑定的独立请求，并为同一命令提供 start、inspect 和 cancel。没有此控制的 Provider 不支持独立执行。命令接纳、唯一已认证业务 run、RLM 执行与 usage 结算仍由既有编排所有者持有；外层物理算子不另建调度器或重复计量。
+
 ## Model Experience
 
 间接产生影响：由面向模型的编排消费方呈现。此 Service Definition 不注册工具或提示词文本。

@@ -72,6 +72,8 @@ import {
   GouziOwnerId,
   OrchestrationArtifactRef,
   OrchestrationError,
+  type OrchestrationErrorCode,
+  StandaloneRlmStartRejected,
   OrchestrationRunId,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
@@ -99,6 +101,8 @@ import {
   type OrchestrationRunSnapshot,
   type OrchestrationStartRequest,
   type WorkbenchTaskContractV1,
+  type StandaloneRlmStartRequest,
+  type StandaloneRlmCommandSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorExecutionId,
@@ -128,6 +132,9 @@ import {
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
+import { RlmDispatchSettlementTracker } from './rlm-dispatch-settlement.ts'
+import { StandaloneRlmCommands } from './standalone-commands.ts'
+import { assertStandaloneRlmBottomOperator, parseStandaloneRlmStart, standaloneRlmOperatorIds, standaloneRlmPrompt } from './standalone-input.ts'
 import { accountOf, EvaluationLedger, isUnknownOutcome, parseEvaluationScope, type CommandAccount } from './evaluation-ledger.ts'
 import {
   abortedWithTheRun,
@@ -181,13 +188,17 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 7
+export const ORCHESTRATION_PROTOCOL_VERSION = 9
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
   'system.handshake',
   'orchestration.compile',
   'orchestration.start',
+  'orchestration.standalone_rlm.ids',
+  'orchestration.standalone_rlm.start',
+  'orchestration.standalone_rlm.inspect',
+  'orchestration.standalone_rlm.cancel',
   'orchestration.list',
   'orchestration.inspect',
   'event.read',
@@ -493,6 +504,8 @@ function selectedHarnessScope(mode: ContinualHarnessMode): ContinualHarnessScope
 
 /** Daemon construction policy. */
 export interface OrchestrationDaemonOptions {
+  /** Exact wrapper identities excluded from every bottom-level dispatch and offer. */
+  readonly standaloneRlmOperatorIds?: readonly string[]
   readonly root: string
   readonly dshHome: string
   readonly buildCommit?: string
@@ -998,6 +1011,9 @@ export class OrchestrationDaemon {
   /** Created only when the headless composition has a configured Browser Provider. */
   private browserBridge: BrowserModelToolBridge | undefined
   private readonly active = new Map<string, ActiveAttempt>()
+  private readonly standaloneIds: readonly string[]
+  private readonly standalone: StandaloneRlmCommands
+  private readonly standaloneSettlements = new Map<string, { readonly runId: string; readonly tracker: RlmDispatchSettlementTracker }>()
   private readonly reconcileRetryAfter = new Map<string, number>()
   private readonly capacityRetryAfter = new Map<string, number>()
   private readonly worktrees: GitWorktreeManager
@@ -1037,7 +1053,22 @@ export class OrchestrationDaemon {
 
   constructor(private readonly options: OrchestrationDaemonOptions) {
     this.socketPath = localIpcAddress(options.root, 'control')
+    this.standaloneIds = standaloneRlmOperatorIds(options.standaloneRlmOperatorIds ?? [])
     this.store = new OrchestrationStore(options.root)
+    this.standalone = new StandaloneRlmCommands(this.store, {
+      compile: request => this.compile({
+        ...request.compile,
+        requirement: { version: 1, kind: 'standalone-rlm-input', inputJson: JSON.stringify(request.input), inputSha256: canonicalSha256(request.input) },
+      }),
+      initial: compilationId => this.initialRun(compilationId),
+      scheduled: () => { this.triggerTick() },
+      observation: run => this.standaloneObservation(run),
+      cancel: (run) => {
+        if (!['completed', 'failed', 'cancelled'].includes(run.state)) {
+          this.controlUnchecked({ commandId: 'standalone-cancel:' + String(run.runId), runId: run.runId, expectedRevision: run.revision, action: 'cancel', reason: 'standalone caller requested cancellation' })
+        }
+      },
+    })
     this.worktrees = new GitWorktreeManager(join(options.root, 'worktrees'))
     this.autoRefine = new DurableAutoRefineCoordinator(join(options.root, 'auto-refine.json'), {
       ...PRIME_AUTO_REFINE_DEFAULTS,
@@ -1167,6 +1198,10 @@ export class OrchestrationDaemon {
       physicalOperators: this.ctx.physicalOperators,
       autonomousEndConditionEvaluators: this.options.autonomousEndConditionEvaluators,
       startResidentTurn: (...args) => this.startResidentTurn(...args),
+      standaloneRootPrompt: (record) => {
+        const request = this.standaloneRequest(record)
+        return request === undefined ? undefined : standaloneRlmPrompt(request)
+      },
       executeModelWorker: (request, accounting) => this.executeModelWorker(request, accounting),
       flushRlmHarnessBoundary: (...args) => this.flushRlmHarnessBoundary(...args),
       recordContextEnvelope: (...args) => { this.recordContextEnvelope(...args) },
@@ -1232,6 +1267,23 @@ export class OrchestrationDaemon {
 
   private async dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
+      case 'orchestration.standalone_rlm.ids': return this.standaloneIds
+      case 'orchestration.standalone_rlm.start': {
+        let request: StandaloneRlmStartRequest
+        try {
+          this.requireClusterLeader()
+          request = parseStandaloneRlmStart(params.request, this.standaloneIds)
+        } catch (error) {
+          if (error instanceof OrchestrationError) throw new StandaloneRlmStartRejected(error.message, error.code as OrchestrationErrorCode)
+          throw error
+        }
+        return this.standalone.start(request)
+      }
+      case 'orchestration.standalone_rlm.inspect':
+        return this.standalone.inspect(PhysicalOperatorExecutionId(requiredString(params, 'execution_id')))
+      case 'orchestration.standalone_rlm.cancel':
+        this.requireClusterLeader()
+        return this.standalone.cancel(PhysicalOperatorExecutionId(requiredString(params, 'execution_id')), requiredString(params, 'request_sha256'))
       case 'system.handshake': return this.handshake(params)
       case 'orchestration.compile': {
         this.requireClusterLeader()
@@ -1348,6 +1400,10 @@ export class OrchestrationDaemon {
     if (browserProviderManifest !== activeBrowserProviderManifest) {
       throw new OrchestrationError('orchestration Browser Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
+    const standaloneManifest = canonicalSha256(this.standaloneIds)
+    if ((params.standalone_rlm_operator_ids_sha256 ?? canonicalSha256([])) !== standaloneManifest) {
+      throw new OrchestrationError('orchestration standalone operator exclusion manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
     return {
       protocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
       stateSchemaVersion: ORCHESTRATION_STATE_SCHEMA_VERSION,
@@ -1355,6 +1411,7 @@ export class OrchestrationDaemon {
       methods: ORCHESTRATION_METHODS,
       skillProviderManifestSha256: activeSkillProviderManifest,
       browserProviderManifestSha256: activeBrowserProviderManifest,
+      standaloneRlmOperatorIdsSha256: standaloneManifest,
       injectionBoundaries: ['pre-dispatch', 'next-turn'],
     }
   }
@@ -1398,6 +1455,11 @@ export class OrchestrationDaemon {
 
   private async compile(request: Parameters<Context['orchestrations']['compile']>[0]): Promise<OrchestrationCompilationV1> {
     validateGraph(request.graph)
+    for (const node of request.graph.nodes) {
+      for (const id of [...node.operator?.preferredIds ?? [], ...node.operator?.fallbackIds ?? []]) {
+        assertStandaloneRlmBottomOperator(id, this.standaloneIds)
+      }
+    }
     validateAdmissionRuntimeContext(request.admission)
     validateAdmissionStrategy(request.admission)
     await this.validateGouziRecipient(request.admission, request.graph)
@@ -1471,7 +1533,61 @@ export class OrchestrationDaemon {
     )
   }
 
-  private startRunUnchecked(compilationId: string, approvalRef?: string): OrchestrationRunSnapshot {
+  private standaloneRequest(record: RuntimeRunRecord): StandaloneRlmStartRequest | undefined {
+    if (record.standaloneRlmCommandId === undefined) return undefined
+    const command = this.store.standaloneCommandForRun(record.snapshot.runId)
+    if (command?.commandId !== record.standaloneRlmCommandId || command.standaloneRequest === undefined) {
+      throw new OrchestrationError('standalone run is missing its authoritative command association', 'COMMAND_INDETERMINATE')
+    }
+    const request = parseStandaloneRlmStart(command.standaloneRequest, this.standaloneIds)
+    const requirement = record.requirementRef === undefined ? undefined : this.store.readArtifact(record.requirementRef)
+    if (typeof requirement !== 'object' || requirement === null
+      || !('version' in requirement) || requirement.version !== 1
+      || !('kind' in requirement) || requirement.kind !== 'standalone-rlm-input'
+      || !('inputSha256' in requirement) || requirement.inputSha256 !== canonicalSha256(request.input)
+      || !('inputJson' in requirement) || typeof requirement.inputJson !== 'string') {
+      throw new OrchestrationError('standalone sealed requirement differs from the command input', 'COMMAND_INDETERMINATE')
+    }
+    let sealedInput: unknown
+    try {
+      sealedInput = JSON.parse(requirement.inputJson)
+    } catch {
+      throw new OrchestrationError('standalone sealed input JSON is invalid', 'COMMAND_INDETERMINATE')
+    }
+    if (canonicalSha256(sealedInput) !== canonicalSha256(request.input)) {
+      throw new OrchestrationError('standalone sealed input differs from the command input', 'COMMAND_INDETERMINATE')
+    }
+    parseStandaloneRlmStart({ ...request, input: sealedInput }, this.standaloneIds)
+    return request
+  }
+
+  private standaloneObservation(run: OrchestrationRunSnapshot): Pick<StandaloneRlmCommandSnapshot, 'settlement' | 'result' | 'error'> {
+    const trackers = [...this.standaloneSettlements.values()].filter(value => value.runId === String(run.runId))
+    if (run.state === 'indeterminate' || trackers.some(value => value.tracker.snapshot().unknownRequests > 0)) {
+      return { settlement: 'unknown' }
+    }
+    if (trackers.some(value => !value.tracker.snapshot().settled)
+      || !['completed', 'failed', 'cancelled'].includes(run.state)) return { settlement: 'running' }
+    if (run.state !== 'completed') {
+      return { settlement: 'settled', error: { code: 'STANDALONE_RUN_' + run.state.toUpperCase(), message: 'standalone business run ' + run.state } }
+    }
+    const node = run.nodes[0]
+    if (node === undefined) throw new OrchestrationError('completed standalone run has no original node', 'COMMAND_INDETERMINATE')
+    const evidence = [...node.evidenceRefs].reverse()
+      .map(ref => this.store.readArtifact(ref))
+      .find((value): value is OrchestrationExecutionEvidenceV1 => typeof value === 'object' && value !== null
+        && 'version' in value && value.version === 1 && 'executionId' in value && 'output' in value && 'stopReason' in value)
+    if (evidence === undefined) {
+      throw new OrchestrationError('completed standalone run has no execution output evidence', 'COMMAND_INDETERMINATE')
+    }
+    // Members/WP1 own usage. The wrapper projects their full output without recording another billable usage total.
+    return { settlement: 'settled', result: { output: [...evidence.output], stopReason: evidence.stopReason } }
+  }
+
+  private initialRun(compilationId: string, approvalRef?: string): {
+    readonly record: RuntimeRunRecord
+    readonly events: readonly Omit<OrchestrationEvent, 'sequence'>[]
+  } {
     const compilation = this.store.getCompilation(compilationId)
     const runId = OrchestrationRunId(`run-${randomUUID()}`)
     const createdAt = now()
@@ -1518,7 +1634,7 @@ export class OrchestrationDaemon {
       ...approvalRef === undefined ? {} : { approvalRef },
       retryAfter: {},
     }
-    this.store.createRun(record, [
+    return { record, events: [
       event(runId, 'intent.compiled', { ref: String(compilation.intentRef), sha256: compilation.intent.provenance.outputSha256 }),
       event(runId, 'graph.compiled', { ref: String(compilation.graphRef), certificateSha256: compilation.certificate.certificateSha256 }),
       event(runId, 'run.started', {
@@ -1526,9 +1642,14 @@ export class OrchestrationDaemon {
         maxParallel: compilation.graph.maxParallel,
         admission: compilation.admission ?? null,
       }),
-    ])
+    ] }
+  }
+
+  private startRunUnchecked(compilationId: string, approvalRef?: string): OrchestrationRunSnapshot {
+    const { record, events } = this.initialRun(compilationId, approvalRef)
+    this.store.createRun(record, events)
     this.triggerTick()
-    return snapshot
+    return record.snapshot
   }
 
   private control(request: OrchestrationControlRequest): OrchestrationRunSnapshot {
@@ -2021,6 +2142,7 @@ export class OrchestrationDaemon {
         const attempt = attempts.find(value => value.executionId === root.executionId)
         if (attempt === undefined) continue
         const record = this.store.getRun(attempt.runId)
+        if (this.standalone.isRecoveredRun(String(record.snapshot.runId))) continue
         const spec = record.graph.nodes.find(value => value.id === attempt.nodeId)
         if (spec === undefined) continue
         const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
@@ -2034,6 +2156,7 @@ export class OrchestrationDaemon {
   }
 
   private async advance(initial: RuntimeRunRecord): Promise<void> {
+    if (this.standalone.isRecoveredRun(String(initial.snapshot.runId))) return
     let record = this.store.getRun(String(initial.snapshot.runId))
     const byId = new Map(record.graph.nodes.map(node => [node.id, node]))
     let nodes = [...record.snapshot.nodes]
@@ -2393,6 +2516,14 @@ export class OrchestrationDaemon {
       )
     }
     const selected = await this.selectOperator(record, spec, rlmPlan, requiresBrowser)
+    const standalone = this.standaloneRequest(record)
+    if (standalone !== undefined && (selected.allocation.operatorId !== standalone.input.driver.operatorId
+      || selected.allocation.model !== standalone.input.driver.model
+      || (standalone.input.driver.kind === 'resident') !== (selected.provider !== undefined)
+      || (standalone.input.driver.kind === 'resident' && standalone.input.driver.effort !== undefined
+        && selected.allocation.profile?.effort !== standalone.input.driver.effort))) {
+      throw new OrchestrationError('standalone root selection cannot substitute its locked driver/model/effort', 'ORCHESTRATION_UNAVAILABLE')
+    }
     const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.fidelity === 'dsh-optimized' && rlmPlan.maxTurns > 1
       ? await this.selectRlmWorker(record, spec, rlmPlan)
       : undefined
@@ -2551,7 +2682,7 @@ export class OrchestrationDaemon {
     envelope: OperatorContextEnvelopeV1,
     receipt: ReturnType<typeof receiveOperatorContextEnvelope>,
   ): void {
-    const ref = this.store.putArtifact(envelope)
+    const ref = this.store.putArtifact({ version: 1, kind: 'operator-context-envelope', envelopeJson: JSON.stringify(envelope) })
     this.store.recordArtifact('compilation_artifacts', {
       ref: String(ref),
       runId: String(record.snapshot.runId),
@@ -2633,6 +2764,7 @@ export class OrchestrationDaemon {
           (this.store.readArtifact(record.workspaceSnapshotRef) as WorkspaceSnapshot).snapshotId,
         )
       this.assertUnmetered('Resident or remote operator')
+      assertStandaloneRlmBottomOperator(plan.operatorPlan.operatorId, this.standaloneIds)
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -2787,7 +2919,27 @@ export class OrchestrationDaemon {
     }
     const progressKey = this.rlmProgressKey(record, spec, plan)
     this.rlmProgressSources.set(progressKey, progressSources)
-    const result = execute(controller, physicalRuns)
+    const tracker = record.standaloneRlmCommandId === undefined ? undefined : new RlmDispatchSettlementTracker()
+    if (tracker !== undefined) {
+      this.standaloneSettlements.set(progressKey, { runId: String(record.snapshot.runId), tracker })
+      controller.signal.addEventListener('abort', () => { tracker.closeAdmission() }, { once: true })
+    }
+    const result = execute(controller, physicalRuns).then(
+      (value) => {
+        tracker?.closeAdmission()
+        if (tracker !== undefined && !tracker.snapshot().settled) {
+          throw new UnknownPhysicalOutcomeError('standalone RLM logical completion has unresolved physical dispatches', tracker.snapshot())
+        }
+        return value
+      },
+      (error: unknown) => {
+        tracker?.closeAdmission()
+        if (tracker !== undefined && !tracker.snapshot().settled) {
+          throw new UnknownPhysicalOutcomeError('standalone RLM failed with unresolved physical dispatches', error)
+        }
+        throw error
+      },
+    )
     this.markAttemptRunning(record, spec, acceptedAttempt, {
       executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
       model: plan.allocationPlan.model, contextIsolation, executor: 'resident-rlm',
@@ -2803,6 +2955,8 @@ export class OrchestrationDaemon {
         timeout.clearTimeout()
         controller.abort()
         await Promise.allSettled(physicalRuns.map(value => value.dispose()))
+        // Daemon shutdown detaches local holders; it cannot wait for an unknown native turn or claim its settlement.
+        if (tracker !== undefined && !this.closing) await tracker.whenSettled
       },
     }
     this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run, progressSources)
@@ -3314,6 +3468,7 @@ export class OrchestrationDaemon {
   private async assertExplicitRlmChildSelection(
     model: Parameters<RlmRuntimeHostBindings['dispatchChild']>[0]['model'],
   ): Promise<void> {
+    assertStandaloneRlmBottomOperator(model.operatorId, this.standaloneIds)
     if (this.ctx.physicalOperators.getOperator(model.operatorId) !== undefined) {
       const catalog = (await this.ctx.physicalOperators.residentCatalogs())
         .find(candidate => String(candidate.operatorId) === model.operatorId)
@@ -3461,6 +3616,57 @@ export class OrchestrationDaemon {
     request: ModelWorkerExecuteRequest,
     accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
   ): Promise<ModelWorkerResult> {
+    this.assertStandaloneDispatchAllowed(accounting.record)
+    assertStandaloneRlmBottomOperator(request.workerId, this.standaloneIds)
+    const tracker = this.standaloneTracker(accounting.record, accounting.plan)
+    if (tracker === undefined) return this.executeModelWorkerWithEvaluation(request, accounting)
+    const command = tracker.beginCommand(PhysicalOperatorExecutionId(request.commandId))
+    const execution = Promise.resolve().then(() => this.executeModelWorkerWithEvaluation({
+      ...request,
+      physicalRequestObserver: () => {
+        const ticket = command.beginRequest()
+        return {
+          dispatching: () => { ticket.sent() },
+          notSent: () => { ticket.notSent() },
+          terminalResponse: () => { ticket.terminalResponse() },
+          unknown: () => { ticket.unknown() },
+        }
+      },
+    }, accounting))
+    const finish = (): void => {
+      command.finishDispatch()
+      command.releaseResources()
+      if (!command.snapshot().settled) {
+        throw new UnknownPhysicalOutcomeError('standalone worker command has an unresolved physical request', command.snapshot())
+      }
+    }
+    return execution.then((value) => { finish(); return value }, (error: unknown) => {
+      try { finish() } catch (unknown) {
+        throw new UnknownPhysicalOutcomeError('standalone worker failed before physical settlement', new AggregateError([error, unknown]))
+      }
+      throw error
+    })
+  }
+
+  private standaloneTracker(record: RuntimeRunRecord, plan: NodeExecutionPlanV1): RlmDispatchSettlementTracker | undefined {
+    if (record.standaloneRlmCommandId === undefined) return undefined
+    const spec = record.graph.nodes.find(value => value.id === plan.nodeId)
+    if (spec === undefined) throw new OrchestrationError('standalone plan has no matching graph node', 'COMMAND_INDETERMINATE')
+    const tracker = this.standaloneSettlements.get(this.rlmProgressKey(record, spec, plan))?.tracker
+    if (tracker === undefined) throw new OrchestrationError('standalone dispatch has no attempt-owned settlement tracker', 'COMMAND_INDETERMINATE')
+    return tracker
+  }
+
+  private assertStandaloneDispatchAllowed(record: RuntimeRunRecord): void {
+    if (this.standalone.isRecoveredRun(String(record.snapshot.runId))) {
+      throw new UnknownPhysicalOutcomeError('recovered standalone physical ownership is unknown; dispatch remains fenced', record.snapshot.runId)
+    }
+  }
+
+  private executeModelWorkerWithEvaluation(
+    request: ModelWorkerExecuteRequest,
+    accounting: { readonly record: RuntimeRunRecord; readonly plan: NodeExecutionPlanV1 },
+  ): Promise<ModelWorkerResult> {
     const ledger = this.evaluation
     if (ledger === undefined) return this.ctx.modelWorkers.execute(request)
     if (request.workerId !== DEEPSEEK_WORKER_ID) {
@@ -3600,7 +3806,9 @@ export class OrchestrationDaemon {
     residentLaneId?: string,
     nativeToolPolicy?: PhysicalOperatorNativeToolPolicy,
   ): Promise<StartedResidentTurn> {
+    this.assertStandaloneDispatchAllowed(record)
     this.assertUnmetered('Resident or remote operator')
+    assertStandaloneRlmBottomOperator(allocation.operatorId, this.standaloneIds)
     const operator = this.ctx.physicalOperators.getOperator(allocation.operatorId)
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
@@ -3612,20 +3820,78 @@ export class OrchestrationDaemon {
       }
       : allocation.profile
     const contextEnvelope = taskGraphContextEnvelope(plan, prompt)
-    const run = await this.ctx.physicalOperators.start(allocation.operatorId, {
-      executionId,
-      mode: 'resident',
-      label: `${spec.id}: ${label}`,
-      prompt: [...prompt],
-      contextEnvelope,
-      parent: fakeParent(workspace, String(record.snapshot.runId)),
-      signal,
-      ...residentProfile === undefined ? {} : { residentProfile },
-      ...spec.generationLimits === undefined ? {} : { generationLimits: spec.generationLimits },
-      ...modelToolBridge === undefined ? {} : { modelToolBridge },
-      ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
-      ...residentLaneId === undefined ? {} : { residentLaneId },
-    })
+    const tracker = this.standaloneTracker(record, plan)
+    const command = tracker?.beginCommand(executionId)
+    const ticket = command?.beginRequest()
+    if (signal.aborted) {
+      ticket?.notSent()
+      command?.finishDispatch()
+      command?.releaseResources()
+      throw signal.reason
+    }
+    const dispatch = { providerInvoked: false }
+    let originalRun: PhysicalOperatorRun
+    try {
+      originalRun = await this.ctx.physicalOperators.start(allocation.operatorId, {
+        executionId,
+        mode: 'resident',
+        label: `${spec.id}: ${label}`,
+        prompt: [...prompt],
+        contextEnvelope,
+        parent: fakeParent(workspace, String(record.snapshot.runId)),
+        signal,
+        ...residentProfile === undefined ? {} : { residentProfile },
+        ...spec.generationLimits === undefined ? {} : { generationLimits: spec.generationLimits },
+        ...modelToolBridge === undefined ? {} : { modelToolBridge },
+        ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
+        ...residentLaneId === undefined ? {} : { residentLaneId },
+      }, () => {
+        dispatch.providerInvoked = true
+        ticket?.sent()
+      })
+    } catch (error) {
+      if (dispatch.providerInvoked) ticket?.unknown()
+      else ticket?.notSent()
+      command?.finishDispatch()
+      command?.releaseResources()
+      if (command !== undefined && dispatch.providerInvoked) throw new UnknownPhysicalOutcomeError('standalone Resident start has no confirmed turn outcome', error)
+      throw error
+    }
+    const run: PhysicalOperatorRun = command === undefined ? originalRun : (() => {
+      if (ticket === undefined) throw new Error('standalone Resident command has no request evidence ticket')
+      command.finishDispatch()
+      const receipt = acceptedReceipt(originalRun, String(executionId))
+      const release = async (): Promise<void> => {
+        try {
+          const turn = await this.resident.inspectTurn(receipt.turnId)
+          if (String(turn.sessionId) === receipt.sessionId && turn.state === 'settled') ticket.terminalResponse()
+          else ticket.unknown()
+        } catch {
+          // A failed read of this exact accepted turn supplies no terminal evidence.
+          ticket.unknown()
+        }
+        await originalRun.dispose()
+        command.releaseResources()
+      }
+      const result = originalRun.result.then(async (value) => {
+        await release()
+        if (!command.snapshot().settled) throw new UnknownPhysicalOutcomeError('standalone Resident lacks authoritative terminal/resource evidence', command.snapshot())
+        return value
+      }, async (error: unknown) => {
+        await release()
+        if (!command.snapshot().settled) throw new UnknownPhysicalOutcomeError('standalone Resident result is physically indeterminate', error)
+        throw error
+      })
+      return { ...originalRun, result, dispose: async () => {
+        await originalRun.dispose()
+        if (this.closing) {
+          ticket.unknown()
+          command.releaseResources()
+          return
+        }
+        await result.catch(() => {})
+      } }
+    })()
     this.recordContextEnvelope(
       record,
       spec,
@@ -4342,7 +4608,7 @@ export class OrchestrationDaemon {
     const providers = await this.ctx.physicalOperators.residentCatalogs()
     const residentOffers = this.residentOffers(record, spec, providers, false, true)
     const modelWorkerOffers = (await this.ctx.modelWorkers.offers()).filter(modelWorkerSupportsRlm)
-    const offers = [...residentOffers, ...modelWorkerOffers]
+    const offers = [...residentOffers, ...modelWorkerOffers].filter(offer => !this.standaloneIds.includes(offer.operatorId))
     const available = offers.filter(value => value.available)
     const targetTier = available.some(value => value.tier === 'low')
       ? 'low'
@@ -4413,7 +4679,7 @@ export class OrchestrationDaemon {
       } : {},
       rlm: rlmPlan.enabled ? 'enabled' : 'disabled',
       graphMaxParallel: record.graph.maxParallel,
-      offers: [...residentOffers, ...modelWorkerOffers],
+      offers: [...residentOffers, ...modelWorkerOffers].filter(offer => !this.standaloneIds.includes(offer.operatorId)),
       now: now(),
     })
     // The allocator receives the canonical native token, while persisted
@@ -4439,6 +4705,7 @@ export class OrchestrationDaemon {
 
   private async reconcile(): Promise<void> {
     for (const attempt of this.store.attempts(['accepted', 'running'])) {
+      if (this.standalone.isRecoveredRun(attempt.runId)) continue
       const key = `${attempt.runId}\0${attempt.nodeId}`
       if (this.active.has(key) || (this.reconcileRetryAfter.get(key) ?? 0) > Date.now()) continue
       if (attempt.turnId === undefined) {
@@ -4472,6 +4739,11 @@ export class OrchestrationDaemon {
       const operatorId = node?.operatorId
       if (operatorId === undefined) {
         this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'recovered attempt has no sealed physical operator identity', updatedAt: now() })
+        continue
+      }
+      if (this.standaloneIds.includes(operatorId)) {
+        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'COMMAND_INDETERMINATE',
+          errorMessage: 'recovered physical identity is an excluded standalone wrapper', updatedAt: now() })
         continue
       }
       const operator = this.ctx.physicalOperators.getOperator(operatorId)

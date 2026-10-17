@@ -1,10 +1,13 @@
 /** Orchestration daemon wire envelopes. */
-import { OrchestrationError } from '@deepseek-ai/dsh-orchestration'
+import { OrchestrationError, StandaloneRlmStartRejected } from '@deepseek-ai/dsh-orchestration'
 
 /** Successful daemon response envelope. */
 export interface OrchestrationWireSuccess<T> { readonly ok: true; readonly value: T }
 /** Failed daemon response envelope. */
-export interface OrchestrationWireFailure { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+export interface OrchestrationWireFailure {
+  readonly ok: false
+  readonly error: { readonly code: string; readonly message: string; readonly standaloneStartRejected?: true }
+}
 /** Version-one local response envelope. */
 export type OrchestrationWireResult<T> = OrchestrationWireSuccess<T> | OrchestrationWireFailure
 
@@ -23,6 +26,10 @@ export function wireSuccess<T>(value: T): OrchestrationWireSuccess<T> {
  * @returns a stable failure envelope.
  */
 export function wireFailure(error: unknown): OrchestrationWireFailure {
+  if (error instanceof StandaloneRlmStartRejected) return {
+    ok: false,
+    error: { code: error.code, message: error.message, standaloneStartRejected: true },
+  }
   if (error instanceof OrchestrationError) return { ok: false, error: { code: error.code, message: error.message } }
   return {
     ok: false,
@@ -41,7 +48,15 @@ export function unwrapWire(value: unknown): unknown {
   }
   const result = value as Partial<OrchestrationWireResult<unknown>>
   if (result.ok === true && 'value' in result) return result.value
-  if (result.ok === false && result.error !== undefined) {
+  if (result.ok === false && result.error !== undefined && result.error !== null
+    && typeof result.error === 'object' && !Array.isArray(result.error)) {
+    if (typeof result.error.message !== 'string' || typeof result.error.code !== 'string'
+      || (result.error.standaloneStartRejected !== undefined && result.error.standaloneStartRejected !== true)) {
+      throw new OrchestrationError('orchestration daemon returned an invalid failure envelope', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    if (result.error.standaloneStartRejected === true) throw new StandaloneRlmStartRejected(
+      result.error.message, result.error.code as never,
+    )
     throw new OrchestrationError(result.error.message, result.error.code as never)
   }
   throw new OrchestrationError('orchestration daemon returned an invalid response envelope', 'ORCHESTRATION_UNAVAILABLE')

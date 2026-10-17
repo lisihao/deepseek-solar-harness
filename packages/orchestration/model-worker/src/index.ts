@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { HarnessError, type ContentBlock, type RequestAdmission, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import { HarnessError, type ContentBlock, type RequestAdmission, type RequestAdmissionInput, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
@@ -40,6 +40,26 @@ export interface ModelWorkerEvaluationV1 {
   admission(label: string): RequestAdmission
 }
 
+/** Transport evidence for one actual provider request, separate from usage accounting. */
+export interface ModelWorkerPhysicalRequestEvidence {
+  /** Record entry to dispatch after any existing scope has admitted the request. */
+  dispatching(): void
+  /** Record proof of refusal before the provider dispatch can begin. */
+  notSent(): void
+  /** Record the provider's terminal response, including a response with no usage. */
+  terminalResponse(): void
+  /** Keep a dispatched request whose provider outcome cannot be proved. */
+  unknown(): void
+}
+
+/**
+ * Observe each serialized physical request before its provider dispatch.
+ * This process-local observer supplies no quota, usage, or execution authority.
+ * @param request - exact serialized request facts from the provider admission seam.
+ * @returns the recorder owned by this physical request alone.
+ */
+export type ModelWorkerPhysicalRequestObserver = (request: RequestAdmissionInput) => ModelWorkerPhysicalRequestEvidence
+
 /** Sealed one-shot request dispatched to a selected model worker. */
 export interface ModelWorkerExecuteRequest {
   readonly commandId: string
@@ -52,6 +72,8 @@ export interface ModelWorkerExecuteRequest {
   readonly modelToolBridge?: ModelWorkerToolBridgeV1
   /** Present when the request runs under an evaluation scope; see {@link ModelWorkerEvaluationV1}. */
   readonly evaluation?: ModelWorkerEvaluationV1
+  /** Optional attempt-owned evidence for every actual request, including all tool rounds and transport attempts. */
+  readonly physicalRequestObserver?: ModelWorkerPhysicalRequestObserver
   readonly signal: AbortSignal
 }
 
@@ -65,6 +87,8 @@ export interface ModelWorkerResult {
 /** Replaceable Provider that exposes offers and executes one-shot model work. */
 export interface ModelWorkerProvider {
   readonly id: string
+  /** True only when every physical request reaches the supplied request observer. */
+  readonly observesPhysicalRequests?: boolean
   offers(): Promise<readonly ModelExecutionOffer[]>
   execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 }
@@ -116,6 +140,9 @@ export class ModelWorkerRuntime extends Service {
   execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
     const provider = this.providers.get(request.workerId)
     if (provider === undefined) throw new ModelWorkerError(`unknown model worker: ${request.workerId}`, 'MODEL_WORKER_UNAVAILABLE')
+    if (request.physicalRequestObserver !== undefined && provider.observesPhysicalRequests !== true) {
+      throw new ModelWorkerError(`model worker cannot report physical request evidence: ${request.workerId}`, 'MODEL_WORKER_INVALID')
+    }
     return provider.execute(request)
   }
 }

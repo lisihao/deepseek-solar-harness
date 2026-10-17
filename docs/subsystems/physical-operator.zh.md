@@ -20,6 +20,10 @@ Resident Provider 资格审查还会发布 Claude Code 与 Codex 的实时原生
 
 只有 `completed` 表示成功。取消、拒绝、token 耗尽与 Provider 失败会保留为明确停止原因或基础设施 rejection。Physical Service Definition 不负责排队、重试、持久化或回滚；Resident 持久化隔离在独立 Service Definition 与单写 daemon 后。协议 v4 仍为快速失败，且永不自动重放 indeterminate command。
 
+## 可信独立 RLM Host
+
+[独立 RLM Provider](../../packages/physical-operator/physical-operator-rlm/README.md) 只在精确包装实例注册成功后发布 `ctx.standaloneRlmHost`。嵌入 Host 必须依赖此能力，再注册自己拥有的存活 root。`StandaloneRlmRootPolicy` 提供明确的底层驱动/模型、读取范围、上下文预算、已启用的递归限额与重试策略。发现不授予资格；首个组合在每个 context 中支持一个包装绑定，并通过既有编排执行所有者运行一个只读文本分析叶节点。
+
 ## 命令拒绝
 
 ```ts public-api
@@ -84,9 +88,10 @@ async residentCatalogs(options?: PhysicalOperatorResidentCatalogOptions): Promis
  * provider startup and released exactly once when the result settles.
  * @param id - stable operator identity to execute.
  * @param request - caller-owned task, parent, and cancellation signal.
+ * @param beforeProviderDispatch - process-local observation after registry admission, immediately before invoking the Provider.
  * @returns the accepted, holder-owned execution handle.
  */
-async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>
+async start(id: string, request: PhysicalOperatorStartRequest, beforeProviderDispatch?: () => void): Promise<PhysicalOperatorRun>
 ```
 
 Source: [`packages/physical-operator/physical-operator/src/index.ts:102`](../../packages/physical-operator/physical-operator/src/index.ts)
@@ -204,6 +209,27 @@ abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): 
 ```
 
 Source: [`packages/physical-operator/resident-operator/src/index.ts:518`](../../packages/physical-operator/resident-operator/src/index.ts)
+
+<a id="ctxstandalonerlmhost--standalonerlmhostbinding"></a>
+
+### `ctx.standaloneRlmHost` — `StandaloneRlmHostBinding`
+
+Host registration capability published only by an active, registered wrapper instance.
+
+```ts cordis-catalog
+/**
+ * Bind the exact root returned by this embedding Host.
+ * @param host - lifecycle owning the explicit grant.
+ * @param agent - exact live top-level Agent instance.
+ * @param policy - explicit versioned driver, scope and execution limits.
+ * @returns disposer that revokes this grant.
+ */
+registerRoot(host: Context, agent: Agent, policy: StandaloneRlmRootPolicy): () => Promise<void>
+```
+
+Types: [Agent](core.md)
+
+Source: [`packages/physical-operator/physical-operator-rlm/src/index.ts:55`](../../packages/physical-operator/physical-operator-rlm/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

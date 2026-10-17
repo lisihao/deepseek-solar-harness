@@ -51,6 +51,7 @@ import type {
   PhysicalOperatorResidentCatalog,
   PhysicalOperatorResult,
   PhysicalOperatorRun,
+  PhysicalOperatorStartRequest,
   PhysicalOperatorStatus,
   PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
@@ -868,14 +869,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       let run: PhysicalOperatorRun | undefined
       let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
       try {
-        parent.session.append('physical-operator/tool-dispatch', {
-          commandId: String(executionId),
-          operatorId,
-          toolCallId: String(exec.callId),
-          mode: request.mode ?? 'ephemeral',
-          description: description.slice(0, 160),
-        }, { ignorable: true })
-        run = await ctx.physicalOperators.start(operatorId, {
+        const startRequest: PhysicalOperatorStartRequest = {
           executionId,
           label: description,
           prompt: [{ type: 'text', text: prompt }],
@@ -887,7 +881,16 @@ export function apply(ctx: Context, config: Config = {}): void {
           ...resident?.systemPrompt === undefined ? {} : { systemPrompt: resident.systemPrompt },
           ...resident?.descriptor === undefined ? {} : { modelToolBridge: resident.descriptor },
           ...resident?.descriptor === undefined ? {} : { nativeToolPolicy: 'dsh-tools-authoritative' as const },
-        })
+        }
+        ctx.physicalOperators.getOperator(operatorId)?.prepareToolCall?.(startRequest, String(exec.callId))
+        parent.session.append('physical-operator/tool-dispatch', {
+          commandId: String(executionId),
+          operatorId,
+          toolCallId: String(exec.callId),
+          mode: request.mode ?? 'ephemeral',
+          description: description.slice(0, 160),
+        }, { ignorable: true })
+        run = await ctx.physicalOperators.start(operatorId, startRequest)
         if (contextEnvelope !== undefined && run.contextReceipt !== undefined) {
           parent.session.append('physical-operator/context-envelope', {
             commandId: String(executionId),

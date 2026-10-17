@@ -137,6 +137,8 @@ export interface RlmExecutionContext {
  * is reimplemented here: each is the daemon's own existing method, bound, or its own ctx service reference.
  */
 export interface RlmExecutionCoreDeps {
+  /** Exact standalone text blocks, verified against the durable command and sealed requirement by the daemon. */
+  standaloneRootPrompt?(record: RuntimeRunRecord): readonly ContentBlock[] | undefined
   readonly store: RlmExecutionStore
   readonly rlmRuntime: RlmExecutionRuntime
   readonly physicalOperators: RlmExecutionOperators
@@ -455,7 +457,7 @@ export function createRlmExecutionCore(deps: RlmExecutionCoreDeps): RlmExecution
     const bridge = await deps.rlmRuntime.modelToolBridge(rootSessionId)
     assertRlmBridgeAllowed(executionOptions, bridge)
     const rootPrompt = primeRlmRootPrompt(
-      promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
+      deps.standaloneRootPrompt?.(record) ?? promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
       rlmPlan,
       plan.rlmWorkerPlan,
     )

@@ -1,0 +1,65 @@
+# Keyless runnable example. Only the external model/Resident transports below are fixtures.
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+- id: fixture-transports
+  name: '../../packages/physical-operator/physical-operator-rlm/tests/fixtures/loader-backend.ts'
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+- id: agents
+  name: '@deepseek-ai/dsh-agent'
+- id: projection
+  name: '@deepseek-ai/dsh-session-projection'
+- id: commands
+  name: '@deepseek-ai/dsh-commands'
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    persona: 'Use the explicitly configured standalone RLM operator for this bounded analysis.'
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+- id: loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    agents: []
+- id: operators
+  name: '@deepseek-ai/dsh-physical-operator'
+- id: orchestration
+  name: '@deepseek-ai/dsh-orchestration-local'
+  config:
+    autoStart: false
+    dshHome: !!js process.env.DSH_HOME
+    standaloneRlmOperatorIds: [standalone]
+- id: standalone
+  name: '@deepseek-ai/dsh-physical-operator-rlm'
+  config:
+    id: standalone
+    displayName: Standalone RLM
+    description: Bounded read-only analysis through the shared execution owner
+    maxConcurrency: 1
+    pollIntervalMs: 5
+- id: operator-tool
+  name: '@deepseek-ai/dsh-tool-physical-operator'
+- id: explicit-root-host
+  name: '@deepseek-ai/dsh-physical-operator-rlm/standalone-host'
+  config:
+    operatorId: standalone
+    rootSessionId: standalone-loader-root
+    rootProvider: standalone-fixture
+    rootModel: outer
+    rootCwd: !!js process.cwd()
+    policy:
+      version: loader-fixture-v1
+      driver: !!js "process.env.DSH_RLM_FIXTURE_DRIVER === 'codex' ? { kind: 'resident', operatorId: 'codex', model: 'fixture-codex-model', effort: 'high' } : { kind: 'model-worker', operatorId: 'deepseek-api', model: 'deepseek-v4-flash' }"
+      readScopes: []
+      contextMaxTokens: 4096
+      rlm:
+        mode: enabled
+        maxDepth: 2
+        maxChildren: 3
+        maxTurns: 4
+      retryPolicy:
+        maxAttempts: 3
+        backoffMs: 0
+        retryableCodes: [UNKNOWN]

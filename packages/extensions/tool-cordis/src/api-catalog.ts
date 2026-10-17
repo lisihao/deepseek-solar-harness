@@ -1323,6 +1323,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Provider-neutral durable orchestration control service.',
     methods: [
       {
+        signature: 'readonly standaloneRlm?: StandaloneRlmControl',
+        description: 'Absent when this Provider cannot preserve standalone command ownership and settlement.',
+        parameters: [],
+      },
+      {
         signature: 'readonly gouzi?: GouziControl',
         description: 'Gouzi host and member registry; absent in Providers that do not manage execution members.',
         parameters: [],
@@ -1499,9 +1504,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the current validated Resident catalogs.',
       },
       {
-        signature: 'async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>',
+        signature: 'async start(id: string, request: PhysicalOperatorStartRequest, beforeProviderDispatch?: () => void): Promise<PhysicalOperatorRun>',
         description: 'Admit and publish one execution. Capacity is reserved synchronously before provider startup and released exactly once when the result settles.',
-        parameters: [{ name: 'id', description: 'stable operator identity to execute.' }, { name: 'request', description: 'caller-owned task, parent, and cancellation signal.' }],
+        parameters: [{ name: 'id', description: 'stable operator identity to execute.' }, { name: 'request', description: 'caller-owned task, parent, and cancellation signal.' }, { name: 'beforeProviderDispatch', description: 'process-local observation after registry admission, immediately before invoking the Provider.' }],
         returns: 'the accepted, holder-owned execution handle.',
       },
     ],
@@ -2550,6 +2555,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Persist `input.content` to a session-scoped spill artifact.',
         parameters: [{ name: 'input', description: 'the owner, caller-supplied source fields, suggested name, and full text to save.' }],
         returns: 'the saved artifact\'s {@link SpillRef}; rejects on a storage failure.',
+      },
+    ],
+  },
+  {
+    key: 'standaloneRlmHost',
+    summary: 'Host registration capability published only by an active, registered wrapper instance.',
+    description: 'Host registration capability published only by an active, registered wrapper instance.',
+    methods: [
+      {
+        signature: 'registerRoot(host: Context, agent: Agent, policy: StandaloneRlmRootPolicy): () => Promise<void>',
+        description: 'Bind the exact root returned by this embedding Host.',
+        parameters: [{ name: 'host', description: 'lifecycle owning the explicit grant.' }, { name: 'agent', description: 'exact live top-level Agent instance.' }, { name: 'policy', description: 'explicit versioned driver, scope and execution limits.' }],
+        returns: 'disposer that revokes this grant.',
       },
     ],
   },
@@ -5402,11 +5420,19 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelWorkerExecuteRequest',
-    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly parent?: Agent;\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly modelToolBridge?: ModelWorkerToolBridgeV1;\n    readonly evaluation?: ModelWorkerEvaluationV1;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly parent?: Agent;\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly modelToolBridge?: ModelWorkerToolBridgeV1;\n    readonly evaluation?: ModelWorkerEvaluationV1;\n    readonly physicalRequestObserver?: ModelWorkerPhysicalRequestObserver;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'ModelWorkerPhysicalRequestEvidence',
+    declaration: 'export interface ModelWorkerPhysicalRequestEvidence {\n    dispatching(): void;\n    notSent(): void;\n    terminalResponse(): void;\n    unknown(): void;\n}',
+  },
+  {
+    name: 'ModelWorkerPhysicalRequestObserver',
+    declaration: 'export type ModelWorkerPhysicalRequestObserver = (request: RequestAdmissionInput) => ModelWorkerPhysicalRequestEvidence;',
   },
   {
     name: 'ModelWorkerProvider',
-    declaration: 'export interface ModelWorkerProvider {\n    readonly id: string;\n    offers(): Promise<readonly ModelExecutionOffer[]>;\n    execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>;\n}',
+    declaration: 'export interface ModelWorkerProvider {\n    readonly id: string;\n    readonly observesPhysicalRequests?: boolean;\n    offers(): Promise<readonly ModelExecutionOffer[]>;\n    execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>;\n}',
   },
   {
     name: 'ModelWorkerResult',
@@ -5610,7 +5636,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperator',
-    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    residentCatalog?(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog>;\n    reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>;\n    interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+    declaration: 'export interface PhysicalOperator {\n    prepareToolCall?(request: PhysicalOperatorStartRequest, toolCallId: string): void;\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    residentCatalog?(options?: PhysicalOperatorResidentCatalogOptions): Promise<PhysicalOperatorResidentCatalog>;\n    reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>;\n    interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
   },
   {
     name: 'PhysicalOperatorAcceptedReceipt',
@@ -6791,6 +6817,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SpillSource',
     declaration: 'export interface SpillSource {\n    toolName: string;\n    callId: CallId;\n    label: string;\n}',
+  },
+  {
+    name: 'StandaloneRlmCommandSnapshot',
+    declaration: 'export interface StandaloneRlmCommandSnapshot {\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly state: \'accepted\' | \'settled\' | \'failed\' | \'indeterminate\';\n    readonly phase: \'accepted\' | \'compiled\' | \'started\';\n    readonly requestSha256: string;\n    readonly run?: OrchestrationRunSnapshot;\n    readonly settlement: \'not-started\' | \'running\' | \'settled\' | \'unknown\';\n    readonly result?: PhysicalOperatorResult;\n    readonly error?: {\n        readonly code: string;\n        readonly message: string;\n    };\n}',
+  },
+  {
+    name: 'StandaloneRlmControl',
+    declaration: 'export interface StandaloneRlmControl {\n    requestFingerprint(request: StandaloneRlmStartRequest): string;\n    operatorIds(): Promise<readonly PhysicalOperatorId[]>;\n    start(request: StandaloneRlmStartRequest, beforeSend: () => void): Promise<StandaloneRlmCommandSnapshot>;\n    inspect(executionId: PhysicalOperatorExecutionId): Promise<StandaloneRlmCommandSnapshot>;\n    cancel(executionId: PhysicalOperatorExecutionId, requestSha256: string): Promise<StandaloneRlmCommandSnapshot>;\n}',
+  },
+  {
+    name: 'StandaloneRlmInputV1',
+    declaration: 'export interface StandaloneRlmInputV1 {\n    readonly version: 1;\n    readonly operatorId: PhysicalOperatorId;\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly contextEnvelope?: PhysicalOperatorStartRequest[\'contextEnvelope\'];\n    readonly driver: {\n        readonly kind: \'resident\';\n        readonly operatorId: PhysicalOperatorId;\n        readonly model: string;\n        readonly effort?: PhysicalOperatorExecutionPreference[\'effort\'];\n    } | {\n        readonly kind: \'model-worker\';\n        readonly operatorId: PhysicalOperatorId;\n        readonly model: string;\n    };\n}',
+  },
+  {
+    name: 'StandaloneRlmRootPolicy',
+    declaration: 'export interface StandaloneRlmRootPolicy {\n    readonly version: string;\n    readonly driver: StandaloneRlmStartRequest[\'input\'][\'driver\'];\n    readonly readScopes: readonly string[];\n    readonly contextMaxTokens: number;\n    readonly rlm: NonNullable<OrchestrationNodeSpecV1[\'rlm\']>;\n    readonly retryPolicy: OrchestrationNodeSpecV1[\'retryPolicy\'];\n}',
+  },
+  {
+    name: 'StandaloneRlmStartRequest',
+    declaration: 'export interface StandaloneRlmStartRequest {\n    readonly input: StandaloneRlmInputV1;\n    readonly compile: OrchestrationCompileRequest;\n}',
   },
   {
     name: 'StorageBackend',

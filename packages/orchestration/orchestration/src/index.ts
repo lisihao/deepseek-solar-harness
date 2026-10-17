@@ -31,6 +31,8 @@ import type {
   PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorStopReason,
   PhysicalOperatorUsage,
+  PhysicalOperatorResult,
+  PhysicalOperatorStartRequest,
 } from '@deepseek-ai/dsh-physical-operator'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
@@ -366,6 +368,72 @@ export interface OrchestrationStartRequest {
   readonly approvalRef?: string
 }
 
+/** Immutable text input prepared by a positively authorized standalone Host. */
+export interface StandaloneRlmInputV1 {
+  readonly version: 1
+  readonly operatorId: PhysicalOperatorId
+  readonly executionId: PhysicalOperatorExecutionId
+  readonly label?: string
+  readonly prompt: readonly ContentBlock[]
+  readonly contextEnvelope?: PhysicalOperatorStartRequest['contextEnvelope']
+  readonly driver:
+    | { readonly kind: 'resident'; readonly operatorId: PhysicalOperatorId; readonly model: string; readonly effort?: PhysicalOperatorExecutionPreference['effort'] }
+    | { readonly kind: 'model-worker'; readonly operatorId: PhysicalOperatorId; readonly model: string }
+}
+
+/** One owner-local standalone command; its complete input is bound before compilation. */
+export interface StandaloneRlmStartRequest {
+  readonly input: StandaloneRlmInputV1
+  readonly compile: OrchestrationCompileRequest
+}
+
+/** Execution and settlement are separate observations of the same standalone command. */
+export interface StandaloneRlmCommandSnapshot {
+  readonly executionId: PhysicalOperatorExecutionId
+  readonly state: 'accepted' | 'settled' | 'failed' | 'indeterminate'
+  readonly phase: 'accepted' | 'compiled' | 'started'
+  readonly requestSha256: string
+  readonly run?: OrchestrationRunSnapshot
+  readonly settlement: 'not-started' | 'running' | 'settled' | 'unknown'
+  readonly result?: PhysicalOperatorResult
+  readonly error?: { readonly code: string; readonly message: string }
+}
+
+/** Optional standalone support backed by the same daemon, Scheduler and command store. */
+export interface StandaloneRlmControl {
+  /**
+   * Compute the exact complete-input identity used by this Provider's durable command store.
+   * @param request - immutable authorized input and compilation request.
+   * @returns canonical command request SHA-256, including the method identity.
+   */
+  requestFingerprint(request: StandaloneRlmStartRequest): string
+  /**
+   * Read exact wrapper identities excluded from every bottom-level RLM selection.
+   * @returns the daemon's explicitly configured standalone operator identities.
+   */
+  operatorIds(): Promise<readonly PhysicalOperatorId[]>
+  /**
+   * Accept once or observe the original identity; indeterminate commands are never replayed.
+   * @param request - immutable authorized input and its single-node compilation request.
+   * @param beforeSend - process-local guard called immediately before the first wire write, after asynchronous readiness/connect.
+   * @returns the current command, run and settlement observations.
+   */
+  start(request: StandaloneRlmStartRequest, beforeSend: () => void): Promise<StandaloneRlmCommandSnapshot>
+  /**
+   * Observe an existing command without dispatching it.
+   * @param executionId - exact outer command identity.
+   * @returns current durable state and locally available settlement evidence.
+   */
+  inspect(executionId: PhysicalOperatorExecutionId): Promise<StandaloneRlmCommandSnapshot>
+  /**
+   * Close further dispatch and request cancellation of the existing run.
+   * @param executionId - existing command to cancel; a receipt alone is not settlement proof.
+   * @param requestSha256 - complete expected command input; a mismatch must reject before cancellation.
+   * @returns current observations, which may remain unknown.
+   */
+  cancel(executionId: PhysicalOperatorExecutionId, requestSha256: string): Promise<StandaloneRlmCommandSnapshot>
+}
+
 /** Immutable terminal Evidence retained for one physical execution attempt. */
 export interface OrchestrationExecutionEvidenceV1 {
   readonly version: 1
@@ -697,6 +765,14 @@ export class OrchestrationError extends HarnessError {
   }
 }
 
+/** Trusted daemon proof that this standalone request was refused before command admission. */
+export class StandaloneRlmStartRejected extends OrchestrationError {
+  constructor(message: string, code: OrchestrationErrorCode) {
+    super(message, code)
+    this.name = 'StandaloneRlmStartRejected'
+  }
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     orchestrations: OrchestrationService
@@ -705,6 +781,8 @@ declare module '@deepseek-ai/cordis' {
 
 /** Provider-neutral durable orchestration control service. */
 export abstract class OrchestrationService extends Service {
+  /** Absent when this Provider cannot preserve standalone command ownership and settlement. */
+  readonly standaloneRlm?: StandaloneRlmControl
   /** Gouzi host and member registry; absent in Providers that do not manage execution members. */
   readonly gouzi?: GouziControl
 

@@ -63,6 +63,8 @@ flowchart LR
   svc_physicalOperators["ctx.physicalOperators<br/>Physical operator registry"]
   pkg_physical_operator_subagent["physical-operator-subagent"]
   pkg_physical_operator_resident["physical-operator-resident"]
+  pkg_physical_operator_rlm["physical-operator-rlm"]
+  svc_standaloneRlmHost["ctx.standaloneRlmHost<br/>Instance-specific standalone RLM Host registration"]
   pkg_resident_operator["resident-operator"]
   svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
   pkg_resident_operator_local["resident-operator-local"]
@@ -320,6 +322,8 @@ flowchart LR
   pkg_permission_presets --> svc_permissionPresets
   pkg_physical_operator --> svc_physicalOperators
   pkg_physical_operator_resident --> svc_physicalOperators
+  pkg_physical_operator_rlm --> svc_physicalOperators
+  pkg_physical_operator_rlm --> svc_standaloneRlmHost
   pkg_physical_operator_subagent --> svc_physicalOperators
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
@@ -550,7 +554,8 @@ flowchart LR
 | `ctx.settings` | `seam` | [`settings`](../packages/settings/settings) | [`settings-file`](../packages/settings/settings-file) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | Plugins register namespace schemas and resolve layered values; providers store the raw document. The LLM adapters register their entry config as the composition base under the user section; the web gateway serves redacted layered descriptors and writes the user layer. |
 | `ctx.credentials` | `seam` | [`credentials`](../packages/credentials/credentials) | [`credentials-local`](../packages/credentials/credentials-local) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | Configuration carries references to secrets; providers own the values. Consumers resolve per operation, so a rotated credential reaches the very next request; the web gateway exposes value-free views and write-only storage. |
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | The seam captures, redacts, and hands session records to one backend; nothing else consumes the service — its output leaves the process. |
-| `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | Stable deployment-owned operator ids, explicit execution lifetime, live availability, fail-fast capacity admission, and paired lifecycle events; providers keep subagent and resident transports outside the consumer. |
+| `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident), [`physical-operator-rlm`](../packages/physical-operator/physical-operator-rlm) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | Stable deployment-owned operator ids, explicit execution lifetime, live availability, fail-fast capacity admission, and paired lifecycle events; providers keep subagent and resident transports outside the consumer. |
+| `ctx.standaloneRlmHost` | `core` | [`physical-operator-rlm`](../packages/physical-operator/physical-operator-rlm) | - | - | - | The registered wrapper publishes this binding for its explicitly owned root Host; default discovery grants no eligibility and the orchestration daemon remains the execution owner. |
 | `ctx.residentOperators` | `seam` | [`resident-operator`](../packages/physical-operator/resident-operator) | [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | - | Trusted management and durable turn execution over one daemon-owned Session, Receipt, Lease, Event, and Artifact store; model execution enters through ctx.physicalOperators. |
 | `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers compile immutable raw requests into versioned Intent IR with deterministic lineage; they cannot create runs or dispatch operators. |
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers project certified sources under token, lineage, redaction, and degradation policy without becoming a source of record. |

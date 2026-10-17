@@ -1,0 +1,11 @@
+{
+  "driver": "api",
+  "task": "Analyze the complete two-part fixture input.",
+  "output": "Standalone RLM completed: first original part; second original part; result=2.",
+  "originalBusinessRuns": 1,
+  "fullContextRetained": true,
+  "apiPhysicalRequests": 2,
+  "residentPhysicalRequests": 0,
+  "wrapperUsageAbsent": true,
+  "innerToolResultObserved": true
+}

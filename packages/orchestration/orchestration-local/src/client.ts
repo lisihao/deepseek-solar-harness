@@ -31,7 +31,10 @@ import {
   type OrchestrationIndeterminateRequest,
   type OrchestrationRunSnapshot,
   type OrchestrationStartRequest,
+  type StandaloneRlmStartRequest,
+  type StandaloneRlmCommandSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
+import type { PhysicalOperatorExecutionId, PhysicalOperatorId } from '@deepseek-ai/dsh-physical-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { waitForDaemonSocketRelease } from '@deepseek-ai/dsh-resident-operator-local'
 import {
@@ -42,12 +45,16 @@ import {
 } from './daemon.ts'
 import { unwrapWire } from './protocol.ts'
 import { ORCHESTRATION_STATE_SCHEMA_VERSION } from './store.ts'
+import { canonicalSha256 } from './canonical.ts'
+import { standaloneRlmOperatorIds } from './standalone-input.ts'
 
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 type ProviderModulePaths = readonly string[]
 
 /** Connection and daemon-start policy for one local orchestration client. */
 export interface OrchestrationClientOptions {
+  /** Explicit wrapper identities excluded by the matching daemon configuration. */
+  readonly standaloneRlmOperatorIds?: readonly string[]
   readonly root: string
   readonly dshHome: string
   readonly autoStart: boolean
@@ -88,6 +95,43 @@ export class OrchestrationDaemonClient {
    */
   compile(request: OrchestrationCompileRequest): Promise<OrchestrationCompilationV1> {
     return this.request('orchestration.compile', { request })
+  }
+
+  /**
+   * Read the daemon's configured standalone wrapper exclusions without dispatching work.
+   * @returns the exact outer wrapper identities owned by this daemon.
+   */
+  standaloneOperatorIds(): Promise<readonly PhysicalOperatorId[]> {
+    return this.request('orchestration.standalone_rlm.ids', {})
+  }
+
+  /**
+   * Accept or observe one immutable standalone command.
+   * @param request - fully bound standalone input.
+   * @param beforeSend - optional trusted Host guard, called after socket connection and immediately before the wire write.
+   * @returns original command, business run and physical settlement observations.
+   */
+  startStandalone(request: StandaloneRlmStartRequest, beforeSend?: () => void): Promise<StandaloneRlmCommandSnapshot> {
+    return this.request('orchestration.standalone_rlm.start', { request }, beforeSend)
+  }
+
+  /**
+   * Observe an existing command without replay.
+   * @param executionId - outer command identity.
+   * @returns current durable and physical observations.
+   */
+  inspectStandalone(executionId: PhysicalOperatorExecutionId): Promise<StandaloneRlmCommandSnapshot> {
+    return this.request('orchestration.standalone_rlm.inspect', { execution_id: executionId })
+  }
+
+  /**
+   * Request cancellation under the same execution owner.
+   * @param executionId - existing outer command identity.
+   * @param requestSha256 - expected complete command input, checked by the daemon before cancellation.
+   * @returns observations; cancellation alone does not imply settlement.
+   */
+  cancelStandalone(executionId: PhysicalOperatorExecutionId, requestSha256: string): Promise<StandaloneRlmCommandSnapshot> {
+    return this.request('orchestration.standalone_rlm.cancel', { execution_id: executionId, request_sha256: requestSha256 })
   }
 
   /**
@@ -375,6 +419,7 @@ export class OrchestrationDaemonClient {
       this.options.skillProviderModules ?? [],
       this.options.browserProviderModules ?? [],
       this.options.headlessNodeExecutable,
+      this.options.standaloneRlmOperatorIds ?? [],
     )
     const deadline = Date.now() + this.options.connectTimeoutMs
     let lastError: unknown
@@ -423,11 +468,13 @@ export class OrchestrationDaemonClient {
       methods: string[]
       skillProviderManifestSha256: string
       browserProviderManifestSha256: string
+      standaloneRlmOperatorIdsSha256: string
     }>('system.handshake', {
       protocol_version: ORCHESTRATION_PROTOCOL_VERSION,
       state_schema_version: ORCHESTRATION_STATE_SCHEMA_VERSION,
       skill_provider_manifest_sha256: skillProviderManifestSha256(this.options.skillProviderModules ?? []),
       browser_provider_manifest_sha256: browserProviderManifestSha256(this.options.browserProviderModules ?? []),
+      standalone_rlm_operator_ids_sha256: canonicalSha256(standaloneRlmOperatorIds(this.options.standaloneRlmOperatorIds ?? [])),
     })
     if (response.protocolVersion !== ORCHESTRATION_PROTOCOL_VERSION
       || response.stateSchemaVersion !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
@@ -449,16 +496,20 @@ export class OrchestrationDaemonClient {
     if (response.browserProviderManifestSha256 !== browserProviderManifestSha256(this.options.browserProviderModules ?? [])) {
       throw new OrchestrationError('orchestration daemon Browser Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
+    const standaloneManifest = canonicalSha256(standaloneRlmOperatorIds(this.options.standaloneRlmOperatorIds ?? []))
+    if (response.standaloneRlmOperatorIdsSha256 !== standaloneManifest) {
+      throw new OrchestrationError('orchestration daemon standalone operator exclusion manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
   }
 
-  private async request<T>(method: string, params: object): Promise<T> {
+  private async request<T>(method: string, params: object, beforeSend?: () => void): Promise<T> {
     await this.ready()
-    return this.rawRequest(method, params)
+    return this.rawRequest(method, params, beforeSend)
   }
 
   // Both local daemon clients own the same one-request JSONL socket lifecycle.
   /* jscpd:ignore-start */
-  private async rawRequest<T>(method: string, params: object): Promise<T> {
+  private async rawRequest<T>(method: string, params: object, beforeSend?: () => void): Promise<T> {
     const socket = createConnection(this.socketPath)
     const connected = new Promise<void>((resolve, reject) => {
       socket.once('connect', resolve)
@@ -473,6 +524,7 @@ export class OrchestrationDaemonClient {
       const transport = new JsonRpcLineTransport(socket, socket)
       transport.start()
       try {
+        beforeSend?.()
         return unwrapWire(await transport.request(method, params)) as T
       } finally {
         transport.close()
@@ -493,6 +545,7 @@ export class OrchestrationDaemonClient {
  * @param skillProviderModules - absolute trusted TypeScript Skill Provider plugin entries.
  * @param browserProviderModules - absolute trusted Browser Provider plugin entries.
  * @param headlessNodeExecutable - executable/helper that must not be the Electron APPL.
+ * @param standaloneOperatorIds - exact outer wrapper identities excluded from physical leaves.
  * @returns detached child process identity.
  */
 export function startDetachedOrchestrationDaemon(
@@ -502,6 +555,7 @@ export function startDetachedOrchestrationDaemon(
   skillProviderModules: ProviderModulePaths = [],
   browserProviderModules: ProviderModulePaths = [],
   headlessNodeExecutable?: string,
+  standaloneOperatorIds: readonly string[] = [],
 ): number {
   const builtEntry = fileURLToPath(new URL('./startup.js', import.meta.url))
   const sourceEntry = fileURLToPath(new URL('./startup.ts', import.meta.url))
@@ -527,6 +581,7 @@ export function startDetachedOrchestrationDaemon(
     ...residentDriverModules.flatMap(module => ['--resident-driver-module', module]),
     ...skillProviderModules.flatMap(module => ['--skill-provider-module', module]),
     ...browserProviderModules.flatMap(module => ['--browser-provider-module', module]),
+    ...standaloneRlmOperatorIds(standaloneOperatorIds).flatMap(id => ['--standalone-rlm-operator-id', id]),
   ], {
     detached: true,
     stdio: 'ignore',
