@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { LogicalTaskGraphV1, OrchestrationAdmissionTraceV1, OrchestrationNodeSpecV1 } from '@deepseek-ai/dsh-orchestration'
+import { OrchestrationArtifactRef, type LogicalTaskGraphV1, type OrchestrationAdmissionTraceV1, type OrchestrationNodeSpecV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import {
   assertRestores, correlateResident, dispatchFacts, projectResident, serializeRequest, Tokens,
@@ -27,7 +27,7 @@ interface ResidentRequestFixture {
   readonly commandId: string
   readonly operatorId: string
   readonly laneId?: string
-  readonly profile?: { readonly model: string }
+  readonly profile?: { readonly model: string; readonly effort?: string }
   readonly prompt?: readonly { readonly type: string; readonly text?: string }[]
   readonly modelToolBridge?: ModelToolBridgeFixture
   readonly nativeToolPolicy?: 'inherit' | 'disabled'
@@ -210,6 +210,8 @@ function node(
     readonly operatorId?: string
     readonly knowledge?: boolean
     readonly retryPolicy?: OrchestrationNodeSpecV1['retryPolicy']
+    /** Pins the model (and optionally the effort) the allocator must honor for the root. */
+    readonly profile?: NonNullable<OrchestrationNodeSpecV1['operator']>['profile']
   } = {},
 ): OrchestrationNodeSpecV1 {
   return {
@@ -234,7 +236,9 @@ function node(
     writeScopes: [...options.writeScopes ?? [`fixture/${id}`]],
     acceptance: [{ id: 'done', description: 'offline provider completes', kind: 'operator-completed' }],
     retryPolicy: options.retryPolicy ?? { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
-    ...options.operatorId === undefined ? {} : { operator: { preferredIds: [options.operatorId] } },
+    ...options.operatorId === undefined
+      ? {}
+      : { operator: { preferredIds: [options.operatorId], ...options.profile === undefined ? {} : { profile: options.profile } } },
   }
 }
 
@@ -658,6 +662,59 @@ describe('Prime-compatible orchestration offline E2E', () => {
   }, 15_000)
 })
 
+/** The part of the runtime's state file that records who each session is and which model it was given. */
+interface RuntimeStateFixture {
+  readonly events: Array<{ type: string; sessionId: string; data: { commandId?: string } }>
+  readonly sessions: Array<{
+    readonly snapshot: {
+      readonly sessionId: string
+      readonly parentSessionId?: string
+      readonly model: ModelIdentityFixture
+      readonly children: Array<{
+        readonly rlmChildId: string
+        readonly sessionId: string
+        readonly name: string
+        readonly model: ModelIdentityFixture
+        readonly modelOrigin: string
+      }>
+    }
+  }>
+}
+
+interface ModelIdentityFixture {
+  readonly operatorId: string
+  readonly model: string
+  readonly profile?: { readonly model: string; readonly effort?: string }
+}
+
+/** What a request to the Resident provider names: the operator, and the model and effort of its profile. */
+function requestedIdentity(request: Readonly<Record<string, unknown>>): { operatorId: unknown; model: unknown; effort: unknown } {
+  const profile = request.profile as { model?: unknown; effort?: unknown } | undefined
+  return { operatorId: request.operatorId, model: profile?.model, effort: profile?.effort }
+}
+
+/** The same three fields as the sealed plan or the runtime recorded them, which no request has touched. */
+function recordedIdentity(model: ModelIdentityFixture): { operatorId: string; model: string; effort: string | undefined } {
+  return { operatorId: model.operatorId, model: model.model, effort: model.profile?.effort }
+}
+
+/**
+ * The identities the daemon sealed and the runtime recorded, read from the sealed execution plan (an artifact of the run) and
+ * from the runtime's state file. Neither is derived from a request the Resident provider received.
+ */
+async function trustedIdentity(
+  client: OrchestrationDaemonClient,
+  events: ReadonlyArray<{ readonly type: string; readonly data: Readonly<Record<string, unknown>> }>,
+  runtime: RuntimeStateFixture,
+) {
+  const sealed = events.find(event => event.type === 'execution_plan.sealed')
+  if (sealed === undefined) throw new Error('the run recorded no sealed execution plan')
+  const plan = await client.readArtifact(OrchestrationArtifactRef(String(sealed.data.ref))) as { allocationPlan: ModelIdentityFixture }
+  const root = runtime.sessions.find(entry => entry.snapshot.parentSessionId === undefined)?.snapshot
+  if (root === undefined) throw new Error('the runtime recorded no root session')
+  return { sealedRoot: plan.allocationPlan, rootSession: root.model, children: root.children }
+}
+
 describe('what a Resident root and a Resident child are given', () => {
   const CANARY = 'CANARY-ONLY-IN-THE-ROOT-TASK-7731'
   const ROOT_TASK = `Run the capture scenario. Private note for the root only: ${CANARY}. Final rule: reply with only {"verdict": "<text>"}. ROOT-TAIL-RULE`
@@ -705,9 +762,8 @@ describe('what a Resident root and a Resident child are given', () => {
       continuations => continuations.length > 0 && continuations.every(request => fixture.resident.cellResults.has(request.commandId)),
     )
     const events = (await fixture.client.readEvents({ runId: run.runId, limit: 400 })).events
-    const runtime = JSON.parse(await readFile(join(fixture.root, 'rlm-runtime', 'state.json'), 'utf8')) as {
-      events: Array<{ type: string; sessionId: string; data: { commandId?: string } }>
-    }
+    const runtime = JSON.parse(await readFile(join(fixture.root, 'rlm-runtime', 'state.json'), 'utf8')) as RuntimeStateFixture
+    const identity = await trustedIdentity(fixture.client, events, runtime)
     const facts = dispatchFacts(events, runtime.events)
     const withBridge = seam.filter(entry => fixture.resident.requests[entry.ordinal]?.modelToolBridge !== undefined)
     const correlated = correlateResident(withBridge.map(entry => ({
@@ -751,7 +807,7 @@ describe('what a Resident root and a Resident child are given', () => {
         childContext: context,
       })
     }
-    return { requests, context }
+    return { requests, context, identity }
   }
 
   it('gives the root, the child and the root\'s message continuation what they should be given, each tied to its recorded dispatch', async () => {
@@ -773,6 +829,74 @@ describe('what a Resident root and a Resident child are given', () => {
     expect(child.nativeToolPolicy).toBe('disabled')
     // The command, session and workspace are what the daemon sent, not a projection of them.
     expect(new Set(requests.map(request => request.sha256)).size).toBe(3)
+  })
+
+  // The two sources below are not derived from any request: the sealed plan names the root's operator, model and effort, and the
+  // runtime's state file names what each session was given. Each request must carry exactly those three, so a profile or effort
+  // dropped or swapped on the way to the Resident provider shows up as a difference.
+  it('gives the root, the inherited child and the root\'s message continuation the operator, model and effort that were sealed and recorded', async () => {
+    const { requests, identity } = await capture()
+    const [root, child, continuation] = requests as [(typeof requests)[number], (typeof requests)[number], (typeof requests)[number]]
+    expect([root.who, child.who, continuation.who]).toEqual(['root', 'child', 'continuation'])
+    const sealed = recordedIdentity(identity.sealedRoot)
+    // A comparison of two undefined efforts would pass without checking anything.
+    expect(sealed.effort).toBeDefined()
+    expect(recordedIdentity(identity.rootSession)).toEqual(sealed)
+    expect(requestedIdentity(root.value)).toEqual(sealed)
+    const recordedChild = identity.children.find(entry => String(child.value.commandId).endsWith(`:rlm:${entry.rlmChildId}`))
+    expect(recordedChild).toBeDefined()
+    expect(recordedChild?.modelOrigin).toBe('parent-inherited')
+    expect(recordedIdentity(recordedChild?.model as ModelIdentityFixture)).toEqual(sealed)
+    expect(requestedIdentity(child.value)).toEqual(sealed)
+    expect(requestedIdentity(continuation.value)).toEqual(recordedIdentity(identity.rootSession))
+  })
+
+  it('gives a child that was explicitly asked for another model and effort exactly that, and a child that was not asked the root\'s', async () => {
+    const fixture = await e2eHarness('dsh-prime-identity-')
+    fixture.resident.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined || !request.commandId.endsWith(':rlm:root')) return
+      const result = await callTypescriptRepl(request, `${request.commandId}:program`, [
+        'await rlm("inherit everything", { name: "inherited" });',
+        'await rlm("use another model and effort", { name: "explicit", model: "codex/gpt-5.6-sol", thinking: "high" });',
+        '"spawned"',
+      ].join('\n'))
+      fixture.resident.cellResults.set(request.commandId, result)
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: 'Spawn one inherited and one explicitly configured child.' },
+      admission: admission({ sourceSessionId: 'identity-rlm', rlm: 'enabled' }),
+      // The root is pinned to the low-effort Luna so that the explicit child's Sol/high differs from it in model and in effort.
+      graph: taskGraph(fixture.workspace, [node('identity', 'Spawn two children.', { operatorId: 'codex', profile: { model: 'gpt-5.6-luna' } })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    const events = (await fixture.client.readEvents({ runId: run.runId, limit: 400 })).events
+    const runtime = JSON.parse(await readFile(join(fixture.root, 'rlm-runtime', 'state.json'), 'utf8')) as RuntimeStateFixture
+    const identity = await trustedIdentity(fixture.client, events, runtime)
+    const sealed = recordedIdentity(identity.sealedRoot)
+    expect(sealed).toMatchObject({ operatorId: 'codex', model: 'gpt-5.6-luna', effort: 'medium' })
+    const withBridge = fixture.resident.requests.filter(request => request.modelToolBridge !== undefined)
+    const rootRequest = withBridge.find(request => request.commandId.endsWith(':rlm:root'))
+    expect(requestedIdentity(rootRequest as unknown as Record<string, unknown>)).toEqual(sealed)
+    const byName = (name: string) => {
+      const recorded = identity.children.find(entry => entry.name === name)
+      const request = withBridge.find(entry => entry.commandId.endsWith(`:rlm:${recorded?.rlmChildId}`))
+      const dispatched = events.find(event => event.type === 'rlm.child.dispatched' && event.data.childId === recorded?.rlmChildId)
+      expect(recorded).toBeDefined()
+      expect(request).toBeDefined()
+      expect(dispatched).toBeDefined()
+      return { recorded: recorded as NonNullable<typeof recorded>, request: request as unknown as Record<string, unknown>, dispatched }
+    }
+    const inherited = byName('inherited')
+    expect(inherited.recorded.modelOrigin).toBe('parent-inherited')
+    expect(requestedIdentity(inherited.request)).toEqual(sealed)
+    const explicit = byName('explicit')
+    expect(explicit.recorded.modelOrigin).toBe('explicit')
+    expect(recordedIdentity(explicit.recorded.model)).toEqual({ operatorId: 'codex', model: 'gpt-5.6-sol', effort: 'high' })
+    expect(requestedIdentity(explicit.request)).toEqual({ operatorId: 'codex', model: 'gpt-5.6-sol', effort: 'high' })
+    // The dispatch record names the same selection and origin that the request carries; no field was added to it for this.
+    expect(explicit.dispatched?.data).toMatchObject({ operatorId: 'codex', model: 'gpt-5.6-sol', modelOrigin: 'explicit', inheritsParentModel: false })
+    expect(inherited.dispatched?.data).toMatchObject({ operatorId: 'codex', model: 'gpt-5.6-luna', modelOrigin: 'parent-inherited', inheritsParentModel: true })
   })
 
   it('lets the root read its child\'s stored result in segments through the real daemon, and returns the same text as the store holds', async () => {

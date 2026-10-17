@@ -300,6 +300,63 @@ describe('PhysicalOperatorRuntime', () => {
     expect(service.status('result-failure')).toMatchObject({ state: 'available', active: 0 })
   })
 
+  // `dispose` asks the provider to stop; it does not settle the result. Capacity is released, and `end` is published, only when the
+  // result settles. This case covers `dispose` only; a caller's `signal` abort is a separate path with its own case.
+  it('keeps the capacity of a run whose result is still pending after dispose, and ends it exactly once when the result settles', async () => {
+    const { ctx, runtime: service } = await runtime()
+    const deferred = Promise.withResolvers<PhysicalOperatorResult>()
+    const operator = new StubOperator('dispose-pending', deferred.promise)
+    service.registerOperator(operator)
+    const lifecycle: string[] = []
+    const ended = vi.fn()
+    ctx.on('physical-operator/start', () => { lifecycle.push('start') })
+    ctx.on('physical-operator/end', (info) => {
+      lifecycle.push('end')
+      ended(info)
+    })
+
+    const run = await service.start('dispose-pending', request())
+    await run.dispose()
+    // The provider was told once, and its result has not settled, so the slot stays taken and nothing has ended.
+    expect(operator.disposed).toBe(1)
+    expect(service.status('dispose-pending')).toMatchObject({ state: 'busy', active: 1, maxConcurrency: 1 })
+    await expect(service.start('dispose-pending', request())).rejects.toMatchObject({ code: 'OPERATOR_BUSY' })
+    expect(operator.starts).toBe(1)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(lifecycle).toEqual(['start'])
+
+    deferred.resolve({ output: [], stopReason: 'completed' })
+    await run.result
+    expect(service.status('dispose-pending')).toMatchObject({ state: 'available', active: 0 })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(lifecycle).toEqual(['start', 'end'])
+    expect(ended).toHaveBeenCalledTimes(1)
+    expect(ended).toHaveBeenCalledWith(expect.objectContaining({ operatorId: 'dispose-pending', stopReason: 'completed' }))
+  })
+
+  it('publishes neither start nor end for a provider that fails before it returns a run, and releases its capacity', async () => {
+    const { ctx, runtime: service } = await runtime()
+    // The listeners are attached before the failing start, so a later-attached listener cannot hide an event.
+    const lifecycle: string[] = []
+    ctx.on('physical-operator/start', () => { lifecycle.push('start') })
+    ctx.on('physical-operator/end', () => { lifecycle.push('end') })
+    service.registerOperator({
+      descriptor: {
+        id: PhysicalOperatorId('startup-fails-quietly'),
+        displayName: 'Startup Failure',
+        description: 'Fails before publication.',
+        tags: [],
+        maxConcurrency: 1,
+      },
+      availability: () => ({ available: true }),
+      start: async () => { throw new Error('cannot start') },
+    })
+    await expect(service.start('startup-fails-quietly', request())).rejects.toThrow('cannot start')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(lifecycle).toEqual([])
+    expect(service.status('startup-fails-quietly')).toMatchObject({ state: 'available', active: 0 })
+  })
+
   it('uses the harness error base for stable machine-readable failures', () => {
     expect(new PhysicalOperatorError('busy', 'OPERATOR_BUSY')).toMatchObject({
       name: 'PhysicalOperatorError',

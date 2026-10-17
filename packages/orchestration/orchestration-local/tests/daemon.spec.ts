@@ -1954,6 +1954,29 @@ describe('orchestration daemon', () => {
       tokensUsed: 27,
       status: 'active',
     })
+
+    // The count and the sources above would still hold if one child were counted twice and the other not at all. Which commands ran
+    // is read from the seam the daemon called (the worker) and from the dispatch records of the runtime, not from the usage events
+    // under test; those events must then name exactly these commands, each once, with the source and the identity of its own request.
+    const ran = worker.requests.filter(request => request.commandId.includes(String(goalRun.runId)))
+    const ranIds = ran.map(request => request.commandId)
+    expect(ranIds).toHaveLength(5)
+    expect(new Set(ranIds).size).toBe(ranIds.length)
+    const sourceOf = (commandId: string): string => commandId.endsWith(':rlm:root')
+      ? 'root'
+      : commandId.includes(':rlm:rlm-child-') ? 'child' : commandId.includes(':goal-continuation:') ? 'goal-continuation' : 'other'
+    expect(ranIds.map(sourceOf).sort()).toEqual(['child', 'child', 'goal-continuation', 'goal-continuation', 'root'])
+    const dispatchedChildren = goalEvents.events.filter(value => value.type === 'rlm.child.dispatched').map(value => String(value.data.executionId))
+    const settledGoalCommands = goalEvents.events.filter(value => value.type === 'rlm.goal.continuation.settled').map(value => String(value.data.commandId))
+    expect(ranIds.filter(id => sourceOf(id) === 'child').sort()).toEqual([...dispatchedChildren].sort())
+    expect(ranIds.filter(id => sourceOf(id) === 'goal-continuation').sort()).toEqual([...settledGoalCommands].sort())
+    expect(allUsageEvents.map(value => String(value.data.sourceCommandId)).sort()).toEqual([...ranIds].sort())
+    for (const event of allUsageEvents) {
+      const request = ran.find(value => value.commandId === event.data.sourceCommandId)
+      expect(request).toBeDefined()
+      expect(event.data.source).toBe(sourceOf(String(request?.commandId)))
+      expect(event.data).toMatchObject({ operatorId: request?.workerId, model: request?.model })
+    }
   })
 
   describe('the terminal state of an RLM run whose last continuation did not succeed', () => {
