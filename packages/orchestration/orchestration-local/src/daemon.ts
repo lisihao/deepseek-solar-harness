@@ -6,7 +6,6 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime from '@deepseek-ai/dsh-browser'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
@@ -32,10 +31,7 @@ import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
 import LlmRuntime, {
   ADMISSION_REFUSED_CODE,
   type ContentBlock,
-  type ContextSnapshotSection,
-  type ResolvedRetryPolicy,
   type StreamChunk,
-  type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
@@ -48,23 +44,15 @@ import { nativeModelTier } from '@deepseek-ai/dsh-model-allocation'
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
 import ModelWorkerRuntime, { type ModelWorkerExecuteRequest, type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import DeepSeekModelWorker, { DEEPSEEK_WORKER_ID } from '@deepseek-ai/dsh-model-worker-deepseek'
-import FileTaskTemplateProvider, { type TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
-import { inferTaskAttributes, inferTaskType, renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
+import FileTaskTemplateProvider from '@deepseek-ai/dsh-task-template'
+import { inferTaskAttributes, inferTaskType } from '@deepseek-ai/dsh-task-template-context'
 import {
-  buildOperatorContextEnvelope,
   materializeOperatorContextEnvelopeNative,
   receiveOperatorContextEnvelope,
-  renderOperatorContextEnvelopeText,
   type OperatorContextEnvelopeV1,
 } from '@deepseek-ai/dsh-system-prompt'
 import {
-  RLM_TYPESCRIPT_REPL_TOOL_SCHEMA,
-  RlmCommandId,
   RlmRuntimeSessionId,
-  type RlmChildExecution,
-  type RlmChildExecutionResult,
-  type RlmChildExecutionOptionsV1,
-  type RlmChildModelPolicyV1,
   type RlmJsonValue,
   type RlmManagedSkillBindingV1,
   type RlmManagedSkillDescriptorV1,
@@ -126,36 +114,38 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResult,
   type PhysicalOperatorModelToolBridgeV1,
   type PhysicalOperatorNativeToolPolicy,
-  type PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { residentProgressPage, type ResidentProviderStatus, type ResidentTurnSnapshot } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
-import { SessionId } from '@deepseek-ai/dsh-session'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
 import { abortableDelay } from './abortable-delay.ts'
 import {
-  accountAutonomousUsage,
-  type AutonomousEndConditionEvidenceV1,
   type AutonomousEndConditionEvaluatorV1,
-  createAutonomousState,
-  nextAutonomousDecision,
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { RlmCancellationScope } from './rlm-cancellation.ts'
 import { accountOf, EvaluationLedger, isUnknownOutcome, parseEvaluationScope, type CommandAccount } from './evaluation-ledger.ts'
 import {
-  assertMessageContinuationNamesMessages,
+  abortedWithTheRun,
+  AttemptAbortReason,
   childResultFromArtifact,
-  refusalBeforeAdmission,
-  rlmContinuationPrompt,
-  rlmContinuationResult,
-  rlmMessageContinuationFacts,
-  rlmResultSucceeded,
+  fakeParent,
+  modelWorkerEnvelopePrompt,
+  promptFromPlan,
+  rlmChildModelPolicy,
+  rlmUsage,
+  taskGraphContextEnvelope,
+  UnknownPhysicalOutcomeError,
 } from './rlm-continuation.ts'
+import {
+  createRlmExecutionCore,
+  type RlmExecutionContext,
+  type RlmExecutionCore,
+} from './rlm-execution-core.ts'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 import { operatorOutputPreview } from './output-preview.ts'
 import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
@@ -288,152 +278,13 @@ interface ResidentReceiptIdentity {
   readonly turnId: string
 }
 
-interface PreparedRlmExecution {
-  readonly rlmPlan: RlmExecutionPlanV1
-  readonly runId: string
-  readonly node: OrchestrationNodeSnapshot | undefined
-  readonly rootSessionId: RlmRuntimeSessionId
-  readonly bindings: RlmRuntimeHostBindings
-  readonly bridge: PhysicalOperatorModelToolBridgeV1
-  readonly executionOptions: RlmChildExecutionOptionsV1
-  readonly rootPrompt: readonly ContentBlock[]
-  readonly signal: AbortSignal
-}
-
 interface StartedResidentTurn {
   readonly run: PhysicalOperatorRun
   readonly receipt: ResidentReceiptIdentity
 }
 
-type RlmUsageResult = Pick<PhysicalOperatorResult, 'stopReason' | 'usage'>
-  | Pick<ModelWorkerResult, 'stopReason' | 'usage'>
-
-function isPhysicalOperatorUsage(
-  usage: PhysicalOperatorUsage | TokenUsage,
-): usage is PhysicalOperatorUsage {
-  return 'cacheReadInputTokens' in usage || 'cacheWriteInputTokens' in usage
-}
-
-function rlmAuthMode(
-  source: 'native-subscription' | 'metered-api' | undefined,
-  operatorId: string,
-): 'api' | 'subscription' {
-  if (source !== undefined) return source === 'metered-api' ? 'api' : 'subscription'
-  return operatorId.startsWith('deepseek') ? 'api' : 'subscription'
-}
-
 function modelWorkerSupportsRlm(offer: ModelExecutionOffer): boolean {
   return !offer.tags.includes('text-only') || offer.tags.includes('dynamic-tools')
-}
-
-function rlmUsage(result: RlmUsageResult): {
-  readonly inputTokens: number
-  readonly outputTokens: number
-  readonly cacheReadInputTokens: number
-  readonly cacheWriteInputTokens: number
-  readonly costUsd?: number
-} | undefined {
-  const usage = result.usage
-  if (usage === undefined) return undefined
-  const physical = isPhysicalOperatorUsage(usage)
-  const cacheReadInputTokens = physical ? usage.cacheReadInputTokens ?? 0 : usage.cacheReadTokens ?? 0
-  const cacheWriteInputTokens = physical ? usage.cacheWriteInputTokens ?? 0 : usage.cacheWriteTokens ?? 0
-  return {
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    cacheReadInputTokens,
-    cacheWriteInputTokens,
-    ...physical && usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {},
-  }
-}
-
-function rlmAttributedUsage(
-  result: RlmUsageResult,
-  model: {
-    readonly operatorId: string
-    readonly model: string
-    readonly source?: 'native-subscription' | 'metered-api'
-  },
-): RlmChildExecutionResult['usage'] {
-  const usage = rlmUsage(result)
-  if (usage === undefined) return undefined
-  return {
-    provider: model.operatorId,
-    model: model.model,
-    authMode: rlmAuthMode(model.source, model.operatorId),
-    ...usage,
-  }
-}
-
-function rlmChildModelPolicy(plan: RlmExecutionPlanV1): RlmChildModelPolicyV1 {
-  if (plan.fidelity === 'prime-strict') return 'parent-inherit'
-  if (plan.fidelity === 'dsh-optimized') return 'allocator-default'
-  throw new OrchestrationError(`enabled RLM plan has unsupported fidelity: ${plan.fidelity}`, 'GRAPH_INVALID')
-}
-
-function rlmChildRetryPolicy(spec: OrchestrationNodeSpecV1): ResolvedRetryPolicy {
-  return {
-    mode: 'normal',
-    maxRetries: Math.max(0, spec.retryPolicy.maxAttempts - 1),
-    retryableCodes: [...spec.retryPolicy.retryableCodes],
-    initialDelayMs: spec.retryPolicy.backoffMs,
-    maxDelayMs: spec.retryPolicy.backoffMs,
-    jitterRatio: 0,
-  }
-}
-
-function rlmExecutionOptionsSummary(options: RlmChildExecutionOptionsV1): RlmJsonValue {
-  return {
-    toolNames: (options.tools ?? []).map(tool => tool.name),
-    skillAliases: (options.skills ?? []).map(skill => skill.alias),
-    retryPolicy: options.retryPolicy === undefined
-      ? null
-      : options.retryPolicy.mode === 'normal'
-        ? {
-          mode: options.retryPolicy.mode,
-          maxRetries: options.retryPolicy.maxRetries,
-          retryableCodes: [...options.retryPolicy.retryableCodes],
-          initialDelayMs: options.retryPolicy.initialDelayMs,
-          maxDelayMs: options.retryPolicy.maxDelayMs,
-          jitterRatio: options.retryPolicy.jitterRatio,
-        }
-        : {
-          mode: options.retryPolicy.mode,
-          initialDelayMs: options.retryPolicy.initialDelayMs,
-          maxDelayMs: options.retryPolicy.maxDelayMs,
-          jitterRatio: options.retryPolicy.jitterRatio,
-        },
-  }
-}
-
-function assertRlmBridgeAllowed(
-  options: RlmChildExecutionOptionsV1,
-  bridge: PhysicalOperatorModelToolBridgeV1,
-): void {
-  const allowedTools = new Set((options.tools ?? []).map(tool => tool.name))
-  const unsealedTool = bridge.tools.find(tool => !allowedTools.has(tool.name))
-  if (unsealedTool !== undefined) {
-    throw new OrchestrationError(
-      `RLM model-tool bridge requested unsealed parent tool: ${unsealedTool.name}`,
-      'GRAPH_INVALID',
-    )
-  }
-}
-
-/**
- * A model-worker command that failed under an evaluation scope after sending a physical request whose usage the ledger does not
- * hold. The request may have been processed and billed, so the command is an unknown outcome and must not be retried as an
- * ordinary failure. Created only under a scope.
- */
-class UnknownPhysicalOutcomeError extends OrchestrationError {
-  /** The failure of the command, and, if the store refused the metering event, that refusal as well. */
-  override readonly cause: unknown
-
-  constructor(message: string, cause: unknown) {
-    super(message, 'COMMAND_INDETERMINATE')
-    this.name = 'UnknownPhysicalOutcomeError'
-    this.cause = cause
-  }
 }
 
 /** The stream of a model call that carried no admission under an evaluation scope: one error finish, nothing sent. */
@@ -844,43 +695,6 @@ function parseAutoRefineReview(output: readonly ContentBlock[]): AutoRefineRevie
   }
 }
 
-function asRlmExecutionResult(result: PhysicalOperatorResult): RlmChildExecutionResult {
-  const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
-  return {
-    status,
-    stopReason: result.stopReason,
-    output: result.output,
-    outputPreview: operatorOutputPreview(result.output).outputPreview,
-    ...status === 'failed' ? { error: `native execution stopped with ${result.stopReason}` } : {},
-  }
-}
-
-function primeRlmRootPrompt(
-  base: readonly ContentBlock[],
-  rlmPlan: RlmExecutionPlanV1,
-  defaultChild?: ModelAllocationPlan,
-): ContentBlock[] {
-  return [
-    ...base,
-    {
-      type: 'text',
-      text: [
-        'This attempt uses the Prime Agent compatible programmable RLM runtime.',
-        'Use the native typescript_repl tool as the only programming and delegation surface.',
-        'The persistent namespace exposes context, rlm(task, options), rlm.listSubagents(), rlm.deleteSubagent(), agentMessage.send(), agentMessage.read(), harness, goal, and compact().',
-        'rlm(...) returns an admission handle immediately, never the child answer. Children deliver answers only by explicit agentMessage.send(...) or artifact references.',
-        'You decide the recursive topology dynamically within the sealed depth, child, and turn budgets. Do not ask the Scheduler to manufacture fixed branches.',
-        defaultChild === undefined
-          ? rlmPlan.fidelity === 'prime-strict'
-            ? 'Prime Strict is active: when rlm() omits overrides, every child inherits this parent model, reasoning profile, tools, managed skills, retry policy and sealed capability context. Unsupported rlm() option names fail instead of being ignored.'
-            : 'Use lower-cost children for bounded exploration and retain this root model for planning, verification, and final synthesis when that improves the result.'
-          : `When rlm() omits a model, the sealed default child is ${defaultChild.operatorId}/${defaultChild.model} (${defaultChild.tier}, ${defaultChild.source}). Use an explicit model only when the task genuinely requires an override.`,
-        'Before finishing, read pending family messages, verify coverage against the original task, and return one complete final answer.',
-      ].join('\n'),
-    },
-  ]
-}
-
 /** Read settled Evidence into a bounded body that a downstream verifier can actually inspect. */
 function upstreamEvidencePreview(value: unknown): { text: string; truncated: boolean } {
   const output = value !== null && typeof value === 'object' && 'output' in value
@@ -905,13 +719,6 @@ function withRevision(record: RuntimeRunRecord, snapshot: OrchestrationRunSnapsh
   return { ...record, snapshot: { ...snapshot, revision: record.snapshot.revision + 1, updatedAt: now() } }
 }
 
-function fakeParent(workspace: string, runId: string): Agent {
-  return {
-    id: SessionId(`orchestration-${runId}`),
-    session: { header: { cwd: workspace } },
-  } as unknown as Agent
-}
-
 function nativeToolPolicy(capabilities: CapabilityBindingPlanV1): PhysicalOperatorNativeToolPolicy {
   if (capabilities.resolvedCapabilities.includes(BROWSER_CAPABILITY)) return 'dsh-tools-authoritative'
   const effects = capabilities.effectiveEffects
@@ -923,88 +730,6 @@ function nativeToolPolicy(capabilities: CapabilityBindingPlanV1): PhysicalOperat
     && effects.network.length === 0
     ? 'disabled'
     : 'inherit'
-}
-
-function promptFromPlan(
-  node: OrchestrationNodeSpecV1,
-  context: ContextPacketV1,
-  capabilities: CapabilityBindingPlanV1,
-  harness?: ContinualHarnessSnapshotV1,
-  rlm?: RlmExecutionPlanV1,
-): ContentBlock[] {
-  const instructions = capabilities.instructions.map(value => `- ${value.text}`).join('\n')
-  const upstream = context.included.filter(value => value.kind === 'artifact').map(value => `- ${value.ref}`).join('\n')
-  const upstreamMaterials = context.sourceMaterials.map(value => (
-    `Evidence ${value.ref}${value.truncated ? ' (bounded preview)' : ''}:\n${value.text}`
-  )).join('\n\n')
-  const legacyHarnessEntries = harness?.entries.map(value => `- [${value.kind}] ${value.text} (Evidence: ${value.evidenceRefs.join(', ') || 'none'})`) ?? []
-  const managedHarnessEntries = harness?.managedEntries.map(value => [
-    `- [${value.kind}] ${value.title}: ${value.content}`,
-    ...value.reference === undefined ? [] : [`  reference=${JSON.stringify(value.reference)}`],
-    ...value.arguments === undefined ? [] : [`  arguments=${JSON.stringify(value.arguments)}`],
-  ].join('\n')) ?? []
-  const harnessEntries = [...managedHarnessEntries, ...legacyHarnessEntries].join('\n')
-  return [{
-    type: 'text',
-    text: [
-      `TaskGraph node ${node.id}: ${node.title}`,
-      '',
-      context.task,
-      '',
-      `Sender workspace: ${context.workspace}`,
-      'Use the executor current working directory for filesystem operations. A remote executor materializes the same repository and commit at its own path; the sender workspace is not a directory on that host. Resolve the listed relative scopes against the executor working directory.',
-      `Read scopes: ${node.readScopes.join(', ') || 'none'}`,
-      `Write scopes: ${node.writeScopes.join(', ') || 'none'}`,
-      `Acceptance: ${node.acceptance.map(value => value.description).join('; ') || 'operator completion'}`,
-      ...(instructions.length === 0 ? [] : ['', 'Capability instructions:', instructions]),
-      ...(upstream.length === 0 ? [] : ['', 'Upstream artifact references:', upstream]),
-      ...(upstreamMaterials.length === 0 ? [] : ['', 'Upstream Evidence contents:', upstreamMaterials]),
-      ...(harnessEntries.length === 0 ? [] : ['', `Continuous Harness generation ${String(harness?.generation ?? 0)}:`, harnessEntries]),
-      ...(rlm?.enabled === true ? [
-        '',
-        'RLM execution strategy:',
-        `- Strategy: ${rlm.strategyId}@${rlm.strategyVersion}.`,
-        `- ${rlm.instruction}`,
-        `- Sealed RLM plan: ${rlm.planSha256}; reason: ${rlm.reason}.`,
-        '- DSH remains the only global TaskGraph Scheduler and acceptance authority.',
-      ] : []),
-      '',
-      'Return a concise result. Do not expand authority beyond the listed scopes and effects.',
-    ].join('\n'),
-  }]
-}
-
-const TASKGRAPH_SYSTEM_TEXT = 'You are a DSH TaskGraph worker. Execute only the sealed current node and preserve its declared authority and acceptance rules.'
-
-/** Project the selected task-template content as one named context field. */
-function taskTemplateContexts(selection: TaskTemplateSelection | undefined): ContextSnapshotSection[] {
-  return selection?.decision === 'inject'
-    ? [{
-      name: `task-template:${String(selection.selected?.id ?? 'unknown')}`,
-      text: renderTaskTemplateInjection(selection),
-    }]
-    : []
-}
-
-/** Build the exact current-node handoff, excluding every unrelated node or conversation turn. */
-function taskGraphContextEnvelope(
-  plan: NodeExecutionPlanV1,
-  prompt: readonly ContentBlock[],
-): OperatorContextEnvelopeV1 {
-  return buildOperatorContextEnvelope({
-    systemText: TASKGRAPH_SYSTEM_TEXT,
-    task: prompt,
-    contexts: [
-      ...(plan.runtimeContext?.sections ?? []),
-      ...taskTemplateContexts(plan.taskTemplate),
-    ],
-    source: {
-      kind: 'taskgraph',
-      runId: String(plan.runId),
-      nodeId: plan.nodeId,
-      contextPacketRef: String(plan.contextPacketRef),
-    },
-  })
 }
 
 /** Validate collaboration trace fields at the daemon JSON ingress without discarding them. */
@@ -1097,11 +822,6 @@ function validateAdmissionRuntimeContext(admission: OrchestrationAdmissionTraceV
   if (bytes > 256 * 1024) {
     throw new OrchestrationError('orchestration runtime context exceeds 256 KiB', 'GRAPH_INVALID')
   }
-}
-
-/** Text-only model workers receive the same envelope with an explicit role downgrade. */
-function modelWorkerEnvelopePrompt(envelope: OperatorContextEnvelopeV1): ContentBlock[] {
-  return [{ type: 'text', text: renderOperatorContextEnvelopeText(envelope) }]
 }
 
 /**
@@ -1214,37 +934,12 @@ function workbenchTaskContract(
   return { ...base, contractSha256: canonicalSha256(base) }
 }
 
-/**
- * The reason with which an attempt is aborted while its run keeps running, so that such an abort can be told from the run's
- * cancellation. Aborting with any other reason (a cancellation of the run, a shutdown, an interrupt of a child) is not one of these.
- */
-class AttemptAbortReason extends Error {}
-
 /** The attempt's own deadline passed. */
 class AttemptDeadlineError extends AttemptAbortReason {
   constructor(timeoutMs: number) {
     super(`orchestration attempt exceeded ${String(timeoutMs)}ms`)
     this.name = 'AttemptDeadlineError'
   }
-}
-
-/** The runtime interrupted the root session of the attempt; the run is not cancelled and the node may be run again. */
-class RootInterruptedError extends AttemptAbortReason {
-  constructor() {
-    super('the root session of the attempt was interrupted')
-    this.name = 'RootInterruptedError'
-  }
-}
-
-/**
- * Whether the work was stopped together with its run: aborted for a reason other than the attempt's deadline or an interrupt of
- * its root session, which leave the run running. A request that such an abort interrupted may still be in doubt, and the node
- * would be run again, so it is not a cancellation.
- * @param signal - the signal the work ran under.
- * @returns `true` when the signal was aborted together with the run (or by an interrupt of one execution below the root).
- */
-function abortedWithTheRun(signal: AbortSignal): boolean {
-  return signal.aborted && !(signal.reason instanceof AttemptAbortReason)
 }
 
 function attemptAbort(timeoutMs: number | undefined): {
@@ -1328,7 +1023,8 @@ export class OrchestrationDaemon {
   /** Operator id of each attempt's sealed plan; an attempt's plan never changes, so it is read once. */
   private readonly attemptOperators = new Map<string, string>()
   private clusterActionAt = 0
-  private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
+  /** Created once in `start()`, after `rlmRuntime`/`physicalOperators` are registered and before recovery or the first dispatch. */
+  private rlmExecutionCore!: RlmExecutionCore
   /** The ledger of the evaluation scope this home is sealed to; absent in an ordinary home. */
   private evaluation: EvaluationLedger | undefined
   private lockDescriptor: number | undefined
@@ -1464,6 +1160,20 @@ export class OrchestrationDaemon {
         writeFileSync(join(this.options.root, 'daemon.pid'), `${String(process.pid)}\n`, { mode: 0o600 })
         resolve()
       })
+    })
+    this.rlmExecutionCore = createRlmExecutionCore({
+      store: this.store,
+      rlmRuntime: this.ctx.rlmRuntime,
+      physicalOperators: this.ctx.physicalOperators,
+      autonomousEndConditionEvaluators: this.options.autonomousEndConditionEvaluators,
+      startResidentTurn: (...args) => this.startResidentTurn(...args),
+      executeModelWorker: (request, accounting) => this.executeModelWorker(request, accounting),
+      flushRlmHarnessBoundary: (...args) => this.flushRlmHarnessBoundary(...args),
+      recordContextEnvelope: (...args) => { this.recordContextEnvelope(...args) },
+      interruptResidentTurn: (sessionId, turnId) => this.resident.interrupt(sessionId, turnId),
+      holdsUnknownRequest: commandId => this.holdsUnknownRequest(commandId),
+      sessionHoldsUnknownRequest: sessionId => this.sessionHoldsUnknownRequest(sessionId),
+      assertExplicitRlmChildSelection: model => this.assertExplicitRlmChildSelection(model),
     })
     await this.rebindRecoveredRlmHosts()
     await this.reconcile()
@@ -2316,7 +2026,7 @@ export class OrchestrationDaemon {
         const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
         const controller = new AbortController()
         this.recoveredRlmControllers.push(controller)
-        bindings = this.rlmHostBindings(record, spec, plan, controller, [], this.sealedManagedSkills(plan))
+        ;({ bindings } = this.rlmHostBindings(record, spec, plan, controller, [], this.sealedManagedSkills(plan)))
         bindingsByRoot.set(rootId, bindings)
       }
       this.recoveredRlmDisposers.push(await this.ctx.rlmRuntime.bindHost(session.sessionId, bindings))
@@ -3010,11 +2720,12 @@ export class OrchestrationDaemon {
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): Promise<void> {
-    return this.dispatchRlmAttempt(record, spec, plan, 'scheduler-owned-resident-rlm', (controller, physicalRuns) => (
-      this.executeResidentRlm(
-        record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
-      )
-    ))
+    return this.dispatchRlmAttempt(record, spec, plan, 'scheduler-owned-resident-rlm', async (controller, physicalRuns) => {
+      if (plan.rlmPlan?.enabled !== true) throw new OrchestrationError('resident RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
+      const managedSkills = this.sealedManagedSkills(plan, harnessSnapshot)
+      const { context, bindings } = this.rlmHostBindings(record, spec, plan, controller, physicalRuns, managedSkills)
+      return this.rlmExecutionCore.executeResidentRlm(context, bindings, managedSkills, contextPacket, capabilityPlan, harnessSnapshot)
+    })
   }
 
   /** Stable owner key for all native turns inside one sealed composite Attempt. */
@@ -3095,247 +2806,6 @@ export class OrchestrationDaemon {
       },
     }
     this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run, progressSources)
-  }
-
-  private async prepareRlmExecution(
-    record: RuntimeRunRecord,
-    spec: OrchestrationNodeSpecV1,
-    plan: NodeExecutionPlanV1,
-    contextPacket: ContextPacketV1,
-    capabilityPlan: CapabilityBindingPlanV1,
-    harnessSnapshot: ContinualHarnessSnapshotV1 | undefined,
-    controller: AbortController,
-    physicalRuns: PhysicalOperatorRun[],
-    executor: 'resident' | 'model-worker',
-  ): Promise<PreparedRlmExecution> {
-    const rlmPlan = plan.rlmPlan
-    if (rlmPlan?.enabled !== true) throw new OrchestrationError(`${executor} RLM dispatch requires an enabled sealed plan`, 'GRAPH_INVALID')
-    const runId = String(record.snapshot.runId)
-    const node = record.snapshot.nodes.find(value => value.id === spec.id)
-    const rootSessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
-    const managedSkills = this.sealedManagedSkills(plan, harnessSnapshot)
-    const bindings = this.rlmHostBindings(record, spec, plan, controller, physicalRuns, managedSkills)
-    const childModelPolicy = rlmChildModelPolicy(rlmPlan)
-    if (childModelPolicy === 'allocator-default' && plan.rlmWorkerPlan === undefined && rlmPlan.maxTurns > 1) {
-      throw new OrchestrationError('optimized RLM plan omitted its sealed default child allocation', 'GRAPH_INVALID')
-    }
-    const executionOptions: RlmChildExecutionOptionsV1 = {
-      version: 1,
-      tools: [RLM_TYPESCRIPT_REPL_TOOL_SCHEMA],
-      skills: managedSkills,
-      retryPolicy: rlmChildRetryPolicy(spec),
-      capabilityContext: {
-        contextPacketRef: String(plan.contextPacketRef),
-        capabilityPlanRef: String(plan.capabilityPlanRef),
-        graphCertificateHash: plan.graphCertificateHash,
-        capabilityGeneration: plan.capabilityGeneration,
-        effectiveReadScopes: [...plan.effectiveReadScopes],
-        effectiveWriteScopes: [...plan.effectiveWriteScopes],
-        effectiveEffects: {
-          read: [...plan.effectiveEffects.read],
-          write: [...plan.effectiveEffects.write],
-          execute: [...plan.effectiveEffects.execute],
-          network: [...plan.effectiveEffects.network],
-          cost: [...plan.effectiveEffects.cost],
-          risk: [...plan.effectiveEffects.risk],
-        },
-      },
-    }
-    await this.ctx.rlmRuntime.create({
-      sessionId: rootSessionId,
-      commandId: RlmCommandId(`${String(plan.executionId)}:rlm:create`),
-      executionId: String(plan.executionId),
-      workspace: plan.executionWorkspace.path,
-      task: spec.task,
-      model: {
-        operatorId: plan.allocationPlan.operatorId,
-        model: plan.allocationPlan.model,
-        source: plan.allocationPlan.source,
-        ...plan.allocationPlan.profile === undefined ? {} : { profile: plan.allocationPlan.profile },
-      },
-      ...plan.rlmWorkerPlan === undefined ? {} : { defaultChildModel: {
-        operatorId: plan.rlmWorkerPlan.operatorId,
-        model: plan.rlmWorkerPlan.model,
-        source: plan.rlmWorkerPlan.source,
-        ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
-      } },
-      childModelPolicy,
-      executionOptions,
-      limits: {
-        maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
-        maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000), maxOutputBytes: 512 * 1024,
-      },
-      context: {
-        runId, nodeId: spec.id, task: spec.task,
-        contextPacketRef: String(plan.contextPacketRef), capabilityPlanRef: String(plan.capabilityPlanRef),
-        graphCertificateHash: plan.graphCertificateHash,
-        ...plan.rlmWorkerPlan === undefined ? {} : {
-          defaultChildOperatorId: plan.rlmWorkerPlan.operatorId,
-          defaultChildModel: plan.rlmWorkerPlan.model,
-          defaultChildTier: plan.rlmWorkerPlan.tier,
-        },
-      },
-    }, bindings)
-    const autonomousPolicy = plan.autonomousPolicy
-    if (autonomousPolicy?.enabled === true
-      && this.store.autonomousState(runId, spec.id, plan.attempt) === undefined) {
-      this.store.saveAutonomousState(runId, spec.id, plan.attempt, createAutonomousState(autonomousPolicy))
-    }
-    const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
-    assertRlmBridgeAllowed(executionOptions, bridge)
-    const rootPrompt = primeRlmRootPrompt(
-      promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
-      rlmPlan,
-      plan.rlmWorkerPlan,
-    )
-    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.started', {
-      runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
-      fidelity: rlmPlan.fidelity,
-      maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
-      autonomous: autonomousPolicy?.enabled === true,
-      autonomousPolicySha256: autonomousPolicy?.policySha256 ?? null,
-      rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
-      tool: 'typescript_repl', topologyOwner: 'model',
-      childModelPolicy,
-      defaultChildModelOrigin: childModelPolicy === 'parent-inherit'
-        ? 'parent-inherited'
-        : 'allocator-default',
-      inheritsParentModelByDefault: childModelPolicy === 'parent-inherit',
-      executionOptions: rlmExecutionOptionsSummary(executionOptions),
-      ...executor === 'model-worker' ? { executor } : {},
-    }, node)])
-    return {
-      rlmPlan, runId, node, rootSessionId, bindings, bridge, executionOptions, rootPrompt, signal: controller.signal,
-    }
-  }
-
-  private async executeResidentRlm(
-    record: RuntimeRunRecord,
-    spec: OrchestrationNodeSpecV1,
-    plan: NodeExecutionPlanV1,
-    contextPacket: ContextPacketV1,
-    capabilityPlan: CapabilityBindingPlanV1,
-    harnessSnapshot: ContinualHarnessSnapshotV1 | undefined,
-    controller: AbortController,
-    physicalRuns: PhysicalOperatorRun[],
-  ): Promise<PhysicalOperatorResult> {
-    const prepared = await this.prepareRlmExecution(
-      record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns, 'resident',
-    )
-    const { runId, node, rootSessionId, bridge, rootPrompt } = prepared
-    const rootExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:root`)
-    try {
-      const root = await this.startResidentTurn(
-        record, spec, plan, plan.executionWorkspace.path, rootExecutionId, plan.allocationPlan,
-        rootPrompt, controller.signal, 'Prime RLM root', bridge, String(rootSessionId), 'disabled',
-      )
-      this.registerRlmPhysicalRun(record, spec, plan, rootExecutionId, root, physicalRuns)
-      await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
-        nativeSessionId: root.receipt.sessionId,
-        nativeTurnId: root.receipt.turnId,
-        result: root.run.result.then(asRlmExecutionResult, (error: unknown) => ({
-          status: controller.signal.aborted ? 'indeterminate' as const : 'failed' as const,
-          error: error instanceof Error ? error.message : String(error),
-        })),
-        interrupt: () => this.resident.interrupt(root.receipt.sessionId, root.receipt.turnId),
-      })
-      const attempt = this.store.attempts().find(value => value.runId === runId
-        && value.nodeId === spec.id
-        && value.attempt === plan.attempt)
-      if (attempt !== undefined) {
-        this.store.saveAttempt({ ...attempt, state: 'running', turnId: root.receipt.turnId, updatedAt: now() })
-      }
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.root.dispatched', {
-        executionId: String(rootExecutionId), runtimeSessionId: String(rootSessionId),
-        nativeSessionId: root.receipt.sessionId, nativeTurnId: root.receipt.turnId,
-        operatorId: plan.allocationPlan.operatorId, model: plan.allocationPlan.model,
-      }, node)])
-      const rootResult = await root.run.result
-      await this.accountRlmGoalUsage(
-        record,
-        plan,
-        'root',
-        String(rootExecutionId),
-        rootResult,
-      )
-      return await this.settleRlmExecution(record, spec, plan, prepared, rootResult)
-    } catch (error) {
-      controller.abort()
-      await Promise.allSettled(physicalRuns.map(value => value.dispose()))
-      throw this.reportRlmFailure(record, plan, prepared, error)
-    }
-  }
-
-  private async settleRlmExecution(
-    record: RuntimeRunRecord,
-    spec: OrchestrationNodeSpecV1,
-    plan: NodeExecutionPlanV1,
-    prepared: PreparedRlmExecution,
-    rootResult: PhysicalOperatorResult,
-  ): Promise<PhysicalOperatorResult> {
-    const { rootSessionId, bindings, node, signal } = prepared
-    await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
-    const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-    const afterMessages = rlmContinuationResult(drained.lastContinuation, rootResult)
-    const result = plan.autonomousPolicy?.enabled === true
-      ? await this.continueAutonomousRlm(
-        record,
-        spec,
-        plan,
-        rootSessionId,
-        bindings,
-        afterMessages,
-        `${String(plan.executionId)}:rlm:root`,
-        signal,
-      )
-      : await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, signal, spec.timeoutMs)
-    const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
-    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
-      executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
-      childCount: snapshot.children.length, stateRevision: snapshot.stateRevision,
-      degradedVariables: snapshot.degradedVariables, stopReason: result.stopReason,
-    }, node)])
-    return result
-  }
-
-  private recordRlmFailure(
-    record: RuntimeRunRecord,
-    plan: NodeExecutionPlanV1,
-    prepared: PreparedRlmExecution,
-    error: unknown,
-  ): void {
-    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.failed', {
-      executionId: String(plan.executionId), runtimeSessionId: String(prepared.rootSessionId),
-      code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
-    }, prepared.node)])
-  }
-
-  /**
-   * Record the failure of an RLM execution and return the error to rethrow. A store that refuses the notification does not change
-   * what the execution failed with when that was an unknown physical outcome: the outcome keeps its identity (so the node is not
-   * retried as an ordinary failure) and carries the refused write as part of its cause. Any other failure behaves as before.
-   * @param record - the run.
-   * @param plan - the node plan.
-   * @param prepared - the prepared execution.
-   * @param error - what the execution failed with.
-   * @returns the error to throw.
-   */
-  private reportRlmFailure(
-    record: RuntimeRunRecord,
-    plan: NodeExecutionPlanV1,
-    prepared: PreparedRlmExecution,
-    error: unknown,
-  ): unknown {
-    try {
-      this.recordRlmFailure(record, plan, prepared, error)
-      return error
-    } catch (writeError) {
-      // Rethrown unless the failure being reported is an unknown outcome, which is returned with this error attached.
-      if (!(error instanceof UnknownPhysicalOutcomeError)) throw writeError
-      return new UnknownPhysicalOutcomeError(
-        error.message, new AggregateError([error.cause, writeError], 'the unknown outcome and the refused failure notification'),
-      )
-    }
   }
 
   private async flushRlmHarnessBoundary(
@@ -3684,6 +3154,10 @@ export class OrchestrationDaemon {
     }
   }
 
+  /**
+   * Build one execution context and its host bindings for an attempt's root, children and continuations. Recovery constructs
+   * a new pair through this factory; it does not reuse the previous daemon's in-memory objects.
+   */
   private rlmHostBindings(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
@@ -3691,145 +3165,26 @@ export class OrchestrationDaemon {
     controller: AbortController,
     physicalRuns: PhysicalOperatorRun[],
     sealedSkills: readonly RlmManagedSkillDescriptorV1[],
-  ): RlmRuntimeHostBindings {
+  ): { readonly context: RlmExecutionContext; readonly bindings: RlmRuntimeHostBindings } {
     const runId = String(record.snapshot.runId)
-    const node = record.snapshot.nodes.find(value => value.id === spec.id)
     const cancellation = new RlmCancellationScope(controller.signal, `rlm:${String(plan.executionId)}`)
-    return {
-      dispatchChild: async (request) => {
-        const execution = cancellation.begin(String(request.childSessionId), String(request.parentSessionId))
-        const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:${String(request.childId)}`)
-        const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.childSessionId)
-        assertRlmBridgeAllowed(request.executionOptions, bridge)
-        if (request.modelOrigin === 'explicit') await this.assertExplicitRlmChildSelection(request.model)
-        const childPrompt: ContentBlock[] = [{
-          type: 'text',
-          text: [
-            `You are recursive RLM child "${request.name}" at depth ${String(request.depth)}.`,
-            `Bounded task: ${request.task}`,
-            'Use typescript_repl for programmable context or further recursive decomposition when useful.',
-            'rlm(...) returns only an admission handle. Read explicit replies with agentMessage.read().',
-            'Your ordinary final response is retained as a diagnostic artifact but is not delivered as the answer to your parent.',
-            'Before finishing, explicitly send your useful result to the parent with await agentMessage.send(text, { receiverRole: "parent", mode: "auto", artifactRefs?: [...] }).',
-          ].join('\n'),
-        }]
-        const settle = async (
-          settled: PhysicalOperatorResult,
-          workerResult?: ModelWorkerResult,
-        ): Promise<RlmChildExecutionResult> => {
-          const accounted = workerResult ?? settled
-          await this.accountRlmGoalUsage(record, plan, 'child', String(executionId), accounted, {
-            operatorId: request.model.operatorId,
-            model: request.model.model,
-            authMode: rlmAuthMode(request.model.source, request.model.operatorId),
-          })
-          const artifactRef = this.store.putArtifact({
-            kind: 'prime-rlm-child-result', runId, nodeId: spec.id,
-            childId: String(request.childId), childSessionId: String(request.childSessionId),
-            executionId: String(executionId), depth: request.depth, name: request.name,
-            operatorId: request.model.operatorId, model: request.model.model,
-            modelOrigin: request.modelOrigin,
-            executionOptions: rlmExecutionOptionsSummary(request.executionOptions),
-            stopReason: settled.stopReason, output: settled.output,
-            ...settled.continuity === undefined ? {} : { continuity: settled.continuity },
-          })
-          this.store.recordArtifact('compilation_artifacts', {
-            ref: String(artifactRef), runId, nodeId: spec.id,
-            attempt: plan.attempt, generation: plan.capabilityGeneration,
-          })
-          const preview = operatorOutputPreview(settled.output).outputPreview
-          const status = settled.stopReason === 'completed' ? 'settled' as const : 'failed' as const
-          this.store.appendEvents([event(record.snapshot.runId, `rlm.child.${status}`, {
-            executionId: String(executionId), childId: String(request.childId),
-            childSessionId: String(request.childSessionId), artifactRef: String(artifactRef),
-            stopReason: settled.stopReason,
-          }, node)])
-          await this.flushRlmHarnessBoundary(record, spec, plan, request.childSessionId, 'turn-end')
-          const usage = rlmAttributedUsage(accounted, request.model)
-          return {
-            status,
-            stopReason: settled.stopReason,
-            output: settled.output,
-            resultRef: String(artifactRef),
-            outputPreview: preview.slice(0, 8_000),
-            ...usage === undefined ? {} : {
-              usage,
-            },
-            ...status === 'failed' ? { error: `native child stopped with ${settled.stopReason}` } : {},
-          }
-        }
-        const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
-          record, spec, plan, request.childSessionId, execution.signal, error,
-        )
-        if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
-          const started = await this.startResidentTurn(
-            record,
-            spec,
-            plan,
-            plan.executionWorkspace.path,
-            executionId,
-            request.model,
-            childPrompt,
-            execution.signal,
-            `Prime RLM child ${request.name}`,
-            bridge,
-            String(request.childSessionId),
-            'disabled',
-          )
-          this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
-          this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
-            executionId: String(executionId), childId: String(request.childId),
-            childSessionId: String(request.childSessionId), parentSessionId: String(request.parentSessionId),
-            depth: request.depth, name: request.name, operatorId: request.model.operatorId,
-            model: request.model.model, nativeSessionId: started.receipt.sessionId,
-            nativeTurnId: started.receipt.turnId, executor: 'resident',
-            modelOrigin: request.modelOrigin,
-            inheritsParentModel: request.modelOrigin === 'parent-inherited',
-            executionOptions: rlmExecutionOptionsSummary(request.executionOptions),
-          }, node)])
-          return this.residentRlmExecution(started, settle, failed)
-        }
-        const childEnvelope = taskGraphContextEnvelope(plan, childPrompt)
-        this.recordContextEnvelope(
-          record,
-          spec,
-          plan,
-          String(executionId),
-          childEnvelope,
-          receiveOperatorContextEnvelope(childEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
-        )
-        const workerResult = this.executeModelWorker({
-          commandId: String(executionId), workerId: request.model.operatorId,
-          model: request.model.model, prompt: modelWorkerEnvelopePrompt(childEnvelope),
-          parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
-          ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-          modelToolBridge: bridge, signal: execution.signal,
-        }, { record, plan })
-        const syntheticSessionId = `model-worker:${request.model.operatorId}:${String(request.childSessionId)}`
-        const syntheticTurnId = `model-worker-turn:${String(executionId)}`
-        this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
-          executionId: String(executionId), childId: String(request.childId),
-          childSessionId: String(request.childSessionId), parentSessionId: String(request.parentSessionId),
-          depth: request.depth, name: request.name, operatorId: request.model.operatorId,
-          model: request.model.model, nativeSessionId: syntheticSessionId,
-          nativeTurnId: syntheticTurnId, executor: 'model-worker',
-          modelOrigin: request.modelOrigin,
-          inheritsParentModel: request.modelOrigin === 'parent-inherited',
-          executionOptions: rlmExecutionOptionsSummary(request.executionOptions),
-        }, node)])
-        return {
-          nativeSessionId: syntheticSessionId,
-          nativeTurnId: syntheticTurnId,
-          result: workerResult.then(result => settle(
-            { output: [...result.output], stopReason: result.stopReason },
-            result,
-          ), failed),
-          interrupt: (): Promise<void> => { execution.abort(); return Promise.resolve() },
+    const context: RlmExecutionContext = {
+      record, spec, plan, controller, physicalRuns, cancellation,
+      registerResidentRun: (executionId, started) => {
+        this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
+      },
+      persistAttemptTurnId: (turnId) => {
+        const attempt = this.store.attempts().find(value => value.runId === runId
+          && value.nodeId === spec.id
+          && value.attempt === plan.attempt)
+        if (attempt !== undefined) {
+          this.store.saveAttempt({ ...attempt, state: 'running', turnId, updatedAt: now() })
         }
       },
-      dispatchContinuation: request => this.dispatchRlmContinuation(
-        record, spec, plan, request, cancellation, physicalRuns,
-      ),
+    }
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: request => this.rlmExecutionCore.dispatchChild(context, request),
+      dispatchContinuation: request => this.rlmExecutionCore.dispatchRlmContinuation(context, request),
       readResult: ({ childSessionId, resultRef }) => {
         // The runtime has checked who may ask and which reference is the child's. The store is shared by every run, so what comes
         // back is also checked to be a child result of this session in this node of this run.
@@ -3949,6 +3304,7 @@ export class OrchestrationDaemon {
         return JSON.parse(JSON.stringify(result)) as RlmJsonValue
       },
     }
+    return { context, bindings }
   }
 
   /**
@@ -4229,428 +3585,6 @@ export class OrchestrationDaemon {
     )
   }
 
-  private async dispatchRlmContinuation(
-    record: RuntimeRunRecord,
-    spec: OrchestrationNodeSpecV1,
-    plan: NodeExecutionPlanV1,
-    request: Parameters<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>[0],
-    cancellation: RlmCancellationScope,
-    physicalRuns: PhysicalOperatorRun[],
-  ): Promise<Awaited<ReturnType<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>>> {
-    // Everything up to the point where a native execution is started is a refusal that admitted nothing. A message continuation
-    // reports it as such, so the runtime may keep the message queued; an error from anywhere later is not marked.
-    let execution: ReturnType<RlmCancellationScope['begin']>
-    let executionId: PhysicalOperatorExecutionId
-    let bridge: Awaited<ReturnType<typeof this.ctx.rlmRuntime.modelToolBridge>>
-    let prompt: ContentBlock[]
-    try {
-      assertMessageContinuationNamesMessages(request)
-      execution = cancellation.begin(String(request.sessionId))
-      executionId = PhysicalOperatorExecutionId(String(request.commandId))
-      bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
-      assertRlmBridgeAllowed(request.executionOptions ?? { version: 1 }, bridge)
-      const inspection = request.source === 'message'
-        ? rlmMessageContinuationFacts(
-          await this.ctx.rlmRuntime.inspect(request.sessionId),
-          await this.ctx.rlmRuntime.familyRoster(request.sessionId),
-          request.messageOrigin === 'controller' ? 'controller' : 'agent',
-          request.messageIds?.length,
-        )
-        : undefined
-      prompt = [{ type: 'text', text: rlmContinuationPrompt(request, inspection) }]
-    } catch (error) {
-      throw refusalBeforeAdmission(request.source, error)
-    }
-    const settle = async (
-      result: PhysicalOperatorResult,
-      workerResult?: ModelWorkerResult,
-    ): Promise<RlmChildExecutionResult> => {
-      const accounted = workerResult ?? result
-      await this.accountRlmGoalUsage(
-        record,
-        plan,
-        request.source === 'goal'
-          ? 'goal-continuation'
-          : request.source === 'autonomous' ? 'autonomous-continuation' : 'continuation',
-        String(request.commandId),
-        accounted,
-        {
-          operatorId: request.model.operatorId,
-          model: request.model.model,
-          authMode: rlmAuthMode(request.model.source, request.model.operatorId),
-        },
-      )
-      const artifactRef = this.store.putArtifact({
-        kind: `prime-rlm-${request.source}-continuation`,
-        runId: String(record.snapshot.runId), nodeId: spec.id,
-        runtimeSessionId: String(request.sessionId), commandId: String(request.commandId),
-        operatorId: request.model.operatorId, model: request.model.model,
-        ...request.messageIds === undefined ? {} : { messageIds: [...request.messageIds] },
-        stopReason: result.stopReason, output: result.output,
-      })
-      this.store.recordArtifact('compilation_artifacts', {
-        ref: String(artifactRef), runId: String(record.snapshot.runId), nodeId: spec.id,
-        attempt: plan.attempt, generation: plan.capabilityGeneration,
-      })
-      const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
-      this.store.appendEvents([event(record.snapshot.runId, `rlm.${request.source}.continuation.${status}`, {
-        runtimeSessionId: String(request.sessionId), commandId: String(request.commandId),
-        ...request.messageIds === undefined ? {} : { messageIds: [...request.messageIds] },
-        artifactRef: String(artifactRef), stopReason: result.stopReason,
-      }, record.snapshot.nodes.find(value => value.id === spec.id))])
-      await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
-      const usage = rlmAttributedUsage(accounted, request.model)
-      return {
-        status, stopReason: result.stopReason, output: result.output, resultRef: String(artifactRef),
-        outputPreview: operatorOutputPreview(result.output).outputPreview,
-        ...usage === undefined ? {} : {
-          usage,
-        },
-        ...status === 'failed' ? { error: `continuation stopped with ${result.stopReason}` } : {},
-      }
-    }
-    const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
-      record, spec, plan, request.sessionId, execution.signal, error,
-    )
-    if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
-      const started = await this.startResidentTurn(
-        record, spec, plan, plan.executionWorkspace.path, executionId, request.model,
-        prompt, execution.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId), 'disabled',
-      )
-      this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
-      return this.residentRlmExecution(started, settle, failed)
-    }
-    const continuationEnvelope = taskGraphContextEnvelope(plan, prompt)
-    this.recordContextEnvelope(
-      record,
-      spec,
-      plan,
-      String(request.commandId),
-      continuationEnvelope,
-      receiveOperatorContextEnvelope(continuationEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
-    )
-    const result = this.executeModelWorker({
-      commandId: String(request.commandId), workerId: request.model.operatorId,
-      model: request.model.model, prompt: modelWorkerEnvelopePrompt(continuationEnvelope),
-      parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
-      ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
-      modelToolBridge: bridge, signal: execution.signal,
-    }, { record, plan })
-    return {
-      nativeSessionId: `model-worker:${request.model.operatorId}:${String(request.sessionId)}`,
-      nativeTurnId: `model-worker-turn:${String(request.commandId)}`,
-      result: result.then(value => settle(
-        { output: [...value.output], stopReason: value.stopReason },
-        value,
-      ), failed),
-      interrupt: (): Promise<void> => { execution.abort(); return Promise.resolve() },
-    }
-  }
-
-  private async failedRlmExecution(
-    record: RuntimeRunRecord,
-    spec: OrchestrationNodeSpecV1,
-    plan: NodeExecutionPlanV1,
-    sessionId: RlmRuntimeSessionId,
-    signal: AbortSignal,
-    error: unknown,
-  ): Promise<RlmChildExecutionResult> {
-    await this.flushRlmHarnessBoundary(record, spec, plan, sessionId, 'turn-end')
-    return {
-      status: signal.aborted || error instanceof UnknownPhysicalOutcomeError ? 'indeterminate' : 'failed',
-      error: error instanceof Error ? error.message : String(error),
-    }
-  }
-
-  private residentRlmExecution(
-    started: StartedResidentTurn,
-    settle: (result: PhysicalOperatorResult) => Promise<RlmChildExecutionResult>,
-    failed: (error: unknown) => Promise<RlmChildExecutionResult>,
-  ): RlmChildExecution {
-    return {
-      nativeSessionId: started.receipt.sessionId,
-      nativeTurnId: started.receipt.turnId,
-      result: started.run.result.then(settle, failed),
-      interrupt: () => this.resident.interrupt(started.receipt.sessionId, started.receipt.turnId),
-    }
-  }
-
-  private async continueAutonomousRlm(
-    record: RuntimeRunRecord,
-    spec: OrchestrationNodeSpecV1,
-    plan: NodeExecutionPlanV1,
-    sessionId: RlmRuntimeSessionId,
-    bindings: RlmRuntimeHostBindings,
-    initial: PhysicalOperatorResult,
-    initialCommandId: string,
-    signal: AbortSignal,
-  ): Promise<PhysicalOperatorResult> {
-    const policy = plan.autonomousPolicy
-    if (policy?.enabled !== true) return initial
-    let result = initial
-    let commandId = initialCommandId
-    for (;;) {
-      const current = this.store.autonomousState(String(record.snapshot.runId), spec.id, plan.attempt)
-        ?? createAutonomousState(policy)
-      // A stop with a request of the session in doubt, which nobody cancelled, is decided before the state and the usage are written,
-      // so a refused write cannot become the error the node is retried on; it is kept as an additional error.
-      const unknownStop = (result.stopReason === 'error' || result.stopReason === 'aborted')
-        && !abortedWithTheRun(signal) && this.sessionHoldsUnknownRequest(String(sessionId))
-      const accounted = accountAutonomousUsage(current, commandId, result.usage)
-      let writeError: unknown
-      try {
-        this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, accounted)
-        this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.usage', {
-          runtimeSessionId: String(sessionId), commandId,
-          turnsUsed: accounted.turnsUsed, tokensUsed: accounted.tokensUsed,
-          inputTokens: result.usage?.inputTokens ?? 0,
-          outputTokens: result.usage?.outputTokens ?? 0,
-          cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
-          cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
-        }, record.snapshot.nodes.find(value => value.id === spec.id))])
-      } catch (error) {
-        if (!unknownStop) throw error
-        writeError = error
-      }
-      if (unknownStop) {
-        throw new UnknownPhysicalOutcomeError(
-          `Autonomous root turn stopped with ${result.stopReason} while a request of the session has an unknown outcome`,
-          writeError === undefined ? result.stopReason : new AggregateError([result.stopReason, writeError], 'the stop and the refused write'),
-        )
-      }
-      if (result.stopReason === 'error' || result.stopReason === 'aborted') {
-        throw new OrchestrationError(
-          `Autonomous root turn stopped with ${result.stopReason}`,
-          'ORCHESTRATION_UNAVAILABLE',
-        )
-      }
-      // `max-tokens` and `refusal` keep their stop reason and partial output instead of starting another round.
-      if (!rlmResultSucceeded(result)) return result
-      const endConditionEvidence = policy.endCondition === undefined
-        ? undefined
-        : await this.autonomousEndConditionEvidence(spec, sessionId, result)
-      const decision = await nextAutonomousDecision(
-        policy,
-        accounted,
-        plan.executionWorkspace.path,
-        signal,
-        new Date(),
-        endConditionEvidence,
-        this.options.autonomousEndConditionEvaluators,
-      )
-      this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, decision.state)
-      if (decision.action === 'complete') {
-        this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.stopped', {
-          runtimeSessionId: String(sessionId), reason: decision.reason,
-          continuationsUsed: decision.state.continuationsUsed,
-          turnsUsed: decision.state.turnsUsed,
-          tokensUsed: decision.state.tokensUsed,
-          gateAttempts: decision.state.gateAttempts,
-        }, record.snapshot.nodes.find(value => value.id === spec.id))])
-        if (decision.reason === 'gate_passed' || decision.reason === 'end_condition_passed') return result
-        throw new OrchestrationError(
-          decision.reason === 'gate_retry_exhausted'
-            ? 'Autonomous quality-gate retry budget was exhausted without terminal evidence'
-            : `Autonomous Mode stopped at ${decision.reason} without a passing quality gate`,
-          decision.reason === 'gate_retry_exhausted'
-            ? 'AUTONOMOUS_GATE_RETRY_EXHAUSTED'
-            : 'AUTONOMOUS_LIMIT_REACHED',
-        )
-      }
-      if (bindings.dispatchContinuation === undefined) {
-        throw new OrchestrationError('RLM host cannot dispatch an Autonomous continuation', 'ORCHESTRATION_UNAVAILABLE')
-      }
-      commandId = `${String(sessionId)}:autonomous-continuation:${String(decision.state.continuationsUsed)}`
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.continuation.requested', {
-        runtimeSessionId: String(sessionId), commandId, reason: decision.reason,
-        continuationsUsed: decision.state.continuationsUsed,
-        promptPreview: decision.prompt.slice(0, 2_000),
-      }, record.snapshot.nodes.find(value => value.id === spec.id))])
-      const runtime = await this.ctx.rlmRuntime.inspect(sessionId)
-      const execution = await bindings.dispatchContinuation({
-        sessionId,
-        commandId: RlmCommandId(commandId),
-        instruction: decision.prompt,
-        source: 'autonomous',
-        deliveryMode: 'follow_up',
-        model: runtime.model,
-        executionOptions: runtime.executionOptions ?? { version: 1 },
-      })
-      await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
-      const continuation = await execution.result
-      if (continuation.status === 'indeterminate' && !abortedWithTheRun(signal) && this.holdsUnknownRequest(commandId)) {
-        throw new UnknownPhysicalOutcomeError(continuation.error ?? 'Autonomous continuation has a request of unknown outcome', continuation)
-      }
-      if (continuation.status !== 'settled') {
-        throw Object.assign(new Error(continuation.error ?? `Autonomous continuation became ${continuation.status}`), {
-          code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
-        })
-      }
-      result = {
-        output: [...(continuation.output ?? [])],
-        stopReason: 'completed',
-        ...continuation.usage === undefined ? {} : { usage: {
-          inputTokens: continuation.usage.inputTokens ?? 0,
-          outputTokens: continuation.usage.outputTokens ?? 0,
-          cacheReadInputTokens: continuation.usage.cacheReadInputTokens ?? 0,
-          cacheWriteInputTokens: continuation.usage.cacheWriteInputTokens ?? 0,
-          ...continuation.usage.costUsd === undefined ? {} : { costUsd: continuation.usage.costUsd },
-        } },
-      }
-      const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-      result = { ...result, ...rlmContinuationResult(drained.lastContinuation, result) }
-    }
-  }
-
-  /**
-   * Project only host-observable terminal evidence into one Autonomous round.
-   * Missing named artifacts and human review remain unknown; they never become
-   * apparent success merely because the native model said it was finished.
-   */
-  private async autonomousEndConditionEvidence(
-    spec: OrchestrationNodeSpecV1,
-    sessionId: RlmRuntimeSessionId,
-    result: PhysicalOperatorResult,
-  ): Promise<AutonomousEndConditionEvidenceV1> {
-    const messages = []
-    for (;;) {
-      const page = await this.ctx.rlmRuntime.readMessages({ sessionId, after: messages.length, limit: 500 })
-      messages.push(...page)
-      if (page.length < 500) break
-    }
-    const reportedArtifacts = new Set(messages.flatMap(message => message.artifactRefs ?? []))
-    const requiredArtifacts = spec.requiredArtifacts
-      ?? spec.acceptance.filter(value => value.kind === 'artifact-present').map(value => value.id)
-    const artifacts = Object.fromEntries(requiredArtifacts.map(artifact => [
-      artifact,
-      reportedArtifacts.has(artifact) ? 'pass' as const : 'unknown' as const,
-    ]))
-    const acceptance = Object.fromEntries(spec.acceptance.map((requirement) => {
-      if (requirement.kind === 'operator-completed') {
-        return [requirement.id, result.stopReason === 'completed' ? 'pass' as const : 'fail' as const]
-      }
-      if (requirement.kind === 'artifact-present') {
-        return [requirement.id, artifacts[requirement.id] ?? 'unknown' as const]
-      }
-      return [requirement.id, 'unknown' as const]
-    }))
-    return { acceptance, artifacts }
-  }
-
-  private async continueActiveRlmGoal(
-    sessionId: RlmRuntimeSessionId,
-    bindings: RlmRuntimeHostBindings,
-    initial: PhysicalOperatorResult,
-    signal: AbortSignal,
-    timeoutMs?: number,
-  ): Promise<PhysicalOperatorResult> {
-    let result = initial
-    for (;;) {
-      // A turn that did not succeed ends the execution as it is; the goal stays active for an explicit decision.
-      if (!rlmResultSucceeded(result)) return result
-      const snapshot = await this.ctx.rlmRuntime.inspect(sessionId)
-      const goal = snapshot.goal
-      if (goal === undefined || goal.status !== 'active') return result
-      const commandId = RlmCommandId(`${String(sessionId)}:goal-continuation:${String(goal.continuationsUsed + 1)}`)
-      const claim = await this.ctx.rlmRuntime.claimGoalContinuation(sessionId, commandId)
-      if (claim === undefined) return result
-      if (bindings.dispatchContinuation === undefined) throw new OrchestrationError('RLM host cannot continue an active goal', 'ORCHESTRATION_UNAVAILABLE')
-      const execution = await bindings.dispatchContinuation({
-        sessionId,
-        commandId: claim.commandId,
-        instruction: claim.objective,
-        source: 'goal',
-        deliveryMode: 'follow_up',
-        model: snapshot.model,
-        executionOptions: snapshot.executionOptions ?? { version: 1 },
-      })
-      await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
-      const continuation = await execution.result
-      if (continuation.status === 'indeterminate' && !abortedWithTheRun(signal) && this.holdsUnknownRequest(String(claim.commandId))) {
-        throw new UnknownPhysicalOutcomeError(continuation.error ?? 'RLM goal continuation has a request of unknown outcome', continuation)
-      }
-      if (continuation.status !== 'settled') {
-        throw Object.assign(new Error(continuation.error ?? `RLM goal continuation became ${continuation.status}`), {
-          code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
-        })
-      }
-      if (continuation.output !== undefined) result = { output: [...continuation.output], stopReason: 'completed' }
-      const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(timeoutMs ?? 120_000, 300_000))
-      result = rlmContinuationResult(drained.lastContinuation, result)
-    }
-  }
-
-  private async accountRlmGoalUsage(
-    record: RuntimeRunRecord,
-    plan: NodeExecutionPlanV1,
-    source: 'root' | 'child' | 'goal-continuation' | 'autonomous-continuation' | 'continuation',
-    sourceCommandId: string,
-    result: RlmUsageResult,
-    attribution: {
-      readonly operatorId: string
-      readonly model: string
-      readonly authMode: 'api' | 'subscription'
-    } = {
-      operatorId: plan.allocationPlan.operatorId,
-      model: plan.allocationPlan.model,
-      authMode: rlmAuthMode(plan.allocationPlan.source, plan.allocationPlan.operatorId),
-    },
-  ): Promise<void> {
-    const usage = rlmUsage(result)
-    if (usage === undefined) return
-    const sessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
-    this.store.appendEvents([event(record.snapshot.runId, 'rlm.usage', {
-      runtimeSessionId: String(sessionId),
-      source,
-      sourceCommandId,
-      ...attribution,
-      stopReason: result.stopReason,
-      ...usage,
-    }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
-    const queueKey = String(sessionId)
-    const previous = this.rlmGoalUsageQueues.get(queueKey) ?? Promise.resolve()
-    const queued = previous.catch(() => undefined).then(async () => {
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        const snapshot = await this.ctx.rlmRuntime.inspect(sessionId)
-        if (snapshot.goal?.active !== true) return
-        try {
-          const goal = await this.ctx.rlmRuntime.accountGoalUsage({
-            sessionId,
-            commandId: RlmCommandId(`${sourceCommandId}:goal-usage`),
-            expectedStateRevision: snapshot.stateRevision,
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cacheReadInputTokens: usage.cacheReadInputTokens,
-            cacheWriteInputTokens: usage.cacheWriteInputTokens,
-          })
-          this.store.appendEvents([event(record.snapshot.runId, 'rlm.goal.usage', {
-            runtimeSessionId: String(sessionId),
-            source,
-            sourceCommandId,
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cacheReadInputTokens: usage.cacheReadInputTokens,
-            cacheWriteInputTokens: usage.cacheWriteInputTokens,
-            tokensUsed: goal.tokensUsed,
-            status: goal.status,
-          }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
-          return
-        } catch (error) {
-          if (!(error instanceof Error) || !('code' in error) || error.code !== 'RLM_REVISION_CONFLICT') throw error
-        }
-      }
-      throw new OrchestrationError(
-        `RLM Goal usage revision did not converge for ${sourceCommandId}`,
-        'ORCHESTRATION_UNAVAILABLE',
-      )
-    })
-    this.rlmGoalUsageQueues.set(queueKey, queued)
-    try {
-      await queued
-    } finally {
-      if (this.rlmGoalUsageQueues.get(queueKey) === queued) this.rlmGoalUsageQueues.delete(queueKey)
-    }
-  }
 
   private async startResidentTurn(
     record: RuntimeRunRecord,
@@ -4711,80 +3645,14 @@ export class OrchestrationDaemon {
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): Promise<void> {
-    return this.dispatchRlmAttempt(record, spec, plan, 'model-worker-prime-rlm', (controller, physicalRuns) => (
-      this.executeModelWorkerRlm(
-        record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
-      )
-    ))
+    return this.dispatchRlmAttempt(record, spec, plan, 'model-worker-prime-rlm', async (controller, physicalRuns) => {
+      if (plan.rlmPlan?.enabled !== true) throw new OrchestrationError('model-worker RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
+      const managedSkills = this.sealedManagedSkills(plan, harnessSnapshot)
+      const { context, bindings } = this.rlmHostBindings(record, spec, plan, controller, physicalRuns, managedSkills)
+      return this.rlmExecutionCore.executeModelWorkerRlm(context, bindings, managedSkills, contextPacket, capabilityPlan, harnessSnapshot)
+    })
   }
 
-  private async executeModelWorkerRlm(
-    record: RuntimeRunRecord,
-    spec: OrchestrationNodeSpecV1,
-    plan: NodeExecutionPlanV1,
-    contextPacket: ContextPacketV1,
-    capabilityPlan: CapabilityBindingPlanV1,
-    harnessSnapshot: ContinualHarnessSnapshotV1 | undefined,
-    controller: AbortController,
-    physicalRuns: PhysicalOperatorRun[],
-  ): Promise<PhysicalOperatorResult> {
-    // The model-worker transport shares the sealed RLM lifecycle but retains a
-    // distinct execution call and native identity from Resident providers.
-    /* jscpd:ignore-start */
-    const prepared = await this.prepareRlmExecution(
-      record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns, 'model-worker',
-    )
-    const { rlmPlan, rootSessionId, bridge, rootPrompt } = prepared
-    /* jscpd:ignore-end */
-    try {
-      const rootEnvelope = taskGraphContextEnvelope(plan, rootPrompt)
-      const rootCommandId = `${String(plan.executionId)}:rlm:root`
-      this.recordContextEnvelope(
-        record,
-        spec,
-        plan,
-        rootCommandId,
-        rootEnvelope,
-        receiveOperatorContextEnvelope(rootEnvelope, `model-worker:${plan.operatorPlan.operatorId}`, 'text'),
-      )
-      const rootExecution = this.executeModelWorker({
-        commandId: rootCommandId,
-        workerId: plan.operatorPlan.operatorId,
-        model: plan.allocationPlan.model,
-        prompt: modelWorkerEnvelopePrompt(rootEnvelope),
-        parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
-        rlmPlan,
-        modelToolBridge: bridge,
-        signal: controller.signal,
-      }, { record, plan })
-      await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
-        nativeSessionId: `model-worker:${plan.operatorPlan.operatorId}:${String(rootSessionId)}`,
-        nativeTurnId: `model-worker-turn:${String(plan.executionId)}:rlm:root`,
-        result: rootExecution.then(
-          value => asRlmExecutionResult({ output: [...value.output], stopReason: value.stopReason }),
-          (error: unknown) => ({
-            status: controller.signal.aborted || error instanceof UnknownPhysicalOutcomeError ? 'indeterminate' as const : 'failed' as const,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        ),
-        interrupt: (): Promise<void> => { controller.abort(new RootInterruptedError()); return Promise.resolve() },
-      })
-      const rootResult = await rootExecution
-      await this.accountRlmGoalUsage(
-        record,
-        plan,
-        'root',
-        rootCommandId,
-        rootResult,
-      )
-      return await this.settleRlmExecution(record, spec, plan, prepared, {
-        output: [...rootResult.output], stopReason: rootResult.stopReason,
-        ...rootResult.usage === undefined ? {} : { usage: rootResult.usage },
-      })
-    } catch (error) {
-      throw this.reportRlmFailure(record, plan, prepared, error)
-    }
-  }
 
   private async dispatchModelWorker(
     record: RuntimeRunRecord,

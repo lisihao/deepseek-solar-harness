@@ -1,14 +1,394 @@
-/** What an RLM execution ends in after its last continuation, and the prompt of each continuation. */
+/**
+ * What an RLM execution ends in after its last continuation, and the prompt of each continuation; the pure helpers that build an
+ * RLM or TaskGraph node's prompt and context envelope and project its usage and attempt-abort reasons; and the one error type
+ * the daemon's `executeModelWorker` and the RLM execution core (`rlm-execution-core.ts`) both construct and check with
+ * `instanceof`. This file has no dependency on either of them, so both import from here instead of from each other.
+ */
 import { OrchestrationError } from '@deepseek-ai/dsh-orchestration'
-import type { PhysicalOperatorResult } from '@deepseek-ai/dsh-physical-operator'
+import type { ModelAllocationPlan } from '@deepseek-ai/dsh-model-allocation'
+import type { ContentBlock, ContextSnapshotSection, ResolvedRetryPolicy, TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { PhysicalOperatorModelToolBridgeV1, PhysicalOperatorResult, PhysicalOperatorUsage } from '@deepseek-ai/dsh-physical-operator'
+import type { ContextPacketV1 } from '@deepseek-ai/dsh-context-compiler'
+import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
+import type { ContinualHarnessSnapshotV1 } from '@deepseek-ai/dsh-continual-harness'
+import {
+  buildOperatorContextEnvelope,
+  renderOperatorContextEnvelopeText,
+  type OperatorContextEnvelopeV1,
+} from '@deepseek-ai/dsh-system-prompt'
+import { renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
+import type { TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { NodeExecutionPlanV1, OrchestrationNodeSpecV1 } from '@deepseek-ai/dsh-orchestration'
+import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
+import { operatorOutputPreview } from './output-preview.ts'
 import {
   RlmRuntimeError,
+  type RlmChildExecutionOptionsV1,
   type RlmChildExecutionResult,
+  type RlmChildModelPolicyV1,
   type RlmChildResultContentV1,
   type RlmFamilyRosterV1,
+  type RlmJsonValue,
   type RlmRuntimeSessionSnapshotV1,
   type RlmStopReason,
 } from '@deepseek-ai/dsh-rlm-runtime'
+
+/**
+ * The reason with which an attempt is aborted while its run keeps running, so that such an abort can be told from the run's
+ * cancellation. Aborting with any other reason (a cancellation of the run, a shutdown, an interrupt of a child) is not one of these.
+ */
+export class AttemptAbortReason extends Error {}
+
+/** The runtime interrupted the root session of the attempt; the run is not cancelled and the node may be run again. */
+export class RootInterruptedError extends AttemptAbortReason {
+  constructor() {
+    super('the root session of the attempt was interrupted')
+    this.name = 'RootInterruptedError'
+  }
+}
+
+/**
+ * Whether the work was stopped together with its run: aborted for a reason other than the attempt's deadline or an interrupt of
+ * its root session, which leave the run running. A request that such an abort interrupted may still be in doubt, and the node
+ * would be run again, so it is not a cancellation.
+ * @param signal - the signal the work ran under.
+ * @returns `true` when the signal was aborted together with the run (or by an interrupt of one execution below the root).
+ */
+export function abortedWithTheRun(signal: AbortSignal): boolean {
+  return signal.aborted && !(signal.reason instanceof AttemptAbortReason)
+}
+
+/**
+ * A model-worker command that failed under an evaluation scope after sending a physical request whose usage the ledger does not
+ * hold. The request may have been processed and billed, so the command is an unknown outcome and must not be retried as an
+ * ordinary failure. Created only under a scope, by the daemon's `executeModelWorker` and by the RLM execution core.
+ */
+export class UnknownPhysicalOutcomeError extends OrchestrationError {
+  /** The failure of the command, and, if the store refused the metering event, that refusal as well. */
+  override readonly cause: unknown
+
+  constructor(message: string, cause: unknown) {
+    super(message, 'COMMAND_INDETERMINATE')
+    this.name = 'UnknownPhysicalOutcomeError'
+    this.cause = cause
+  }
+}
+
+function isPhysicalOperatorUsage(
+  usage: PhysicalOperatorUsage | TokenUsage,
+): usage is PhysicalOperatorUsage {
+  return 'cacheReadInputTokens' in usage || 'cacheWriteInputTokens' in usage
+}
+
+function rlmAuthMode(
+  source: 'native-subscription' | 'metered-api' | undefined,
+  operatorId: string,
+): 'api' | 'subscription' {
+  if (source !== undefined) return source === 'metered-api' ? 'api' : 'subscription'
+  return operatorId.startsWith('deepseek') ? 'api' : 'subscription'
+}
+
+/** The usage-bearing fields of either a Resident `PhysicalOperatorResult` or an API `ModelWorkerResult`. */
+export type RlmUsageResult = Pick<PhysicalOperatorResult, 'stopReason' | 'usage'>
+  | { readonly stopReason: string; readonly usage?: PhysicalOperatorUsage | TokenUsage }
+
+/**
+ * The usage of one RLM turn or command, normalized to one shape regardless of whether it came from a Resident
+ * `PhysicalOperatorResult` or an API `ModelWorkerResult`.
+ * @param result - the turn or command's result.
+ * @returns `undefined` when the result carries no usage.
+ */
+export function rlmUsage(result: RlmUsageResult): {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens: number
+  readonly cacheWriteInputTokens: number
+  readonly costUsd?: number
+} | undefined {
+  const usage = result.usage
+  if (usage === undefined) return undefined
+  const physical = isPhysicalOperatorUsage(usage)
+  const cacheReadInputTokens = physical ? usage.cacheReadInputTokens ?? 0 : usage.cacheReadTokens ?? 0
+  const cacheWriteInputTokens = physical ? usage.cacheWriteInputTokens ?? 0 : usage.cacheWriteTokens ?? 0
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadInputTokens,
+    cacheWriteInputTokens,
+    ...physical && usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {},
+  }
+}
+
+/**
+ * The usage of one RLM child or continuation turn, attributed to the operator and model it actually ran on, in the shape an
+ * {@link RlmChildExecutionResult} carries it.
+ * @param result - the turn's result.
+ * @param model - the operator, model and recorded source the turn actually ran with.
+ * @returns `undefined` when the result carries no usage.
+ */
+export function rlmAttributedUsage(
+  result: RlmUsageResult,
+  model: {
+    readonly operatorId: string
+    readonly model: string
+    readonly source?: 'native-subscription' | 'metered-api'
+  },
+): RlmChildExecutionResult['usage'] {
+  const usage = rlmUsage(result)
+  if (usage === undefined) return undefined
+  return {
+    provider: model.operatorId,
+    model: model.model,
+    authMode: rlmAuthMode(model.source, model.operatorId),
+    ...usage,
+  }
+}
+
+/**
+ * Which model policy a sealed RLM plan's fidelity implies for a child that does not pick a model explicitly.
+ * @param plan - the sealed RLM execution plan.
+ * @returns `'parent-inherit'` for Prime Strict, `'allocator-default'` for the DSH-optimized fidelity.
+ * @throws OrchestrationError `GRAPH_INVALID` for a fidelity this build does not know.
+ */
+export function rlmChildModelPolicy(plan: RlmExecutionPlanV1): RlmChildModelPolicyV1 {
+  if (plan.fidelity === 'prime-strict') return 'parent-inherit'
+  if (plan.fidelity === 'dsh-optimized') return 'allocator-default'
+  throw new OrchestrationError(`enabled RLM plan has unsupported fidelity: ${plan.fidelity}`, 'GRAPH_INVALID')
+}
+
+/**
+ * The retry policy an RLM root or child session records, derived from its node's sealed retry policy.
+ * @param spec - the sealed node spec.
+ * @returns the resolved retry policy.
+ */
+export function rlmChildRetryPolicy(spec: OrchestrationNodeSpecV1): ResolvedRetryPolicy {
+  return {
+    mode: 'normal',
+    maxRetries: Math.max(0, spec.retryPolicy.maxAttempts - 1),
+    retryableCodes: [...spec.retryPolicy.retryableCodes],
+    initialDelayMs: spec.retryPolicy.backoffMs,
+    maxDelayMs: spec.retryPolicy.backoffMs,
+    jitterRatio: 0,
+  }
+}
+
+/**
+ * A JSON-safe projection of an RLM session's execution options, for the event that records it.
+ * @param options - the session's execution options.
+ * @returns the JSON-safe projection.
+ */
+export function rlmExecutionOptionsSummary(options: RlmChildExecutionOptionsV1): RlmJsonValue {
+  return {
+    toolNames: (options.tools ?? []).map(tool => tool.name),
+    skillAliases: (options.skills ?? []).map(skill => skill.alias),
+    retryPolicy: options.retryPolicy === undefined
+      ? null
+      : options.retryPolicy.mode === 'normal'
+        ? {
+          mode: options.retryPolicy.mode,
+          maxRetries: options.retryPolicy.maxRetries,
+          retryableCodes: [...options.retryPolicy.retryableCodes],
+          initialDelayMs: options.retryPolicy.initialDelayMs,
+          maxDelayMs: options.retryPolicy.maxDelayMs,
+          jitterRatio: options.retryPolicy.jitterRatio,
+        }
+        : {
+          mode: options.retryPolicy.mode,
+          initialDelayMs: options.retryPolicy.initialDelayMs,
+          maxDelayMs: options.retryPolicy.maxDelayMs,
+          jitterRatio: options.retryPolicy.jitterRatio,
+        },
+  }
+}
+
+/**
+ * Reject a model-tool bridge that offers a tool the sealed RLM execution options did not seal in.
+ * @param options - the sealed execution options the turn was given.
+ * @param bridge - the model-tool bridge the turn's provider actually offered.
+ * @throws OrchestrationError `GRAPH_INVALID` when the bridge offers an unsealed tool.
+ */
+export function assertRlmBridgeAllowed(
+  options: RlmChildExecutionOptionsV1,
+  bridge: PhysicalOperatorModelToolBridgeV1,
+): void {
+  const allowedTools = new Set((options.tools ?? []).map(tool => tool.name))
+  const unsealedTool = bridge.tools.find(tool => !allowedTools.has(tool.name))
+  if (unsealedTool !== undefined) {
+    throw new OrchestrationError(
+      `RLM model-tool bridge requested unsealed parent tool: ${unsealedTool.name}`,
+      'GRAPH_INVALID',
+    )
+  }
+}
+
+/**
+ * The Prime Agent operator-protocol projection of one native RLM turn's `PhysicalOperatorResult`.
+ * @param result - the turn's result as the physical operator reported it.
+ * @returns the settled or failed `RlmChildExecutionResult` the RLM runtime records for the turn.
+ */
+export function asRlmExecutionResult(result: PhysicalOperatorResult): RlmChildExecutionResult {
+  const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
+  return {
+    status,
+    stopReason: result.stopReason,
+    output: result.output,
+    outputPreview: operatorOutputPreview(result.output).outputPreview,
+    ...status === 'failed' ? { error: `native execution stopped with ${result.stopReason}` } : {},
+  }
+}
+
+/**
+ * The additional instruction appended to an RLM root's prompt describing the programmable runtime it runs under.
+ * @param base - the node's own prompt, before this instruction is appended.
+ * @param rlmPlan - the sealed RLM execution plan, for its fidelity.
+ * @param defaultChild - the sealed default child allocation, when the plan has one.
+ * @returns the root's complete prompt content blocks.
+ */
+export function primeRlmRootPrompt(
+  base: readonly ContentBlock[],
+  rlmPlan: RlmExecutionPlanV1,
+  defaultChild?: ModelAllocationPlan,
+): ContentBlock[] {
+  return [
+    ...base,
+    {
+      type: 'text',
+      text: [
+        'This attempt uses the Prime Agent compatible programmable RLM runtime.',
+        'Use the native typescript_repl tool as the only programming and delegation surface.',
+        'The persistent namespace exposes context, rlm(task, options), rlm.listSubagents(), rlm.deleteSubagent(), agentMessage.send(), agentMessage.read(), harness, goal, and compact().',
+        'rlm(...) returns an admission handle immediately, never the child answer. Children deliver answers only by explicit agentMessage.send(...) or artifact references.',
+        'You decide the recursive topology dynamically within the sealed depth, child, and turn budgets. Do not ask the Scheduler to manufacture fixed branches.',
+        defaultChild === undefined
+          ? rlmPlan.fidelity === 'prime-strict'
+            ? 'Prime Strict is active: when rlm() omits overrides, every child inherits this parent model, reasoning profile, tools, managed skills, retry policy and sealed capability context. Unsupported rlm() option names fail instead of being ignored.'
+            : 'Use lower-cost children for bounded exploration and retain this root model for planning, verification, and final synthesis when that improves the result.'
+          : `When rlm() omits a model, the sealed default child is ${defaultChild.operatorId}/${defaultChild.model} (${defaultChild.tier}, ${defaultChild.source}). Use an explicit model only when the task genuinely requires an override.`,
+        'Before finishing, read pending family messages, verify coverage against the original task, and return one complete final answer.',
+      ].join('\n'),
+    },
+  ]
+}
+
+/**
+ * A fake Agent carrying only the workspace and run identity a Prime RLM dispatch needs to pass as `parent`.
+ * @param workspace - the execution workspace path.
+ * @param runId - the run identity to embed in the fake session id.
+ * @returns the fake Agent.
+ */
+export function fakeParent(workspace: string, runId: string): Agent {
+  return {
+    id: SessionId(`orchestration-${runId}`),
+    session: { header: { cwd: workspace } },
+  } as unknown as Agent
+}
+
+/** Project the selected task-template content as one named context field. */
+function taskTemplateContexts(selection: TaskTemplateSelection | undefined): ContextSnapshotSection[] {
+  return selection?.decision === 'inject'
+    ? [{
+      name: `task-template:${String(selection.selected?.id ?? 'unknown')}`,
+      text: renderTaskTemplateInjection(selection),
+    }]
+    : []
+}
+
+const TASKGRAPH_SYSTEM_TEXT = 'You are a DSH TaskGraph worker. Execute only the sealed current node and preserve its declared authority and acceptance rules.'
+
+/**
+ * Build the exact current-node handoff, excluding every unrelated node or conversation turn.
+ * @param plan - the sealed node execution plan.
+ * @param prompt - the node's prompt content blocks.
+ * @returns the operator context envelope.
+ */
+export function taskGraphContextEnvelope(
+  plan: NodeExecutionPlanV1,
+  prompt: readonly ContentBlock[],
+): OperatorContextEnvelopeV1 {
+  return buildOperatorContextEnvelope({
+    systemText: TASKGRAPH_SYSTEM_TEXT,
+    task: prompt,
+    contexts: [
+      ...(plan.runtimeContext?.sections ?? []),
+      ...taskTemplateContexts(plan.taskTemplate),
+    ],
+    source: {
+      kind: 'taskgraph',
+      runId: String(plan.runId),
+      nodeId: plan.nodeId,
+      contextPacketRef: String(plan.contextPacketRef),
+    },
+  })
+}
+
+/**
+ * The prompt an operator context envelope renders as, for a transport (the API worker) that takes plain content blocks.
+ * @param envelope - the built operator context envelope.
+ * @returns the envelope's text, as one text content block.
+ */
+export function modelWorkerEnvelopePrompt(envelope: OperatorContextEnvelopeV1): ContentBlock[] {
+  return [{ type: 'text', text: renderOperatorContextEnvelopeText(envelope) }]
+}
+
+/**
+ * Build the prompt a TaskGraph node's executor receives: the task, capability instructions, upstream Evidence and Harness state.
+ * @param node - the sealed node spec.
+ * @param context - the compiled context packet.
+ * @param capabilities - the sealed capability binding plan.
+ * @param harness - the Continuous Harness snapshot, when one applies.
+ * @param rlm - the sealed RLM execution plan, when the node is RLM-enabled.
+ * @returns the node's prompt, as one text content block.
+ */
+export function promptFromPlan(
+  node: OrchestrationNodeSpecV1,
+  context: ContextPacketV1,
+  capabilities: CapabilityBindingPlanV1,
+  harness?: ContinualHarnessSnapshotV1,
+  rlm?: RlmExecutionPlanV1,
+): ContentBlock[] {
+  const instructions = capabilities.instructions.map(value => `- ${value.text}`).join('\n')
+  const upstream = context.included.filter(value => value.kind === 'artifact').map(value => `- ${value.ref}`).join('\n')
+  const upstreamMaterials = context.sourceMaterials.map(value => (
+    `Evidence ${value.ref}${value.truncated ? ' (bounded preview)' : ''}:\n${value.text}`
+  )).join('\n\n')
+  const legacyHarnessEntries = harness?.entries.map(value => `- [${value.kind}] ${value.text} (Evidence: ${value.evidenceRefs.join(', ') || 'none'})`) ?? []
+  const managedHarnessEntries = harness?.managedEntries.map(value => [
+    `- [${value.kind}] ${value.title}: ${value.content}`,
+    ...value.reference === undefined ? [] : [`  reference=${JSON.stringify(value.reference)}`],
+    ...value.arguments === undefined ? [] : [`  arguments=${JSON.stringify(value.arguments)}`],
+  ].join('\n')) ?? []
+  const harnessEntries = [...managedHarnessEntries, ...legacyHarnessEntries].join('\n')
+  return [{
+    type: 'text',
+    text: [
+      `TaskGraph node ${node.id}: ${node.title}`,
+      '',
+      context.task,
+      '',
+      `Sender workspace: ${context.workspace}`,
+      'Use the executor current working directory for filesystem operations. A remote executor materializes the same repository and commit at its own path; the sender workspace is not a directory on that host. Resolve the listed relative scopes against the executor working directory.',
+      `Read scopes: ${node.readScopes.join(', ') || 'none'}`,
+      `Write scopes: ${node.writeScopes.join(', ') || 'none'}`,
+      `Acceptance: ${node.acceptance.map(value => value.description).join('; ') || 'operator completion'}`,
+      ...(instructions.length === 0 ? [] : ['', 'Capability instructions:', instructions]),
+      ...(upstream.length === 0 ? [] : ['', 'Upstream artifact references:', upstream]),
+      ...(upstreamMaterials.length === 0 ? [] : ['', 'Upstream Evidence contents:', upstreamMaterials]),
+      ...(harnessEntries.length === 0 ? [] : ['', `Continuous Harness generation ${String(harness?.generation ?? 0)}:`, harnessEntries]),
+      ...(rlm?.enabled === true ? [
+        '',
+        'RLM execution strategy:',
+        `- Strategy: ${rlm.strategyId}@${rlm.strategyVersion}.`,
+        `- ${rlm.instruction}`,
+        `- Sealed RLM plan: ${rlm.planSha256}; reason: ${rlm.reason}.`,
+        '- DSH remains the only global TaskGraph Scheduler and acceptance authority.',
+      ] : []),
+      '',
+      'Return a concise result. Do not expand authority beyond the listed scopes and effects.',
+    ].join('\n'),
+  }]
+}
 
 /**
  * The operator result an RLM execution ends in after its last continuation. A continuation that did not settle keeps

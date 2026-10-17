@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Context } from '@deepseek-ai/cordis'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import { gouziRequestHash } from '@deepseek-ai/dsh-client-connection'
 import {
@@ -1613,6 +1614,171 @@ describe('orchestration daemon', () => {
     expect(secondFake.requests).toHaveLength(0)
   })
 
+  // Slice B baseline: the same FakeResidentClient instance is reused across the restart, so its turn table survives, unlike the
+  // previous case. Rerun unchanged after the extraction to show it did not change this path.
+  it('[slice B baseline] reattaches a Resident RLM root to its real turn after restart, settles it once, and starts no second execution', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-reattach-'))
+    cleanup.push(async () => { await rm(home, { recursive: true, force: true }) })
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    fake.defer = true
+    const first = createDaemon(root, home, fake, 10)
+    cleanup.push(async () => { await first.close() })
+    await first.start()
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...rlmNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Persist bounded recursion across a daemon restart.' },
+      graph: { ...fixture, nodes: [{ ...rlmNode, role: 'recursive synthesis', task: 'Recursively synthesize alternatives.' }] },
+    })
+    const run = await startCompilation(client, compilation.compilationId)
+    await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running' && fake.requests.length === 1)
+    const commandId = fake.requests[0]?.commandId
+    const turnId = `turn:${String(commandId)}`
+
+    const attemptBeforeRestart = await eventually(async () => {
+      const beforeRestart = new OrchestrationStore(root)
+      try {
+        return beforeRestart.attempts().find(value => value.runId === String(run.runId))
+      } finally {
+        beforeRestart.close()
+      }
+    }, value => value?.state === 'running' && value.turnId !== undefined)
+    expect(attemptBeforeRestart).toMatchObject({ state: 'running', turnId })
+    await first.close()
+
+    // Same fake instance: its turn table (and only its turn table) survives, as the Resident daemon's own would.
+    const inspectTurnSpy = vi.spyOn(fake, 'inspectTurn')
+    const second = createDaemon(root, home, fake, 10)
+    cleanup.push(async () => { await second.close() })
+    await second.start()
+    const recoveredClient = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    // Confirm the recovered daemon actually queried this turn's real identity (not merely that the fake's Map still has it)
+    // before letting it settle, so the assertions below exercise the reattach poll loop, not a race that skips it.
+    await eventually(
+      () => Promise.resolve(inspectTurnSpy.mock.calls.some(call => call[0] === turnId)),
+      value => value,
+    )
+    fake.resolveAllDeferred()
+    const recovered = await eventually(
+      () => recoveredClient.inspect(String(run.runId)),
+      value => value.nodes[0]?.state !== 'running' && value.nodes[0]?.state !== 'pending',
+    )
+
+    expect(recovered.nodes[0]).toMatchObject({ state: 'passed' })
+    // No second native execution: the reattach polled the existing turn to its already-recorded result; it did not start another.
+    expect(fake.requests).toHaveLength(1)
+    expect(fake.starts).toEqual([`${String(fake.requests[0]?.operatorId)}:${String(commandId)}`])
+    const afterRestart = new OrchestrationStore(root)
+    try {
+      expect(afterRestart.attempts().filter(value => value.runId === String(run.runId))).toHaveLength(1)
+      const attemptAfterRestart = afterRestart.attempts().find(value => value.runId === String(run.runId))
+      expect(attemptAfterRestart).toMatchObject({ state: 'settled', turnId, executionId: attemptBeforeRestart?.executionId })
+    } finally {
+      afterRestart.close()
+    }
+    const events = (await recoveredClient.readEvents({ runId: run.runId, limit: 200 })).events
+    expect(events.some(value => value.type === 'rlm.execution.settled')).toBe(false)
+    expect(events.some(value => value.type === 'rlm.usage')).toBe(false)
+  })
+
+  it('fails the attempt and clears its progress tracking when the Resident RLM root dispatch throws synchronously before any native turn', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-sync-throw-resident-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const internals = daemon as unknown as {
+      sealedManagedSkills: (plan: unknown, fallback?: unknown) => unknown
+      rlmProgressSources: Map<string, unknown[]>
+    }
+    const originalSealedManagedSkills = internals.sealedManagedSkills.bind(daemon)
+    let calls = 0
+    let keyAtCallTime: string | undefined
+    internals.sealedManagedSkills = () => {
+      calls += 1
+      // The attempt's progress-tracking key is registered by dispatchRlmAttempt before this throws; captured here, not assumed.
+      keyAtCallTime = [...internals.rlmProgressSources.keys()][0]
+      throw new Error('synthetic sealed-skills failure')
+    }
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...rlmNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Exercise a synchronous Resident RLM dispatch failure.' },
+      graph: { ...fixture, nodes: [{ ...rlmNode, role: 'recursive synthesis', task: 'Trigger a synchronous sealedManagedSkills throw.' }] },
+    })
+    const run = await startCompilation(client, compilation.compilationId)
+    const failed = await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'failed')
+    internals.sealedManagedSkills = originalSealedManagedSkills
+    expect(calls).toBe(1)
+    expect(failed.nodes[0]?.blockers?.[0]?.message).toContain('synthetic sealed-skills failure')
+    // No Resident native dispatch happened: the throw fired before startResidentTurn could ever be reached.
+    expect(fake.requests).toHaveLength(0)
+    expect(keyAtCallTime).toBeDefined()
+    expect(internals.rlmProgressSources.has(keyAtCallTime!)).toBe(false)
+  })
+
+  it('fails the attempt and clears its progress tracking when the API model-worker RLM root dispatch throws synchronously before any native turn', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-sync-throw-model-worker-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    resident.available = false
+    const worker = new KeylessModelWorker()
+    const daemon = createDaemon(root, home, resident, 10, [worker])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const internals = daemon as unknown as {
+      sealedManagedSkills: (plan: unknown, fallback?: unknown) => unknown
+      rlmProgressSources: Map<string, unknown[]>
+    }
+    const originalSealedManagedSkills = internals.sealedManagedSkills.bind(daemon)
+    let calls = 0
+    let keyAtCallTime: string | undefined
+    internals.sealedManagedSkills = () => {
+      calls += 1
+      keyAtCallTime = [...internals.rlmProgressSources.keys()][0]
+      throw new Error('synthetic sealed-skills failure')
+    }
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const admission = {
+      policy: 'codex' as const,
+      route: 'taskgraph' as const,
+      sourceSessionId: 'sync-throw-model-worker-fixture',
+      rlm: 'enabled' as const,
+      continualHarness: 'off' as const,
+      optimization: 'balanced' as const,
+    }
+    const compilation = await client.compile({
+      intent: { request: 'Exercise a synchronous API model-worker RLM dispatch failure.' },
+      admission,
+      graph: {
+        ...fixture,
+        nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Trigger a synchronous sealedManagedSkills throw.', writeScopes: [] }],
+      },
+    })
+    const run = await startCompilation(client, compilation.compilationId)
+    const failed = await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'failed')
+    internals.sealedManagedSkills = originalSealedManagedSkills
+    expect(calls).toBe(1)
+    expect(failed.nodes[0]?.blockers?.[0]?.message).toContain('synthetic sealed-skills failure')
+    // No API native dispatch happened: the throw fired before executeModelWorker could ever be reached.
+    expect(worker.requests).toHaveLength(0)
+    expect(resident.requests).toHaveLength(0)
+    expect(keyAtCallTime).toBeDefined()
+    expect(internals.rlmProgressSources.has(keyAtCallTime!)).toBe(false)
+  })
+
   it('continues an explicit Prime goal until the model completes it without changing the TaskGraph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-goal-'))
     const root = join(home, 'orchestrations')
@@ -1858,6 +2024,98 @@ describe('orchestration daemon', () => {
         cacheWriteInputTokens: 0,
       },
     })
+  })
+
+  it('keeps usage queues and progress tracking separate for two daemon instances executing the same logical identity', async () => {
+    const firstHome = await mkdtemp(join(tmpdir(), 'dsh-rlm-instance-a-'))
+    cleanup.push(async () => { await rm(firstHome, { recursive: true, force: true }) })
+    const secondHome = await mkdtemp(join(tmpdir(), 'dsh-rlm-instance-b-'))
+    cleanup.push(async () => { await rm(secondHome, { recursive: true, force: true }) })
+    const firstRoot = join(firstHome, 'orchestrations')
+    const secondRoot = join(secondHome, 'orchestrations')
+    const resident = new FakeResidentClient()
+    resident.available = false
+    const firstWorker = new KeylessModelWorker()
+    const secondWorker = new KeylessModelWorker()
+    for (const worker of [firstWorker, secondWorker]) {
+      worker.onExecute = async (request) => {
+        await callRlmTool(request, `${request.commandId}:instance-goal-cell`, request.commandId.endsWith(':rlm:root')
+          ? 'await goal.create("account this instance", { continuationBudget: 1 }); "active"'
+          : 'await goal.complete(); "complete"')
+      }
+    }
+    const first = createDaemon(firstRoot, firstHome, resident, 10, [firstWorker])
+    cleanup.push(async () => { await first.close() })
+    const second = createDaemon(secondRoot, secondHome, resident, 10, [secondWorker])
+    cleanup.push(async () => { await second.close() })
+    type Internals = {
+      store: OrchestrationStore
+      ctx: Context
+      rlmExecutionCore: unknown
+      rlmProgressSources: Map<string, unknown[]>
+      triggerTick(): void
+    }
+    const firstInternals = first as unknown as Internals
+    const secondInternals = second as unknown as Internals
+    const firstTick = vi.spyOn(firstInternals, 'triggerTick').mockImplementation(() => {})
+    const secondTick = vi.spyOn(secondInternals, 'triggerTick').mockImplementation(() => {})
+    await first.start()
+    await second.start()
+    const firstCore = firstInternals.rlmExecutionCore
+    const secondCore = secondInternals.rlmExecutionCore
+    expect(firstCore).toBeDefined()
+    expect(secondCore).not.toBe(firstCore)
+    const firstClient = new OrchestrationDaemonClient({ root: firstRoot, dshHome: firstHome, autoStart: false, connectTimeoutMs: 2_000 })
+    const secondClient = new OrchestrationDaemonClient({ root: secondRoot, dshHome: secondHome, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(firstHome, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const compilation = await firstClient.compile({
+      intent: { request: 'Exercise independent RLM accounting for identical logical identities.' },
+      admission: {
+        policy: 'codex', route: 'taskgraph', sourceSessionId: 'instance-isolation-fixture',
+        rlm: 'enabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: { ...fixture, nodes: [{ ...baseNode, role: 'recursive synthesis', task: 'Account the local instance.', writeScopes: [] }] },
+    })
+    const run = await startCompilation(firstClient, compilation.compilationId)
+    // Copy only this temporary fixture's logical state before either scheduler dispatches. Equal execution ids make a shared
+    // module-level queue observable; independent randomly generated ids would let that defect pass.
+    const replica = firstInternals.store.exportClusterReplica()
+    expect(secondInternals.store.installClusterReplica({ ...replica, commitIndex: replica.commitIndex + 1 })).toBe('applied')
+    const releaseUsage = Promise.withResolvers<undefined>()
+    const runtime = firstInternals.ctx.rlmRuntime
+    const accountUsage = runtime.accountGoalUsage.bind(runtime)
+    const firstAccounting = vi.spyOn(runtime, 'accountGoalUsage').mockImplementation(async (request) => {
+      await releaseUsage.promise
+      return accountUsage(request)
+    })
+    const secondAccounting = vi.spyOn(secondInternals.ctx.rlmRuntime, 'accountGoalUsage')
+    try {
+      firstTick.mockRestore()
+      await eventually(() => Promise.resolve(firstAccounting.mock.calls.length), value => value === 1)
+      expect(firstInternals.rlmProgressSources.size).toBe(1)
+      secondTick.mockRestore()
+      await eventually(() => secondClient.inspect(String(run.runId)), value => value.state === 'completed', 2_000)
+      expect(secondAccounting.mock.calls[0]?.[0].sessionId).toBe(firstAccounting.mock.calls[0]?.[0].sessionId)
+      expect((await firstClient.inspect(String(run.runId))).nodes[0]?.state).toBe('running')
+      expect(firstWorker.requests).toHaveLength(1)
+      expect(firstInternals.rlmProgressSources.size).toBe(1)
+      expect(secondInternals.rlmProgressSources.size).toBe(0)
+      releaseUsage.resolve(undefined)
+      await eventually(() => firstClient.inspect(String(run.runId)), value => value.state === 'completed')
+      for (const client of [firstClient, secondClient]) {
+        const events = (await client.readEvents({ runId: run.runId, limit: 200 })).events
+        expect(events.filter(value => value.type === 'rlm.usage')).toHaveLength(2)
+        expect(events.filter(value => value.type === 'rlm.goal.usage')).toHaveLength(1)
+      }
+      expect(firstInternals.rlmProgressSources.size).toBe(0)
+      expect(firstInternals.rlmExecutionCore).toBe(firstCore)
+      expect(secondInternals.rlmExecutionCore).toBe(secondCore)
+    } finally {
+      releaseUsage.resolve(undefined)
+    }
   })
 
   it('serially accounts keyless DeepSeek root, concurrent child, and active goal-continuation usage', async () => {
