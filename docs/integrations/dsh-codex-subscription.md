@@ -1,8 +1,8 @@
 # DSH Codex Subscription: V4 integration and DSH 3.x migration
 
-Status: design for review, 2026-10-19. 昊哥 reports that the official Codex subagent, official Claude Code subagent, and `dsh-codex-subscription` are already installed and working. The current request authorizes this document and related documentation updates only. It does not authorize installation, configuration changes, implementation, paid probes, GitHub changes, or publication.
+Status: integration design, updated after implementation authorization on 2026-10-19. 昊哥 reports that the official Codex subagent, official Claude Code subagent, and `dsh-codex-subscription` are installed and working. Development of the two Solar plugins is now authorized under the [implementation contract](../native-plugins-contract.md). Existing-app installation, third-party configuration changes, paid probes and publication remain outside this source-development scope.
 
-The migration deliverable is **one independently installable Solar plugin**, provisionally named `@lisihao/dsh-solar-native-collaboration`. It will own the bounded collaboration behavior migrated from DSH 3.x and use the existing providers. It is not an app build, a replacement DSH core, or a copy of the full 3.x execution system. Other unrelated legacy features remain separate candidates.
+The migration delivers **two independently installable Solar plugins**: `@lisihao/dsh-solar-native-collaboration` owns handoff, cooperation and model allocation; `@lisihao/dsh-solar-native-resident` owns native Drivers, persisted sessions/lanes, tool bridging, TaskGraph, scheduling and recovery. Existing subscription/account/main-model functionality remains with the installed third-party plugin. RLM was explicitly excluded and will be a separate task. There is no app build or V4 core package.
 
 ## Starting point and evidence
 
@@ -32,11 +32,11 @@ The report of working software is accepted as user experience evidence. The priv
 
 A model supplied through the subscription adapter can use DSH tools because DSH runs the conversation. A native Codex/Claude child receives a standalone task and runs that product's own execution environment. The migration plugin must keep these identities visible instead of presenting every route as the same kind of Codex execution.
 
-## The migration plugin
+## The migration plugins
 
-### Proposed first slice
+### Collaboration responsibilities
 
-The proposed package `@lisihao/dsh-solar-native-collaboration` carries the useful bounded part of the former physical-operator collaboration layer:
+The package `@lisihao/dsh-solar-native-collaboration` carries the useful bounded part of the former physical-operator collaboration layer:
 
 1. An explicit choice of the available official Codex or Claude Code executor for one task. The current main model remains selected by the user; delegation does not replace it.
 2. A structured handoff containing the task, working directory, allowed scope, expected result, and requested verification. It is presented as the actual delegated text, so the model-visible input remains reconstructable from official tool/session logging.
@@ -44,9 +44,9 @@ The proposed package `@lisihao/dsh-solar-native-collaboration` carries the usefu
 4. A readable task acknowledgement and result linked to the official child identity, showing actual completion, refusal, failure, or cancellation. A returned answer alone does not certify the requested code or tests.
 5. Plugin lifecycle cleanup: remove the plugin's own tool and settings contributions on disable; cancel and await cleanup of its own live activations where required, without stopping unrelated children or unregistering official providers.
 
-The first slice is a design proposal, not a scheduled implementation. D7 remains unchanged. A single model-visible tool, tentatively `solar_delegate`, is sufficient; its final name and UI wording are fixed during implementation review. It must not shadow `subagent_codex`, `subagent_claude_code`, or the standard DSH delegation tools.
+The subsequent authorization extends this design: `solar_delegate` handles single-task handoff, `solar_coordinate` handles graph/model allocation, and the independent Resident bundle exposes `solar_resident`. These names do not shadow official delegation tools. The shared versioned service contract and complete current acceptance boundary are in [native-plugins-contract.md](../native-plugins-contract.md).
 
-The plugin does not create another scheduler, native CLI driver, account vault, daemon, model directory, or full trace database. It uses `ctx.subagents.startActivation()` with the actual parent and parent delivery, then follows that activation's returned result and lifecycle. The public service and existing session records remain the execution authority. After publication, cancelling a published activation requires its disposal path; aborting only a startup request is not proof that the child stopped.
+The collaboration plugin owns no scheduler, native Driver, account vault or daemon. Its single mode uses `ctx.subagents.startActivation()` with the actual parent and parent delivery. Its resident mode uses the optional public Solar Resident service. Only Resident owns durable graph scheduling and native execution state. Cancelling a published official activation uses its disposal path; cancelling durable work requires an explicit graph control, while disposing a Resident client detaches it.
 
 An explicit task directory is not filesystem isolation by itself. Use an already prepared task worktree for conflicting writes, and do not claim that registering a child automatically creates one. Read admission/capacity failures as failures; do not increase parallel limits, change models, or bypass permissions to make dispatch succeed.
 
@@ -88,7 +88,7 @@ Change the **integrated project**, not official Harness:
 
 The public rc.2 web service exposes registration and configured search execution; the inspected interface does not expose a general named-provider lookup or execution API. A router selected as the active provider cannot call `ctx.web.search()` to reach the previous provider: that can select the router again. Temporarily rewriting global selection around individual requests is also unsuitable for concurrent sessions.
 
-Prefer a reviewed release from the integrated-project author that uses public seams. If the exact automatic behavior needs a new official extension point, record the missing named-provider execution or equivalent provider composition locally, including selection, cancellation, lifecycle, and recursion requirements. Such an API is not an existing capability. Under D3, official upstream is read-only: do not push, submit PRs, or merge changes into it; redesign or defer the dependent feature.
+Prefer a reviewed release from the integrated-project author that uses public seams. If the exact automatic behavior needs a new official extension point, record the missing named-provider execution or equivalent provider composition locally, including selection, cancellation, lifecycle, and recursion requirements. Such an API is not an existing capability. Under D3, prepare any official-upstream issue/PR as a draft for 昊哥's approval before sending it; never patch the installed upstream runtime.
 
 Until a supported mechanism is available, record automatic cross-provider routing as deferred. Do not duplicate DSH's account/credential handling merely to reproduce its existing provider privately.
 
@@ -119,15 +119,15 @@ The following is a scoped migration recommendation, not a claim that the remaini
 
 | Legacy function and relevant code | Proposed treatment | Boundary or next evidence |
 |---|---|---|
-| Basic Codex/Claude invocation: `packages/subagent/subagent-*`, `physical-operator-subagent` | Reuse official providers; do not port the old drivers or provider edits. | User reports the official bundles working. Test only the new plugin's use of their published APIs when implementation is authorized. |
+| Basic Codex/Claude invocation: `packages/subagent/subagent-*`, `physical-operator-subagent` | Reuse official providers for one-shot work; durable execution uses the independent Resident Drivers below. | User reports the official bundles working. Verify the new plugin's use of their published APIs separately. |
 | Codex subscription main model, account model/effort controls: parts of `tool-physical-operator`, `ui-physical-operator`, Resident routing | Reuse `dsh-codex-subscription` and DSH's model/settings UI. | This replaces the user need for a subscription-backed DSH main model, not every native Codex execution semantic. Resolve the source-boundary issue above. |
-| Bounded native collaboration: stable executor choice, explicit handoff, result presentation | Implement the proposed single Solar migration plugin against current services. | First-slice proposal only; no new daemon, automatic allocator, or native-session persistence. |
-| Automatic allocation, quota-aware switching, native model/effort policy | Defer additional automation and use current explicit selection. | Check native capabilities, account separation, and the real user need before extending the migration plugin. No silent model or spending changes. |
-| Persistent native Codex/Claude sessions and recovery: `resident-operator*` | Defer as a distinct capability assessment. | Official one-shot providers cannot provide it by adding a wrapper. A future implementation needs verified public lifecycle/process seams and its own persistence design. |
+| Bounded native collaboration: stable executor choice, explicit handoff, result presentation | Implement native-collaboration against official subagents and the optional public Solar Resident service. | Collaboration owns allocation and handoff; Resident owns native execution and persistence. |
+| Model allocation and native model/effort policy | Collaboration selects from configured roles/profiles and advertised native catalogs; explicit selections take precedence. | No silent model/account fallback. Quota-aware account switching is not implemented or claimed. |
+| Persistent native Codex/Claude sessions and recovery: `resident-operator*` | The independent native-resident plugin owns Drivers, session lanes, receipts and recovery. | Use public product protocols/SDK; official one-shot activations are not resumable native sessions. |
 | Claude Code as the DSH main executor | Keep official one-shot delegation for now; assess this separately if requested. | The subscription plugin does not fill this gap. Do not describe GPT-as-main as Claude-as-main support. |
 | Task templates and output style: `prompt/task-template*`, `core/output-style` | Assess current official skills/presets/settings first; port only a demonstrated gap as a separate plugin. | Not yet selected as the first plugin and not automatically bundled into native collaboration. |
-| TaskGraph and continual execution: `orchestration*`, `continual-harness*` | Compare each required behavior with official workflow, goal, and team packages before designing a separate plugin. | Package-name overlap is not equivalence. Durable scheduling and remote execution remain unverified migration requirements. |
-| Debate: `debate*`; RLM: `rlm-runtime*`, `rlm-strategy*` | Separate design and priority decisions. | No wholesale port, no inherited experimental efficacy claim, and no paid run authorized by this plan. |
+| Durable TaskGraph and task scheduling: `orchestration*` | Native-resident owns the single local durable graph and admission scheduler; collaboration submits assigned graphs. | Validate dependencies, capacity, scopes, cancellation, idempotency and restart recovery. Calendar/cron, remote scheduling and Continual Harness are not activated. |
+| Debate: `debate*`; RLM: `rlm-runtime*`, `rlm-strategy*` | Separate tasks; 昊哥 explicitly excluded RLM from the current two-plugin delivery. | No inherited efficacy claim or paid run. |
 | Kennel/Gouzi and remote members: `host/gouzi-member`, `ui-gouzi`, remote orchestration | Separate assessment after local collaboration is understood. | Phone control of a DSH host is not multi-host execution, membership, or TaskGraph recovery. |
 | ChatGPT browser execution and browser automation | Compare against subscription inference and official browser providers by actual user need. | Subscription model access is not browser automation; do not claim one covers the other. |
 | Native event/usage/receipt dashboards | Use official child records and third-party account projections first; add only missing task evidence in a separately scoped change. | No promise of complete native reasoning, raw transcripts, or precise billing. |
@@ -139,27 +139,27 @@ This sequence preserves useful behavior while removing duplicated infrastructure
 
 The integrated project's [MIT license](https://github.com/WSL043/dsh-codex-subscription/blob/v3.1.1/LICENSE) permits redistribution subject to retaining its copyright and permission notice. Any fork/distribution must preserve relevant notices and dependency attribution. Its published package contains built `lib/*.js`, profile patch, locales, and documentation; its build uses `tsdown`, and its tests use Node's test runner. None of those scripts ran during this design work.
 
-The Solar plugin follows the V4 ESM/TypeScript/build/package contract. Its exact dependency pins and compatibility bounds belong in its eventual `package.json` and `UPGRADING.md`; no manifest or scaffold is created now. `UPGRADING.md` must list the provider ids and public APIs used, optional-backend differences, tested baselines, and every carried integrated-project patch.
+Both Solar plugins follow the V4 ESM/TypeScript/build/package contract. Their `package.json` and `UPGRADING.md` record exact dependency pins, public APIs, compatibility bounds and carried patches. The subscription plugin is not repackaged or modified by these bundles.
 
-No Python, pip package, model file, or new native binary is introduced by the proposed first slice. Existing official subagent packages own their native payloads. The subscription plugin's optional native backend resolves the host-matched official Codex package through its dependency graph and currently checks Codex `0.153.4`; do not assume that an installed UI entry alone proves that this optional resolver can find its dependency. Future readiness testing must use the normal plugin-manager path, with no copying out of the app or downloading executables into the repository.
+Collaboration adds no native runtime. Resident pins the public Codex package and Claude Agent SDK as ordinary dependencies and keeps its Drivers internal to that plugin. No Python, pip or model-file installer is introduced. Existing official subagent packages continue owning their separate one-shot payloads. Readiness must be tested through normal plugin-manager installation; no app binary is copied into the repository.
 
-The first slice needs no independent execution database. Host configuration owns selected preferences and official session records own child results. If later behavior requires plugin-owned files, they belong under `$DSH_HOME/solar/native-collaboration/` with a format version and explicit refusal of unsupported formats. Do not store another copy of OAuth tokens or native session histories.
+Collaboration needs no independent execution database. Host configuration owns selected preferences and official session records own one-shot child results. Resident owns its versioned graph/session mapping and tool receipts under `$DSH_HOME/solar/native-resident/`. It stores native session identities, not another copy of OAuth tokens or native transcript files.
 
 The existing third-party plugin uses DSH credentials and its own `$DSH_HOME/state/codex-subscription/` namespace. This differs from the Solar-owned data-directory convention. Document the third-party dependency boundary explicitly before formal integration acceptance; do not silently relocate its state or claim it already uses the Solar namespace. The user's existing data remains untouched.
 
 Do not copy DSH 3.x `~/.dsh`, settings, credentials, sessions, daemon databases, or native thread ids into V4. Any later legacy-data import is a separately approved, versioned operation on an explicit export. Reading legacy source does not authorize runtime migration.
 
-## Implementation order and acceptance, when authorized
+## Implementation order and acceptance
 
-1. Confirm only the information needed by the next step: exact installed bundle versions, chosen backend/configuration, and D4's effective isolated home. Reuse the user's reported successful use; do not start with a blanket reinstall or duplicate paid probes.
-2. Review the search tradeoff and choose an integrated-project fix path. Prepare a concrete patch/proposal only after implementation or external-proposal work is authorized. Keep current installed software separate from the candidate.
-3. Approve the first-slice boundary and final package name, then implement **one Solar plugin**. Use a V4 task branch/worktree; the task's development directory follows the unresolved Q3 decision, while the release package belongs under `plugins/native-collaboration/`.
+1. Use the recorded published baseline for source development. Exact installed versions and D4's effective isolated GUI home are required before future existing-app acceptance, not before keyless scratch-profile testing. Reuse the user's reported successful use; do not reinstall or run duplicate paid probes.
+2. Keep the search correction separate from the two-plugin implementation. The installed subscription plugin remains unchanged. A future correction requires its own reviewed fix path and authorization.
+3. Implement the **two authorized Solar plugins** on task branches. Unreleased sources stay under `incubator/`; only an authorized release moves the relevant package under `plugins/`.
 4. Verify the built package against the published baseline in a scratch home. Exercise actual observable behavior and lifecycle; add only focused tests that answer a real question.
-5. Once D4 permits install acceptance and the work is authorized, validate the plugin in the official app using a stable installation artifact/path. Then prepare the source PR, keeping merge and plugin release as separate authorized steps.
+5. Prepare separate source PRs after source/plugin checks pass. Once D4 permits install acceptance and that work is authorized, validate each plugin in the official app using a stable installation artifact/path. Merge and plugin release remain separate authorized steps.
 
 | Acceptance area | Required future evidence |
 |---|---|
-| Registration | One new Solar bundle; unique tool name; official providers and the subscription adapter remain registered once. Disable removes only Solar-owned contributions. |
+| Registration | Two independent Solar bundles with unique tools; official providers and the subscription adapter remain registered once. Disable removes only Solar-owned contributions. |
 | Main-model independence | Delegating to Codex or Claude does not change the selected main model, reasoning setting, account, or the optional standard-subagent backend. |
 | Handoff and outcome | Exact delegated input is reconstructable; correct provider and cwd are used; unsupported overrides are rejected; parent receives an honest acknowledgement and terminal result. |
 | Cancellation and failure | Startup refusal is surfaced; published activation cancellation uses its lifecycle; no fabricated completion, silent fallback, or automatic replay of uncertain work. |
@@ -168,15 +168,15 @@ Do not copy DSH 3.x `~/.dsh`, settings, credentials, sessions, daemon databases,
 | Installed behavior | Exercise the normal official-app path under the isolated V4 home; inspect relevant UI at default and narrow widths. User-reported current success is retained separately from this candidate's test result. |
 | Publication | New Solar plugin version/tag, market entry, and generated homepage agree after approved release. External dependencies are attributed and are not presented as newly published Solar plugins. |
 
-Source readiness, installed acceptance, and publication are reported separately. The current documentation work has not run any of these implementation/runtime checks.
+Source readiness, installed acceptance, and publication are reported separately. The implementation contract and each plugin's README describe the current checks. Installed-GUI acceptance and subscription-search correction are not claimed by source verification.
 
 ## Decisions still required
 
-- Approve or revise the proposed native-collaboration first slice; its name is provisional. The user has confirmed that the migration must be a plugin, not that every legacy subsystem should be included in it.
+- The two-plugin split and current scope are approved under the implementation contract; unrelated legacy subsystems remain separate.
 - Choose whether explicit search selection is an acceptable first correction, or automatic routing must wait for an adequate public seam.
-- Choose author-maintained release versus a maintained pinned fork of the integrated subscription plugin if necessary. Any issue/PR to that integrated project needs separate approval; no such message has been sent. This does not authorize a PR or merge into official Harness upstream, which remains read-only under D3.
+- Choose author-maintained release versus a maintained pinned fork of the integrated subscription plugin if necessary. Any issue/PR to that integrated project needs separate approval; no such message has been sent. D3 also requires 昊哥 to approve a concrete official-upstream proposal before it is sent.
 - Before a future configuration change, choose whether native Codex tasks use the already installed official provider or the optional subscription-authenticated backend. Preserve the current setup until then.
-- Resolve relevant Q1–Q3 and the third-party data-boundary interpretation before the dependent implementation/release step. Do not treat these as reasons to repeat D1–D8 or reinstall working plugins.
+- Q1–Q3 have since been confirmed in AGENTS.md. Verify the third-party data boundary before dependent release acceptance; do not repeat settled decisions or reinstall working plugins.
 
 ## Source references
 

@@ -6,9 +6,9 @@ V4 is a personal project hosted publicly at `lisihao/deepseek-solar-harness`. Of
 
 ## Current state
 
-No Solar plugin has been published. No market index or installation URL exists, and no V4 CI or automation has been implemented or activated. D7 continues to defer the first plugin.
+No Solar plugin has been published. No market index or installation URL exists. Native collaboration and native Resident are under authorized development; RLM will be a separate task. Build/test tooling is local; no recurring automation has been activated.
 
-The `v4` branch is the V4 repository entry point. It contains the V4 rules, documentation, pinned upstream identity, and empty plugin directories. GitHub readback confirmed `v4` as the default branch on 2026-10-19.
+The `v4` branch is the V4 repository entry point. It contains the V4 rules, documentation and pinned upstream identity. Native plugin development adds candidates under `incubator/`. GitHub readback confirmed `v4` as the default branch on 2026-10-19.
 
 ## Upstream baseline
 
@@ -92,5 +92,14 @@ V4 must not copy or move DSH 3.x source into this branch. A future plugin may as
 - [Three-loop development workflow](docs/development-loops.md)
 - [DSH 3.x extraction candidates](docs/extraction-candidates.md)
 - [DSH Codex Subscription integration and migration plan](docs/integrations/dsh-codex-subscription.md)
+- [Native plugins: ownership and acceptance](docs/native-plugins-contract.md)
+- [Native plugin source verification](docs/native-plugins-verification.md)
+- [Native Resident development candidate](incubator/native-resident/README.md)
 
-Unreleased plugin work belongs in `incubator/<name>/`; only an authorized first release moves it to `plugins/<name>/`. The empty directories currently present do not contain plugin implementation or a market index.
+Unreleased plugin work belongs in `incubator/<name>/`; only an authorized first release moves it to `plugins/<name>/`. Root workspace globs exclude these candidates from the market. Run `pnpm install --ignore-scripts`, then `pnpm check` for local source verification; scratch-profile tests require package-registry access and never call a model.
+
+## Published plugins
+
+<!-- SOLAR-PUBLISHED-PLUGINS:START -->
+No Solar plugin has been published. The plugins under `incubator/` are development candidates.
+<!-- SOLAR-PUBLISHED-PLUGINS:END -->

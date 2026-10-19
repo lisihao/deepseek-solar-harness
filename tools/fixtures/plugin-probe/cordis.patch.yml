@@ -1,0 +1,5 @@
+# Test-only row. This package is installed only into an ephemeral profile by
+# tools/plugin-test.mjs and is not a Solar release bundle.
+- insert:
+    - id: solar-plugin-probe
+      name: '@lisihao/dsh-solar-plugin-probe'
