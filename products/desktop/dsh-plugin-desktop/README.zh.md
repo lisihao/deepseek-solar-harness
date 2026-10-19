@@ -4,6 +4,10 @@
 
 `dsh-plugin-desktop` 在 Electron 中运行 DSH，同时仍然参与普通 Cordis 组合。安装后的应用名称为 **DSH Desktop**。该包提供 `dsh-plugin-desktop` 可执行命令和 `dsh-desktop` 别名；已注册的 npm 包名是可靠的 `npx` 入口。
 
+## 任务提示词模板
+
+设置中提供任务提示词模板库。用户可以编辑方法和匹配属性、预览选择结果，并将偏好与版本化指令分别管理。模板由当前连接的 DSH Server 私下保存于其 DSH home，不内嵌进应用，也不随源码发布。普通模型路径和物理算子适配器通过既有执行服务接收适用的任务指令与有效上下文；任务绑定和压缩恢复规则见[模板上下文插件](../../../packages/prompt/task-template-context/README.zh.md)。
+
 ## 架构
 
 Electron 可执行文件只包含最小启动代码。它获取单实例锁、解析当前选中的 DSH profile、提供原生运行时能力，并在 Electron main 进程中启动 Host Cordis 根。`desktop-shell` Host 插件通过 Cordis effect 拥有 `BrowserWindow`、导航策略、settings namespace，以及关闭与退出生命周期。原生 runtime 拥有实体托盘；`desktop-shell`、`desktop-profiles`、`desktop-terminal` 与 `desktop-updates` 则通过有序 item registry 提供 effect-scoped 命令。
