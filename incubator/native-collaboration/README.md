@@ -8,6 +8,12 @@ The handoff contains the executor, mode, working directory, declared read/write 
 
 Allocation is a rule-based supported-selection policy. It is not a performance optimizer and does not claim that one advertised executor or model is faster, better, or more effective than another.
 
+## Installed UI entry and acceptance
+
+When the client contribution is installed with this bundle, the normal user entry is the Chinese `智能协同` conversation tab and the matching `智能协同` settings section. The status view reads Resident/tool/provider registration and existing graph state; it does not call a model or discover models. It offers the explicit buttons `测试 Codex（使用订阅额度）` and `测试 Claude Code（使用订阅额度）`. Each button submits one text-only canary in the plugin-owned `$DSH_HOME/solar/native-collaboration/check-workspace`, expects `SOLAR_CODEX_OK` or `SOLAR_CLAUDE_OK`, and supplies no bridged DSH tools. A submission acknowledgement is not a terminal result.
+
+Use the [Chinese manual acceptance guide](../../docs/native-plugins-acceptance.zh.md) for the entry check, quota boundary, canaries, task inspection, revision-aware controls, and keyless fixture cases. It records the distinction between a UI run and source fixtures; this development bundle has no installed-app acceptance claim until those steps are run and recorded. Do not invent shell commands or treat loading the bundle, a task-list row, or a canary submission receipt as execution success.
+
 When `dsh_tools` is supplied, the Resident service's public `bindBridge` capability receives a stable internal bridge id, the actual calling Agent owner, and exactly that allowlist before graph submission. The bridge id or any endpoint/token is never put in model arguments. Without `dsh_tools`, no DSH tools are exposed to the native graph. RLM and automatic account/model switching are outside this plugin.
 
 The tools do not change the DSH main model, account, reasoning setting, provider selection, or standard subagent configuration. Single-mode per-call model and continuation overrides are rejected; Resident graph allocation is explicit and bounded by the rules above. A scope declaration documents intended paths but is not filesystem isolation; conflicting writes still require a prepared worktree. Missing providers and a missing or incompatible Resident service are surfaced as errors.

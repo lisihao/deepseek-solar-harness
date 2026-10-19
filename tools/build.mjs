@@ -17,7 +17,7 @@ for (const name of packages) {
   await build({
     entryPoints: name === 'native-resident'
       ? ['src/index.ts', 'src/daemon.ts', 'src/client.ts', 'src/contracts.ts']
-      : ['src/index.ts'],
+      : ['src/index.ts', 'src/typert.ts'],
     absWorkingDir: directory,
     outdir: 'lib',
     bundle: true,
@@ -27,6 +27,9 @@ for (const name of packages) {
     format: 'esm',
     sourcemap: true,
   })
+  if (name === 'native-collaboration') {
+    await build({ entryPoints: ['src/client.ts'], absWorkingDir: directory, outfile: 'lib/client.cjs', bundle: true, platform: 'browser', target: 'es2022', format: 'cjs', external: ['@deepseek-ai/*', 'react'], banner: { js: 'window.__ModuleLoader__.load({ id: "@lisihao/dsh-solar-native-collaboration", factory: (require) => { var module = { exports: {} }; var exports = module.exports;' }, footer: { js: 'return module.exports; } });' }, sourcemap: true })
+  }
 }
 const declarations = join(root, '.build-types')
 await rm(declarations, { recursive: true, force: true })

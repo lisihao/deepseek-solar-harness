@@ -25,6 +25,12 @@ The final cancellation regression verifies that an unknown node remains fenced w
 
 PR CI runs the full check on Ubuntu/Node 24 for each submitted head. Its result belongs to that head and is reported separately from this local record.
 
+## Native UI source correction (2026-10-19)
+
+The later UI candidate adds the `智能协同` conversation/settings entries, an owner-only Remote control service, and ten manual/fixture acceptance cases. At its stable source boundary, `pnpm check` passed: build, strict types, 94 tests, actual built-bundle scratch CLI installation/boot and homepage check. The scratch probe observed all three tools and the UI status service without a model request. A VM check ran the actual browser artifact without CommonJS globals, verified module-factory registration and both slot contributions. Focused regressions cover legal Resident graph identities, strict markers, no duplicate unresolved canary, revision controls and cancelling remaining work in an indeterminate graph.
+
+These source and scratch results do not establish installed UI or real native model execution. The installed record below initially describes the earlier merged artifacts; a later candidate must record its own installation evidence.
+
 ## Desktop installation (2026-10-19)
 
 昊哥 explicitly authorized installation and selected the existing `~/.dsh` as the permanent default home, replacing the earlier separate-home decision. The installed official app and its bundled CLI both reported `0.2.1-rc.2`.

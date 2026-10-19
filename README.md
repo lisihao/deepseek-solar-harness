@@ -94,6 +94,7 @@ V4 must not copy or move DSH 3.x source into this branch. A future plugin may as
 - [DSH Codex Subscription integration and migration plan](docs/integrations/dsh-codex-subscription.md)
 - [Native plugins: ownership and acceptance](docs/native-plugins-contract.md)
 - [Native plugin source verification](docs/native-plugins-verification.md)
+- [智能协同与 Resident：典型测试用例及缺陷判据](docs/native-plugins-acceptance.zh.md)
 - [Native collaboration development candidate](incubator/native-collaboration/README.md)
 - [Native Resident development candidate](incubator/native-resident/README.md)
 

@@ -1,3 +1,4 @@
+import { NativeControl } from './control.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
@@ -290,6 +291,8 @@ export function apply(ctx: Context, config: Config): void {
       unregisterDelegate()
     }
   })
+
+  new NativeControl(ctx, { codex: config.codexProvider, claudeCode: config.claudeCodeProvider }, [config.toolName, config.coordinateToolName])
 
   ctx.effect(() => () => {
     return disposeOwnedActivations(activations)
