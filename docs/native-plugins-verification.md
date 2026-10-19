@@ -44,10 +44,19 @@ These source and scratch results do not establish installed UI or real native mo
 
 This establishes package installation, visible enablement and Resident daemon availability. It does not establish complete user-facing native execution, live tool bridging, logged-in model catalogs, or real model behavior. The app was left running.
 
-## Not run in this delivery
+## UI candidate installation and bounded native checks (2026-10-19)
 
-- Logged-in Codex or Claude model execution, live model catalogs, or paid calls.
-- Full native task execution or complete feature acceptance in the installed app; the installation and read-only checks above are narrower.
+The Collaboration UI candidate at source commit `e4c50c6288e939af826278cddc7ef61d738d84f2` was packed to a stable local path and installed with the official bundled CLI after the user quit the app. The installed package files matched the checked build. All previously declared direct dependency versions and enabled bundles were preserved; Resident remained at its earlier installed artifact. PR #278 CI passed for that source head.
+
+The running app's accessibility tree exposed the `智能协同` conversation tab and its status panel. Its actual Remote call reported Resident connected, all three Solar tools registered, and both official one-shot providers registered. This proves the loaded entry and read-only query, not authentication or model behavior. The automation screenshot and accessibility state disagreed, so default/narrow visual acceptance and the settings entry have not passed. Automated button actions produced no observed task admission; no native execution was inferred from those actions.
+
+With explicit permission for one native check per executor, the installed Resident public client first confirmed an empty graph list and the matching daemon fingerprint. It then admitted two synthetic marker tasks, one per executor, with no DSH bridge and no graph retry policy. Durable snapshots/events showed exactly one node attempt in each graph. The Codex graph completed with a succeeded node and exact `SOLAR_CODEX_OK` output. The Claude Code graph reached a failed terminal state because an external execution prerequisite was unavailable; details are retained privately. It is not accepted as a pass, and was not retried. These checks used the installed public client rather than the UI button path; they do not establish complete UI acceptance or count physical provider requests.
+
+## Remaining uncovered scope
+
+- Default/narrow rendered layout, settings navigation and the two quota-labelled buttons through the complete GUI path.
+- A successful live Claude Code canary; its single authorized attempt did not complete.
+- Live model catalogs, full collaboration tasks, logged-in tool bridging, and ordinary long-task pause/resume/recovery.
 - Subscription-plugin modification, search reconfiguration, account switching, DSH 3.x data import, release/tag/index publication, or recurring automation.
 
 The public Tool Runtime is used for DSH guards and execution. The Resident journal is not a complete native-tool trace in the parent DSH transcript; see [the missing public logging seam](blocked-seams.md).

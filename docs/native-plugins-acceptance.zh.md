@@ -1,6 +1,6 @@
 # Native collaboration / Resident 手工验收指南
 
-本文是后续验收的操作规程，不是本次源码检查或安装报告。当前 checkout 尚未在官方 Desktop 中安装并执行本指南的手工用例；因此本文不把任何用例标记为已通过。实现边界以 [native UI contract](native-ui-contract.md) 和 [native plugins contract](native-plugins-contract.md) 为准。
+本文定义验收操作和判据，不把用例定义当作执行结果。当前候选的源码、安装和有限原生执行记录见 [verification record](native-plugins-verification.md)；未被该记录明确覆盖的用例仍是未运行或未完成。实现边界以 [native UI contract](native-ui-contract.md) 和 [native plugins contract](native-plugins-contract.md) 为准。
 
 ## 先确认验收边界
 
