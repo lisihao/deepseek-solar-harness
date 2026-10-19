@@ -42,7 +42,7 @@ For each item:
 5. Prepare the source PR, related plugin documentation, and homepage guide updates. Follow CI and review feedback, repairing failures caused by the change within the authorized scope.
 6. Continue through merge, release, and external feedback only when the required authority exists. Prepare concrete decision material or reply drafts while waiting.
 
-Outputs are a PR with traceable evidence, or a reasoned request for information, deferral, decline, or missing-seam proposal. The loop retains responsibility for the item until its authorized stage is accepted or a specific blocker is recorded; opening a PR alone is not full delivery.
+Outputs are a PR in `lisihao/deepseek-solar-harness` with traceable evidence, or a reasoned request for information, deferral, decline, or locally recorded missing-seam finding. The loop retains responsibility for the item until its authorized stage is accepted or a specific blocker is recorded; opening a PR alone is not full delivery.
 
 ## Loop 2: real usage feedback
 
@@ -115,7 +115,7 @@ The table describes future execution within an authorized task. Current onboardi
 |---|---|---|
 | Routine delivery | Inspect assigned evidence, reproduce, implement scoped fixes, run relevant keyless checks, update docs, commit, push, open a PR, and address resulting CI/review failures once repository implementation is authorized. | A new plugin, material scope change, important product or architecture tradeoff, or an action outside the assignment. |
 | Feedback | Analyze selected sources, deduplicate, prepare actionable findings and reply drafts. | Which external sources to monitor; sending public replies or mentions; closing issues/PRs or restricting accounts. |
-| Missing upstream seam | Research existing seams, record limitations, and draft a concrete proposal. | Whether to redesign or defer, and approval of each upstream issue/PR before submission. |
+| Missing upstream seam | Research existing seams and record limitations locally in the personal project. Do not push to official upstream, submit upstream PRs, or merge changes into it. | Whether to redesign or defer. |
 | Release and repository | Prepare reviewed changes, verification evidence, and release decision material. | Merge, release, tags, index generation/publication, repository settings, and repository-reorganization actions under the existing rules. |
 | Operation and cost | Use existing permitted tools and resource configuration; report actual usage when available. | Activating recurring tasks, choosing frequency and operating host, spending limits, paid model/API calls, and changes to model or reasoning configuration. |
 | V4 preparation | Preserve the confirmed D1–D8 and Q1–Q3 choices and prepare evidence for a later first-plugin decision. | When to choose the first plugin under D7. |

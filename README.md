@@ -2,6 +2,8 @@
 
 DSH V4 uses the official DeepSeek Harness Desktop application unchanged together with an independent collection of Solar plugins. V4 has no core of its own: it does not vendor, fork, build, re-sign, or otherwise modify the official application.
 
+V4 is a personal project hosted publicly at `lisihao/deepseek-solar-harness`. Official `deepseek-ai/deepseek-harness` upstream is read-only for reference and updates: this project does not push, submit PRs, or merge changes into it. V4 feature PRs belong in the personal repository.
+
 ## Current state
 
 No Solar plugin has been published. No market index or installation URL exists, and no V4 CI or automation has been implemented or activated. D7 continues to defer the first plugin.

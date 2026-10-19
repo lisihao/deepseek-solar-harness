@@ -88,7 +88,7 @@ Change the **integrated project**, not official Harness:
 
 The public rc.2 web service exposes registration and configured search execution; the inspected interface does not expose a general named-provider lookup or execution API. A router selected as the active provider cannot call `ctx.web.search()` to reach the previous provider: that can select the router again. Temporarily rewriting global selection around individual requests is also unsuitable for concurrent sessions.
 
-Prefer a reviewed release from the integrated-project author that uses public seams. If the exact automatic behavior needs a new official extension point, draft a narrowly scoped proposal for named-provider execution or equivalent provider composition, with explicit selection, cancellation, lifecycle, and recursion behavior. Such an API is a proposal, not an existing capability. Submission to the official project requires approval under D3.
+Prefer a reviewed release from the integrated-project author that uses public seams. If the exact automatic behavior needs a new official extension point, record the missing named-provider execution or equivalent provider composition locally, including selection, cancellation, lifecycle, and recursion requirements. Such an API is not an existing capability. Under D3, official upstream is read-only: do not push, submit PRs, or merge changes into it; redesign or defer the dependent feature.
 
 Until a supported mechanism is available, record automatic cross-provider routing as deferred. Do not duplicate DSH's account/credential handling merely to reproduce its existing provider privately.
 
@@ -174,7 +174,7 @@ Source readiness, installed acceptance, and publication are reported separately.
 
 - Approve or revise the proposed native-collaboration first slice; its name is provisional. The user has confirmed that the migration must be a plugin, not that every legacy subsystem should be included in it.
 - Choose whether explicit search selection is an acceptable first correction, or automatic routing must wait for an adequate public seam.
-- Choose author-maintained release versus a maintained pinned fork if necessary. Approve each external issue/PR before submission; no such message has been sent.
+- Choose author-maintained release versus a maintained pinned fork of the integrated subscription plugin if necessary. Any issue/PR to that integrated project needs separate approval; no such message has been sent. This does not authorize a PR or merge into official Harness upstream, which remains read-only under D3.
 - Before a future configuration change, choose whether native Codex tasks use the already installed official provider or the optional subscription-authenticated backend. Preserve the current setup until then.
 - Resolve relevant Q1–Q3 and the third-party data-boundary interpretation before the dependent implementation/release step. Do not treat these as reasons to repeat D1–D8 or reinstall working plugins.
 

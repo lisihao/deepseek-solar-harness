@@ -2,6 +2,8 @@
 
 **Confirmed direction (D5, Q1–Q3, 2026-10-19):** keep `lisihao/deepseek-solar-harness` public and organize it for V4. Do not create a separate V4 repository or change its visibility to private. The selected V4 branch is `v4`; the authorized transition makes it the default branch.
 
+This is a personal project even though its repository is public. All pushes in this transition target `lisihao/deepseek-solar-harness`; no official-upstream push, PR, or merge is authorized. Official `deepseek-ai/deepseek-harness` is read-only for reference and updates.
+
 This transition preserves every existing branch, pull request, tag, and Release. It does not delete or close any legacy object. The 27 added DSH 3.x archive branch identities have been verified against GitHub; development is frozen. The [archive record](legacy-source-archive.md) lists exact commits and known verification failures. GitHub readback confirmed the default branch as `v4` on 2026-10-19.
 
 ## Historical observed state (2026-10-19)

@@ -8,7 +8,7 @@
 |---|---|
 | D1 | **A:** use the official Desktop app unmodified. |
 | D2 | **A:** use the GitHub repository as the market source, with a separate release tag for each plugin version. All V4 features are released as plugins. The GitHub homepage must list every published plugin; the implementing agent is responsible for refreshing the homepage guide when committing plugin-related changes. |
-| D3 | **B:** prepare upstream issue/PR drafts when an extension point is missing; submit each draft only after 昊哥 approves it. |
+| D3 | **A, clarified 2026-10-19:** official upstream is read-only for reference and updates. Do not push, submit pull requests, or merge changes into `deepseek-ai/deepseek-harness`. Record missing extension points locally, then redesign or defer. |
 | D4 | **A:** use a separate V4 `DSH_HOME`, starting empty; verify GUI isolation before launching the official app for install acceptance. |
 | D5 | Keep the existing public repository `lisihao/deepseek-solar-harness` and organize it for V4. Open feature PRs automatically; merge and release only when 昊哥 asks. The intended CI runs on Ubuntu with build, unit tests, plugin tests, and the homepage check; it is not implemented or activated in this transition. Concrete repository-reorganization steps remain in the proposal linked below. |
 | D6 | Keep `DeepSeek-Solar-Harness-V4`, package names `@lisihao/dsh-solar-<name>`, author email `haogege1977@gmail.com`, and market display name `Solar 插件市场`. |
@@ -34,11 +34,11 @@ These choices settle D1–D8 and Q1–Q3. The current external scope preserves e
 
 ## Hard boundaries
 
-In this file, **upstream** means DeepSeek Harness only. An open-source project that a plugin wraps is **the integrated project**; its rules are in [Integrating an open-source project](#integrating-an-open-source-project).
+In this file, **upstream** means the official `deepseek-ai/deepseek-harness` repository only. V4 is a personal project in `lisihao/deepseek-solar-harness`; public visibility does not authorize contributions to official upstream. All V4 feature and baseline-update PRs described here target the personal repository. An open-source project that a plugin wraps is **the integrated project**; its rules are in [Integrating an open-source project](#integrating-an-open-source-project).
 
 1. **Plugins only.** Every feature is a bundle package that the official plugin manager installs, enables, disables, and removes. Never patch upstream: no `pnpm patch`, `patch-package`, vendored or copied upstream source, runtime monkey-patching of upstream modules, or edits to files inside the installed app.
 2. **No Desktop build.** Never fork, rebuild, re-sign, or reseal the Desktop application or its runtime. A V4 delivery never produces an `.app`.
-3. **Missing seam → redesign, defer, or propose.** When a feature needs an extension point that the baseline does not offer, redesign it on existing seams, or defer it and record the missing seam in `docs/blocked-seams.md`. An issue or PR to `deepseek-ai/deepseek-harness` proposing the seam may be drafted; it is sent only after 昊哥 approves that draft. A missing seam is never a reason to patch upstream. (D3)
+3. **Missing seam → redesign or defer.** When a feature needs an extension point that the baseline does not offer, redesign it on existing seams, or defer it and record the missing seam in `docs/blocked-seams.md`. Keep the finding in this personal project; do not start an official-upstream contribution workflow, push to official upstream, submit an upstream PR, or merge changes into it. A missing seam is never a reason to patch upstream. (D3)
 4. **Published packages only.** Build and test against the published npm packages at the baseline version. Never vendor upstream.
 5. **Separate Harness home.** V4 runs with its own `DSH_HOME`, separate from the `~/.dsh` that DSH 3.x uses, and starts empty; a plugin that needs DSH 3.x data imports it explicitly. Development and tests use a throwaway `DSH_HOME` in a scratch directory. How to start the official GUI app with its own `DSH_HOME` without affecting DSH 3.x is unverified; until it is verified, install acceptance is blocked and no agent launches `DeepSeek Harness.app`. (D4)
 
@@ -125,7 +125,7 @@ The current [DSH Codex Subscription integration and DSH 3.x migration plan](docs
 One feature per PR, in this order:
 
 1. **Upstream first.** Check whether the baseline already provides it, built in or as an official/experimental bundle (e.g. `subagent-codex`, `subagent-claude-code`, `agent-team`, `browser-use-*`, `workflow`, `goal`, `schedule`, `session-search`). If it does, use upstream and drop ours.
-2. **Seams.** List the extension points the feature needs and confirm each exists in the baseline. DSH 3.x's `distribution/upstream-source-edits.json` (136 edited upstream files) shows which features depended on edits; those need a redesign, a seam proposal (boundary 3), or an entry in `docs/blocked-seams.md`.
+2. **Seams.** List the extension points the feature needs and confirm each exists in the baseline. DSH 3.x's `distribution/upstream-source-edits.json` (136 edited upstream files) shows which features depended on edits; those need a redesign or deferral recorded locally in `docs/blocked-seams.md` (boundary 3).
 3. **Port, not copy.** Rewrite against the baseline APIs (DSH 3.x forked at rc.5); delete code that existed only to support upstream edits.
 4. **Data.** The plugin starts empty in the V4 home; importing DSH 3.x data is an explicit, versioned import step inside the plugin.
 5. **Test, install, accept** as above. Update `docs/extraction-candidates.md`.
