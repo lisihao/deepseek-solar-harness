@@ -73,6 +73,7 @@ class MemoryDriver implements ResidentProductDriver {
   readonly profiles: ResidentDriverExecuteRequest['profile'][] = []
   readonly systemPrompts: Array<string | undefined> = []
   readonly nativeToolPolicies: Array<ResidentDriverExecuteRequest['nativeToolPolicy']> = []
+  readonly modelToolBridges: Array<ResidentDriverExecuteRequest['modelToolBridge']> = []
   readonly commandIds: string[] = []
   readonly compactions: ResidentDriverCompactRequest[] = []
   constructor(readonly counts = new Map<string, number>()) {}
@@ -99,6 +100,7 @@ class MemoryDriver implements ResidentProductDriver {
     this.profiles.push(request.profile)
     this.systemPrompts.push(request.systemPrompt)
     this.nativeToolPolicies.push(request.nativeToolPolicy)
+    this.modelToolBridges.push(request.modelToolBridge)
     request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
     const count = (this.counts.get(session) ?? 0) + 1
@@ -976,6 +978,20 @@ describe('ResidentDaemon', () => {
       prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'inherit',
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+    const modelToolBridge = {
+      version: 1 as const,
+      socketPath: join(root, 'bridge.sock'),
+      sessionId: 'bridge-session',
+      tools: [{ name: 'typescript_repl', description: 'Execute TypeScript.', inputSchema: { type: 'object' } }],
+    }
+    const bridged = await connected.execute({
+      commandId: 'rlm-tools', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'reason with the repl' }], nativeToolPolicy: 'disabled', modelToolBridge,
+      signal: new AbortController().signal,
+    })
+    await bridged.result
+    expect(driver.nativeToolPolicies).toEqual(['disabled', 'disabled'])
+    expect(driver.modelToolBridges.at(-1)?.tools.map(tool => tool.name)).toEqual(['typescript_repl'])
     await expect(connected.execute({
       commandId: 'contradictory-tools', operatorId: 'codex', workspace,
       prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'disabled',

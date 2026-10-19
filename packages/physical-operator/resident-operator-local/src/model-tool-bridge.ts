@@ -1,9 +1,51 @@
 /** Client for owner-local model tool bridges used by detached Resident Drivers. */
 
 import { createConnection } from 'node:net'
-import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
+import type {
+  PhysicalOperatorModelToolBridgeV1,
+  PhysicalOperatorNativeToolPolicy,
+} from '@deepseek-ai/dsh-physical-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
+
+/** The sole model-tool surface permitted beside a sealed no-native-tool turn. */
+export const RESIDENT_RLM_TOOL_NAME = 'typescript_repl'
+
+/**
+ * Validate the model-tool surface against the native product-tool policy.
+ *
+ * `inherit` preserves the existing generic DSH bridge, whose exact tool set is
+ * sealed by its owning Host. `disabled` is the Prime/RLM bridge-only mode: it
+ * removes every ambient Claude/Codex tool while permitting only the one
+ * allowlisted TypeScript REPL surface. The returned descriptor is the same
+ * immutable request value; the daemon and Drivers must validate it at their
+ * respective process boundaries.
+ *
+ * @param bridge - optional owner-local model-tool bridge descriptor.
+ * @param nativeToolPolicy - sealed native product-tool policy.
+ * @returns the validated bridge, or undefined when no bridge was supplied.
+ */
+export function validateResidentModelToolBridge(
+  bridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+  nativeToolPolicy: PhysicalOperatorNativeToolPolicy = 'inherit',
+): PhysicalOperatorModelToolBridgeV1 | undefined {
+  if (bridge === undefined) return undefined
+  if (bridge.tools.length === 0) {
+    throw new ResidentOperatorError('Resident model tool bridge must contain at least one tool', 'PROTOCOL_MISMATCH')
+  }
+  if (new Set(bridge.tools.map(tool => tool.name)).size !== bridge.tools.length) {
+    throw new ResidentOperatorError('Resident model tool bridge must contain unique tools', 'PROTOCOL_MISMATCH')
+  }
+  if (nativeToolPolicy === 'disabled' && (
+    bridge.tools.length !== 1 || bridge.tools[0]?.name !== RESIDENT_RLM_TOOL_NAME
+  )) {
+    throw new ResidentOperatorError(
+      `native_tool_policy disabled only permits the sealed ${RESIDENT_RLM_TOOL_NAME} model tool bridge`,
+      'INVALID_RESULT',
+    )
+  }
+  return bridge
+}
 
 function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error(`model tool bridge aborted: ${String(signal.reason)}`)
@@ -59,6 +101,12 @@ export async function callModelToolBridge(
   signal: AbortSignal,
 ): Promise<unknown> {
   if (signal.aborted) throw abortError(signal)
+  if (!bridge.tools.some(spec => spec.name === tool)) {
+    throw new ResidentOperatorError(
+      `model tool bridge did not allowlist ${JSON.stringify(tool)}`,
+      'PROTOCOL_MISMATCH',
+    )
+  }
   const socket = createConnection(bridge.socketPath)
   const transport = new JsonRpcLineTransport(socket, socket)
   const connected = new Promise<void>((resolve, reject) => {

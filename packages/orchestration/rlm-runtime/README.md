@@ -12,6 +12,12 @@ The Prime Agents View control surface is versioned as `attach → input → deta
 
 `RLM_TYPESCRIPT_REPL_TOOL_SCHEMA` is the canonical `ToolSchema` for the `typescript_repl` bridge. Consumers should reuse it rather than maintaining a second description or JSON schema.
 
+## Child model and execution inheritance
+
+Each root seals a `childModelPolicy`. `parent-inherit` is the Prime-compatible rule: when `rlm()` omits `model`, the child receives the exact parent operator, model, and reasoning profile. `allocator-default` is the explicit DSH economy adaptation and requires a Scheduler-sealed `defaultChildModel`; it never appears as an implicit fallback. `RlmChildHandleV1.modelOrigin` records `parent-inherited`, `allocator-default`, or `explicit` so a Consumer can make non-inheritance visible in its plan and event trace.
+
+`RlmChildExecutionOptionsV1` is likewise sealed at root admission and inherited unchanged by every child: the model-visible bridge tools, Host-issued Skills, retry policy, and capability references all travel in the child dispatch request. The runtime accepts only Prime's `name`, `model`, and `thinking` options. A Consumer must validate explicit model/thinking selections against its live provider catalog and must not add tools beyond the sealed parent set.
+
 Mutating calls use caller-generated command identities. `rlm(...)` admission returns an `RlmChildHandleV1`; the child answer arrives later through messages or artifact references. The programmable `skills.list()` API returns Host-issued `RlmManagedSkillDescriptorV1.alias` values, and `skills.call(name, args)` accepts only one of those aliases. Aliases use the public kebab-case skill grammar and are at most 128 characters. The Host maps each alias to a managed entry and its TypeScript import/callable; neither title nor `reference.import` is accepted from the kernel. Both operations return `RlmManagedSkillResultV1` for success and failure. A recovered uncertain command remains `indeterminate` until a trusted caller records `abandon`; replay never guesses its native outcome.
 
 The model-facing compaction surface is `compact.status()` and `compact.run({ instructions? })`. The exact Host wire methods are `compact.status` with `{}` and `compact.run` with `{ instructions? }`. `compact.run` records the Host's `scheduled`, optional `reason`, and optional `note`; it does not claim that history was already compacted. The Host owns the real turn-boundary scheduling and native history operation.

@@ -30,6 +30,7 @@ import {
   EXPECTED_CODEX_SCHEMA_SHA256,
 } from './drivers.ts'
 import { residentDriverManifestSha256 } from './driver-modules.ts'
+import { validateResidentModelToolBridge } from './model-tool-bridge.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
@@ -513,11 +514,8 @@ export class ResidentDaemon {
     const prompt = promptParam(params)
     const systemPrompt = systemPromptParam(params)
     const requestedProfile = profileParam(params)
-    const modelToolBridge = modelToolBridgeParam(params)
     const nativeToolPolicy = nativeToolPolicyParam(params)
-    if (nativeToolPolicy === 'disabled' && modelToolBridge !== undefined) {
-      throw new ResidentOperatorError('a no-tool resident turn cannot expose a model tool bridge', 'INVALID_RESULT')
-    }
+    const modelToolBridge = validateResidentModelToolBridge(modelToolBridgeParam(params), nativeToolPolicy)
     const supersedesCommandId = params.supersedes_command_id === undefined
       ? undefined
       : stringParam(params, 'supersedes_command_id')
