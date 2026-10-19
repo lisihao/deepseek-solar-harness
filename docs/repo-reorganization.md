@@ -2,7 +2,7 @@
 
 **Confirmed direction (D5, Q1–Q3, 2026-10-19):** keep `lisihao/deepseek-solar-harness` public and organize it for V4. Do not create a separate V4 repository or change its visibility to private. The selected V4 branch is `v4`; the authorized transition makes it the default branch.
 
-This transition preserves every existing branch, pull request, tag, and Release. It does not delete or close any legacy object. The 27 added DSH 3.x archive branch identities have been verified against GitHub; development is frozen. The [archive record](legacy-source-archive.md) lists exact commits and known verification failures. The default-branch setting is verified separately after the initial V4 upload.
+This transition preserves every existing branch, pull request, tag, and Release. It does not delete or close any legacy object. The 27 added DSH 3.x archive branch identities have been verified against GitHub; development is frozen. The [archive record](legacy-source-archive.md) lists exact commits and known verification failures. GitHub readback confirmed the default branch as `v4` on 2026-10-19.
 
 ## Historical observed state (2026-10-19)
 
@@ -28,3 +28,9 @@ This is the recorded snapshot from the original proposal, not a fresh check made
 - Do not merge, close, reopen, retarget, or otherwise change any existing pull request.
 - Do not delete or modify `solar`, `master`, any other existing branch, any tag, or any Release.
 - Do not move DSH 3.x source into the V4 branch. Preserve it as the verified legacy source archive documented above.
+
+## Completed transition verification (2026-10-19)
+
+GitHub readback matched all 27 new archive commits and confirmed `v4` as the default branch. Comparison with the pre-transition inventory found all 234 old branches, 191 tags, 34 Releases, and 12 open pull requests unchanged. The V4 tree is an independent root history containing documentation, the upstream identity, and empty plugin directories; no 3.x source or workflow was imported.
+
+The first V4 commit uses the selected author email, but GitHub returned `author.login: null`. The email was not linked to a GitHub account at that observation. The transition did not change account settings or substitute another author identity; account linkage remains a separate user action if desired.

@@ -26,7 +26,7 @@ These choices settle D1–D8 and Q1–Q3. The current external scope preserves e
 
 ## Repository and branches (D5)
 
-- V4 is to live in the existing public repository `lisihao/deepseek-solar-harness`, on its own branch **`v4`**, which becomes the repository's default branch through the authorized transition. The default branch's `README.md` is the GitHub homepage, and the market generator reads plugins from the default branch.
+- V4 lives in the existing public repository `lisihao/deepseek-solar-harness`, on its own branch **`v4`**, verified as the repository's default branch on 2026-10-19. The default branch's `README.md` is the GitHub homepage, and the market generator reads plugins from the default branch.
 - DSH 3.x stays in the same repository on `solar` and `master`, with its existing branches, pull requests, `DSH-desktop-v*` tags, and Releases retained. Its source archive is verified and development is frozen, as recorded in [the archive index](docs/legacy-source-archive.md). V4 never imports from DSH 3.x, never merges into or from `solar`, and never reads or writes DSH 3.x runtime state or its installed app.
 - The local V4 checkout is `~/Projects/DeepSeek-Solar-Harness-V4`, kept outside `~/Projects/DeepSeek-Solar-Harness` so that DSH 3.x agent memory and rules do not load into V4 sessions. Task worktrees branch from the V4 branch.
 - The V4 branch tree holds only V4 content. Released plugin packages belong under `plugins/*`; unreleased plugin work belongs under `incubator/*`, outside the root workspace globs. The market generator reads the union of root `package.json` `workspaces` and `pnpm-workspace.yaml` `packages` (negated globs are dropped), so only `plugins/*` can contribute a bundle to the market.

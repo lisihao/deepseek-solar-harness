@@ -6,7 +6,7 @@ DSH V4 uses the official DeepSeek Harness Desktop application unchanged together
 
 No Solar plugin has been published. No market index or installation URL exists, and no V4 CI or automation has been implemented or activated. D7 continues to defer the first plugin.
 
-The `v4` branch is the V4 repository entry point. It contains the V4 rules, documentation, pinned upstream identity, and empty plugin directories. The repository transition selects it as the default branch; the transition verifies that setting separately after the branch is uploaded.
+The `v4` branch is the V4 repository entry point. It contains the V4 rules, documentation, pinned upstream identity, and empty plugin directories. GitHub readback confirmed `v4` as the default branch on 2026-10-19.
 
 ## Upstream baseline
 
