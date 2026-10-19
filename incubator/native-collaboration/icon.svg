@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Solar native collaboration</title>
+  <desc id="desc">Two linked speech marks representing an explicit native task handoff.</desc>
+  <rect width="128" height="128" rx="24" fill="#152238"/>
+  <path d="M28 37c0-8 7-14 15-14h22c8 0 15 6 15 14v18c0 8-7 14-15 14H51l-14 13V69c-5-3-9-8-9-14V37Z" fill="#f6c453"/>
+  <path d="M64 68c0-8 7-14 15-14h22c8 0 15 6 15 14v18c0 8-7 14-15 14H87l-14 13V100c-5-3-9-8-9-14V68Z" fill="#55c2b0"/>
+  <path d="m48 43 8 8 14-16" fill="none" stroke="#152238" stroke-linecap="round" stroke-linejoin="round" stroke-width="6"/>
+</svg>
