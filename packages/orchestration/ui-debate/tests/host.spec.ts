@@ -290,6 +290,103 @@ describe('Debate Host projection', () => {
     expect(inspected.body).not.toContain('privateInstructions')
   })
 
+  it('projects a two-round continuation offer, terminal result, and prior moderator summary', async () => {
+    let handler: Handler | undefined
+    const selected = run()
+    const allowance = {
+      version: 1 as const,
+      additionalRounds: 2 as const,
+      additionalTurnsPerAgent: 2 as const,
+      additionalInputTokens: 600_000,
+      additionalOutputTokens: 90_000,
+      additionalTotalTokens: 690_000,
+    }
+    const settled = {
+      ...selected,
+      state: 'completed' as const,
+      cost: { ...selected.cost, usageStatus: 'known' as const, costStatus: 'known' as const, costUsd: 0 },
+      result: { version: 1 as const, outcome: 'completed' as const, reason: 'evidence-backed convergence' },
+      continuation: {
+        version: 1 as const,
+        grants: [{
+          version: 1 as const,
+          commandId: 'provider-private-command-id',
+          expectedRevision: selected.revision,
+          grantedAt: '2026-08-29T01:01:01.000Z',
+          firstRound: 3,
+          lastRound: 4,
+          allowance,
+        }],
+        synthesisHistory: [{
+          version: 1 as const,
+          throughRound: 2,
+          sealedAt: '2026-08-29T01:01:01.000Z',
+          synthesis: selected.synthesis!,
+        }],
+        effectiveBudget: {
+          version: 1 as const,
+          maxRounds: 5,
+          maxTurnsPerAgent: 5,
+          maxAgentsPerRound: 3,
+          maxInputTokens: 630_000,
+          maxOutputTokens: 95_000,
+          maxTotalTokens: 725_000,
+        },
+        offeredAllowance: allowance,
+        eligibility: {
+          version: 1 as const,
+          status: 'eligible' as const,
+          outcome: 'completed' as const,
+          accounting: 'sufficient' as const,
+          reason: 'eligible' as const,
+          message: 'the settled debate may continue for two rounds',
+        },
+      },
+    }
+    const ctx = {
+      webServer: { register(entry: { handler: Handler }) { handler = entry.handler; return () => {} } },
+      effect(callback: () => unknown) { callback() },
+      get() { return undefined },
+      logger: { warn() {} },
+      debates: {
+        async list() { return [summary(settled)] },
+        async inspect() { return settled },
+        async readEvents() {
+          return {
+            events: [{
+              version: 1 as const, sequence: 9, runId: settled.runId, revision: 8, generation: 8,
+              type: 'debate.continuation.granted' as const, createdAt: settled.updatedAt,
+              data: { firstRound: 3, lastRound: 4, additionalRounds: 2, commandId: 'provider-private-command-id' },
+            }],
+            nextSequence: 9,
+          }
+        },
+      },
+    }
+    apply(ctx as never)
+    if (handler === undefined) throw new Error('Debate route was not registered')
+
+    const inspected = response()
+    await handler(request('GET', '/api/debates?run_id=debate-1'), inspected)
+    expect(inspected.statusCode).toBe(200)
+    const projected = JSON.parse(inspected.body) as {
+      selectedRun: Record<string, unknown>
+      events: Array<{ data: Record<string, unknown> }>
+    }
+    expect(projected.selectedRun).toMatchObject({
+      initialPlan: { plannedRounds: 3, maxInputTokens: 10_000 },
+      result: { outcome: 'completed' },
+      continuation: {
+        grants: [{ firstRound: 3, lastRound: 4, allowance: { additionalRounds: 2 } }],
+        synthesisHistory: [{ throughRound: 2, synthesis: { outputPreview: 'Choose A and retain the cost dissent.' } }],
+        offeredAllowance: { additionalInputTokens: 600_000, additionalOutputTokens: 90_000 },
+        eligibility: { status: 'eligible', reason: 'eligible' },
+      },
+    })
+    expect(projected.events[0]?.data).not.toHaveProperty('commandId')
+    expect(inspected.body).not.toContain('provider-private-command-id')
+  })
+
   it('requires a control header and applies revision-fenced controls', async () => {
     let handler: Handler | undefined
     const controls: DebateControlRequestV1[] = []
@@ -305,7 +402,7 @@ describe('Debate Host projection', () => {
     }
     apply(ctx as never)
     if (handler === undefined) throw new Error('Debate route was not registered')
-    const body = { version: 1, commandId: 'control-1', runId: 'debate-1', expectedRevision: 7, action: 'approve', reason: 'approved' }
+    const body = { version: 1, commandId: 'continue-1', runId: 'debate-1', expectedRevision: 7, action: 'continue', reason: '继续讨论 2 轮' }
 
     const denied = response()
     await handler(request('POST', '/api/debates', body), denied)
@@ -322,7 +419,9 @@ describe('Debate Host projection', () => {
   it('limits pocket controls and maps revision conflicts to HTTP 409', async () => {
     expect(remoteDebateControlAllowed('pocket', 'pause')).toBe(true)
     expect(remoteDebateControlAllowed('pocket', 'stop')).toBe(false)
+    expect(remoteDebateControlAllowed('pocket', 'continue')).toBe(false)
     expect(remoteDebateControlAllowed('cockpit', 'stop')).toBe(true)
+    expect(remoteDebateControlAllowed('cockpit', 'continue')).toBe(true)
     let handler: Handler | undefined
     const remoteAuth = {
       authenticate: (token: string) => token === 'pocket'

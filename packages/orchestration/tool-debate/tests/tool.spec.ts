@@ -240,40 +240,65 @@ function resultValue(result: Awaited<ReturnType<typeof call>>): Record<string, u
 }
 
 describe('debate model Consumer', () => {
-  it('uses a one-round three-role budget when the user explicitly asks for a concise result', () => {
-    const policy = tool.debatePolicyForPrompt('请简洁讨论并给出三条结论')
-    expect(policy.roster.map(role => role.role)).toEqual([
-      'constructive-proposer',
-      'skeptical-falsifier',
-      'decision-judge',
-    ])
-    expect(policy.budget).toMatchObject({
-      maxRounds: 1,
-      maxTurnsPerAgent: 1,
-      maxAgentsPerRound: 3,
-      maxTotalTokens: 120_000,
-      maxCostUsd: 2,
-    })
-    expect(policy.convergence.minSettledAgents).toBe(3)
-    expect(policy.roster.map(role => [role.role, role.fallbackOperatorIds])).toEqual([
-      ['constructive-proposer', undefined],
-      ['skeptical-falsifier', ['codex']],
-      ['decision-judge', ['codex']],
-    ])
-    expect(policy.budget).toMatchObject({
-      maxInputTokens: 80_000,
-      maxOutputTokens: 40_000,
-    })
-    expect(policy.convergence.minSettledAgents).toBe(3)
-    expect(tool.debatePolicyForPrompt('Evaluate this contested architecture.')).toMatchObject({
-      budget: { maxRounds: 3 },
-      roster: { length: 4 },
+  it('separates presentation brevity from deterministic initial debate depth and per-round capacity', () => {
+    const cases = [{
+      prompt: '请简洁讨论并给出三条结论',
+      plan: { plannedRounds: 3, reason: 'ordinary' },
+      budget: { maxRounds: 3, maxInputTokens: 1_200_000, maxOutputTokens: 180_000, maxTotalTokens: 1_380_000 },
+    }, {
+      prompt: '只讨论一轮，即使这是架构问题。',
+      plan: { plannedRounds: 1, reason: 'explicit-one-round' },
+      budget: { maxRounds: 1, maxInputTokens: 400_000, maxOutputTokens: 60_000, maxTotalTokens: 460_000 },
+    }, {
+      prompt: 'Give a quick basic comparison.',
+      plan: { plannedRounds: 2, reason: 'quick-or-basic' },
+      budget: { maxRounds: 2, maxInputTokens: 800_000, maxOutputTokens: 120_000, maxTotalTokens: 920_000 },
+    }, {
+      prompt: 'Evaluate this contested choice.',
+      plan: { plannedRounds: 3, reason: 'ordinary' },
+      budget: { maxRounds: 3, maxInputTokens: 1_200_000, maxOutputTokens: 180_000, maxTotalTokens: 1_380_000 },
+    }, {
+      prompt: 'Design a deep system architecture with multi-constraint tradeoffs.',
+      plan: { plannedRounds: 4, reason: 'deep-or-system-design' },
+      budget: { maxRounds: 4, maxInputTokens: 1_600_000, maxOutputTokens: 240_000, maxTotalTokens: 1_840_000 },
+    }]
+
+    for (const fixture of cases) {
+      const plan = tool.debateInitialPlanForPrompt(fixture.prompt)
+      const policy = tool.debatePolicyForPrompt(fixture.prompt)
+      expect(plan).toMatchObject(fixture.plan)
+      expect(policy.roster).toHaveLength(4)
+      expect(policy.budget).toMatchObject({
+        ...fixture.budget,
+        maxTurnsPerAgent: fixture.plan.plannedRounds,
+        maxAgentsPerRound: 4,
+      })
+    }
+
+    expect(tool.debateInitialPlanForPrompt('请输出三条 concise 结论。')).toMatchObject({
+      plannedRounds: 3,
+      reason: 'ordinary',
     })
     expect(tool.DEFAULT_DEBATE_POLICY.budget).toMatchObject({
-      maxInputTokens: 400_000,
+      maxRounds: 3,
+      maxInputTokens: 1_200_000,
       maxOutputTokens: 180_000,
-      maxTotalTokens: 580_000,
+      maxTotalTokens: 1_380_000,
     })
+  })
+
+  it('preserves an explicit caller policy and its monetary cap without prompt rewriting', () => {
+    const explicitPolicy = {
+      ...tool.DEFAULT_DEBATE_POLICY,
+      budget: {
+        ...tool.DEFAULT_DEBATE_POLICY.budget,
+        maxRounds: 1,
+        maxTurnsPerAgent: 1,
+        maxCostUsd: 7,
+      },
+    }
+    expect(tool.debatePolicyForPrompt('Perform a deep architecture review.', 'enabled', explicitPolicy)).toBe(explicitPolicy)
+    expect(validateDebatePolicy(explicitPolicy).budget).toMatchObject({ maxRounds: 1, maxCostUsd: 7 })
   })
 
   it('lets an explicitly enabled Debate own the user turn without calling a primary model', async () => {
@@ -473,6 +498,7 @@ describe('debate model Consumer', () => {
 
     const streamText = textDeltas(agent).join('')
     expect(streamText).toContain('建设性提案者')
+    expect(streamText).toContain('**初始计划：** 4 轮（请求明确涉及深度分析、系统设计、架构或多项约束。）')
     expect(streamText).toContain('主题帖状态更新')
     expect(streamText.indexOf('# 主题帖')).toBeLessThan(streamText.indexOf('第 1 轮'))
     expect(streamText.indexOf('Proposal output summary')).toBeLessThan(streamText.indexOf('第 2 轮'))
@@ -1050,7 +1076,11 @@ describe('debate model Consumer', () => {
     provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
     provider.controlResult = snapshot({ revision: 3 })
     const started = await call(ctx, agent, { action: 'start', prompt: 'Choose A or B.', objective: 'Choose safely.' }, 'same-call')
-    expect(resultValue(started)).toMatchObject({ kind: 'start', run: { runId: 'debate-run-1', state: 'completed' } })
+    expect(resultValue(started)).toMatchObject({
+      kind: 'start',
+      initialPlan: { plannedRounds: 3, reason: 'ordinary', explanation: '普通讨论采用默认深度。' },
+      run: { runId: 'debate-run-1', state: 'completed' },
+    })
     expect(provider.starts).toHaveLength(1)
     expect(provider.starts[0]).toMatchObject({
       workspace: '/workspace',

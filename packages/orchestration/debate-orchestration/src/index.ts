@@ -377,12 +377,17 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
   }
 
   /**
-   * Build the immutable round graph without executing it.
+   * Build the immutable round graph without executing it. Every input turn
+   * must carry the requested round number, so a sealed prior round cannot be
+   * recompiled as a continuation round.
    * @param request - sealed roster turns for one Debate round.
    * @returns certified TaskGraph plan for the existing Scheduler.
    */
   plan(request: DebateRoundExecutionRequestV1): DebateTaskGraphPlanV1 {
     if (request.turns.length < 3) throw new DebateError('a Debate round requires at least two participants and one judge', 'DEBATE_ROSTER_INVALID')
+    if (request.turns.some(turn => turn.round !== request.round)) {
+      throw new DebateError('a Debate round cannot reuse turns from another round', 'DEBATE_INVALID')
+    }
     const judgeTurns = request.turns.filter(turn => turn.role === 'decision-judge')
     const participants = request.turns.filter(turn => turn.role !== 'decision-judge')
     if (judgeTurns.length !== 1 || participants.length < 2) {

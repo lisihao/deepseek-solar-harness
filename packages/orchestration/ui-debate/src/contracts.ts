@@ -20,7 +20,47 @@ export type DesktopDebateLifecycle =
   | 'indeterminate'
 
 /** Trusted lifecycle controls exposed by the Desktop projection. */
-export type DesktopDebateControlAction = 'approve' | 'reject' | 'pause' | 'resume' | 'stop'
+export type DesktopDebateControlAction = 'approve' | 'reject' | 'pause' | 'resume' | 'stop' | 'continue'
+
+/** Browser-safe initial policy summary for a persistent Debate run. */
+export interface DesktopDebateInitialPlan {
+  plannedRounds: number
+  reason: string
+  maxInputTokens: number
+  maxOutputTokens: number
+  maxTotalTokens: number
+  maxCostUsd?: number
+}
+
+/** Browser-safe finite ceilings derived from initial policy and continuation grants. */
+export interface DesktopDebateEffectiveBudget {
+  maxRounds: number
+  maxTurnsPerAgent: number
+  maxAgentsPerRound: number
+  maxInputTokens: number
+  maxOutputTokens: number
+  maxTotalTokens: number
+  maxCostUsd?: number
+}
+
+/** Fresh capacity that one deliberate continuation can add. */
+export interface DesktopDebateContinuationAllowance {
+  additionalRounds: 2
+  additionalTurnsPerAgent: 2
+  additionalInputTokens: number
+  additionalOutputTokens: number
+  additionalTotalTokens: number
+}
+
+/** Browser-safe explanation for whether a settled Debate can continue. */
+export interface DesktopDebateContinuationEligibility {
+  status: 'eligible' | 'ineligible' | 'approval_required'
+  outcome: 'running' | 'completed' | 'max_rounds' | 'budget_limited' | 'failed' | 'indeterminate' | 'rejected' | 'stopped'
+  accounting: 'sufficient' | 'usage_unknown' | 'cost_unknown'
+  reason: 'eligible' | 'run_not_settled' | 'last_round_not_settled' | 'usage_accounting_unknown' | 'cost_accounting_unknown' | 'cost_cap_requires_approval'
+  message: string
+  costLimit?: { limitUsd: number; usedUsd: number; reservedUsd?: number }
+}
 
 /** Browser-safe token and account-cost projection. */
 export interface DesktopDebateCost {
@@ -196,6 +236,40 @@ export interface DesktopDebateTopic {
   source: 'user' | 'objective' | 'legacy-missing'
 }
 
+/** Browser-safe moderator synthesis owned by the Debate Provider. */
+export interface DesktopDebateSynthesis {
+  state: 'pending' | 'running' | 'settled' | 'failed'
+  artifactRef?: string
+  outputPreview?: string
+  unresolvedClaimIds: string[]
+  dissentCount: number
+}
+
+/** Durable continuation history and currently offered capacity. */
+export interface DesktopDebateContinuation {
+  grants: Array<{
+    firstRound: number
+    lastRound: number
+    grantedAt: string
+    allowance: DesktopDebateContinuationAllowance
+  }>
+  synthesisHistory: Array<{
+    throughRound: number
+    sealedAt: string
+    synthesis: DesktopDebateSynthesis
+  }>
+  effectiveBudget: DesktopDebateEffectiveBudget
+  offeredAllowance?: DesktopDebateContinuationAllowance
+  eligibility: DesktopDebateContinuationEligibility
+}
+
+/** Durable terminal disposition exposed without Provider-private details. */
+export interface DesktopDebateResult {
+  outcome: 'running' | 'completed' | 'max_rounds' | 'budget_limited' | 'failed' | 'indeterminate' | 'rejected' | 'stopped'
+  reason: string
+  settledAt?: string
+}
+
 /** Full browser-safe inspect projection for one Debate run. */
 export interface DesktopDebateRun extends DesktopDebateRunSummary {
   /** Preferred title for the topic post; older runs may only have `objective`. */
@@ -208,13 +282,10 @@ export interface DesktopDebateRun extends DesktopDebateRunSummary {
   dissent: DesktopDebateDissent[]
   unresolved: DesktopDebateUnresolved[]
   evidence: { refs: string[]; coverage: number; missingRefs: string[]; lineage: string[] }
-  synthesis?: {
-    state: 'pending' | 'running' | 'settled' | 'failed'
-    artifactRef?: string
-    outputPreview?: string
-    unresolvedClaimIds: string[]
-    dissentCount: number
-  }
+  initialPlan: DesktopDebateInitialPlan
+  synthesis?: DesktopDebateSynthesis
+  continuation?: DesktopDebateContinuation
+  result?: DesktopDebateResult
   sourceSessionId?: string
   createdAt: string
 }

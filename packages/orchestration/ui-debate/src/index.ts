@@ -20,11 +20,16 @@ import {
   DEBATE_DASHBOARD_PATH,
   type DesktopDebateControlAction,
   type DesktopDebateControlRequest,
+  type DesktopDebateContinuation,
+  type DesktopDebateContinuationAllowance,
   type DesktopDebateDashboard,
   type DesktopDebateEvent,
+  type DesktopDebateInitialPlan,
   type DesktopDebateRole,
+  type DesktopDebateResult,
   type DesktopDebateRun,
   type DesktopDebateRunSummary,
+  type DesktopDebateSynthesis,
   type DesktopDebateTopic,
   type DesktopDebateTurnBlocker,
   type DesktopDebateTurnRouting,
@@ -40,7 +45,7 @@ const MAX_CONTROL_BYTES = 64 * 1024
 const MAX_TEXT = 2_000
 const MAX_TURN_PREVIEW = 800
 const MAX_ITEMS = 100
-const CONTROL_ACTIONS = new Set<DesktopDebateControlAction>(['approve', 'reject', 'pause', 'resume', 'stop'])
+const CONTROL_ACTIONS = new Set<DesktopDebateControlAction>(['approve', 'reject', 'pause', 'resume', 'stop', 'continue'])
 
 /**
  * Decide whether a remote device scope may issue a Debate control action.
@@ -126,6 +131,10 @@ const PUBLIC_EVENT_DATA_KEYS: Readonly<Record<DebateEventType, readonly string[]
   ],
   'debate.synthesis.started': ['round'],
   'debate.synthesis.settled': ['round', 'unresolvedClaimIds', 'dissentCount'],
+  'debate.continuation.granted': [
+    'firstRound', 'lastRound', 'additionalRounds', 'additionalTurnsPerAgent',
+    'additionalInputTokens', 'additionalOutputTokens', 'additionalTotalTokens',
+  ],
   'debate.cost.accounted': ['usageStatus', 'costStatus', 'inputTokens', 'outputTokens', 'costUsd'],
   'debate.stopped': ['action', 'reason'],
   'debate.failed': ['errorCode', 'error', 'reason'],
@@ -177,6 +186,103 @@ function projectBlockers(blockers: readonly DebateTurnBlockerV1[] | undefined): 
   }))
 }
 
+function projectSynthesis(synthesis: NonNullable<DebateRunSnapshotV1['synthesis']>): DesktopDebateSynthesis {
+  const outputPreview = boundedText(synthesis.outputPreview, 1_200)
+  return {
+    state: synthesis.state,
+    ...(synthesis.artifactRef === undefined ? {} : { artifactRef: synthesis.artifactRef }),
+    ...(outputPreview === undefined ? {} : { outputPreview }),
+    unresolvedClaimIds: synthesis.unresolvedClaimIds.slice(0, MAX_ITEMS),
+    dissentCount: synthesis.dissentCount,
+  }
+}
+
+function projectContinuationAllowance(
+  allowance: NonNullable<DebateRunSnapshotV1['continuation']>['grants'][number]['allowance'],
+): DesktopDebateContinuationAllowance {
+  return {
+    additionalRounds: allowance.additionalRounds,
+    additionalTurnsPerAgent: allowance.additionalTurnsPerAgent,
+    additionalInputTokens: allowance.additionalInputTokens,
+    additionalOutputTokens: allowance.additionalOutputTokens,
+    additionalTotalTokens: allowance.additionalTotalTokens,
+  }
+}
+
+function initialPlanReason(rounds: number): string {
+  if (rounds === 1) return '初始策略明确为 1 轮。'
+  if (rounds === 2) return '初始策略明确为 2 轮。'
+  if (rounds === 3) return '初始策略采用 3 轮基线。'
+  if (rounds === 4) return '初始策略明确为 4 轮。'
+  return `初始策略明确为 ${String(rounds)} 轮。`
+}
+
+function projectInitialPlan(run: DebateRunSnapshotV1): DesktopDebateInitialPlan {
+  const budget = run.policy.budget
+  return {
+    plannedRounds: budget.maxRounds,
+    reason: initialPlanReason(budget.maxRounds),
+    maxInputTokens: budget.maxInputTokens,
+    maxOutputTokens: budget.maxOutputTokens,
+    maxTotalTokens: budget.maxTotalTokens,
+    ...(budget.maxCostUsd === undefined ? {} : { maxCostUsd: budget.maxCostUsd }),
+  }
+}
+
+function projectContinuation(run: DebateRunSnapshotV1): DesktopDebateContinuation | undefined {
+  const continuation = run.continuation
+  if (continuation === undefined) return undefined
+  const offeredAllowance = continuation.offeredAllowance
+  return {
+    grants: continuation.grants.map(grant => ({
+      firstRound: grant.firstRound,
+      lastRound: grant.lastRound,
+      grantedAt: grant.grantedAt,
+      allowance: projectContinuationAllowance(grant.allowance),
+    })),
+    synthesisHistory: continuation.synthesisHistory.map(entry => ({
+      throughRound: entry.throughRound,
+      sealedAt: entry.sealedAt,
+      synthesis: projectSynthesis(entry.synthesis),
+    })),
+    effectiveBudget: {
+      maxRounds: continuation.effectiveBudget.maxRounds,
+      maxTurnsPerAgent: continuation.effectiveBudget.maxTurnsPerAgent,
+      maxAgentsPerRound: continuation.effectiveBudget.maxAgentsPerRound,
+      maxInputTokens: continuation.effectiveBudget.maxInputTokens,
+      maxOutputTokens: continuation.effectiveBudget.maxOutputTokens,
+      maxTotalTokens: continuation.effectiveBudget.maxTotalTokens,
+      ...(continuation.effectiveBudget.maxCostUsd === undefined ? {} : { maxCostUsd: continuation.effectiveBudget.maxCostUsd }),
+    },
+    ...(offeredAllowance === undefined ? {} : { offeredAllowance: projectContinuationAllowance(offeredAllowance) }),
+    eligibility: {
+      status: continuation.eligibility.status,
+      outcome: continuation.eligibility.outcome,
+      accounting: continuation.eligibility.accounting,
+      reason: continuation.eligibility.reason,
+      message: boundedText(continuation.eligibility.message) ?? '',
+      ...(continuation.eligibility.costLimit === undefined ? {} : {
+        costLimit: {
+          limitUsd: continuation.eligibility.costLimit.limitUsd,
+          usedUsd: continuation.eligibility.costLimit.usedUsd,
+          ...(continuation.eligibility.costLimit.reservedUsd === undefined ? {} : {
+            reservedUsd: continuation.eligibility.costLimit.reservedUsd,
+          }),
+        },
+      }),
+    },
+  }
+}
+
+function projectResult(run: DebateRunSnapshotV1): DesktopDebateResult | undefined {
+  if (run.result === undefined) return undefined
+  return {
+    outcome: run.result.outcome,
+    reason: boundedText(run.result.reason) ?? '',
+    ...(run.result.settledAt === undefined ? {} : { settledAt: run.result.settledAt }),
+  }
+}
+
 function projectTurnDetails(turn: DebateAgentTurnV1): NonNullable<DesktopDebateRole['latestTurn']> {
   const outputPreview = boundedText(turn.outputPreview, MAX_TURN_PREVIEW)
   const routing = projectRouting(turn.routing)
@@ -212,18 +318,9 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
         source: run.topic.source,
       } satisfies DesktopDebateTopic
     })()
-  const synthesis = run.synthesis === undefined
-    ? undefined
-    : (() => {
-      const outputPreview = boundedText(run.synthesis.outputPreview, 1_200)
-      return {
-        state: run.synthesis.state,
-        ...(run.synthesis.artifactRef === undefined ? {} : { artifactRef: run.synthesis.artifactRef }),
-        ...(outputPreview === undefined ? {} : { outputPreview }),
-        unresolvedClaimIds: run.synthesis.unresolvedClaimIds.slice(0, MAX_ITEMS),
-        dissentCount: run.synthesis.dissentCount,
-      }
-    })()
+  const synthesis = run.synthesis === undefined ? undefined : projectSynthesis(run.synthesis)
+  const continuation = projectContinuation(run)
+  const result = projectResult(run)
   return {
     ...projectSummary({
       version: 1,
@@ -302,7 +399,10 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
       missingRefs: run.evidence.missingRefs.slice(0, MAX_ITEMS),
       lineage: run.evidence.lineage.slice(0, MAX_ITEMS),
     },
+    initialPlan: projectInitialPlan(run),
     ...(synthesis === undefined ? {} : { synthesis }),
+    ...(continuation === undefined ? {} : { continuation }),
+    ...(result === undefined ? {} : { result }),
     ...(run.provenance.sourceSessionId === undefined ? {} : { sourceSessionId: run.provenance.sourceSessionId }),
     createdAt: run.createdAt,
   }
