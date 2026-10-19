@@ -110,7 +110,7 @@ class FakeSubprocess extends SubprocessRuntime {
 const op = (value: string) => BrowserOperationId(value)
 const pageKey = (value: string) => BrowserPageKey(value)
 
-const plan: BrowserRunPlanV1 = {
+const plan = {
   version: 1,
   workspace: { kind: 'named', name: 'workspace', createIfMissing: true },
   requiredCapabilities: ['named-workspace'],
@@ -122,7 +122,7 @@ const plan: BrowserRunPlanV1 = {
     reuse: 'exact-url',
     waitUntil: 'load',
   }],
-}
+} satisfies BrowserRunPlanV1
 
 const planResult = {
   version: 1,

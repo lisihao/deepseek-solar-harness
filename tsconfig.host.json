@@ -228,6 +228,8 @@
     { "path": "./packages/compaction/command-compact" },
     { "path": "./packages/compaction/compaction-tool-result-pruner" },
     { "path": "./packages/browser/browser" },
+    { "path": "./packages/browser/browser-ego-lite" },
+    { "path": "./packages/browser/tool-browser" },
     { "path": "./packages/web/web" },
     { "path": "./packages/web/web-search-exa" },
     { "path": "./packages/web/web-search-perplexity" },
