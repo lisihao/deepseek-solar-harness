@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "原生协作",
+    "description": "将明确任务交给 Codex 或 Claude Code，或使用已公布的原生模型分配协调一个有限 Resident 任务图。"
+  }
+}

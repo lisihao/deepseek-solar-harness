@@ -1,0 +1,4 @@
+# Mounts the native-collaboration bundle into a DSH profile.
+- insert:
+    - id: native-collaboration
+      name: '@lisihao/dsh-solar-native-collaboration'

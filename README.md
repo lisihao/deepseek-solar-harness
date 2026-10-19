@@ -94,6 +94,7 @@ V4 must not copy or move DSH 3.x source into this branch. A future plugin may as
 - [DSH Codex Subscription integration and migration plan](docs/integrations/dsh-codex-subscription.md)
 - [Native plugins: ownership and acceptance](docs/native-plugins-contract.md)
 - [Native plugin source verification](docs/native-plugins-verification.md)
+- [Native collaboration development candidate](incubator/native-collaboration/README.md)
 - [Native Resident development candidate](incubator/native-resident/README.md)
 
 Unreleased plugin work belongs in `incubator/<name>/`; only an authorized first release moves it to `plugins/<name>/`. Root workspace globs exclude these candidates from the market. Run `pnpm install --ignore-scripts`, then `pnpm check` for local source verification; scratch-profile tests require package-registry access and never call a model.
