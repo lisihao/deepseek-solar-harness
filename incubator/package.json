@@ -1,0 +1,6 @@
+{
+  "name": "dsh-solar-incubator",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.31.0"
+}

@@ -9,6 +9,9 @@ node_modules/
 # Test and TypeScript output
 coverage/
 *.tsbuildinfo
+.build-types/
+incubator/*/lib/
+tools/tsconfig.build.json
 
 # macOS metadata
 .DS_Store

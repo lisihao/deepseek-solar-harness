@@ -1,6 +1,6 @@
 # AGENTS.md — DeepSeek Solar Harness V4
 
-> **Status: DRAFT — D1–D8 and Q1–Q3 confirmed.** 昊哥 explicitly confirmed the decisions below on 2026-10-19. The authorized repository transition is limited to creating the `v4` branch and making it the default branch. Do not write plugin implementation, scaffolding, or tooling, and do not create Pages, releases, merges, installations, market publications, or automation. The first plugin remains deferred under D7.
+> **Status: D1–D8 and Q1–Q3 confirmed; two plugins authorized for development.** On 2026-10-19 昊哥 authorized parallel development of `dsh-solar-native-collaboration` and `dsh-solar-native-resident`, including persistent TaskGraph, scheduling, native sessions/lanes, tool bridging and model allocation. RLM is explicitly excluded and will be commissioned separately. See [implementation scope and acceptance](docs/native-plugins-contract.md). Existing-app installation, paid probes, Pages, releases, merges, market publication and recurring automation remain separately authorized actions.
 
 ## Confirmed decisions (2026-10-19)
 
@@ -10,9 +10,9 @@
 | D2 | **A:** use the GitHub repository as the market source, with a separate release tag for each plugin version. All V4 features are released as plugins. The GitHub homepage must list every published plugin; the implementing agent is responsible for refreshing the homepage guide when committing plugin-related changes. |
 | D3 | **A, clarified 2026-10-19:** official upstream is read-only for reference and updates. Do not push, submit pull requests, or merge changes into `deepseek-ai/deepseek-harness`. Record missing extension points locally, then redesign or defer. |
 | D4 | **A:** use a separate V4 `DSH_HOME`, starting empty; verify GUI isolation before launching the official app for install acceptance. |
-| D5 | Keep the existing public repository `lisihao/deepseek-solar-harness` and organize it for V4. Open feature PRs automatically; merge and release only when 昊哥 asks. The intended CI runs on Ubuntu with build, unit tests, plugin tests, and the homepage check; it is not implemented or activated in this transition. Concrete repository-reorganization steps remain in the proposal linked below. |
+| D5 | Keep the existing public repository `lisihao/deepseek-solar-harness` and organize it for V4. Open feature PRs automatically; merge and release only when 昊哥 asks. The native-plugin change includes Ubuntu PR CI for build, unit tests, plugin tests, and the homepage check. Concrete repository-reorganization steps remain in the proposal linked below. |
 | D6 | Keep `DeepSeek-Solar-Harness-V4`, package names `@lisihao/dsh-solar-<name>`, author email `haogege1977@gmail.com`, and market display name `Solar 插件市场`. |
-| D7 | Defer choosing and scheduling the first plugin. Do not start a demonstration plugin or a DSH 3.x port by default. |
+| D7 | Initially deferred. The later explicit authorization selects native-collaboration and native-resident; do not start an unrelated demonstration plugin or port. |
 | D8 | **B:** follow each new upstream rc and automate compatibility tests with failure notification. The policy is selected; the app's actual update channel and the test job still need verification and implementation respectively. |
 
 These choices settle D1–D8 and Q1–Q3. The current external scope preserves every existing branch, pull request, tag, and Release while adding `v4` and switching the default branch to it. DSH 3.x source was archived and the 27 new remote archive identities were verified on 2026-10-19; its development is frozen. The [archive record](docs/legacy-source-archive.md) lists exact commits and verification limits. In particular, the earlier suggestions to create a separate private repository or start with a manually frozen upstream baseline are not the selected direction.
@@ -30,7 +30,7 @@ These choices settle D1–D8 and Q1–Q3. The current external scope preserves e
 - DSH 3.x stays in the same repository on `solar` and `master`, with its existing branches, pull requests, `DSH-desktop-v*` tags, and Releases retained. Its source archive is verified and development is frozen, as recorded in [the archive index](docs/legacy-source-archive.md). V4 never imports from DSH 3.x, never merges into or from `solar`, and never reads or writes DSH 3.x runtime state or its installed app.
 - The local V4 checkout is `~/Projects/DeepSeek-Solar-Harness-V4`, kept outside `~/Projects/DeepSeek-Solar-Harness` so that DSH 3.x agent memory and rules do not load into V4 sessions. Task worktrees branch from the V4 branch.
 - The V4 branch tree holds only V4 content. Released plugin packages belong under `plugins/*`; unreleased plugin work belongs under `incubator/*`, outside the root workspace globs. The market generator reads the union of root `package.json` `workspaces` and `pnpm-workspace.yaml` `packages` (negated globs are dropped), so only `plugins/*` can contribute a bundle to the market.
-- PRs open automatically when a feature is complete, as in DSH 3.x; merge and release happen only when 昊哥 asks. The Ubuntu CI target is build, unit tests, plugin tests, and the homepage check, but no CI has been implemented or activated.
+- PRs open automatically when a feature is source-verified; merge and release happen only when 昊哥 asks. The native-plugin change includes Ubuntu PR CI for build, unit tests, plugin tests, and the homepage check. No recurring compatibility job is activated by that workflow.
 
 ## Hard boundaries
 
@@ -111,7 +111,7 @@ Local installs during development come from a stable path (the main V4 checkout 
 
 Applies whenever 昊哥 names an open-source project to integrate. The result is one or more market plugins.
 
-The current [DSH Codex Subscription integration and DSH 3.x migration plan](docs/integrations/dsh-codex-subscription.md) proposes one independent Solar migration plugin over the already installed providers. It records user-reported working software separately from source constraints and future acceptance. The current request authorizes documentation only, not installation or implementation.
+The [DSH Codex Subscription integration and DSH 3.x migration plan](docs/integrations/dsh-codex-subscription.md) records the installed-provider boundary and search constraints. The later [two-plugin implementation contract](docs/native-plugins-contract.md) owns current development scope and acceptance. Reuse the working third-party plugin and official providers; do not silently change their installation or authentication.
 
 1. **Read before running.** Clone the project into its own directory outside this repository and read it. The analysis phase runs none of its install, build, or test scripts.
 2. **Design document first.** Before any code, write `docs/integrations/<project>.md`: repository URL, exact version or commit, license (the market redistributes, so the license must permit it), how the project is built, which of its parts V4 uses, which DSH extension points each part maps onto (for non-JS projects, how it runs: subprocess or MCP server; check upstream `packages/mcp` first), the plugin split, the boundary, and how each non-npm dependency (pip package, binary, model file) reaches the user's machine through the normal market install and where it lives under `$DSH_HOME/solar/<plugin>/`. pnpm does not run pip and the plugin manager refuses blocked build scripts, so this path must be designed, not assumed; check the Python runtime the official app bundles before adding another (unverified until the first such integration). 昊哥 reviews the document before implementation.
@@ -130,12 +130,12 @@ One feature per PR, in this order:
 4. **Data.** The plugin starts empty in the V4 home; importing DSH 3.x data is an explicit, versioned import step inside the plugin.
 5. **Test, install, accept** as above. Update `docs/extraction-candidates.md`.
 
-The first plugin is not scheduled yet. (D7)
+The two named native plugins are authorized; unrelated extraction candidates remain unscheduled. (D7)
 
 ## Workflow and gates
 
 - Follow [Three-loop development workflow](docs/development-loops.md) for delivery, usage feedback, and maintenance/compatibility. 昊哥 selected one coordinating chat plus three separate loop chats. Each loop chat first reads this file and the workflow, confirms its role, and then waits for an assigned task.
-- **Current activation boundary:** documentation and read-and-confirm onboarding of the three user-created loop chats are authorized. Do not start automated tasks, periodic monitoring, or implementation code. Creating a loop chat does not activate its loop. D7 continues to defer the first plugin; the confirmed Q1–Q3 decisions do not activate any loop.
+- **Current activation boundary:** the two native plugins and their necessary build/test tooling are authorized for development. The separate loop chats remain read-and-confirm only. Do not start automated tasks or periodic monitoring; creating a loop chat does not activate its loop.
 - The global acceptance rules apply at delivery: a test or probe that fails without the change, a real run in the installed app, every check marked run or not run, merge only the reviewed head, one PR one goal.
 - Lessons already paid for in DSH 3.x, and the rule here that covers each:
   - Behavior fixes bundled into release PRs → a release PR holds only version, changelog, and the regenerated homepage section.
