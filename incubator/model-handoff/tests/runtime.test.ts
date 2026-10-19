@@ -1,0 +1,660 @@
+import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { createSystemMessage, createUserMessage, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { HandoffEngine as HandoffEngineType } from '../src/index.js'
+import { HandoffStore } from '../src/store.js'
+
+const fsReadGate = vi.hoisted(() => ({
+  wait: undefined as ((path: string) => Promise<void>) | undefined,
+}))
+
+vi.mock('node:fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+  return {
+    ...actual,
+    readFile: async (...args: any[]) => {
+      await fsReadGate.wait?.(String(args[0]))
+      return (actual.readFile as any)(...args)
+    },
+  }
+})
+
+let HandoffEngineCtor!: typeof HandoffEngineType
+let applyRuntime!: typeof import('../src/index.js').apply
+
+beforeAll(async () => {
+  // The built plugin intentionally ships JavaScript only; source mode remains typed.
+  const module = process.env.MODEL_HANDOFF_BUILT === '1'
+    // @ts-expect-error built output has no declaration file
+    ? await import('../lib/index.js')
+    : await import('../src/index.js')
+  HandoffEngineCtor = module.HandoffEngine
+  applyRuntime = module.apply
+})
+
+interface RecordedCall {
+  readonly provider: string
+  readonly model: string
+  readonly messages: readonly Message[]
+}
+
+type TestEngine = HandoffEngineType & {
+  runSummary(owner: Agent): Promise<{ summary: readonly { type: string; text?: string }[] }>
+}
+
+interface RuntimeFixture {
+  readonly ctx: Context
+  readonly session: Session
+  readonly agent: Agent
+  readonly engine: TestEngine
+  readonly calls: RecordedCall[]
+  readonly asks: Array<{ readonly ids: readonly string[]; readonly detail?: string }>
+  readonly root: string
+  readonly events: unknown[]
+  cleanup(): Promise<void>
+}
+
+const config = {
+  summaryProvider: 'fixture-luna',
+  summaryModel: 'fixture-luna-model',
+  maxInputBytes: 1_500_000,
+  maxOutputTokens: 8192,
+  maxHandoffBytes: 48_000,
+}
+
+const draft = JSON.stringify({
+  summary: '交接摘要：保留目标、已完成工作和未决风险。',
+  questions: [
+    { id: 'next', question: '下一步必须先做什么？' },
+    { id: 'risk', question: '需要保留哪些风险？' },
+  ],
+})
+
+const target = { provider: 'target-provider', model: 'target-model' }
+
+describe('model-handoff runtime boundary', () => {
+  const fixtures: RuntimeFixture[] = []
+
+  afterEach(async () => {
+    await Promise.all(fixtures.splice(0).map(fixture => fixture.cleanup()))
+  })
+
+  it('runs the isolated compaction subclass on a real Session and keeps the original log', async () => {
+    const fixture = await createFixture()
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+    await fixture.engine.compactRegion(user!, user!, fixture.agent)
+
+    expect(fixture.calls).toHaveLength(1)
+    expect(fixture.calls[0]?.provider).toBe(config.summaryProvider)
+    expect(fixture.calls[0]?.model).toBe(config.summaryModel)
+    const summaryPrompt = fixture.calls[0]?.messages.at(-1)?.content
+    expect(summaryPrompt?.[0]).toMatchObject({ type: 'text', text: expect.stringContaining('旧会话中的原始任务') })
+    expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+    const messages = fixture.session.deriveMessages().map(message => message.content)
+    expect(messages).toHaveLength(2)
+    expect(messages[0]).toEqual([{ type: 'text', text: '系统头' }])
+    expect(messages[1]?.some(block => block.type === 'text' && block.text.includes('交接摘要'))).toBe(true)
+    expect(fixture.session.snapshotEvents().map(event => event.type)).toEqual([
+      'request/header',
+      'turn/start',
+      'system/message',
+      'user/message',
+      'compaction/start',
+      'compaction/summary',
+      'user/message',
+      'compaction/end',
+    ])
+    expect(fixture.events.some(event => JSON.stringify(event).includes('旧会话中的原始任务'))).toBe(true)
+  })
+
+  it('does not call Luna when the draft is already persisted and confirmed', async () => {
+    const fixture = await createFixture()
+    fixtures.push(fixture)
+    const operation = { target, selectionSeq: 0 }
+    fixture.engine.operations.set(fixture.session, operation)
+    const state = {
+      formatVersion: 1 as const,
+      id: '7ad54f08-6a2d-4ea5-9a55-60b5f7db28dd',
+      sessionId: fixture.session.id,
+      target,
+      fingerprint: (await fixture.engine.source(fixture.session)).fingerprint,
+      phase: 'confirmed' as const,
+      draftText: draft,
+      answers: [
+        { id: 'next', answer: '先运行验证。' },
+        { id: 'risk', answer: '保留失败未知状态。' },
+      ],
+      confirmedText: '模型交接\n已确认',
+      rawOutput: [{ type: 'text', text: draft }],
+    }
+    await fixture.engine.store.write(state)
+
+    const result = await fixture.engine.runSummary(fixture.agent)
+    expect(result.summary[0]).toMatchObject({ type: 'text', text: '模型交接\n已确认' })
+    expect(fixture.calls).toHaveLength(0)
+    expect(fixture.asks).toHaveLength(0)
+  })
+
+  it('records an in-flight Luna call and rejects replay after cancellation', async () => {
+    const fixture = await createFixture({ blockLuna: true })
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+    const controller = new AbortController()
+    const pending = fixture.engine.compactRegion(user!, user!, fixture.agent, controller.signal)
+    await waitFor(() => fixture.calls.length === 1)
+    controller.abort(new Error('test cancellation'))
+    await expect(pending).rejects.toThrow('test cancellation')
+
+    const saved = await fixture.engine.store.read(fixture.session.id)
+    expect(saved?.phase).toBe('calling')
+    expect(fixture.calls).toHaveLength(1)
+    await expect(fixture.engine.compactRegion(user!, user!, fixture.agent)).rejects.toThrow('结果未知')
+    expect(fixture.calls).toHaveLength(1)
+  })
+
+  it('does not dispatch a target request while questions or confirmation are pending', async () => {
+    const fixture = await createFixture({ blockQuestions: true })
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+    const pending = fixture.engine.compactRegion(user!, user!, fixture.agent)
+    await waitFor(() => fixture.asks.length === 1)
+    expect(fixture.calls).toHaveLength(1)
+    expect(fixture.targetRequests).toHaveLength(0)
+    fixture.releaseQuestions()
+    await pending
+    expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+    expect(fixture.targetRequests).toHaveLength(0)
+  })
+
+  it('holds the real agent/request waterfall until the human answers and confirms', async () => {
+    const fixture = await createFixture({ blockQuestions: true })
+    fixtures.push(fixture)
+    const removeAgents = fixture.ctx.provide('agents', {
+      get: (id: Agent['id']) => id === fixture.agent.id ? fixture.agent : undefined,
+      roots: () => [fixture.agent],
+    })
+    const removeCommands = fixture.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = fixture.root
+    try {
+      await applyRuntime(fixture.ctx, config)
+      const signal = new AbortController().signal
+      let resolvedRoute = 0
+      const pending = fixture.ctx.waterfall('agent/request', {
+        agent: fixture.agent,
+        turn: 1,
+        step: 1,
+        signal,
+      }, async () => {
+        resolvedRoute += 1
+        return target
+      })
+      await waitFor(() => fixture.asks.length === 1)
+      // `next()` only resolves the route configuration; it must not be mistaken
+      // for provider I/O. The target adapter is invoked below, after the gate.
+      expect(resolvedRoute).toBe(1)
+      expect(fixture.targetRequests).toHaveLength(0)
+      fixture.releaseQuestions()
+      await pending
+      const trigger = fixture.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: '新触发输入' }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      expect(trigger.type).toBe('user/message')
+      const prepared = await fixture.ctx.llm.prepareCall({ provider: target.provider, model: target.model })
+      for await (const _chunk of prepared.stream({
+        ...prepared.config,
+        messages: fixture.session.deriveMessages(),
+        signal,
+        sessionId: SessionId(`${fixture.session.id}:target`),
+      })) { /* the fixture adapter records this provider request */ }
+      expect(fixture.targetRequests).toHaveLength(1)
+      expect(fixture.targetRequests[0]).toContain('模型交接')
+      expect(fixture.targetRequests[0]).toContain('先运行验证。')
+      expect(fixture.targetRequests[0]).toContain('新触发输入')
+      expect(fixture.targetRequests[0]).not.toContain('旧会话中的原始任务')
+      expect(resolvedRoute).toBe(1)
+      expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('arms idle model selection before the first target provider request', async () => {
+    const fixture = await createFixture({ idle: true, extraHistory: true, blockQuestions: true })
+    fixtures.push(fixture)
+    const removeAgents = fixture.ctx.provide('agents', {
+      get: (id: Agent['id']) => id === fixture.agent.id ? fixture.agent : undefined,
+      roots: () => [fixture.agent],
+    })
+    const removeCommands = fixture.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = fixture.root
+    try {
+      await applyRuntime(fixture.ctx, config)
+      const selection = fixture.session.append('model/selection', target)
+      fixture.ctx.emit('session/event', fixture.session, selection)
+      await waitFor(() => fixture.asks.length === 1)
+      expect(fixture.targetRequests).toHaveLength(0)
+      fixture.releaseQuestions()
+      await waitFor(() => fixture.asks.length === 2)
+      expect(fixture.targetRequests).toHaveLength(0)
+      await waitFor(() => fixture.session.deriveMessages().some(message => message.content.some(block => block.type === 'text' && block.text.includes('模型交接'))))
+      const receiptStore = new HandoffStore(join(fixture.root, 'solar', 'model-handoff'))
+      await waitFor(async () => (await receiptStore.read(fixture.session.id))?.phase === 'committed')
+      const trigger = fixture.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'idle 后的新输入' }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      expect(trigger.type).toBe('user/message')
+      const prepared = await fixture.ctx.llm.prepareCall({ provider: target.provider, model: target.model })
+      for await (const _chunk of prepared.stream({
+        ...prepared.config,
+        messages: fixture.session.deriveMessages(),
+        signal: new AbortController().signal,
+        sessionId: SessionId(`${fixture.session.id}:idle-target`),
+      })) { /* the fixture adapter records this provider request */ }
+      expect(fixture.targetRequests).toHaveLength(1)
+      expect(fixture.targetRequests[0]).toContain('交接摘要')
+      expect(fixture.targetRequests[0]).toContain('先运行验证。')
+      expect(fixture.targetRequests[0]).toContain('idle 后的新输入')
+      expect(fixture.targetRequests[0]).not.toContain('旧会话中的原始任务')
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('runs only the latest idle selection when B is immediately followed by C', async () => {
+    const fixture = await createFixture({ idle: true, extraHistory: true })
+    fixtures.push(fixture)
+    const removeAgents = fixture.ctx.provide('agents', {
+      get: (id: Agent['id']) => id === fixture.agent.id ? fixture.agent : undefined,
+      roots: () => [fixture.agent],
+    })
+    const removeCommands = fixture.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = fixture.root
+    const latest = { provider: 'provider-c', model: 'model-c' }
+    try {
+      await applyRuntime(fixture.ctx, config)
+      const first = fixture.session.append('model/selection', { provider: 'provider-b', model: 'model-b' })
+      fixture.ctx.emit('session/event', fixture.session, first)
+      const second = fixture.session.append('model/selection', latest)
+      fixture.ctx.emit('session/event', fixture.session, second)
+
+      await waitFor(() => fixture.calls.length === 1)
+      const receiptStore = new HandoffStore(join(fixture.root, 'solar', 'model-handoff'))
+      await waitFor(async () => (await receiptStore.read(fixture.session.id))?.phase === 'committed')
+      expect(fixture.calls).toHaveLength(1)
+      expect(fixture.calls[0]?.provider).toBe(config.summaryProvider)
+      expect(fixture.calls[0]?.model).toBe(config.summaryModel)
+      expect(fixture.targetRequests).toHaveLength(0)
+      expect((await receiptStore.read(fixture.session.id))?.target).toEqual(latest)
+      expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('does not call Luna when the target returns to the original model while the receipt read is pending', async () => {
+    const fixture = await createFixture()
+    fixtures.push(fixture)
+    const removeAgents = fixture.ctx.provide('agents', {
+      get: (id: Agent['id']) => id === fixture.agent.id ? fixture.agent : undefined,
+      roots: () => [fixture.agent],
+    })
+    const removeCommands = fixture.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = fixture.root
+    let blockedRead = false
+    let readPending = false
+    let releaseRead: (() => void) | undefined
+    fsReadGate.wait = async path => {
+      if (path.includes('/solar/model-handoff/') && path.endsWith('.json') && !blockedRead) {
+        blockedRead = true
+        readPending = true
+        await new Promise<void>(resolve => {
+          releaseRead = () => {
+            readPending = false
+            resolve()
+          }
+        })
+      }
+    }
+    try {
+      await applyRuntime(fixture.ctx, config)
+      const pending = fixture.ctx.waterfall('agent/request', {
+        agent: fixture.agent,
+        turn: 1,
+        step: 1,
+        signal: new AbortController().signal,
+      }, async () => target)
+      await waitFor(() => readPending)
+      expect(fixture.calls).toHaveLength(0)
+
+      const original = fixture.session.append('model/selection', { provider: 'old-provider', model: 'old-model' })
+      fixture.ctx.emit('session/event', fixture.session, original)
+      releaseRead?.()
+      await expect(pending).rejects.toThrow()
+      expect(fixture.calls).toHaveLength(0)
+      expect(fixture.targetRequests).toHaveLength(0)
+    } finally {
+      releaseRead?.()
+      fsReadGate.wait = undefined
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('rejects the old target when selection changes during the final flush', async () => {
+    const fixture = await createFixture({ blockFlush: true })
+    fixtures.push(fixture)
+    const removeAgents = fixture.ctx.provide('agents', {
+      get: (id: Agent['id']) => id === fixture.agent.id ? fixture.agent : undefined,
+      roots: () => [fixture.agent],
+    })
+    const removeCommands = fixture.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = fixture.root
+    try {
+      await applyRuntime(fixture.ctx, config)
+      const pending = fixture.ctx.waterfall('agent/request', {
+        agent: fixture.agent,
+        turn: 1,
+        step: 1,
+        signal: new AbortController().signal,
+      }, async () => target)
+      await waitFor(() => fixture.asks.length === 2 && fixture.flushPending())
+      expect(fixture.flushPending()).toBe(true)
+      const newerTarget = { provider: 'new-provider', model: 'new-model' }
+      const selection = fixture.session.append('model/selection', newerTarget)
+      fixture.ctx.emit('session/event', fixture.session, selection)
+      fixture.releaseFlush()
+      await waitFor(() => fixture.flushPending())
+      fixture.releaseFlush()
+      await expect(pending).rejects.toThrow()
+      expect(fixture.targetRequests).toHaveLength(0)
+    } finally {
+      fixture.releaseFlush()
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('reuses a confirmed native compaction receipt without a second Luna call or checkpoint', async () => {
+    const fixture = await createFixture()
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+    await fixture.engine.compactRegion(user!, user!, fixture.agent)
+    const confirmed = await fixture.engine.store.read(fixture.session.id)
+    expect(confirmed?.phase).toBe('confirmed')
+    expect(confirmed?.compactionId).toBeTruthy()
+      const receiptStore = new HandoffStore(join(fixture.root, 'solar', 'model-handoff'))
+    await receiptStore.write(confirmed!)
+    const checkpointsBefore = fixture.session.snapshotEvents().filter(event => event.type === 'compaction/summary').length
+    const callsBefore = fixture.calls.length
+    const removeAgents = fixture.ctx.provide('agents', {
+      get: (id: Agent['id']) => id === fixture.agent.id ? fixture.agent : undefined,
+      roots: () => [fixture.agent],
+    })
+    const removeCommands = fixture.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = fixture.root
+    try {
+      await applyRuntime(fixture.ctx, config)
+      const result = await fixture.ctx.waterfall('agent/request', {
+        agent: fixture.agent,
+        turn: 1,
+        step: 2,
+        signal: new AbortController().signal,
+      }, async () => target)
+      expect(result).toEqual(target)
+      expect(fixture.calls).toHaveLength(callsBefore)
+      expect(fixture.session.snapshotEvents().filter(event => event.type === 'compaction/summary')).toHaveLength(checkpointsBefore)
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('includes first human answers in the source of a later handoff', async () => {
+    const fixture = await createFixture()
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+    await fixture.engine.compactRegion(user!, user!, fixture.agent)
+    fixture.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: '第二次交接的新输入' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    const source = await fixture.engine.source(fixture.session)
+    expect(source.text).toContain('先运行验证。')
+    expect(source.text).toContain('保留失败未知状态。')
+    expect(source.text).toContain('第二次交接的新输入')
+  })
+
+  it('splits bounded history, asks budget approval, and records aggregate raw output without a stream marker', async () => {
+    const historyTexts = ['一'.repeat(700), '二'.repeat(700), '三'.repeat(700)]
+    const fixture = await createFixture({ historyTexts, contextWindow: 19_500, approveBudget: true })
+    fixtures.push(fixture)
+    fixture.engine.settings = { ...config, maxSummaryCalls: 8 }
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+    await fixture.engine.compactRegion(user!, user!, fixture.agent)
+
+    expect(fixture.calls.length).toBeGreaterThan(1)
+    expect(fixture.asks[0]?.ids).toEqual(['handoff-budget'])
+    const prompts = fixture.calls.map(call => call.messages.at(-1)?.content.map(block => block.type === 'text' ? block.text : '').join('') ?? '').join('\n')
+    for (const text of historyTexts) expect(prompts).toContain(text)
+    const summary = fixture.session.snapshotEvents().find(event => event.type === 'compaction/summary')
+    expect(summary?.type).toBe('compaction/summary')
+    if (summary?.type === 'compaction/summary') {
+      expect(summary.data.llmStreamCall).toBeUndefined()
+      expect(summary.data.rawOutput?.[0]).toMatchObject({ type: 'text', text: expect.stringContaining('solar-model-handoff') })
+    }
+  })
+
+  it('persists completed malformed-call evidence and never retries it automatically', async () => {
+    const fixture = await createFixture({ malformedLuna: true, includeUsage: true })
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+    await expect(fixture.engine.compactRegion(user!, user!, fixture.agent)).rejects.toThrow()
+    const saved = await fixture.engine.store.read(fixture.session.id)
+    expect(saved?.phase).toBe('failed')
+    expect(saved?.calls?.[0]?.status).toBe('completed')
+    expect(saved?.calls?.[0]?.rawOutput).toEqual([{ type: 'text', text: 'not-json' }])
+    expect(saved?.calls?.[0]?.usage).toEqual({ inputTokens: 3, outputTokens: 2, totalTokens: 5 })
+    expect(fixture.calls).toHaveLength(1)
+    await expect(fixture.engine.compactRegion(user!, user!, fixture.agent)).rejects.toThrow()
+    expect(fixture.calls).toHaveLength(1)
+  })
+})
+
+type FixtureOptions = {
+  readonly blockLuna?: boolean
+  readonly blockQuestions?: boolean
+  readonly extraHistory?: boolean
+  readonly idle?: boolean
+  readonly blockFlush?: boolean
+  readonly contextWindow?: number
+  readonly historyTexts?: readonly string[]
+  readonly approveBudget?: boolean
+  readonly malformedLuna?: boolean
+  readonly includeUsage?: boolean
+}
+
+async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixture & {
+  readonly targetRequests: string[]
+  readonly flushPending: () => boolean
+  releaseQuestions(): void
+  releaseFlush(): void
+}> {
+  const root = await mkdtemp(join(tmpdir(), 'model-handoff-runtime-'))
+  const ctx = new Context()
+  const calls: RecordedCall[] = []
+  const asks: Array<{ readonly ids: readonly string[]; readonly detail?: string }> = []
+  const targetRequests: string[] = []
+  const events: unknown[] = []
+  let releaseQuestions!: () => void
+  let releaseFlush!: () => void
+  let flushIsPending = false
+  let blockedQuestions = options.blockQuestions === true ? 1 : 0
+
+  const session = Session.create(SessionId(`runtime-${Math.random().toString(16).slice(2)}`))
+  const append = <T extends Parameters<Session['append']>[0]>(type: T, data: Parameters<Session['append']>[1], opts?: Parameters<Session['append']>[2]) => {
+    const event = (session.append as (...args: unknown[]) => unknown)(type, data, ...(opts === undefined ? [] : [opts]))
+    events.push(event)
+    return event
+  }
+  append('request/header', {
+    header: { config: { provider: 'old-provider', model: 'old-model' } },
+    reason: 'initial',
+  })
+  append('turn/start', { turn: 1 })
+  append('system/message', { turn: 1, step: 0, message: createSystemMessage('系统头') }, { surfaceOp: 'append' })
+  const historyTexts = options.historyTexts ?? ['旧会话中的原始任务']
+  for (const text of historyTexts) append('user/message', createUserMessage({
+    content: [{ type: 'text', text }],
+    source: { kind: 'user' },
+  }), { surfaceOp: 'append' })
+  if (options.extraHistory && options.historyTexts === undefined) append('user/message', createUserMessage({
+    content: [{ type: 'text', text: '旧会话中的第二条历史' }],
+    source: { kind: 'user' },
+  }), { surfaceOp: 'append' })
+  if (options.idle) append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+
+  const removeLlm = ctx.provide('llm', {
+    async prepareCall(request: { provider: string; model: string }) {
+      return {
+        config: { ...request, maxTokens: config.maxOutputTokens },
+        retryPolicy: {},
+        adapterDefaults: {},
+        context: { contextWindow: options.contextWindow ?? 1_000_000 },
+        async *stream(options_: { messages: readonly Message[]; signal?: AbortSignal }): AsyncIterable<StreamChunk> {
+          const last = options_.messages.at(-1)
+          calls.push({ provider: request.provider, model: request.model, messages: options_.messages })
+          if (request.provider !== config.summaryProvider) {
+            targetRequests.push(options_.messages.map(message => message.content.map(block => block.type === 'text' ? block.text : '').join('')).join('\n'))
+            yield { type: 'text-delta', index: 0, text: 'target output' }
+            yield { type: 'finish', reason: { kind: 'stop' } }
+            return
+          }
+          if (options.blockLuna) {
+            await new Promise<void>((resolve, reject) => {
+              const signal = options_.signal
+              if (signal?.aborted) return reject(signal.reason)
+              signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+              void resolveQuestions
+            })
+          }
+          yield { type: 'text-delta', index: 0, text: options.malformedLuna ? 'not-json' : draft }
+          if (options.includeUsage) yield { type: 'usage', usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 } }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        },
+      }
+    },
+  })
+  const removeMeter = ctx.provide('tokenMeter', {
+    measure: () => ({ totalTokens: 100, nodes: session.surface.nodes.map(seq => ({ seq, tokens: 100, heuristicTokens: 100 })) }),
+    estimateMessage: () => 1,
+  })
+  const removeSessions = ctx.provide('sessions', {
+    flush: async () => {
+      if (!options.blockFlush) return
+      await new Promise<void>(resolve => {
+        flushIsPending = true
+        releaseFlush = () => { flushIsPending = false; resolve() }
+      })
+    },
+  })
+  const removeQuery = ctx.provide('sessionQuery', {
+    readSession: async () => ({ header: session.header, events: session.snapshotEvents() }),
+  })
+  let resolveQuestions!: () => void
+  const removeQuestions = ctx.provide('userQuestions', {
+    ask: async (request: { questions: readonly { id: string; detail?: string }[]; signal?: AbortSignal; agent: Agent; }): Promise<unknown> => {
+      asks.push({ ids: request.questions.map(question => question.id), ...request.questions[0]?.detail === undefined ? {} : { detail: request.questions[0].detail } })
+      if (blockedQuestions > 0) {
+        blockedQuestions -= 1
+        await new Promise<void>((resolve, reject) => {
+          resolveQuestions = resolve
+          request.signal?.addEventListener('abort', () => reject(request.signal?.reason), { once: true })
+        })
+      }
+      if (request.questions[0]?.id === 'handoff-budget' && options.approveBudget) return { answers: [{ id: 'handoff-budget', selected: ['按此上限继续'] }] }
+      if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
+      return { answers: [{ id: 'next', selected: [], custom: '先运行验证。' }, { id: 'risk', selected: [], custom: '保留失败未知状态。' }] }
+    },
+  })
+  const agent = {
+    id: session.id,
+    session,
+    status: options.idle ? 'idle' : 'running',
+    ctx,
+    runMaintenance: async (operation: (signal: AbortSignal) => Promise<unknown>) => operation(new AbortController().signal),
+  } as unknown as Agent
+  const engine = new HandoffEngineCtor(ctx)
+  engine.settings = config
+  engine.store = new HandoffStore(join(root, 'state'))
+
+  class ExposedEngine extends HandoffEngineCtor {
+    async runSummary(owner: Agent): Promise<{ summary: readonly { type: string; text?: string }[] }> {
+      return this.summarize({ messages: [] }, owner) as Promise<{ summary: readonly { type: string; text?: string }[] }>
+    }
+  }
+  const exposed = Object.setPrototypeOf(engine, ExposedEngine.prototype) as ExposedEngine
+
+  return {
+    ctx,
+    session,
+    agent,
+    engine: exposed,
+    calls,
+    asks,
+    root,
+    events,
+    targetRequests,
+    flushPending: () => flushIsPending,
+    releaseFlush: () => releaseFlush?.(),
+    releaseQuestions: () => resolveQuestions?.(),
+    async cleanup(): Promise<void> {
+      await new Promise<void>(resolve => setImmediate(resolve))
+      removeQuestions(); removeQuery(); removeSessions(); removeMeter(); removeLlm()
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+    },
+  }
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 2_000
+  while (!(await predicate()) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5))
+  expect(await predicate()).toBe(true)
+}

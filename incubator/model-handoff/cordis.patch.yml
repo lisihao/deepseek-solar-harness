@@ -1,0 +1,4 @@
+# Additive Host integration. The existing preset's compaction backend is untouched.
+- insert:
+    - id: solar-model-handoff
+      name: '@lisihao/dsh-solar-model-handoff'
