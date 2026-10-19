@@ -164,9 +164,12 @@ export class ModelDirectoryResolver extends Service {
     const conversation = this.ctx.get('conversation')
     if (conversation !== undefined) {
       const publish = (): void => {
-        conversation.blocks.set(sessionId, directory.store.getSnapshot().routable === false
-          ? { reason: this.blockReason() }
-          : undefined)
+        const state = directory.store.getSnapshot()
+        conversation.blocks.set(sessionId, state.conversationModePending === true
+          ? { reason: '正在切换对话模式，请等待确认' }
+          : state.conversationModeError !== undefined
+            ? { reason: state.conversationModeError }
+            : state.routable === false ? { reason: this.blockReason() } : undefined)
       }
       publish()
       actx.effect(() => {

@@ -93,6 +93,10 @@ flowchart LR
   pkg_scheduling_evidence["scheduling-evidence"]
   svc_schedulingEvidence["ctx.schedulingEvidence<br/>Scheduling evidence collector gateway"]
   pkg_scheduling_evidence_rpc["scheduling-evidence-rpc"]
+  pkg_research_handoff["research-handoff"]
+  svc_researchHandoff["ctx.researchHandoff<br/>Owner-scoped research action and evidence seam"]
+  pkg_research_handoff_local["research-handoff-local"]
+  pkg_research_workflow["research-workflow"]
   pkg_rlm_strategy["rlm-strategy"]
   svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
   pkg_rlm_strategy_local["rlm-strategy-local"]
@@ -330,6 +334,8 @@ flowchart LR
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
   pkg_remote_auth --> svc_remoteAuth
+  pkg_research_handoff --> svc_researchHandoff
+  pkg_research_handoff_local --> svc_researchHandoff
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
   pkg_rlm_runtime --> svc_rlmRuntime
@@ -451,6 +457,7 @@ flowchart LR
   svc_physicalOperators --> pkg_tool_physical_operator
   svc_remoteAuth --> pkg_connection
   svc_remoteAuth --> pkg_ui_orchestration
+  svc_researchHandoff --> pkg_research_workflow
   svc_residentOperators --> pkg_physical_operator_resident
   svc_rlmRuntime --> pkg_orchestration_local
   svc_rlmStrategy --> pkg_orchestration_local
@@ -568,6 +575,7 @@ flowchart LR
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 选择合格的订阅优先执行 Offer 并建议并行度，但不派发任务。 |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 注册与 Provider 无关的一次性模型通道；计费 DeepSeek Provider 仍是最后兜底执行路径。 |
 | `ctx.schedulingEvidence` | `core` | [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | - | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`scheduling-evidence-rpc`](../packages/orchestration/scheduling-evidence-rpc) | - | 把 Radar 与 AI Frontier 采集器作为有界子进程运行并返回其存储的 JSON 文档；所有者开启 Radar 后，还会保持已存储的版本为最新，并把证据交给分配器。 |
+| `ctx.researchHandoff` | `seam` | [`research-handoff`](../packages/orchestration/research-handoff) | [`research-handoff-local`](../packages/orchestration/research-handoff-local) | [`research-workflow`](../packages/orchestration/research-workflow) | - | 本地 SQLite 所有者保留原动作、完整输入、采集内容及有归属的核验；标准 Consumer 绑定当前 Agent 和 Session。网站 Driver 与研究 UI 仍须另行实现。 |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 在节点 Attempt 内封存有界递归执行指令，永不创建或修改全局 TaskGraph。 |
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 持有节点内 TypeScript Kernel、异步子项注册表、家族消息、Receipt、Goal 与恢复机制，不成为第二个全局 TaskGraph 调度器。 |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |

@@ -5,7 +5,11 @@
  * boundary for a running selection change.
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -18,12 +22,16 @@ import type {
 import ModelCatalogs from '@deepseek-ai/dsh-model-catalog-local'
 import type { CatalogModel, CatalogRefreshResult, ModelCatalogSource } from '@deepseek-ai/dsh-model-catalog-local'
 import SessionStore from '@deepseek-ai/dsh-session'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+
+const modelTestDirectories: string[] = []
+afterEach(async () => { for (const root of modelTestDirectories.splice(0)) await rm(root, { recursive: true, force: true }) })
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { createApiProxy } from '../src/api-proxy.ts'
+import { sessionModelsValueSchema } from '../src/api/sessions.schema.ts'
 
 let nextRpc = 1
 function request<P>(payload: P): RpcRequest<P> {
@@ -78,13 +86,18 @@ async function harness(logged?: {
   provider: string
   model: string
   reasoningEffort?: ReasoningEffortId
-}): Promise<{
+}, durable = false, restored?: { meta: SessionHeader; events: readonly SessionEvent[] }): Promise<{
   ctx: Context
   agent: Agent
   sessionId: SessionId
 }> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
+  if (durable) {
+    const root = await mkdtemp(join(tmpdir(), 'session-model-choice-'))
+    modelTestDirectories.push(root)
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+  }
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(UserQuestionService)
@@ -102,7 +115,8 @@ async function harness(logged?: {
     { provider: 'duplicate', id: 'same', name: 'Same' },
     { provider: 'duplicate', id: 'same', name: 'Same Again' },
   ]))
-  const session = ctx.sessions.create()
+  const session = ctx.sessions.create(restored?.meta.id, restored === undefined ? undefined
+    : { seed: restored.events, meta: restored.meta })
   if (logged !== undefined) {
     session.append('request/header', { header: { config: logged }, reason: 'initial' })
   }
@@ -580,6 +594,122 @@ describe('Web session model selection', () => {
       model: 'deepseek-reasoner',
       reasoningEffort: 'max',
     })
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps explicit composer-mode selections session-local with colon-only Web catalogs and restores the exact ordinary route', async () => {
+    const { ctx, agent, sessionId } = await harness(undefined, true)
+    ctx.llm.registerAdapter(['dsh-physical-operator'], new CatalogAdapter('Web', [
+      { provider: 'dsh-physical-operator', id: 'chatgpt-web:account-choice', name: 'Actual account choice' },
+    ]))
+    const ordinary = { provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: ReasoningEffortId('max') }
+    const save = vi.fn(async () => {})
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ordinary, saveDefaultModelSelection: save, cwd: '/tmp' })
+    expectValue(await api.sessions.selectModel(request({ sessionId, provider: 'dsh-physical-operator',
+      model: 'chatgpt-web', persistDefault: false })))
+    const directory = expectValue(await api.sessions.models(request({ sessionId })))
+    expect(directory.groups.find(g => g.id === 'dsh-physical-operator')?.models.map(m => m.id)).toEqual(['chatgpt-web:account-choice'])
+    expect(directory.current).toEqual({ provider: 'dsh-physical-operator', model: 'chatgpt-web' })
+    for (const turn of [1, 2]) {
+      expect((await ctx.systemPrompt.assemble()).variables).toMatchObject({ provider: 'dsh-physical-operator', model: 'chatgpt-web' })
+      await expect(agentEvents(ctx, agent).waterfall('agent/request', { turn, step: 1, signal: new AbortController().signal },
+        () => Promise.resolve({ provider: 'seed', model: 'seed' }))).resolves.toMatchObject({
+        provider: 'dsh-physical-operator', model: 'chatgpt-web' })
+    }
+    expect(save).not.toHaveBeenCalled()
+    expectValue(await api.sessions.selectModel(request({ sessionId, ...ordinary, persistDefault: false })))
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).current).toEqual(ordinary)
+    expect((await ctx.systemPrompt.assemble()).variables).toMatchObject({ provider: ordinary.provider, model: ordinary.model })
+    await expect(agentEvents(ctx, agent).waterfall('agent/request', { turn: 3, step: 1, signal: new AbortController().signal },
+      () => Promise.resolve({ provider: 'seed', model: 'seed' }))).resolves.toMatchObject(ordinary)
+    expect(save).not.toHaveBeenCalled()
+    await ctx.fiber.dispose()
+  })
+
+  it('recovers the prior ordinary selection from the Session log instead of inventing a default after a Host restart', async () => {
+    const original = { provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: ReasoningEffortId('max') }
+    const { ctx, agent, sessionId } = await harness(original, true)
+    agent.session.append('request/header', { header: { config: { provider: 'dsh-physical-operator', model: 'chatgpt-web' } }, reason: 'change' })
+    ctx.llm.registerAdapter(['dsh-physical-operator'], new CatalogAdapter('Web', []))
+    const save = vi.fn(async () => {})
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'other-default' }),
+      saveDefaultModelSelection: save, cwd: '/tmp' })
+    expect(expectValue(await api.sessions.models(request({ sessionId })))).toMatchObject({
+      current: { provider: 'dsh-physical-operator', model: 'chatgpt-web' }, ordinary: original })
+    expectValue(await api.sessions.selectModel(request({ sessionId, ...original, persistDefault: false })))
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).current).toEqual(original)
+    expect(save).not.toHaveBeenCalled()
+    await ctx.fiber.dispose()
+  })
+
+  it('persists a blank Session mode before any request and restores it through a new Host and real JSONL read', async () => {
+    const ordinary = { provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: ReasoningEffortId('max') }
+    const first = await harness(undefined, true), save = vi.fn(async () => {})
+    first.ctx.llm.registerAdapter(['dsh-physical-operator'], new CatalogAdapter('Web', []))
+    const api = createApiProxy(first.ctx, { defaultModelSelection: () => ordinary, saveDefaultModelSelection: save, cwd: '/tmp' })
+    expectValue(await api.sessions.selectModel(request({ sessionId: first.sessionId, provider: 'dsh-physical-operator',
+      model: 'chatgpt-web', persistDefault: false })))
+    const disk = await first.ctx.sessionPersistence.readFrom(first.sessionId, 0)
+    expect(disk.events.some(e => e.type === 'request/header')).toBe(false)
+    expect(disk.events.find(e => e.type === 'session/model-selection')?.data).toMatchObject({
+      selected: { provider: 'dsh-physical-operator', model: 'chatgpt-web' }, ordinary })
+    await first.ctx.fiber.dispose()
+    const second = await harness(undefined, true, disk)
+    expect(second.sessionId).toBe(first.sessionId)
+    second.ctx.llm.registerAdapter(['dsh-physical-operator'], new CatalogAdapter('Web', []))
+    const restored = createApiProxy(second.ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'other-default' }),
+      saveDefaultModelSelection: save, cwd: '/tmp' })
+    expect(expectValue(await restored.sessions.models(request({ sessionId: second.sessionId })))).toMatchObject({
+      current: { provider: 'dsh-physical-operator', model: 'chatgpt-web' }, ordinary })
+    expect((await second.ctx.systemPrompt.assemble()).variables).toMatchObject({ provider: 'dsh-physical-operator', model: 'chatgpt-web' })
+    await expect(agentEvents(second.ctx, second.agent).waterfall('agent/request',
+      { turn: 1, step: 1, signal: new AbortController().signal }, () => Promise.resolve({ provider: 'seed', model: 'seed' })))
+      .resolves.toMatchObject({ provider: 'dsh-physical-operator', model: 'chatgpt-web' })
+    expectValue(await restored.sessions.selectModel(request({ sessionId: second.sessionId, ...ordinary, persistDefault: false })))
+    expect(expectValue(await restored.sessions.models(request({ sessionId: second.sessionId }))).current).toEqual(ordinary)
+    expect(save).not.toHaveBeenCalled()
+    await second.ctx.fiber.dispose()
+  })
+
+  it('reports failed durability after a Host change and explicitly restores the exact ordinary request route', async () => {
+    const { ctx, agent, sessionId } = await harness(undefined, true)
+    ctx.llm.registerAdapter(['dsh-physical-operator'], new CatalogAdapter('Web', []))
+    const ordinary = { provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: ReasoningEffortId('max') }
+    const save = vi.fn(async () => {})
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ordinary, saveDefaultModelSelection: save, cwd: '/tmp' })
+    const flush = vi.spyOn(ctx.sessions, 'flush').mockRejectedValueOnce(new Error('fake durability failure'))
+    const failed = await api.sessions.selectModel(request({ sessionId, provider: 'dsh-physical-operator',
+      model: 'chatgpt-web', persistDefault: false }))
+    expect(failed.result.ok).toBe(false)
+    const followup = vi.fn()
+    const steer = vi.fn()
+    Object.assign(agent, { followup, steer })
+    const prompt = (mode: 'queue' | 'steer') => api.sessions.prompt(request({ sessionId, mode,
+      content: [{ type: 'text' as const, text: 'Synthetic admission probe' }] }))
+    for (const mode of ['queue', 'steer'] as const) {
+      expect((await prompt(mode)).result).toMatchObject({ ok: false, error: { code: 'agent-busy',
+        details: { reason: 'MODEL_SELECTION_UNCONFIRMED' } } })
+    }
+    expect(followup).not.toHaveBeenCalled()
+    expect(steer).not.toHaveBeenCalled()
+    const unconfirmed = expectValue(await api.sessions.models(request({ sessionId })))
+    expect(unconfirmed).toMatchObject({
+      current: { provider: 'dsh-physical-operator', model: 'chatgpt-web' }, selectionConfirmationRequired: true })
+    expect(sessionModelsValueSchema.parse(unconfirmed).selectionConfirmationRequired).toBe(true)
+    expect(sessionModelsValueSchema.safeParse({ ...unconfirmed, selectionConfirmationRequired: 'true' }).success).toBe(false)
+    expectValue(await api.sessions.selectModel(request({ sessionId, ...ordinary, persistDefault: false })))
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).selectionConfirmationRequired).toBeUndefined()
+    expectValue(await prompt('queue'))
+    expectValue(await prompt('steer'))
+    expect(followup).toHaveBeenCalledTimes(1)
+    expect(steer).toHaveBeenCalledTimes(1)
+    expect((await ctx.systemPrompt.assemble()).variables).toMatchObject({ provider: ordinary.provider, model: ordinary.model })
+    await expect(agentEvents(ctx, agent).waterfall('agent/request', { turn: 1, step: 1, signal: new AbortController().signal },
+      () => Promise.resolve({ provider: 'seed', model: 'seed' }))).resolves.toMatchObject(ordinary)
+    const disk = await ctx.sessionPersistence.readFrom(sessionId, 0)
+    expect(disk.events.filter(e => e.type === 'session/model-selection').at(-1)?.data).toMatchObject({ selected: ordinary })
+    expect(save).not.toHaveBeenCalled()
+    flush.mockRestore()
     await ctx.fiber.dispose()
   })
 

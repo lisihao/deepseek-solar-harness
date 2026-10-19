@@ -649,7 +649,7 @@ describe('LocalRlmRuntime', () => {
       return { bytes, outcome }
     }
 
-    it.each([1, 2, 3, 4, 5, 7])('refuses a version %i file by name and leaves its bytes unchanged', async (version) => {
+    it.each([1, 2, 3, 4, 5, 6, 8])('refuses a version %i file by name and leaves its bytes unchanged', async (version) => {
       const state = await freshState()
       state.version = version
       delete state.messageBatchDispatches
@@ -658,7 +658,7 @@ describe('LocalRlmRuntime', () => {
       expect(messageOf(outcome)).toContain(`version ${String(version)}`)
     })
 
-    it('refuses a version 6 file that has no messageBatchDispatches, leaving it unchanged', async () => {
+    it('refuses a version 7 file that has no messageBatchDispatches, leaving it unchanged', async () => {
       const state = await freshState()
       delete state.messageBatchDispatches
       const { outcome } = await load(state)
@@ -666,7 +666,7 @@ describe('LocalRlmRuntime', () => {
       expect(messageOf(outcome)).toContain('unsupported shape')
     })
 
-    it('loads a version 6 file and keeps accepted and held batches', async () => {
+    it('loads a version 7 file and keeps accepted and held batches', async () => {
       const state = await freshState()
       state.messages = [message('m1', { deliveryStatus: 'delivered' }), message('m2')]
       state.messageBatchDispatches = [record(['m1'], { state: 'accepted' }), record(['m2'])]

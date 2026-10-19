@@ -25,7 +25,7 @@ export interface EvaluationScopeV1 {
    * How input tokens are bounded before a request is sent. `request-bytes-audited` reserves the request body's byte length and
    * checks it against the usage the provider reports afterwards; it is not a proof that no request exceeds its reservation, and
    * a request that does is charged in full and stops all later admission. `proven-token-count` asks for a bound that is proven
-   * before sending; no such bound exists in this build, so a scope that asks for it admits nothing.
+   * before sending, supplied by the trusted verifier passed to `admission`. Without that verifier every request is refused.
    */
   readonly inputBound: 'request-bytes-audited' | 'proven-token-count'
   readonly limits: {
@@ -68,6 +68,21 @@ export interface EvaluationUsage {
   readonly output: number
 }
 
+/**
+ * A trusted verifier's upper bounds for the exact serialized request. Input includes the supplier's server template; output
+ * includes reasoning. The ledger validates identity and counts, not the truth or applicability of the supplier evidence.
+ */
+export interface EvaluationTokenBound {
+  readonly model: string
+  readonly bodySha256: string
+  readonly inputTokensUpperBound: number
+  readonly reasoningInclusiveOutputUpperBound: number
+  /** SHA256 of the evidence the verifier used; this digest does not grant permission or prove supplier behavior. */
+  readonly evidenceSHA256: string
+}
+
+type TokenBoundVerifier = (request: Readonly<RequestAdmissionInput>) => EvaluationTokenBound | undefined
+
 /** One physical request, or one refusal, in the ledger. */
 export interface EvaluationAttempt {
   readonly id: string
@@ -79,12 +94,14 @@ export interface EvaluationAttempt {
   readonly bodyBytes: number
   readonly bodySha256: string
   /**
-   * Input tokens held for the request: the body's byte length. It is a reservation that is audited afterwards, not a proven
-   * bound on the provider's input tokens. Zero for a refusal.
+   * Input tokens held for the request: the verified token upper bound in proven mode, otherwise the audited body byte length.
+   * Zero for a refusal.
    */
   readonly reservedInput: number
   /** Output tokens held for the request: its `max_tokens`. Zero for a refusal. */
   readonly reservedOutput: number
+  /** Evidence retained for an admitted proven-mode request. Historical evidence cannot authorize another request. */
+  readonly tokenBound?: EvaluationTokenBound
   readonly admittedAt: string
   /** The usage that replaced the reservation, once settled. */
   usage?: EvaluationUsage
@@ -211,9 +228,22 @@ function writeDurably(path: string, text: string): void {
 
 const LEDGER_KEYS = ['version', 'scopeId', 'scopeSha256', 'nextSeq', 'attempts', 'boundViolation', 'integrityFault'] as const
 const ATTEMPT_KEYS = [
-  'id', 'seq', 'label', 'state', 'model', 'bodyBytes', 'bodySha256', 'reservedInput', 'reservedOutput', 'admittedAt', 'usage', 'refusal',
+  'id', 'seq', 'label', 'state', 'model', 'bodyBytes', 'bodySha256', 'reservedInput', 'reservedOutput', 'admittedAt', 'usage', 'refusal', 'tokenBound',
 ] as const
 const SHA256 = /^[0-9a-f]{64}$/u
+const TOKEN_BOUND_KEYS = ['model', 'bodySha256', 'inputTokensUpperBound', 'reasoningInclusiveOutputUpperBound', 'evidenceSHA256'] as const
+
+function isTokenBound(value: unknown): value is EvaluationTokenBound {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const bound = value as Record<string, unknown>
+  if (Object.keys(bound).length !== TOKEN_BOUND_KEYS.length || !TOKEN_BOUND_KEYS.every(key => Object.hasOwn(bound, key))) return false
+  return typeof bound.model === 'string' && bound.model.trim().length > 0
+    && typeof bound.bodySha256 === 'string' && SHA256.test(bound.bodySha256)
+    && typeof bound.evidenceSHA256 === 'string' && SHA256.test(bound.evidenceSHA256)
+    && typeof bound.inputTokensUpperBound === 'number' && Number.isSafeInteger(bound.inputTokensUpperBound) && bound.inputTokensUpperBound > 0
+    && typeof bound.reasoningInclusiveOutputUpperBound === 'number' && Number.isSafeInteger(bound.reasoningInclusiveOutputUpperBound)
+    && bound.reasoningInclusiveOutputUpperBound > 0
+}
 
 function corrupt(path: string, message: string): never {
   throw new EvaluationLedgerError(
@@ -275,12 +305,21 @@ function validateLedgerState(value: unknown, path: string, scope: EvaluationScop
     const reservedOutput = safeCount(attempt.reservedOutput, `attempt ${id} reservedOutput`, path)
     const bodyBytes = safeCount(attempt.bodyBytes, `attempt ${id} bodyBytes`, path)
     if (state === 'refused') {
-      if (reservedInput !== 0 || reservedOutput !== 0 || attempt.usage !== undefined || typeof attempt.refusal !== 'string') {
+      if (reservedInput !== 0 || reservedOutput !== 0 || attempt.usage !== undefined || attempt.tokenBound !== undefined || typeof attempt.refusal !== 'string') {
         corrupt(path, `refused attempt ${id} holds a reservation or usage, or names no reason`)
       }
     } else {
       if (attempt.refusal !== undefined) corrupt(path, `attempt ${id} is not refused but names a refusal`)
-      if (reservedInput !== bodyBytes || reservedOutput < 1) corrupt(path, `attempt ${id} reserves something other than its body and a max_tokens`)
+      if (reservedOutput < 1) corrupt(path, `attempt ${id} has no output reservation`)
+      if (scope.inputBound === 'proven-token-count') {
+        const bound = attempt.tokenBound
+        if (!isTokenBound(bound) || bound.model !== scope.model || bound.model !== attempt.model || bound.bodySha256 !== attempt.bodySha256
+          || bound.inputTokensUpperBound !== reservedInput || bound.reasoningInclusiveOutputUpperBound > reservedOutput) {
+          corrupt(path, `attempt ${id} lacks a matching token bound and reservation`)
+        }
+      } else if (attempt.tokenBound !== undefined || reservedInput !== bodyBytes) {
+        corrupt(path, `attempt ${id} reserves something other than its body bytes`)
+      }
     }
     if (state === 'settled') {
       const usage = attempt.usage as Record<string, unknown> | undefined
@@ -629,10 +668,13 @@ export class EvaluationLedger {
   /**
    * The admission for one physical request. Each call to the returned function is one request with its own attempt id.
    * @param label - the logical command and round, recorded with the attempt.
+   * @param verifyBound - trusted synchronous supplier verification for this request, including server template and reasoning.
+   * Returning no proof refuses proven-mode admission. Never restore this authority from a saved proof or caller-provided JSON.
+   * Byte-audited scopes do not call it. Verifier failures are recorded as refusals unless the verifier closed the ledger.
    * @returns the admission to set on the request.
    */
-  admission(label: string): RequestAdmission {
-    return request => this.admit(label, request)
+  admission(label: string, verifyBound?: TokenBoundVerifier): RequestAdmission {
+    return request => this.admit(label, request, verifyBound)
   }
 
   /**
@@ -663,12 +705,15 @@ export class EvaluationLedger {
     return { input, output, attempts, inFlight, unknown, outstanding: inFlight + unknown, refused: this.state.attempts.length - attempts }
   }
 
-  private refusal(request: RequestAdmissionInput): string | undefined {
+  private refusal(request: RequestAdmissionInput, bound?: EvaluationTokenBound, proofFailure?: string): string | undefined {
     const { limits, generation } = this.scope
     if (this.state.integrityFault !== undefined) return 'ledger-integrity-fault'
     if (this.state.boundViolation !== undefined) return 'bound-violated'
-    // A bound proven before sending would have to come from the provider's own tokenizer and template; this build has none.
-    if (this.scope.inputBound !== 'request-bytes-audited') return 'input-bound-unproven'
+    if (this.scope.inputBound === 'proven-token-count') {
+      if (proofFailure !== undefined) return proofFailure
+      if (bound === undefined) return 'input-bound-unproven'
+      if (bound.model !== request.model || bound.bodySha256 !== request.bodySha256) return 'token-bound-mismatch'
+    }
     if (request.hasNonTextContent) return 'non-text-content'
     if (request.model !== this.scope.model) return 'model-mismatch'
     if (request.thinking !== generation.thinking) return 'thinking-mismatch'
@@ -676,19 +721,37 @@ export class EvaluationLedger {
     const max = request.maxOutputTokens
     if (max === undefined || !Number.isSafeInteger(max) || max < 1) return 'max-tokens-missing'
     if (max > limits.maxOutputTokensPerRequest) return 'max-tokens-over-cap'
+    if (bound !== undefined && bound.reasoningInclusiveOutputUpperBound > max) return 'reasoning-output-unbounded'
     if (!Number.isSafeInteger(request.bodyBytes) || request.bodyBytes < 0) return 'body-size-invalid'
     const totals = this.totals()
     if (addCounts(totals.attempts, 1) > limits.httpAttempts) return 'attempts-exhausted'
     // A request that ended without usage may still be running at the provider, so it keeps its slot until usage is reconciled.
     if (addCounts(totals.outstanding, 1) > limits.concurrentRequests) return 'concurrency-exhausted'
-    if (addCounts(totals.input, request.bodyBytes) > limits.inputTokens) return 'input-exhausted'
+    if (addCounts(totals.input, bound?.inputTokensUpperBound ?? request.bodyBytes) > limits.inputTokens) return 'input-exhausted'
     if (addCounts(totals.output, max) > limits.outputTokens) return 'output-exhausted'
     return undefined
   }
 
-  private admit(label: string, request: RequestAdmissionInput): RequestAdmissionTicket {
-    if (this.closed) throw new LlmError(`evaluation scope ${this.scope.scopeId} is closed; no request is admitted`, ADMISSION_REFUSED_CODE)
-    const refusal = this.refusal(request)
+  private admit(label: string, original: RequestAdmissionInput, verifyBound?: TokenBoundVerifier): RequestAdmissionTicket {
+    this.assertAdmissionOpen()
+    const request = Object.freeze({ ...original })
+    let bound: EvaluationTokenBound | undefined
+    let proofFailure: string | undefined
+    if (this.scope.inputBound === 'proven-token-count' && verifyBound !== undefined) {
+      let candidate: unknown
+      try {
+        candidate = verifyBound(request)
+      } catch {
+        // Verification errors cannot authorize a request; preserve a refusal without persisting provider error text.
+        proofFailure = 'token-bound-verification-failed'
+      }
+      if (candidate !== undefined) {
+        if (isTokenBound(candidate)) bound = { ...candidate }
+        else proofFailure = 'token-bound-invalid'
+      }
+    }
+    this.assertAdmissionOpen()
+    const refusal = this.refusal(request, bound, proofFailure)
     const seq = this.state.nextSeq
     this.state.nextSeq += 1
     const attempt: EvaluationAttempt = {
@@ -699,8 +762,9 @@ export class EvaluationLedger {
       model: request.model,
       bodyBytes: Number.isSafeInteger(request.bodyBytes) && request.bodyBytes >= 0 ? request.bodyBytes : 0,
       bodySha256: request.bodySha256,
-      reservedInput: refusal === undefined ? request.bodyBytes : 0,
+      reservedInput: refusal === undefined ? bound?.inputTokensUpperBound ?? request.bodyBytes : 0,
       reservedOutput: refusal === undefined ? request.maxOutputTokens ?? 0 : 0,
+      ...refusal === undefined && bound !== undefined ? { tokenBound: bound } : {},
       admittedAt: new Date().toISOString(),
       ...refusal === undefined ? {} : { refusal },
     }
@@ -714,6 +778,10 @@ export class EvaluationLedger {
       settle: (usage) => { if (!this.closed) this.settle(attempt.id, usage) },
       abandon: () => { if (!this.closed) this.abandon(attempt.id) },
     }
+  }
+
+  private assertAdmissionOpen(): void {
+    if (this.closed) throw new LlmError(`evaluation scope ${this.scope.scopeId} is closed; no request is admitted`, ADMISSION_REFUSED_CODE)
   }
 
   private find(attemptId: string): EvaluationAttempt {

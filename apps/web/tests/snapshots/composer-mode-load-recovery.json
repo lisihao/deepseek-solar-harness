@@ -1,0 +1,8 @@
+{
+  "failure": "对话模式读取失败：internal: Directory temporarily unavailable",
+  "pending": "正在读取对话模式…",
+  "recovered": "普通对话",
+  "insight": "disabled:暂不可用",
+  "retryReads": 1,
+  "selectionsOrPrompts": []
+}

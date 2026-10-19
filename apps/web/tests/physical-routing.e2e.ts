@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
 import { createChatScrollFixture } from './chat-scroll-fixture.ts'
 import { createNativeReplyFixture } from './native-reply-fixture.ts'
 import { launchWebScaffold, seedSession, watchConsole, type WebScaffold } from './scaffold.ts'
@@ -166,6 +167,195 @@ describe('web e2e: physical operator qualification and routing', () => {
       { timeout: 10_000 },
     ).toBe('true')
   }
+
+  it('switches exclusive composer modes through the real Host and restores them after reload without a model call', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-composer-modes'))
+    const directoryResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session.models')
+    await page.reload({ waitUntil: 'load' })
+    const directoryWire = await directoryResponse
+    const initial = await directoryWire.json() as { result: { ok: boolean; value: { current: Record<string, unknown> } } }
+    const original = initial.result.value.current
+    const sessionId = (directoryWire.request().postDataJSON() as { payload: { sessionId: string } }).payload.sessionId
+    const readSelection = async () => page.evaluate(async (id) => {
+      const response = await fetch('/api/session.models', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: 'composer-mode-read', method: 'session.models', payload: { sessionId: id } }) })
+      const wire = await response.json() as { result: { ok: boolean; value: { current: Record<string, unknown> } } }
+      if (!wire.result.ok) throw new Error('mode directory read failed')
+      return wire.result.value.current
+    }, sessionId)
+    const ordinary = page.getByRole('radio', { name: '普通对话', exact: true })
+    const web = page.getByRole('radio', { name: 'ChatGPT', exact: true })
+    const insight = page.getByRole('radio', { name: '洞察', exact: true })
+    await ordinary.waitFor()
+    await expect.poll(() => ordinary.isChecked()).toBe(true)
+    expect(await insight.isDisabled()).toBe(true)
+    expect(await page.getByText('暂不可用', { exact: true }).isVisible()).toBe(true)
+    const switched = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session.selectModel')
+    await web.click()
+    expect((await switched).request().postDataJSON()).toMatchObject({ payload: {
+      provider: 'dsh-physical-operator', model: 'chatgpt-web', persistDefault: false } })
+    await expect.poll(readSelection).toMatchObject({ provider: 'dsh-physical-operator', model: 'chatgpt-web' })
+    await expect.poll(() => web.isChecked()).toBe(true)
+    expect(await ordinary.isChecked()).toBe(false)
+    await saveFailureShot(page, 'composer-modes-web-verified')
+    await page.reload({ waitUntil: 'load' })
+    await expect.poll(() => web.isChecked()).toBe(true)
+    await ordinary.click()
+    await expect.poll(readSelection).toEqual(original)
+    await expect.poll(() => ordinary.isChecked()).toBe(true)
+    expect(await insight.isDisabled()).toBe(true)
+    await saveFailureShot(page, 'composer-modes-ordinary-verified')
+    const session = scaffold.ctx.sessions.get(SessionId(sessionId))
+    if (session === undefined) throw new Error('mode Session missing after selection')
+    const modelRequests = session.events.filter(event => event.type === 'request/header').length
+    const transcript = JSON.stringify({ options: ['普通对话', 'ChatGPT', '洞察'], insight: 'disabled:暂不可用',
+      web: 'dsh-physical-operator/chatgpt-web', sessionOnly: true, reload: 'chatgpt', restore: 'exact-original', modelCalls: modelRequests }, null, 2) + '\n'
+    const snapshot = fileURLToPath(new URL('./snapshots/composer-modes.json', import.meta.url))
+    if (scaffold.mode === 'refresh') await writeFile(snapshot, transcript)
+    expect(modelRequests).toBe(0)
+    expect(transcript).toBe(await readFile(snapshot, 'utf8'))
+  })
+
+  it('recovers an initial mode-directory failure through an explicit read without selecting or submitting', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-composer-mode-load'))
+    let failDirectory = true
+    let reads = 0
+    const started = Promise.withResolvers<undefined>(), held = Promise.withResolvers<undefined>()
+    const sideEffects: string[] = []
+    const observe = (request: import('playwright').Request) => {
+      const path = new URL(request.url()).pathname
+      if (path === '/api/session.selectModel' || path === '/api/session.prompt') sideEffects.push(path)
+    }
+    const pattern = '**/api/session.models'
+    page.on('request', observe)
+    await page.route(pattern, async (route) => {
+      reads += 1
+      if (failDirectory) {
+        const request = route.request().postDataJSON() as { rpcId: string }
+        await route.fulfill({ json: { type: 'server-response', rpcId: request.rpcId,
+          result: { ok: false, error: { code: 'internal', message: 'Directory temporarily unavailable', details: {} } } } })
+      } else {
+        started.resolve(undefined)
+        await held.promise
+        await route.continue()
+      }
+    })
+    try {
+      await page.reload({ waitUntil: 'load' })
+      const warning = page.getByRole('alert').filter({ hasText: '对话模式读取失败' })
+      await warning.waitFor()
+      const failure = await warning.textContent()
+      expect(failure).toBe('对话模式读取失败：internal: Directory temporarily unavailable')
+      await saveFailureShot(page, 'composer-mode-load-failed')
+      const ordinary = page.getByRole('radio', { name: '普通对话', exact: true })
+      const web = page.getByRole('radio', { name: 'ChatGPT', exact: true })
+      const insight = page.getByRole('radio', { name: '洞察', exact: true })
+      expect(await ordinary.isDisabled()).toBe(true)
+      expect(await web.isDisabled()).toBe(true)
+      expect(await ordinary.isChecked()).toBe(false)
+      expect(await web.isChecked()).toBe(false)
+      const before = reads
+      failDirectory = false
+      const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session.models')
+      await page.getByRole('button', { name: '重新读取对话模式', exact: true }).click()
+      await started.promise
+      expect(await page.getByRole('button', { name: '重新读取对话模式', exact: true }).isDisabled()).toBe(true)
+      expect(await page.getByRole('status').filter({ hasText: '正在读取对话模式' }).isVisible()).toBe(true)
+      expect(reads).toBe(before + 1)
+      held.resolve(undefined)
+      const wire = await (await refreshed).json() as { result: { ok: boolean } }
+      expect(wire.result.ok).toBe(true)
+      await expect.poll(() => warning.count()).toBe(0)
+      await expect.poll(() => ordinary.isChecked()).toBe(true)
+      expect(await insight.isDisabled()).toBe(true)
+      expect(sideEffects).toEqual([])
+      await saveFailureShot(page, 'composer-mode-load-recovered')
+      const transcript = JSON.stringify({ failure, pending: '正在读取对话模式…', recovered: '普通对话',
+        insight: 'disabled:暂不可用', retryReads: reads - before, selectionsOrPrompts: sideEffects }, null, 2) + '\n'
+      const snapshot = fileURLToPath(new URL('./snapshots/composer-mode-load-recovery.json', import.meta.url))
+      if (scaffold.mode === 'refresh') await writeFile(snapshot, transcript)
+      expect(transcript).toBe(await readFile(snapshot, 'utf8'))
+    } finally {
+      held.resolve(undefined)
+      await page.unroute(pattern)
+      page.off('request', observe)
+    }
+  })
+
+  it('keeps a failed mode confirmation blocked after page rebuild until explicit successful reselection', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-composer-durability'))
+    const directoryResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session.models')
+    await page.reload({ waitUntil: 'load' })
+    const directoryWire = await directoryResponse
+    const sessionId = (directoryWire.request().postDataJSON() as { payload: { sessionId: string } }).payload.sessionId
+    const web = page.getByRole('radio', { name: 'ChatGPT', exact: true })
+    const ordinary = page.getByRole('radio', { name: '普通对话', exact: true })
+    await expect.poll(() => ordinary.isChecked()).toBe(true)
+    const flush = vi.spyOn(scaffold.ctx.sessions, 'flush').mockRejectedValueOnce(new Error('fake mode durability failure'))
+    try {
+      const failed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session.selectModel')
+      await web.click()
+      expect(await (await failed).json()).toMatchObject({ result: { ok: false,
+        error: { message: 'fake mode durability failure' } } })
+      const agent = scaffold.ctx.agents.get(SessionId(sessionId))
+      if (agent === undefined) throw new Error('mode Agent missing during failure recovery')
+      const followup = vi.spyOn(agent, 'followup').mockImplementation(() => {})
+      const steer = vi.spyOn(agent, 'steer').mockImplementation(() => {})
+      let releaseDirectory!: () => void
+      let directoryStarted!: () => void
+      const held = new Promise<void>((resolve) => { releaseDirectory = resolve })
+      const started = new Promise<void>((resolve) => { directoryStarted = resolve })
+      const sendPrompt = (mode: 'queue' | 'steer') => page.evaluate(async ({ id, mode }) => {
+        const response = await fetch('/api/session.prompt', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ type: 'client-request', rpcId: 'held-directory-' + mode, method: 'session.prompt',
+            payload: { sessionId: id, mode, content: [{ type: 'text', text: 'Synthetic admission probe' }] } }) })
+        return response.json() as Promise<{ result: { ok: boolean; error?: { code: string } } }>
+      }, { id: sessionId, mode })
+      const directoryRoute = '**/api/session.models'
+      await page.route(directoryRoute, async (route) => { directoryStarted(); await held; await route.continue() })
+      const restoredDirectory = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session.models')
+      try {
+        await page.reload({ waitUntil: 'load' })
+        await started
+        for (const mode of ['queue', 'steer'] as const) {
+          expect(await sendPrompt(mode)).toMatchObject({ result: { ok: false,
+            error: { code: 'agent-busy', details: { reason: 'MODEL_SELECTION_UNCONFIRMED' } } } })
+        }
+        expect(followup).not.toHaveBeenCalled()
+        expect(steer).not.toHaveBeenCalled()
+      } finally {
+        releaseDirectory()
+        await restoredDirectory
+        await page.unroute(directoryRoute)
+        followup.mockRestore()
+        steer.mockRestore()
+      }
+      expect(await (await restoredDirectory).json()).toMatchObject({ result: { ok: true,
+        value: { selectionConfirmationRequired: true } } })
+      await expect.poll(() => web.isChecked()).toBe(true)
+      const warning = page.getByRole('alert').filter({ hasText: '上次对话模式未成功保存' })
+      await warning.waitFor()
+      const input = page.locator('textarea').first()
+      await expect.poll(() => input.isDisabled()).toBe(true)
+      const send = page.getByRole('button', { name: 'Send message', exact: true })
+      await expect.poll(() => send.isDisabled()).toBe(true)
+      const confirmed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/session.selectModel')
+      await web.click()
+      expect(await (await confirmed).json()).toMatchObject({ result: { ok: true } })
+      await expect.poll(() => warning.count()).toBe(0)
+      await expect.poll(() => input.isEnabled()).toBe(true)
+      await input.fill('Synthetic text is allowed only after confirmation')
+      await expect.poll(() => send.isEnabled()).toBe(true)
+      await input.fill('')
+      await ordinary.click()
+      await expect.poll(() => ordinary.isChecked()).toBe(true)
+      const session = scaffold.ctx.sessions.get(SessionId(sessionId))
+      if (session === undefined) throw new Error('mode Session missing after failure recovery')
+      expect(session.events.filter(event => event.type === 'request/header')).toHaveLength(0)
+    } finally {
+      flush.mockRestore()
+    }
+  })
 
   it('keeps a selected primary in charge while exposing bounded downstream and Web coordination controls', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-routing'))

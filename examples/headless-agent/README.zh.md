@@ -34,3 +34,9 @@ pnpm exec vitest run --config vitest.e2e.config.ts packages/e2b/e2b/tests/compos
 ## Keyless 独立 RLM
 
 [`standalone-rlm.cordis.yml`](standalone-rlm.cordis.yml) 将明确拥有的 root、独立 RLM Provider 与既有执行所有者组装在一起。API 和 Codex 快照场景只替换外部传输；不使用凭据，经过真实 Loader、工具、daemon 和 RLM 核心。运行 `pnpm run test:snapshot -- examples/headless-agent/tests/standalone-rlm.snapshot.ts`；完成 host 构建后，设置 `DSH_EXAMPLE_MODE=lib`，以 plain Node 检查构建包的 exports。此夹具不构成通用 CLI 或 Desktop Host 集成。
+
+## 本地 HTTP 准入
+
+[`http-admission.cordis.yml`](http-admission.cordis.yml) 将真实 Loader、Worker、Runtime、DeepSeek 适配器和共享评估账本连接到回环 HTTP 服务；认证和响应均为合成数据。运行 `pnpm run test:snapshot -- examples/headless-agent/tests/http-admission.snapshot.ts`；完成 host 构建后，设置 `DSH_EXAMPLE_MODE=lib`，以 plain Node 检查构建包的 exports。服务端独立记录每次请求到达，夹具逐项核对 root、child 和工具轮中的请求体哈希、观察事件与账本尝试。父流程读取完整子结果后才发出下一次请求，并发上限保持为 1。
+
+输入上界未获证明时，准入在任何 HTTP 请求到达前拒绝。请求到达后断连会持久保留 unknown，不发生隐藏重试，并继续占用并发上限为 1 的槽位；另一项并发上限为 2 的独立诊断证明，后续独立请求成功不会抹去该 unknown。篡改请求体关联、保留未分类的到达记录或删除 unknown 事件，都必须使验证失败。按字节计量的合成作用域不证明真实 Provider token 上界、操作系统隔离或付费运行就绪；该组装不发出外部模型请求。

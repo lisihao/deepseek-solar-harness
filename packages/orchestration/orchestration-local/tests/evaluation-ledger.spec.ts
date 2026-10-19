@@ -15,6 +15,7 @@ import {
   parseEvaluationScope,
   takeEvaluationOwnerLock,
   type EvaluationScopeV1,
+  type EvaluationTokenBound,
 } from '../src/evaluation-ledger.ts'
 
 let directory: string
@@ -373,7 +374,7 @@ describe('what unknown means', () => {
 })
 
 describe('input bound', () => {
-  it('admits nothing when the scope asks for a bound proven before sending, because this build has none', () => {
+  it('admits nothing when the scope asks for a proven bound and no verifier is supplied', () => {
     const text = scopeText({ inputBound: 'proven-token-count' })
     const ledger = open({ ...SCOPE, inputBound: 'proven-token-count' }, text)
     expect(refusal(() => ledger.admission('a')(request()))).toContain('input-bound-unproven')
@@ -392,6 +393,204 @@ describe('input bound', () => {
     const ticket = ledger.admission('a')(request())
     expect(() => { ticket.settle({ inputTokens: Number.NaN, outputTokens: 1 }) }).toThrow(/not a count/u)
     expect(refusal(() => ledger.admission('b')(request()))).toContain('ledger-integrity-fault')
+  })
+})
+
+describe('proven token admission', () => {
+  const scope = { ...SCOPE, inputBound: 'proven-token-count' } as const
+  const text = scopeText({ inputBound: scope.inputBound })
+  const proof = (facts = request(), override: Partial<EvaluationTokenBound> = {}): EvaluationTokenBound => ({
+    model: facts.model, bodySha256: facts.bodySha256, inputTokensUpperBound: 300,
+    reasoningInclusiveOutputUpperBound: 40, evidenceSHA256: 'e'.repeat(64), ...override,
+  })
+
+  it('persists the exact proof and token input reservation before returning, retaining the larger wire output cap', () => {
+    const ledger = open(scope, text)
+    const bound = proof()
+    const facts = request()
+    ledger.admission('a', (snapshot) => {
+      expect(Object.isFrozen(snapshot)).toBe(true)
+      expect(snapshot).not.toBe(facts)
+      Object.assign(facts, { model: 'changed-after-snapshot', bodyBytes: 999, bodySha256: 'b'.repeat(64), maxOutputTokens: 1 })
+      return bound
+    })(facts)
+    Object.assign(bound, { inputTokensUpperBound: 1 })
+    const persisted = JSON.parse(readFileSync(join(directory, 'ledger.json'), 'utf8')) as { attempts: unknown[] }
+    expect(persisted.attempts).toEqual([expect.objectContaining({ state: 'reserved', model: scope.model,
+      bodyBytes: 100, bodySha256: 'a'.repeat(64), reservedInput: 300, reservedOutput: 50, tokenBound: proof() })])
+    expect(ledger.snapshot().totals).toMatchObject({ input: 300, output: 50, attempts: 1 })
+  })
+
+  it('does not invoke a token verifier in byte-audited mode', () => {
+    const ledger = open()
+    ledger.admission('a', () => { throw new Error('must not be called') })(request())
+    expect(ledger.snapshot().state.attempts[0]).toMatchObject({ reservedInput: 100, reservedOutput: 50 })
+    expect(ledger.snapshot().state.attempts[0]?.tokenBound).toBeUndefined()
+  })
+
+  const invalidProofs: readonly (readonly [string, unknown])[] = [
+    ['null', null], ['array', []], ['no output bound', { ...proof(), reasoningInclusiveOutputUpperBound: undefined }],
+    ['negative input', proof(request(), { inputTokensUpperBound: -1 })],
+    ['fractional input', proof(request(), { inputTokensUpperBound: 1.5 })],
+    ['unsafe input', proof(request(), { inputTokensUpperBound: Number.MAX_SAFE_INTEGER + 1 })],
+    ['zero output', proof(request(), { reasoningInclusiveOutputUpperBound: 0 })],
+    ['non-finite output', proof(request(), { reasoningInclusiveOutputUpperBound: Number.NaN })],
+    ['missing evidence', proof(request(), { evidenceSHA256: '' })],
+    ['unknown field', { ...proof(), extra: true }],
+  ]
+  it.each(invalidProofs)('refuses %s proof without reserving or falling back to bytes', (_name, value) => {
+    const ledger = open(scope, text)
+    // A verifier may receive supplier JSON; exercise its result validation with malformed external data.
+    expect(refusal(() => ledger.admission('a', () => value as EvaluationTokenBound)(request()))).toContain('token-bound-invalid')
+    expect(ledger.snapshot().totals).toMatchObject({ input: 0, output: 0, attempts: 0, refused: 1 })
+    expect(ledger.snapshot().state.attempts[0]?.tokenBound).toBeUndefined()
+  })
+
+  it('refuses absent, failed, mismatched and reasoning-unbounded verification', () => {
+    const ledger = open(scope, text)
+    expect(refusal(() => ledger.admission('a', () => undefined)(request()))).toContain('input-bound-unproven')
+    expect(refusal(() => ledger.admission('b', () => { throw new Error('supplier details must not be persisted') })(request()))).toContain('token-bound-verification-failed')
+    for (const bound of [proof(request(), { model: 'other' }), proof(request(), { bodySha256: 'b'.repeat(64) })]) {
+      expect(refusal(() => ledger.admission('c', () => bound)(request()))).toContain('token-bound-mismatch')
+    }
+    expect(refusal(() => ledger.admission('d', facts => proof(facts, { reasoningInclusiveOutputUpperBound: 51 }))(request()))).toContain('reasoning-output-unbounded')
+    expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).not.toContain('supplier details')
+    expect(ledger.snapshot().totals).toMatchObject({ input: 0, output: 0, attempts: 0, refused: 5 })
+  })
+
+  it.each([
+    [{ model: 'other' }, 'model-mismatch'], [{ thinking: 'disabled' }, 'thinking-mismatch'],
+    [{ reasoningEffort: 'max' }, 'effort-mismatch'], [{ hasNonTextContent: true }, 'non-text-content'],
+    [{ maxOutputTokens: undefined }, 'max-tokens-missing'], [{ maxOutputTokens: 101 }, 'max-tokens-over-cap'],
+    [{ bodyBytes: -1 }, 'body-size-invalid'],
+  ] as const)('retains ordinary request guards for %o', (override, reason) => {
+    const ledger = open(scope, text)
+    expect(refusal(() => ledger.admission('a', facts => proof(facts))(request(override)))).toContain(reason)
+  })
+
+  it('uses proven tokens rather than bytes for the last input balance', () => {
+    const ledger = open(scope, text)
+    ledger.admission('a', facts => proof(facts, { inputTokensUpperBound: 600 }))(request({ bodyBytes: 1 }))
+    ledger.admission('b', facts => proof(facts, { inputTokensUpperBound: 400 }))(request({ bodyBytes: 2000 }))
+    expect(refusal(() => ledger.admission('c', facts => proof(facts))(request()))).toContain('concurrency-exhausted')
+    ledger.reconcile('scope-a-000001', { inputTokens: 600, outputTokens: 1 })
+    expect(refusal(() => ledger.admission('d', facts => proof(facts, { inputTokensUpperBound: 1 }))(request({ bodyBytes: 0 })))).toContain('input-exhausted')
+    expect(ledger.snapshot().totals.input).toBe(1000)
+  })
+
+  it('rechecks the last slot and sequence after a verifier makes another synchronous reservation', () => {
+    const single = { ...scope, limits: { ...scope.limits, concurrentRequests: 1 } }
+    const ledger = open(single, scopeText({ ...single }))
+    expect(refusal(() => ledger.admission('outer', (facts) => {
+      ledger.admission('inner', inner => proof(inner))(request())
+      return proof(facts)
+    })(request()))).toContain('concurrency-exhausted')
+    expect(ledger.snapshot().state.attempts.map(row => [row.id, row.label, row.state])).toEqual([
+      ['scope-a-000001', 'inner', 'reserved'], ['scope-a-000002', 'outer', 'refused'],
+    ])
+  })
+
+  it('retains the cumulative wire output and physical attempt ceilings in proven mode', () => {
+    const wide = { ...scope, limits: { ...scope.limits, concurrentRequests: 5 } }
+    const ledger = open(wide, scopeText({ ...wide }))
+    const admit = (label: string): ReturnType<ReturnType<EvaluationLedger['admission']>> => ledger.admission(label,
+      facts => proof(facts, { inputTokensUpperBound: 1, reasoningInclusiveOutputUpperBound: 1 }))(request({ maxOutputTokens: 100 }))
+    for (let index = 0; index < 4; index += 1) admit(String(index))
+    expect(ledger.snapshot().totals).toMatchObject({ output: 400, attempts: 4 })
+    expect(refusal(() => admit('fifth'))).toContain('attempts-exhausted')
+    ledger.reconcile('scope-a-000001', { inputTokens: 1, outputTokens: 100 })
+    expect(ledger.snapshot().totals.output).toBe(400)
+  })
+
+  it('reserves wire output rather than a smaller proof when checking remaining output', () => {
+    const wide = { ...scope, limits: { ...scope.limits, concurrentRequests: 5, httpAttempts: 10 } }
+    const ledger = open(wide, scopeText({ ...wide }))
+    const admit = (): ReturnType<ReturnType<EvaluationLedger['admission']>> => ledger.admission('a',
+      facts => proof(facts, { inputTokensUpperBound: 1, reasoningInclusiveOutputUpperBound: 1 }))(request({ maxOutputTokens: 100 }))
+    for (let index = 0; index < 4; index += 1) admit()
+    expect(refusal(admit)).toContain('output-exhausted')
+    expect(ledger.snapshot().totals).toMatchObject({ input: 4, output: 400, attempts: 4 })
+  })
+
+  it.each(['bound', 'integrity'] as const)('rechecks a %s fault introduced inside the verifier', (kind) => {
+    const ledger = open(scope, text)
+    const ticket = ledger.admission('first', facts => proof(facts))(request())
+    expect(refusal(() => ledger.admission('second', (facts) => {
+      if (kind === 'bound') ticket.settle({ inputTokens: 301, outputTokens: 1 })
+      else {
+        ticket.settle({ inputTokens: 1, outputTokens: 1 })
+        try { ticket.settle({ inputTokens: 2, outputTokens: 1 }) } catch { /* the durable conflict must stop the outer admission */ }
+      }
+      return proof(facts)
+    })(request()))).toContain(kind === 'bound' ? 'bound-violated' : 'ledger-integrity-fault')
+    expect(ledger.snapshot().totals.attempts).toBe(1)
+  })
+
+  it.each([false, true])('writes nothing when verification closes the ledger (throws: %s)', (throws) => {
+    const ledger = open(scope, text)
+    const before = readFileSync(join(directory, 'ledger.json'), 'utf8')
+    expect(refusal(() => ledger.admission('a', (facts) => {
+      ledger.close()
+      if (throws) throw new Error('closed verifier')
+      return proof(facts)
+    })(request()))).toContain('closed')
+    expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).toBe(before)
+  })
+
+  it('keeps unknown token reservations after restart and requires a new verifier even after a late receipt', () => {
+    const single = { ...scope, limits: { ...scope.limits, concurrentRequests: 1 } }
+    const singleText = scopeText({ ...single })
+    const first = open(single, singleText)
+    first.admission('a', facts => proof(facts))(request())
+    const ledger = reopen(first, single, singleText)
+    expect(ledger.snapshot().totals).toMatchObject({ input: 300, output: 50, unknown: 1, outstanding: 1 })
+    expect(refusal(() => ledger.admission('b', facts => proof(facts))(request()))).toContain('concurrency-exhausted')
+    ledger.reconcile('scope-a-000001', { inputTokens: 20, cacheReadTokens: 10, outputTokens: 40, reasoningTokens: 30 })
+    expect(refusal(() => ledger.admission('c')(request()))).toContain('input-bound-unproven')
+    ledger.admission('d', facts => proof(facts))(request())
+    expect(ledger.snapshot().totals).toMatchObject({ input: 330, output: 90, unknown: 0, outstanding: 1 })
+  })
+
+  it.each(['input', 'output'] as const)('charges a %s bound violation in full and blocks all later admissions', (kind) => {
+    const ledger = open(scope, text)
+    ledger.admission('a', facts => proof(facts))(request()).settle({ inputTokens: kind === 'input' ? 301 : 1, outputTokens: kind === 'output' ? 51 : 1 })
+    expect(ledger.snapshot().state.boundViolation).toEqual({ attemptId: 'scope-a-000001', what: kind })
+    expect(ledger.snapshot().totals[kind]).toBe(kind === 'input' ? 301 : 51)
+    expect(refusal(() => ledger.admission('b', facts => proof(facts))(request()))).toContain('bound-violated')
+  })
+
+  it.each([
+    ['no proof', (row: Record<string, unknown>) => { delete row.tokenBound }],
+    ['wrong model', (row: Record<string, unknown>) => { row.tokenBound = proof(request(), { model: 'other' }) }],
+    ['wrong request', (row: Record<string, unknown>) => { row.tokenBound = proof(request(), { bodySha256: 'b'.repeat(64) }) }],
+    ['wrong input reservation', (row: Record<string, unknown>) => { row.reservedInput = 100 }],
+    ['output beyond wire cap', (row: Record<string, unknown>) => { row.tokenBound = proof(request(), { reasoningInclusiveOutputUpperBound: 51 }) }],
+    ['malformed evidence', (row: Record<string, unknown>) => { row.tokenBound = proof(request(), { evidenceSHA256: 'bad' }) }],
+    ['unknown proof field', (row: Record<string, unknown>) => { row.tokenBound = { ...proof(), extra: true } }],
+    ['proof on refused row', (row: Record<string, unknown>) => { row.state = 'refused'; row.refusal = 'no'; row.reservedInput = 0; row.reservedOutput = 0 }],
+  ] as const)('refuses persisted %s without rewriting the ledger', (_name, damage) => {
+    const ledger = open(scope, text)
+    ledger.admission('a', facts => proof(facts))(request())
+    ledger.close()
+    const state = JSON.parse(readFileSync(join(directory, 'ledger.json'), 'utf8')) as { attempts: Record<string, unknown>[] }
+    damage(state.attempts[0]!)
+    const damaged = JSON.stringify(state)
+    writeFileSync(join(directory, 'ledger.json'), damaged)
+    expect(() => open(scope, text)).toThrow(expect.objectContaining({ code: 'EVALUATION_LEDGER_INVALID' }) as Error)
+    expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).toBe(damaged)
+    expect(existsSync(join(directory, 'ledger.json.lock'))).toBe(false)
+  })
+
+  it('rejects a proof added to a byte-audited row', () => {
+    const ledger = open()
+    ledger.admission('a')(request())
+    ledger.close()
+    const state = JSON.parse(readFileSync(join(directory, 'ledger.json'), 'utf8')) as { attempts: Record<string, unknown>[] }
+    state.attempts[0]!.tokenBound = proof()
+    const damaged = JSON.stringify(state)
+    writeFileSync(join(directory, 'ledger.json'), damaged)
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'EVALUATION_LEDGER_INVALID' }) as Error)
+    expect(readFileSync(join(directory, 'ledger.json'), 'utf8')).toBe(damaged)
   })
 })
 

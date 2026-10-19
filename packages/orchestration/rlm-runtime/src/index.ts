@@ -87,6 +87,14 @@ export interface RlmRuntimeLimitsV1 {
   readonly maxOutputBytes: number
 }
 
+/** Host-owned child admission for one root tree, independent of context placement and model selection. */
+export interface RlmChildSpawnPolicyV1 {
+  readonly version: 1
+  readonly mode: 'none' | 'root-only' | 'recursive'
+  /** Cumulative accepted descendants, including deleted, failed and indeterminate children; none requires zero. */
+  readonly maxTotalChildren: number
+}
+
 /** Native model selection for a root or child agent. */
 export interface RlmModelSelectionV1 {
   readonly operatorId: string
@@ -143,6 +151,8 @@ export interface RlmRuntimeCreateRequest {
    * omission preserves the legacy interpretation of `defaultChildModel`.
    */
   readonly childModelPolicy?: RlmChildModelPolicyV1
+  /** Explicit Host child admission; a Provider resolves its documented default when absent. */
+  readonly childSpawnPolicy?: RlmChildSpawnPolicyV1
   /** Sealed parent execution inputs inherited by Prime children. */
   readonly executionOptions?: RlmChildExecutionOptionsV1
   readonly limits: RlmRuntimeLimitsV1
@@ -385,6 +395,8 @@ export interface RlmRuntimeSessionSnapshotV1 {
   readonly defaultChildModel?: RlmModelSelectionV1
   /** Persisted default-model rule for recursively admitted children. */
   readonly childModelPolicy?: RlmChildModelPolicyV1
+  /** Resolved Host child admission inherited by descendants; Local storage requires this value. */
+  readonly childSpawnPolicy?: RlmChildSpawnPolicyV1
   /** Sealed parent execution inputs inherited by recursively admitted children. */
   readonly executionOptions?: RlmChildExecutionOptionsV1
   readonly limits: RlmRuntimeLimitsV1

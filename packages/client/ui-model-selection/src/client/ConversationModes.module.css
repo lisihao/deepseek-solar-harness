@@ -1,0 +1,41 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+}
+
+.options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.options input {
+  margin: 0;
+  accent-color: var(--dsw-alias-state-business-primary);
+}
+
+.options label:has(input:disabled) {
+  cursor: default;
+}
+
+.unavailable {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.unavailable span {
+  font-size: 12px;
+}

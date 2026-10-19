@@ -43,3 +43,10 @@
   - text: DeepSeek-V4-Flash
   - img
 - button "Stop generating"
+- radiogroup "对话模式":
+  - radio "普通对话" [checked] [disabled]
+  - text: 普通对话
+  - radio "ChatGPT" [disabled]
+  - text: ChatGPT
+  - radio "洞察" [disabled]
+  - text: 洞察 暂不可用

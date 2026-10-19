@@ -54,3 +54,10 @@
 - button "7% of context used"
 - button "Send message" [disabled]
 - text: 1 turns · 2 steps LLM {{duration}} · Tool call {{duration}} TTFT avg {{duration}} · {{throughput}} tok/s Cache hit 52% Input 17.2K tok · Output 252 tok
+- radiogroup "对话模式":
+  - radio "普通对话" [checked]
+  - text: 普通对话
+  - radio "ChatGPT"
+  - text: ChatGPT
+  - radio "洞察" [disabled]
+  - text: 洞察 暂不可用

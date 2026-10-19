@@ -18,6 +18,13 @@ export interface ModelWorkerToolBridgeV1 {
   }[]
 }
 
+/** Host-selected tool loop, independent of context placement and child-spawn authority. */
+export interface ModelWorkerToolExecutionV1 {
+  readonly version: 1
+  /** Maximum tool-execution rounds; at most one additional model request may finish the answer. */
+  readonly maxToolRounds: number
+}
+
 /**
  * The sealed evaluation scope of a request: the generation limits it must send and the admission that meters every physical
  * request it makes. Set only by an orchestration layer that holds a scope; a request without it keeps the worker's ordinary
@@ -70,6 +77,8 @@ export interface ModelWorkerExecuteRequest {
   readonly parent?: Agent
   readonly rlmPlan?: RlmExecutionPlanV1
   readonly modelToolBridge?: ModelWorkerToolBridgeV1
+  /** Explicit tool policy takes precedence over the legacy RLM-derived loop limit. */
+  readonly toolExecution?: ModelWorkerToolExecutionV1
   /** Present when the request runs under an evaluation scope; see {@link ModelWorkerEvaluationV1}. */
   readonly evaluation?: ModelWorkerEvaluationV1
   /** Optional attempt-owned evidence for every actual request, including all tool rounds and transport attempts. */
@@ -89,6 +98,8 @@ export interface ModelWorkerProvider {
   readonly id: string
   /** True only when every physical request reaches the supplied request observer. */
   readonly observesPhysicalRequests?: boolean
+  /** True only when explicit toolExecution requests are honored or refused before model dispatch. */
+  readonly supportsToolExecution?: boolean
   offers(): Promise<readonly ModelExecutionOffer[]>
   execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 }
@@ -142,6 +153,9 @@ export class ModelWorkerRuntime extends Service {
     if (provider === undefined) throw new ModelWorkerError(`unknown model worker: ${request.workerId}`, 'MODEL_WORKER_UNAVAILABLE')
     if (request.physicalRequestObserver !== undefined && provider.observesPhysicalRequests !== true) {
       throw new ModelWorkerError(`model worker cannot report physical request evidence: ${request.workerId}`, 'MODEL_WORKER_INVALID')
+    }
+    if (request.toolExecution !== undefined && provider.supportsToolExecution !== true) {
+      throw new ModelWorkerError('model worker cannot honor explicit tool execution', 'MODEL_WORKER_INVALID')
     }
     return provider.execute(request)
   }

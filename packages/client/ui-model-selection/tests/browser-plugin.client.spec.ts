@@ -168,6 +168,23 @@ async function bench() {
 const projection = (id: string) => ({ sessionId: sid(id) })
 
 describe('ui-model-selection dual entry', () => {
+  it('blocks the real composer during mode selection and after failure until an explicit ordinary choice', async () => {
+    const b = await bench(); b.mint('mode-session')
+    const directory = (b.ctx.get('modelDirectories') as ModelDirectoryResolver).directoryFor(sid('mode-session'))
+    await directory.load()
+    const gate = b.holdSelect(), changing = directory.selectConversationMode('chatgpt')
+    expect(b.blockOf('mode-session')?.reason).toContain('正在切换')
+    gate.reject(new Error('fake unavailable Web operator'))
+    await expect(changing).rejects.toThrow('fake unavailable')
+    expect(b.blockOf('mode-session')?.reason).toBe('fake unavailable Web operator')
+    expect(b.hostCurrent().provider).toBe('deepseek-official')
+    const recoveryGate = b.holdSelect(), recovery = directory.selectConversationMode('ordinary')
+    recoveryGate.resolve(undefined)
+    await recovery
+    expect(b.blockOf('mode-session')).toBeUndefined()
+    expect(b.calls.select).toBe(2)
+    await b.ctx.fiber.dispose()
+  })
   it('reloads the directory when a turn ends, not when it starts or while it streams, and never over a selection in flight', async () => {
     const b = await bench()
     b.mint('s1')

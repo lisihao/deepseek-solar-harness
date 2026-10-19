@@ -54,7 +54,7 @@ describe('serializeMessages', () => {
     expect(wire).toEqual([{ role: 'system', content: 'be brief' }])
   })
 
-  it('maps plain assistant text without reasoning_content', () => {
+  it('retains plain assistant reasoning for request assembly', () => {
     const wire = serializeMessages([
       createMessage({
         role: 'assistant',
@@ -65,8 +65,7 @@ describe('serializeMessages', () => {
         source: { kind: 'plugin', plugin: 'test' },
       }),
     ])
-    // Tool-call-free turn: reasoning is dropped (ignored by the API anyway).
-    expect(wire).toEqual([{ role: 'assistant', content: 'answer' }])
+    expect(wire).toEqual([{ role: 'assistant', content: 'answer', reasoning_content: 'thinking…' }])
   })
 
   it('passes reasoning_content back on tool-call turns (official passback rule)', () => {
@@ -181,6 +180,50 @@ describe('serializeMessages', () => {
 })
 
 describe('serializeRequest', () => {
+  it.each([false, true])('omits reasoning without current tools while retaining original history (images=%s)', async (images) => {
+    const messages = [createMessage({
+      role: 'assistant',
+      content: [
+        { type: 'reasoning', text: 'retained in the session' },
+        { type: 'tool-call', id: CallId('old-call'), name: 'lookup', arguments: '{}' },
+      ],
+      source: { kind: 'plugin', plugin: 'test' },
+    })]
+    for (const tools of [undefined, []]) {
+      const options = request({ messages, ...tools === undefined ? {} : { tools } })
+      const wire = images
+        ? await serializeRequestWithImages(options, {
+          attachments: attachmentStore(), maxRequestImageBytes: 100, signal: new AbortController().signal,
+        })
+        : serializeRequest(options)
+      expect(wire.tools).toBeUndefined()
+      expect(wire.messages[0]).not.toHaveProperty('reasoning_content')
+      expect(wire.messages[0]).toMatchObject({ content: '', tool_calls: [{ id: 'old-call' }] })
+      expect(messages[0]?.content[0]).toEqual({ type: 'reasoning', text: 'retained in the session' })
+    }
+  })
+
+  it.each([false, true])('retains all prior reasoning when the current request has tools (images=%s)', async (images) => {
+    const messages = [createMessage({
+      role: 'assistant',
+      content: [{ type: 'reasoning', text: 'earlier reasoning' }, { type: 'text', text: 'earlier answer' }],
+      source: { kind: 'plugin', plugin: 'test' },
+    })]
+    const options = request({
+      messages,
+      tools: [{ name: 'lookup', description: 'lookup', parameters: { type: 'object' } }],
+    })
+    const wire = images
+      ? await serializeRequestWithImages(options, {
+        attachments: attachmentStore(), maxRequestImageBytes: 100, signal: new AbortController().signal,
+      })
+      : serializeRequest(options)
+    expect(wire.messages).toEqual([{
+      role: 'assistant', content: 'earlier answer', reasoning_content: 'earlier reasoning',
+    }])
+    expect(messages[0]?.content[0]).toEqual({ type: 'reasoning', text: 'earlier reasoning' })
+  })
+
   const history: Message[] = [createUserMessage({
     content: [{ type: 'text', text: 'hi' }],
     source: { kind: 'plugin', plugin: 'test' },
@@ -578,16 +621,12 @@ describe('review fixes: assistant content shapes', () => {
     expect(wire).toEqual([{ role: 'assistant', content: '' }])
   })
 
-  it('serializes a reasoning-ONLY assistant message as "" content with the reasoning dropped', () => {
-    // The model can answer entirely in the reasoning channel (a v4-flash
-    // greeting did, live). The passback rule keeps reasoning_content off
-    // plain turns, and content must still be SET — a null here poisoned the
-    // session log and bricked every later turn of that session.
+  it('serializes reasoning-only assistant history with empty string content', () => {
     const wire = serializeMessages([createMessage({
       role: 'assistant', content: [{ type: 'reasoning', text: '你好！有什么我可以帮你的吗？' }],
       source: { kind: 'plugin', plugin: 'test' },
     })])
-    expect(wire).toEqual([{ role: 'assistant', content: '' }])
+    expect(wire).toEqual([{ role: 'assistant', content: '', reasoning_content: '你好！有什么我可以帮你的吗？' }])
   })
 
   it('serializes tool-call turns with empty string content, not null', () => {

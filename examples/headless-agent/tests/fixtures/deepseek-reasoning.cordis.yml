@@ -1,0 +1,10 @@
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./deepseek-defaults.cordis.yml
+    patches:
+      - id: llm-deepseek
+        config:
+          thinking: enabled
+          maxTokens: 100
+          streamIdleTimeoutMs: 1000

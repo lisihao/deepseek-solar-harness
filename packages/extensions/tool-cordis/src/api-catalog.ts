@@ -1592,6 +1592,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'researchHandoff',
+    summary: 'Complete research control seam; implementing this Definition does not establish website compatibility.',
+    description: 'Complete research control seam; implementing this Definition does not establish website compatibility.',
+    methods: [
+      {
+        signature: 'abstract bindHost(host: Context, policy: ResearchHostPolicy, sourceAccess?: ResearchSourceAccess, scope?: ResearchHostScope): ResearchHostRegistration',
+        description: 'Bind an explicit current-process Host; never expose this registration through model or generic JSON RPC.',
+        parameters: [{ name: 'host', description: 'Trusted embedding Context owning the grant lifecycle.' }, { name: 'policy', description: 'Explicit deployment/Host bounds, independent of imported policy or saved confirmations.' }, { name: 'sourceAccess', description: 'Optional explicit live source controls; absence disables source Reader execution.' }, { name: 'scope', description: 'Optional trusted lifecycle check, called on reads and existing external-operation guards.' }],
+        returns: 'Current callable control and owned revocation; arbitrary trusted same-process plugins share this trust domain.',
+      },
+      {
+        signature: 'abstract registerSourceReader(owner: Context, reader: ResearchSourceReader): () => Promise<void>',
+        description: 'Register an explicit source Reader under its contribution lifecycle.',
+        parameters: [{ name: 'owner', description: 'Trusted Reader lifecycle.' }, { name: 'reader', description: 'Explicit adapter obeying initial and redirect access guards.' }],
+        returns: 'Owned registration disposal, without cancelling already accepted remote work.',
+      },
+      {
+        signature: 'abstract registerDriver(owner: Context, driver: ResearchPlatformDriver): () => Promise<void>',
+        description: 'Register one explicitly selected Driver under its plugin lifecycle.',
+        parameters: [{ name: 'owner', description: 'Context owning this Driver registration.' }, { name: 'driver', description: 'Actual platform implementation; unknown website interfaces remain unavailable.' }],
+        returns: 'Owned registration disposal, without automatic Driver replacement or fallback.',
+      },
+    ],
+  },
+  {
     key: 'residentOperators',
     summary: 'Abstract provider-neutral resident session/control surface.',
     description: 'Abstract provider-neutral resident session/control surface.',
@@ -5925,6 +5950,310 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RequestRunOutcome',
     declaration: 'export type RequestRunOutcome = \'approved\' | \'completed\' | \'rejected\' | \'cancelled\' | \'failed\';',
+  },
+  {
+    name: 'ResearchAcceptedResource',
+    declaration: 'export interface ResearchAcceptedResource {\n    readonly workspace: string;\n    readonly page: string;\n    readonly conversation: string | null;\n    readonly report: string | null;\n    readonly evidence: string;\n}',
+  },
+  {
+    name: 'ResearchActionId',
+    declaration: 'export type ResearchActionId = Branded<\'ResearchActionId\'>;',
+  },
+  {
+    name: 'ResearchActionObservation',
+    declaration: 'export interface ResearchActionObservation {\n    readonly state: Exclude<ResearchActionState, \'unknown\'>;\n    readonly receipt: string;\n    readonly acceptedResource: ResearchAcceptedResource | null;\n}',
+  },
+  {
+    name: 'ResearchActionRequest',
+    declaration: 'export interface ResearchActionRequest {\n    readonly runId: ResearchRunId;\n    readonly actionId: ResearchActionId;\n    readonly stepId: ResearchStepId;\n    readonly revision: number;\n    readonly bindingSha256: string;\n    readonly binding: ResearchConfirmationBinding;\n    readonly driverId: ResearchDriverId;\n    readonly selection: ResearchDriverSelection;\n    readonly kind: \'gemini-plan-submit\' | \'gemini-research-start\' | \'chatgpt-upload\' | \'chatgpt-submit\';\n    readonly target: ResearchActionTarget;\n    readonly input: string;\n    readonly preparedPromptId: ResearchPromptInputId | null;\n}',
+  },
+  {
+    name: 'ResearchActionRun',
+    declaration: 'export interface ResearchActionRun {\n    readonly runId: ResearchRunId;\n    readonly revision: number;\n    readonly binding: ResearchConfirmationBinding;\n    readonly bindingSha256: string;\n    readonly confirmed: boolean;\n}',
+  },
+  {
+    name: 'ResearchActionSnapshot',
+    declaration: 'export interface ResearchActionSnapshot {\n    readonly request: ResearchActionRequest;\n    readonly inputSha256: string;\n    readonly state: ResearchActionState;\n    readonly receipt: string | null;\n    readonly acceptedResource: ResearchAcceptedResource | null;\n}',
+  },
+  {
+    name: 'ResearchActionState',
+    declaration: 'export type ResearchActionState = \'unknown\' | \'accepted\' | \'completed\' | \'not-sent\';',
+  },
+  {
+    name: 'ResearchActionTarget',
+    declaration: 'export interface ResearchActionTarget {\n    readonly workspace: string;\n    readonly page: string;\n    readonly conversation: string | null;\n}',
+  },
+  {
+    name: 'ResearchArtifactId',
+    declaration: 'export type ResearchArtifactId = Branded<\'ResearchArtifactId\'>;',
+  },
+  {
+    name: 'ResearchArtifactInput',
+    declaration: 'export interface ResearchArtifactInput {\n    readonly artifactId: ResearchArtifactId;\n    readonly actionId: ResearchActionId;\n    readonly role: \'gemini-plan\' | \'gemini-report\' | \'chatgpt-report\' | \'verification\';\n    readonly expectedVersion: number;\n    readonly source: ResearchCaptureSource;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
+    name: 'ResearchArtifactSnapshot',
+    declaration: 'export interface ResearchArtifactSnapshot {\n    readonly runId: ResearchRunId;\n    readonly artifactId: ResearchArtifactId;\n    readonly actionId: ResearchActionId;\n    readonly requestSha256: string;\n    readonly role: ResearchArtifactInput[\'role\'];\n    readonly version: number;\n    readonly source: ResearchCaptureSource;\n    readonly sha256: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
+    name: 'ResearchCaptureSource',
+    declaration: 'export interface ResearchCaptureSource {\n    readonly page: string;\n    readonly conversation: string | null;\n    readonly method: \'dom-text\' | \'download\' | \'manual-import\';\n    readonly capturedAt: string;\n    readonly extent: \'complete\' | \'partial\' | \'unknown\';\n    readonly endEvidence: string | null;\n}',
+  },
+  {
+    name: 'ResearchClaimId',
+    declaration: 'export type ResearchClaimId = Branded<\'ResearchClaimId\'>;',
+  },
+  {
+    name: 'ResearchConfirmationBinding',
+    declaration: 'export interface ResearchConfirmationBinding {\n    readonly questionSha256: string;\n    readonly sourcesSha256: string;\n    readonly modeSha256: string;\n    readonly destinationSha256: string;\n    readonly plan: {\n        readonly version: number;\n        readonly sha256: string;\n    } | null;\n}',
+  },
+  {
+    name: 'ResearchDeliveryReadBack',
+    declaration: 'export type ResearchDeliveryReadBack = {\n    readonly kind: \'complete-text\' | \'partial-text\';\n    readonly text: string;\n    readonly evidence: string;\n} | {\n    readonly kind: \'unavailable\';\n    readonly reason: string;\n};',
+  },
+  {
+    name: 'ResearchDeliveryRecord',
+    declaration: 'export interface ResearchDeliveryRecord {\n    readonly seq: number;\n    readonly runId: ResearchRunId;\n    readonly actionId: ResearchActionId;\n    readonly requestSha256: string;\n    readonly resource: ResearchAcceptedResource;\n    readonly observation: ResearchDriverDelivery;\n    readonly contentStatus: \'matched\' | \'mismatched\' | \'not-read-back\';\n    readonly sha256: string;\n    readonly recordedAt: string;\n}',
+  },
+  {
+    name: 'ResearchDriverDelivery',
+    declaration: 'export interface ResearchDriverDelivery {\n    readonly kind: \'message\' | \'attachment\';\n    readonly externalId: ResearchExternalDeliveryId;\n    readonly observedAt: string;\n    readonly evidence: string;\n    readonly readBack: ResearchDeliveryReadBack;\n}',
+  },
+  {
+    name: 'ResearchDriverId',
+    declaration: 'export type ResearchDriverId = Branded<\'ResearchDriverId\'>;',
+  },
+  {
+    name: 'ResearchDriverObservation',
+    declaration: 'export type ResearchDriverObservation = ResearchDriverReceipt | {\n    readonly state: \'unknown\';\n    readonly requestSha256: string;\n    readonly target: ResearchActionTarget;\n    readonly receipt: string | null;\n};',
+  },
+  {
+    name: 'ResearchDriverQualification',
+    declaration: 'export type ResearchDriverQualification = {\n    readonly status: \'unsupported\' | \'not_observed\';\n    readonly reason: string;\n} | {\n    readonly status: \'available\';\n    readonly requestSha256: string;\n    readonly target: ResearchActionTarget;\n    readonly selection: ResearchDriverSelection;\n    readonly effort: ResearchObservedEffort;\n    readonly inputMaxBytes: number;\n    readonly evidence: string;\n};',
+  },
+  {
+    name: 'ResearchDriverReceipt',
+    declaration: 'export interface ResearchDriverReceipt extends ResearchActionObservation {\n    readonly delivery?: ResearchDriverDelivery;\n    readonly requestSha256: string;\n    readonly target: ResearchActionTarget;\n}',
+  },
+  {
+    name: 'ResearchDriverRequest',
+    declaration: 'export interface ResearchDriverRequest {\n    readonly request: ResearchActionRequest;\n    readonly requestSha256: string;\n    readonly acceptedResource: ResearchAcceptedResource | null;\n}',
+  },
+  {
+    name: 'ResearchDriverSelection',
+    declaration: 'export interface ResearchDriverSelection {\n    readonly model: string;\n    readonly mode: string;\n    readonly effort: ResearchRequestedEffort;\n    readonly tools: readonly string[];\n}',
+  },
+  {
+    name: 'ResearchExternalDeliveryId',
+    declaration: 'export type ResearchExternalDeliveryId = Branded<\'ResearchExternalDeliveryId\'>;',
+  },
+  {
+    name: 'ResearchFinalBasis',
+    declaration: 'export interface ResearchFinalBasis {\n    readonly runId: ResearchRunId;\n    readonly revision: number;\n    readonly questionSha256: string;\n    readonly criticalClosure: readonly ResearchClaimId[];\n    readonly requiredFacts: number;\n    readonly supportedFacts: number;\n    readonly evidence: readonly ResearchFinalEvidence[];\n}',
+  },
+  {
+    name: 'ResearchFinalEvidence',
+    declaration: 'export interface ResearchFinalEvidence {\n    readonly kind: \'run\' | \'prepared-question\' | \'report\' | \'inventory\' | \'final-map\' | \'citation\' | \'source\' | \'judgment\' | \'disposition\';\n    readonly json: string;\n    readonly sha256: string;\n}',
+  },
+  {
+    name: 'ResearchFinalIssue',
+    declaration: 'export type ResearchFinalIssue = \'original-question\' | \'gemini-report\' | \'chatgpt-report\' | \'run-confirmation\' | \'inventory-confirmation\' | \'final-map-confirmation\' | \'fact-support\' | \'counter-check\' | \'counter-disposition\' | \'zero-critical-facts\';',
+  },
+  {
+    name: 'ResearchFinalState',
+    declaration: 'export type ResearchFinalState = \'needs-input\' | \'partial\' | \'verified-and-synthesized\';',
+  },
+  {
+    name: 'ResearchFinalStatus',
+    declaration: 'export interface ResearchFinalStatus {\n    readonly state: ResearchFinalState;\n    readonly issues: readonly ResearchFinalIssue[];\n    readonly limitations: readonly string[];\n    readonly basis: ResearchFinalBasis;\n    readonly sha256: string;\n}',
+  },
+  {
+    name: 'ResearchHostControl',
+    declaration: 'export interface ResearchHostControl {\n    readWorkflowState(runId: ResearchRunId): ResearchWorkflowState;\n    previewWorkflowStage(runId: ResearchRunId, kind: ResearchWorkflowStage[\'kind\'], previewId: ResearchWorkflowPreviewId): ResearchWorkflowPreview;\n    readWorkflowStage(runId: ResearchRunId, kind: ResearchWorkflowStage[\'kind\']): ResearchWorkflowStageEvidence;\n    appendWorkflowDeliveryDisposition(runId: ResearchRunId, input: unknown, assertHuman: () => void): ResearchWorkflowDeliveryDisposition;\n    readWorkflowDeliveryDisposition(runId: ResearchRunId, id: ResearchWorkflowDeliveryDispositionId): ResearchWorkflowDeliveryDisposition;\n    readonly ownerId: ResearchOwnerId;\n    claimWorkflowDefinition(runId: ResearchRunId, input: unknown): ResearchWorkflowDefinition;\n    readWorkflowDefinition(runId: ResearchRunId): ResearchWorkflowDefinition | null;\n    previewWorkflowAction(runId: ResearchRunId, input: ResearchWorkflowPreviewInput): ResearchWorkflowPreview;\n    readWorkflowPreview(runId: ResearchRunId, id: ResearchWorkflowPreviewId): ResearchWorkflowPreview;\n    confirmWorkflowPreview(runId: ResearchRunId, id: ResearchWorkflowPreviewId, sha256: string, assertHuman: () => void): ResearchWorkflowPreview;\n    freezeWorkflowPreview(runId: ResearchRunId, id: ResearchWorkflowPreviewId, sha256: string): ResearchActionRequest;\n    captureWorkflowOutput(runId: ResearchRunId, workflowId: ResearchWorkflowId, actionId: ResearchActionId, collector: ResearchWorkflowCollector, signal?:  /* …truncated — full shape in source */',
+  },
+  {
+    name: 'ResearchHostPolicy',
+    declaration: 'export interface ResearchHostPolicy {\n    readonly version: string;\n    readonly judgmentChannel: ResearchJudgmentAttribution[\'channel\'];\n    readonly ownerId: ResearchOwnerId;\n    readonly workspace: string;\n    readonly sourceConfigurationSha256s: readonly string[];\n    readonly destinations: readonly {\n        readonly bindingSha256: string;\n        readonly target: ResearchActionTarget;\n    }[];\n    readonly drivers: readonly {\n        readonly id: ResearchDriverId;\n        readonly platform: \'gemini\' | \'chatgpt\';\n        readonly selection: ResearchDriverSelection;\n    }[];\n    readonly inputMaxBytes: number;\n}',
+  },
+  {
+    name: 'ResearchHostRegistration',
+    declaration: 'export interface ResearchHostRegistration {\n    readonly control: ResearchHostControl;\n    dispose(): Promise<void>;\n}',
+  },
+  {
+    name: 'ResearchHostScope',
+    declaration: 'export interface ResearchHostScope {\n    assertCurrent(): void;\n}',
+  },
+  {
+    name: 'ResearchJudgmentAttribution',
+    declaration: 'export interface ResearchJudgmentAttribution {\n    readonly channel: \'imported\' | \'model\' | \'human\';\n    readonly ownerId: ResearchOwnerId;\n    readonly hostPolicyVersion: string;\n}',
+  },
+  {
+    name: 'ResearchObservedEffort',
+    declaration: 'export type ResearchObservedEffort = {\n    readonly kind: \'observed\';\n    readonly value: string;\n} | {\n    readonly kind: \'not_observed\';\n} | {\n    readonly kind: \'not-applicable\';\n};',
+  },
+  {
+    name: 'ResearchOwnerId',
+    declaration: 'export type ResearchOwnerId = Branded<\'ResearchOwnerId\'>;',
+  },
+  {
+    name: 'ResearchPlatformDriver',
+    declaration: 'export interface ResearchPlatformDriver {\n    readonly id: ResearchDriverId;\n    readonly platform: \'gemini\' | \'chatgpt\';\n    qualify(input: ResearchDriverRequest, signal: AbortSignal): Promise<ResearchDriverQualification>;\n    execute(input: ResearchDriverRequest, signal: AbortSignal, beforeSubmit: () => void): Promise<ResearchDriverReceipt>;\n    observe(input: ResearchDriverRequest, signal: AbortSignal): Promise<ResearchDriverObservation>;\n}',
+  },
+  {
+    name: 'ResearchPreparedPrompt',
+    declaration: 'export interface ResearchPreparedPrompt {\n    readonly inputId: ResearchPromptInputId;\n    readonly runId: ResearchRunId;\n    readonly revision: number;\n    readonly questionSha256: string;\n    readonly template: ResearchPromptTemplate;\n    readonly values: Readonly<Record<string, readonly ResearchRetainedPromptPart[]>>;\n    readonly renderedText: string;\n    readonly renderedSha256: string;\n    readonly preparedAt: string;\n}',
+  },
+  {
+    name: 'ResearchPromptId',
+    declaration: 'export type ResearchPromptId = \'gemini-deep-research\' | \'chatgpt-verify-synthesize\';',
+  },
+  {
+    name: 'ResearchPromptInputId',
+    declaration: 'export type ResearchPromptInputId = Branded<\'ResearchPromptInputId\'>;',
+  },
+  {
+    name: 'ResearchPromptPart',
+    declaration: 'export type ResearchPromptPart = {\n    readonly kind: \'text\';\n    readonly text: string;\n} | {\n    readonly kind: \'artifact\';\n    readonly artifactId: ResearchArtifactId;\n    readonly sha256: string;\n};',
+  },
+  {
+    name: 'ResearchPromptPreparation',
+    declaration: 'export interface ResearchPromptPreparation {\n    readonly inputId: ResearchPromptInputId;\n    readonly revision: number;\n    readonly templateId: ResearchPromptId;\n    readonly values: Readonly<Record<string, readonly ResearchPromptPart[]>>;\n}',
+  },
+  {
+    name: 'ResearchPromptTemplate',
+    declaration: 'export interface ResearchPromptTemplate {\n    readonly id: ResearchPromptId;\n    readonly version: string;\n    readonly sourceName: string;\n    readonly sha256: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'ResearchRequestedEffort',
+    declaration: 'export type ResearchRequestedEffort = {\n    readonly kind: \'required\';\n    readonly value: string;\n} | {\n    readonly kind: \'not-requested\';\n} | {\n    readonly kind: \'not-applicable\';\n};',
+  },
+  {
+    name: 'ResearchRetainedPromptPart',
+    declaration: 'export type ResearchRetainedPromptPart = {\n    readonly kind: \'text\';\n    readonly text: string;\n} | {\n    readonly kind: \'artifact\';\n    readonly artifactId: ResearchArtifactId;\n    readonly version: number;\n    readonly sha256: string;\n    readonly text: string;\n};',
+  },
+  {
+    name: 'ResearchRunId',
+    declaration: 'export type ResearchRunId = Branded<\'ResearchRunId\'>;',
+  },
+  {
+    name: 'ResearchSourceAccess',
+    declaration: 'export interface ResearchSourceAccess {\n    readonly readers: readonly ResearchSourceReaderId[];\n    authorizeSourceUrl(request: ResearchSourceReadRequest, actualUrl: string): {\n        readonly allowed: boolean;\n        readonly evidence: string;\n    };\n}',
+  },
+  {
+    name: 'ResearchSourceReader',
+    declaration: 'export interface ResearchSourceReader {\n    readonly id: ResearchSourceReaderId;\n    read(input: ResearchSourceReaderInput, signal: AbortSignal, beforeVisit: (actualUrl: string) => void): Promise<unknown>;\n    observe(input: ResearchSourceReaderInput, signal: AbortSignal): Promise<unknown>;\n}',
+  },
+  {
+    name: 'ResearchSourceReaderId',
+    declaration: 'export type ResearchSourceReaderId = Branded<\'ResearchSourceReaderId\'>;',
+  },
+  {
+    name: 'ResearchSourceReaderInput',
+    declaration: 'export interface ResearchSourceReaderInput {\n    readonly request: ResearchSourceReadRequest;\n    readonly requestSha256: string;\n    readonly resource: ResearchSourceResource | null;\n}',
+  },
+  {
+    name: 'ResearchSourceReadId',
+    declaration: 'export type ResearchSourceReadId = Branded<\'ResearchSourceReadId\'>;',
+  },
+  {
+    name: 'ResearchSourceReadRequest',
+    declaration: 'export interface ResearchSourceReadRequest {\n    readonly runId: ResearchRunId;\n    readonly readId: ResearchSourceReadId;\n    readonly readerId: ResearchSourceReaderId;\n    readonly revision: number;\n    readonly bindingSha256: string;\n    readonly requestedUrl: string;\n    readonly sourceLabel: string;\n    readonly inventoryVersion: number | null;\n}',
+  },
+  {
+    name: 'ResearchSourceResource',
+    declaration: 'export interface ResearchSourceResource {\n    readonly id: string;\n    readonly evidence: string;\n}',
+  },
+  {
+    name: 'ResearchStepId',
+    declaration: 'export type ResearchStepId = Branded<\'ResearchStepId\'>;',
+  },
+  {
+    name: 'ResearchWorkflowCollectionRequest',
+    declaration: 'export interface ResearchWorkflowCollectionRequest {\n    readonly runId: ResearchRunId;\n    readonly workflowId: ResearchWorkflowId;\n    readonly snapshot: ResearchActionSnapshot;\n}',
+  },
+  {
+    name: 'ResearchWorkflowCollector',
+    declaration: 'export interface ResearchWorkflowCollector {\n    collect(request: ResearchWorkflowCollectionRequest, signal: AbortSignal, guard: () => void): Promise<ResearchWorkflowOutputInput>;\n}',
+  },
+  {
+    name: 'ResearchWorkflowDefinition',
+    declaration: 'export interface ResearchWorkflowDefinition {\n    readonly runId: ResearchRunId;\n    readonly input: ResearchWorkflowDefinitionInput;\n    readonly sha256: string;\n}',
+  },
+  {
+    name: 'ResearchWorkflowDefinitionInput',
+    declaration: 'export interface ResearchWorkflowDefinitionInput {\n    readonly workflowId: ResearchWorkflowId;\n    readonly sessionId: string;\n    readonly question: string;\n    readonly sourcesSha256: string;\n    readonly gemini: ResearchWorkflowPlatform;\n    readonly chatgpt: ResearchWorkflowPlatform;\n    readonly templateVersions: {\n        readonly gemini: string;\n        readonly chatgpt: string;\n    };\n    readonly values: {\n        readonly gemini: Readonly<Record<string, readonly string[]>>;\n        readonly chatgpt: Readonly<Record<string, readonly string[]>>;\n    };\n    readonly stages: readonly ResearchWorkflowStage[];\n}',
+  },
+  {
+    name: 'ResearchWorkflowDeliveryDisposition',
+    declaration: 'export interface ResearchWorkflowDeliveryDisposition {\n    readonly input: ResearchWorkflowDeliveryDispositionInput;\n    readonly workflowId: ResearchWorkflowId;\n    readonly definitionSha256: string;\n    readonly action: ResearchActionSnapshot;\n    readonly material: ResearchWorkflowMaterial | null;\n    readonly history: readonly import(\'./delivery.ts\').ResearchDeliveryRecord[];\n    readonly attribution: import(\'./claims.ts\').ResearchJudgmentAttribution;\n    readonly recordedAt: string;\n    readonly sha256: string;\n}',
+  },
+  {
+    name: 'ResearchWorkflowDeliveryDispositionId',
+    declaration: 'export type ResearchWorkflowDeliveryDispositionId = Branded<\'ResearchWorkflowDeliveryDispositionId\'>;',
+  },
+  {
+    name: 'ResearchWorkflowDeliveryDispositionInput',
+    declaration: 'export interface ResearchWorkflowDeliveryDispositionInput {\n    readonly dispositionId: ResearchWorkflowDeliveryDispositionId;\n    readonly actionId: ResearchActionId;\n    readonly expectedPreviousId: ResearchWorkflowDeliveryDispositionId | null;\n    readonly negative: readonly ResearchWorkflowDeliveryRef[];\n    readonly correction: ResearchWorkflowDeliveryRef;\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'ResearchWorkflowDeliveryRef',
+    declaration: 'export interface ResearchWorkflowDeliveryRef {\n    readonly seq: number;\n    readonly sha256: string;\n}',
+  },
+  {
+    name: 'ResearchWorkflowId',
+    declaration: 'export type ResearchWorkflowId = Branded<\'ResearchWorkflowId\'>;',
+  },
+  {
+    name: 'ResearchWorkflowMaterial',
+    declaration: 'export interface ResearchWorkflowMaterial {\n    readonly observationId: ResearchWorkflowObservationId;\n    readonly resource: ResearchAcceptedResource;\n    readonly artifact: Omit<ResearchArtifactSnapshot, \'bytes\'> & {\n        readonly text: string;\n    };\n}',
+  },
+  {
+    name: 'ResearchWorkflowObservationId',
+    declaration: 'export type ResearchWorkflowObservationId = Branded<\'ResearchWorkflowObservationId\'>;',
+  },
+  {
+    name: 'ResearchWorkflowOutputInput',
+    declaration: 'export interface ResearchWorkflowOutputInput {\n    readonly actionId: ResearchActionId;\n    readonly observationId: ResearchWorkflowObservationId;\n    readonly requestSha256: string;\n    readonly resource: ResearchAcceptedResource;\n    readonly source: ResearchCaptureSource;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
+    name: 'ResearchWorkflowPlatform',
+    declaration: 'export interface ResearchWorkflowPlatform {\n    readonly driverId: ResearchDriverId;\n    readonly selection: ResearchDriverSelection;\n    readonly target: ResearchActionTarget;\n    readonly destinationSha256: string;\n}',
+  },
+  {
+    name: 'ResearchWorkflowPrerequisites',
+    declaration: 'export interface ResearchWorkflowPrerequisites {\n    readonly workflowId: ResearchWorkflowId;\n    readonly definitionSha256: string;\n    readonly kind: ResearchWorkflowStage[\'kind\'];\n    readonly stages: readonly ResearchWorkflowStageEvidence[];\n    readonly ready: boolean;\n    readonly key: string;\n}',
+  },
+  {
+    name: 'ResearchWorkflowPreview',
+    declaration: 'export interface ResearchWorkflowPreview {\n    readonly input: ResearchWorkflowPreviewData;\n    readonly sha256: string;\n    readonly isCurrent: boolean;\n    readonly confirmed: boolean;\n    readonly confirmation: {\n        readonly attribution: import(\'./claims.ts\').ResearchJudgmentAttribution;\n        readonly confirmedAt: string;\n        readonly previewSha256: string;\n    } | null;\n}',
+  },
+  {
+    name: 'ResearchWorkflowPreviewData',
+    declaration: 'export interface ResearchWorkflowPreviewData {\n    readonly previewId: ResearchWorkflowPreviewId;\n    readonly workflowId: ResearchWorkflowId;\n    readonly definitionSha256: string;\n    readonly request: ResearchActionRequest;\n    readonly preparedPrompt: import(\'./prompt.ts\').ResearchPreparedPrompt | null;\n    readonly materials: readonly ResearchWorkflowPreviewMaterial[];\n    readonly prerequisites: ResearchWorkflowPrerequisites;\n}',
+  },
+  {
+    name: 'ResearchWorkflowPreviewId',
+    declaration: 'export type ResearchWorkflowPreviewId = Branded<\'ResearchWorkflowPreviewId\'>;',
+  },
+  {
+    name: 'ResearchWorkflowPreviewInput',
+    declaration: 'export interface ResearchWorkflowPreviewInput {\n    readonly previewId: ResearchWorkflowPreviewId;\n    readonly workflowId: ResearchWorkflowId;\n    readonly request: ResearchActionRequest;\n    readonly prompt: import(\'./prompt.ts\').ResearchPromptPreparation | null;\n    readonly artifactIds: readonly import(\'./artifact.ts\').ResearchArtifactId[];\n}',
+  },
+  {
+    name: 'ResearchWorkflowPreviewMaterial',
+    declaration: 'export interface ResearchWorkflowPreviewMaterial {\n    readonly artifactId: import(\'./artifact.ts\').ResearchArtifactId;\n    readonly role: ResearchArtifactSnapshot[\'role\'];\n    readonly version: number;\n    readonly sha256: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'ResearchWorkflowStage',
+    declaration: 'export interface ResearchWorkflowStage {\n    readonly kind: ResearchActionRequest[\'kind\'];\n    readonly actionId: ResearchActionId;\n    readonly stepId: ResearchStepId;\n    readonly preparedPromptId: ResearchPromptInputId | null;\n}',
+  },
+  {
+    name: 'ResearchWorkflowStageEvidence',
+    declaration: 'export interface ResearchWorkflowStageEvidence {\n    readonly kind: ResearchWorkflowStage[\'kind\'];\n    readonly action: ResearchActionSnapshot | null;\n    readonly preparedPrompt: import(\'./prompt.ts\').ResearchPreparedPrompt | null;\n    readonly material: ResearchWorkflowMaterial | null;\n    readonly output: ResearchWorkflowMaterial | null;\n    readonly history: readonly import(\'./delivery.ts\').ResearchDeliveryRecord[];\n    readonly disposition: ResearchWorkflowDeliveryDisposition | null;\n    readonly deliveryVerified: boolean;\n    readonly blockers: readonly string[];\n}',
+  },
+  {
+    name: 'ResearchWorkflowState',
+    declaration: 'export interface ResearchWorkflowState {\n    readonly ownerId: import(\'./action.ts\').ResearchOwnerId;\n    readonly run: import(\'./action.ts\').ResearchActionRun;\n    readonly definition: ResearchWorkflowDefinition;\n    readonly stages: readonly ResearchWorkflowStageEvidence[];\n    readonly outputs: readonly ResearchWorkflowMaterial[];\n    readonly previews: readonly ResearchWorkflowPreview[];\n    readonly finalStatus: import(\'./final-status.ts\').ResearchFinalStatus;\n    readonly fullInputVerified: boolean;\n    readonly readyForVerification: boolean;\n    readonly state: import(\'./final-status.ts\').ResearchFinalState;\n}',
   },
   {
     name: 'ResidentCliProduct',

@@ -398,7 +398,10 @@ parentPort.on('message', async message => {
 parentPort.postMessage({ type: 'ready' });
 `
 
-/** One persistent namespace. A synchronous runaway cell can be terminated without blocking its owner daemon. */
+/**
+ * One persistent namespace with an empty Worker environment and owner-daemon OS authority.
+ * A synchronous runaway cell can be terminated without blocking its owner daemon.
+ */
 export class PersistentTypeScriptKernel {
   private readonly worker: Worker
   private readonly pending = new Map<number, PendingCell>()
@@ -428,6 +431,7 @@ export class PersistentTypeScriptKernel {
     this.rejectReady = ready.reject
     this.worker = new Worker(WORKER_SOURCE, {
       eval: true,
+      env: {},
       workerData: {
         context: structuredClone(context),
         variables: structuredClone(variables),

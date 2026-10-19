@@ -1,0 +1,13 @@
+{
+  "options": [
+    "普通对话",
+    "ChatGPT",
+    "洞察"
+  ],
+  "insight": "disabled:暂不可用",
+  "web": "dsh-physical-operator/chatgpt-web",
+  "sessionOnly": true,
+  "reload": "chatgpt",
+  "restore": "exact-original",
+  "modelCalls": 0
+}

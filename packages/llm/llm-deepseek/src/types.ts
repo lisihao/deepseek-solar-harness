@@ -72,16 +72,15 @@ export type WireMessage =
 
 /**
  * Assistant-role history message. The harness replays `content: ""` (never
- * null) on tool-call-only turns — some gateways reject null — and sends null
- * only when the turn carried neither text nor tool calls.
+ * null), including when the turn carried neither text nor tool calls.
  */
 export interface WireAssistantMessage {
   role: 'assistant'
   content: string | null
   /**
-   * CoT passback. REQUIRED on assistant turns that carried tool calls
-   * (thinking mode); ignored on tool-call-free turns (we omit it there to
-   * save tokens). See guides/thinking_mode.mdx § Tool Calls.
+   * Historical reasoning. Required for every retained assistant turn when
+   * the current request carries tools; omitted when it has no tools.
+   * See https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/.
    */
   reasoning_content?: string
   tool_calls?: WireToolCall[]

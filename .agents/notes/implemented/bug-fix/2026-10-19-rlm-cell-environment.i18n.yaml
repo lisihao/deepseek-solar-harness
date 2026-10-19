@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-19-rlm-cell-environment.md
+2026-10-19-rlm-cell-environment.md: 40340064d5ee29d0cf9d49d362932193a329ef93
+2026-10-19-rlm-cell-environment.zh.md: 2dd67ac8eb6ab4aabf859067d85bc91d3f5a7b3f

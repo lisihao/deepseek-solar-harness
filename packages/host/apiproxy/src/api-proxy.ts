@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { readSavedModelSelection } from './model-selection-event.ts'
 import { mkdir, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -1280,8 +1281,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const { provider, model } = defaults.defaultModelSelection()
     return { provider, model }
   }
-  type WebModelSelectionRef = ModelSelectionRef & { current: ModelSelection }
+  type WebModelSelectionRef = ModelSelectionRef & {
+    current: ModelSelection
+    ordinary: ModelSelection | undefined
+  }
   const selections = new WeakMap<Agent, WebModelSelectionRef>()
+  // Browser reload can replace the Agent while this Host still owns its Session id.
+  const unconfirmedSelections = new Set<SessionId>()
 
   /**
    * Sessions recorded while Debate took over direct messages log the
@@ -1293,13 +1299,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return selection.provider === 'dsh-debate-host' && selection.model === 'debate'
   }
 
-  /** Recover the most recent user-visible route from request/header history. */
-  function lastUserSelection(agent: Agent): ModelSelection | undefined {
+  function isChatGptWebRoute(selection: Pick<ModelSelection, 'provider' | 'model'>): boolean {
+    return selection.provider === 'dsh-physical-operator'
+      && (selection.model === 'chatgpt-web' || selection.model.startsWith('chatgpt-web:'))
+  }
+
+  /** Recover the most recent user-visible route, optionally excluding ChatGPT Web. */
+  function lastUserSelection(agent: Agent, ordinaryOnly = false): ModelSelection | undefined {
     for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
       const event = agent.session.events[index]
       if (event?.type !== 'request/header') continue
       const { config } = event.data.header
-      if (isTransientDebateRoute(config)) continue
+      if (isTransientDebateRoute(config) || ordinaryOnly && isChatGptWebRoute(config)) continue
       return {
         provider: config.provider,
         model: config.model,
@@ -1384,7 +1395,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   function selectionFor(agent: Agent): WebModelSelectionRef {
     const installed = selections.get(agent)
     if (installed !== undefined) return installed
-    let picked: ModelSelection | undefined
+    const saved = readSavedModelSelection(agent.session.events)
+    let picked: ModelSelection | undefined = saved?.selected
     const selection: WebModelSelectionRef = {
       get current(): ModelSelection {
         if (picked !== undefined) return picked
@@ -1407,8 +1419,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
       set current(next: ModelSelection) {
+        const previous = selection.current
+        if (!isChatGptWebRoute(previous)) selection.ordinary = { ...previous }
+        if (!isChatGptWebRoute(next)) selection.ordinary = { ...next }
         picked = next
       },
+      ordinary: saved === undefined ? lastUserSelection(agent, true) : saved.ordinary ?? undefined,
       assembled: undefined,
     }
     installModelSelection(agent.ctx, selection)
@@ -2515,17 +2531,21 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const { sessionId, refresh } = request.payload
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
-        const current = userFacingSelection(found.agent, selectionFor(found.agent))
         const { groups, failures } = await buildModelCatalog(
           ctx,
           refresh === true ? { refresh: true } : undefined,
         )
+        const selection = selectionFor(found.agent)
+        const current = userFacingSelection(found.agent, selection)
         const routable = routeServed(current.provider)
         const effective = effectiveSelection(found.agent)
+        const ordinary = selection.ordinary
         return ok(request, {
           current: { ...current },
+          ...isChatGptWebRoute(current) && ordinary !== undefined ? { ordinary: { ...ordinary } } : {},
           ...effective === undefined ? {} : { effective },
           routable,
+          ...unconfirmedSelections.has(sessionId) ? { selectionConfirmationRequired: true } : {},
           groups,
           failures,
         })
@@ -2563,9 +2583,17 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
                 ? {}
                 : { reasoningEffort: resolved.reasoningEffort },
             }
-            selectionFor(found.agent).current = selected
+            const selection = selectionFor(found.agent)
+            selection.current = selected
+            if (request.payload.persistDefault === false || readSavedModelSelection(found.agent.session.events) !== undefined) {
+              unconfirmedSelections.add(sessionId)
+              found.agent.session.append('session/model-selection', { version: 1, selected: { ...selected },
+                ordinary: selection.ordinary === undefined ? null : { ...selection.ordinary } })
+              if (!await ctx.sessions.flush(found.agent.session)) throw new Error('Session model selection has no durability listener')
+              unconfirmedSelections.delete(sessionId)
+            }
             try {
-              await defaults.saveDefaultModelSelection?.(selected)
+              if (request.payload.persistDefault !== false) await defaults.saveDefaultModelSelection?.(selected)
             } catch (error: unknown) {
               ctx.logger.warn(
                 `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
@@ -2733,6 +2761,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
         const hasImage = content.some(part => part.type === 'image')
         const admit = async (): Promise<RpcResponse<{ accepted: true }>> => {
+          const unconfirmed = (): RpcResponse<{ accepted: true }> | undefined => unconfirmedSelections.has(sessionId)
+            ? err(request, { code: 'agent-busy',
+              message: 'Confirm the conversation mode before sending a message.',
+              details: { reason: 'MODEL_SELECTION_UNCONFIRMED' } })
+            : undefined
+          const refused = unconfirmed()
+          if (refused !== undefined) return refused
           try {
             if (hasImage) {
               const current = selectionFor(agent).current
@@ -2746,6 +2781,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               }
             }
             const durable = await durablePromptContent(ctx, content)
+            const changed = unconfirmed()
+            if (changed !== undefined) return changed
             const message: UserMessage = createUserMessage({ content: durable, source })
             if (mode === 'steer') agent.steer(message)
             else agent.followup(message)

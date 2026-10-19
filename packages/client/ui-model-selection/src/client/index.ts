@@ -24,6 +24,7 @@ import type { ModelDirectoryState } from './directory.ts'
 import { ModelDirectoryResolver } from './service.ts'
 import type { ModelSelectInjected, ServedByInjected } from './slots.ts'
 import { ModelSelect } from './ModelSelect.tsx'
+import { ConversationModes, type ConversationModesInjected } from './ConversationModes.tsx'
 import { ServedByCaption } from './ServedByCaption.tsx'
 import { en, zh, type ModelKey } from './locales.ts'
 
@@ -175,6 +176,26 @@ export function apply(ctx: ClientContext): void {
         }
       },
     }, ModelSelect))
+  })
+
+  ctx.inject(['slots', 'modelDirectories'], (scope: ClientContext) => {
+    const models = scope.modelDirectories, sessions = scope.sessions
+    scope.slots.inject('conversation.composer.controls', () => scope.slots.register({
+      name: 'conversation.composer.controls', id: 'conversation-modes', order: 0,
+      inject: (sessionId): ConversationModesInjected => {
+        const directory = models.directoryFor(sessionId)
+        const available = sessions.subagentAddress(sessionId) === undefined
+        return { available, hooks: { directory: directory.store },
+          load: () => { if (available) void directory.load().catch(() => { /* Visible directory load error. */ }) },
+          selectMode: async (mode) => {
+            const session = sessions.binding(sessionId)?.session
+            if (!available || session === undefined || session.getSnapshot().running || session.getSnapshot().removed) {
+              throw new Error('当前会话不能切换对话模式')
+            }
+            await directory.selectConversationMode(mode)
+          } }
+      },
+    }, ConversationModes))
   })
 
   // Entry 3: the caption of the model that served each reply, in the per-message action strip. It reads the same

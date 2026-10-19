@@ -4,6 +4,7 @@
  * WebSocket, and in-process SSE are merely physical channels (four-quadrant message model).
  */
 
+export type {} from '../model-selection-event.ts'
 import type { SessionsApi } from './sessions.ts'
 import type { HostApi } from './host.ts'
 import type { WorkspaceApi } from './workspace.ts'

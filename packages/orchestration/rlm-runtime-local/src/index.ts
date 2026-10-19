@@ -1,7 +1,7 @@
 /** Owner-local persistent programmable RLM runtime Provider. @module @deepseek-ai/dsh-rlm-runtime-local */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -26,6 +26,7 @@ import RlmRuntimeService, {
   type RlmManagedSkillBindingV1,
   type RlmChildSnapshotV1,
   type RlmChildSpawnRequest,
+  type RlmChildSpawnPolicyV1,
   type RlmCommandReceiptSnapshotV1,
   type RlmCompactRunOutcomeV1,
   type RlmCompactRunRequest,
@@ -61,11 +62,32 @@ import RlmRuntimeService, {
   type RlmRuntimeSessionSnapshotV1,
 } from '@deepseek-ai/dsh-rlm-runtime'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
-import { PersistentTypeScriptKernel, type KernelHooks, type PersistedVariable } from './kernel.ts'
+import { PersistentTypeScriptKernel, RLM_SNAPSHOT_MAX_BYTES, RLM_SNAPSHOT_MAX_VARIABLE_BYTES, type KernelHooks, type PersistedVariable } from './kernel.ts'
+import { PersistentQuickJSKernel, validateQuickJSKernelLimits, type QuickJSKernelLimits } from './quickjs-kernel.ts'
 
 export const name = 'rlm-runtime-local'
-/** Owner-local directory that contains the RLM runtime state. */
-export type Config = string
+/** Owner-local storage and explicit guest limits; a string selects the Node REPL. */
+export type Config = string | { readonly root: string; readonly kernel: QuickJSKernelLimits & { readonly kind: 'quickjs-wasm' } }
+
+function localRuntimeConfig(value: unknown): { readonly root: string; readonly quickjs?: QuickJSKernelLimits } {
+  if (typeof value === 'string') return { root: nonBlank(value, 'RLM runtime root') }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new RlmRuntimeError('RLM runtime config must be a directory or explicit kernel config', 'RLM_INVALID')
+  const config = value as Record<string, unknown>
+  const kernel = config.kernel
+  if (typeof config.root !== 'string' || kernel === null || typeof kernel !== 'object' || Array.isArray(kernel)) throw new RlmRuntimeError('QuickJS runtime requires root and kernel config', 'RLM_INVALID')
+  const options = kernel as Record<string, unknown>
+  if (options.kind !== 'quickjs-wasm') throw new RlmRuntimeError('unsupported RLM kernel kind', 'RLM_INVALID')
+  const number = (key: keyof QuickJSKernelLimits): number => {
+    const candidate = options[key]
+    if (typeof candidate !== 'number') throw new RlmRuntimeError('QuickJS limit must be explicit: ' + key, 'RLM_INVALID')
+    return candidate
+  }
+  const quickjs: QuickJSKernelLimits = { memoryLimitBytes: number('memoryLimitBytes'), maxStackBytes: number('maxStackBytes'),
+    maxInterruptChecks: number('maxInterruptChecks'), maxBridgeBytes: number('maxBridgeBytes'), maxLogBytes: number('maxLogBytes'),
+    maxCellSourceBytes: number('maxCellSourceBytes'), maxHostCalls: number('maxHostCalls'), maxPendingHostCalls: number('maxPendingHostCalls'), jobBatchSize: number('jobBatchSize') }
+  validateQuickJSKernelLimits(quickjs)
+  return { root: nonBlank(config.root, 'RLM runtime root'), quickjs }
+}
 
 const MAX_MESSAGE_CHARS = 16_384
 const MAX_PENDING_MESSAGES_PER_SESSION = 20
@@ -149,9 +171,10 @@ interface StoredMessageBatchDispatch {
   readonly createdAt: string
 }
 
-/** Current on-disk shape. Version 6 requires `messageBatchDispatches`; no other version is read or rewritten. */
+/** Each selected kernel reads its own state version and codec without migration. */
 interface StoreDocument {
-  readonly version: 6
+  readonly version: typeof RLM_STATE_SCHEMA_VERSION | typeof QUICKJS_STATE_SCHEMA_VERSION
+  readonly kernelCodec?: 'quickjs-json-v1'
   eventSequence: number
   sessions: StoredSession[]
   receipts: StoredReceipt[]
@@ -162,7 +185,95 @@ interface StoreDocument {
   messageBatchDispatches: StoredMessageBatchDispatch[]
 }
 
-const RLM_STATE_SCHEMA_VERSION = 6
+function resolveChildSpawnPolicy(request: RlmRuntimeCreateRequest): RlmChildSpawnPolicyV1 {
+  const policy: RlmChildSpawnPolicyV1 = request.childSpawnPolicy ?? { version: 1, mode: 'recursive', maxTotalChildren: request.limits.maxTurns }
+  const maximum = policy.maxTotalChildren
+  if (!Number.isSafeInteger(maximum) || maximum > 1_000
+    || (policy.mode === 'none' ? maximum !== 0 : maximum < 1)) {
+    throw new RlmRuntimeError('RLM child-spawn policy is outside supported bounds', 'RLM_INVALID')
+  }
+  return { version: 1, mode: policy.mode, maxTotalChildren: maximum }
+}
+
+function sameChildSpawnPolicy(a: RlmChildSpawnPolicyV1 | undefined, b: RlmChildSpawnPolicyV1 | undefined): boolean {
+  return a !== undefined && b !== undefined && a.mode === b.mode
+    && a.maxTotalChildren === b.maxTotalChildren
+}
+
+/** Validate only the durable relationships needed by inherited child admission and cumulative counting. */
+function validateChildSpawnState(sessions: readonly StoredSession[]): void {
+  const fail = (): never => { throw new RlmRuntimeError('RLM state has unsupported child-spawn state; file was not changed', 'RLM_UNAVAILABLE') }
+  const byId = new Map<string, StoredSession>()
+  const limitKeys = ['maxDepth', 'maxChildren', 'maxTurns', 'maxCellMs', 'maxOutputBytes'] as const
+  // oxlint-disable typescript/no-unnecessary-condition -- Durable JSON has not established the asserted StoreDocument fields yet.
+  for (const session of sessions) {
+    const snapshot = session?.snapshot
+    if (snapshot === null || typeof snapshot !== 'object' || typeof snapshot.sessionId !== 'string'
+      || snapshot.sessionId.length === 0 || byId.has(snapshot.sessionId) || !Array.isArray(snapshot.children)
+      || !Number.isSafeInteger(snapshot.depth) || snapshot.depth < 0) fail()
+    const policy = snapshot.childSpawnPolicy
+    if (policy === null || typeof policy !== 'object' || policy.version !== 1
+      || !['none', 'root-only', 'recursive'].includes(policy.mode)
+      || !Number.isSafeInteger(policy.maxTotalChildren) || policy.maxTotalChildren > 1_000
+      || (policy.mode === 'none' ? policy.maxTotalChildren !== 0 : policy.maxTotalChildren < 1)) fail()
+    const limits = snapshot.limits
+    if (limits === null || typeof limits !== 'object'
+      || !limitKeys.every(key => Number.isSafeInteger(limits[key]) && limits[key] > 0)
+      || limits.maxDepth > 8 || limits.maxChildren > 64 || limits.maxTurns > 1_000
+      || limits.maxCellMs > 3_600_000 || limits.maxOutputBytes > 16 * 1024 * 1024) fail()
+    byId.set(snapshot.sessionId, session)
+  }
+  const childIds = new Set<string>()
+  const childSessions = new Set<string>()
+  for (const { snapshot } of sessions) {
+    if (snapshot.parentSessionId === undefined) {
+      if (snapshot.depth !== 0 || snapshot.parentChildId !== undefined) fail()
+    } else {
+      const parent = byId.get(snapshot.parentSessionId)?.snapshot
+      if (parent === undefined || snapshot.depth !== parent.depth + 1
+        || !sameChildSpawnPolicy(snapshot.childSpawnPolicy, parent.childSpawnPolicy)
+        || !limitKeys.every(key => snapshot.limits[key] === parent.limits[key])
+        || parent.children.filter(child => child.sessionId === snapshot.sessionId
+          && child.rlmChildId === snapshot.parentChildId).length !== 1) fail()
+    }
+    let liveChildren = 0
+    for (const child of snapshot.children) {
+      if (child === null || typeof child !== 'object' || typeof child.rlmChildId !== 'string'
+        || child.rlmChildId.length === 0 || childIds.has(child.rlmChildId) || childSessions.has(child.sessionId)) fail()
+      const actual = byId.get(child.sessionId)?.snapshot
+      if (actual === undefined || actual.parentSessionId !== snapshot.sessionId || actual.parentChildId !== child.rlmChildId
+        || child.parentSessionId !== snapshot.sessionId || child.depth !== actual.depth) fail()
+      childIds.add(child.rlmChildId)
+      childSessions.add(child.sessionId)
+      if (child.lifecycle !== 'deleted') liveChildren++
+    }
+    if (liveChildren > snapshot.limits.maxChildren) fail()
+  }
+  const visited = new Set<string>()
+  const visit = (session: StoredSession, policy: RlmChildSpawnPolicyV1): number => {
+    const { snapshot } = session
+    if (visited.has(snapshot.sessionId) || snapshot.depth > snapshot.limits.maxDepth
+      || (policy.mode === 'none' && snapshot.children.length > 0)
+      || (policy.mode === 'root-only' && snapshot.depth > 1)) fail()
+    visited.add(snapshot.sessionId)
+    return snapshot.children.reduce((count, child) => {
+      const next = byId.get(child.sessionId)
+      if (next === undefined) return fail()
+      return count + 1 + visit(next, policy)
+    }, 0)
+  }
+  for (const root of sessions.filter(session => session.snapshot.parentSessionId === undefined)) {
+    const policy = root.snapshot.childSpawnPolicy
+    if (policy === undefined) return fail()
+    const total = visit(root, policy)
+    if (total > policy.maxTotalChildren || total > root.snapshot.limits.maxTurns) fail()
+  }
+  if (visited.size !== sessions.length) fail()
+  // oxlint-enable typescript/no-unnecessary-condition
+}
+
+const RLM_STATE_SCHEMA_VERSION = 7
+const QUICKJS_STATE_SCHEMA_VERSION = 8
 
 // Kept local so the persistent RLM state owner does not acquire a runtime
 // dependency on the optional strategy Provider solely for request hashing.
@@ -535,7 +646,8 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   private readonly runtimeOwnerKey: string
   private readonly runtimeInstanceId = `rlm-runtime-${randomUUID()}`
   private readonly bindings = new Map<string, RlmRuntimeHostBindings>()
-  private readonly kernels = new Map<string, PersistentTypeScriptKernel>()
+  private readonly kernels = new Map<string, PersistentTypeScriptKernel | PersistentQuickJSKernel>()
+  private readonly quickjs: QuickJSKernelLimits | undefined
   private readonly kernelCommands = new Map<string, { cellCommandId: RlmCommandId; callOrdinal: number }>()
   private readonly activeExecutions = new Map<string, RlmChildExecution>()
   /**
@@ -552,16 +664,26 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   private readonly bridgeReady: Promise<void>
   private document: StoreDocument
 
-  constructor(ctx: Context, root: Config) {
+  constructor(ctx: Context, config: Config) {
     super(ctx)
+    const resolved = localRuntimeConfig(config)
+    const root = resolved.root
+    this.quickjs = resolved.quickjs
+    const nodeState = join(root, 'state.json')
+    const guestState = join(root, 'quickjs-state-v1.json')
+    if (existsSync(this.quickjs === undefined ? guestState : nodeState)
+      || (this.quickjs !== undefined && !existsSync(guestState) && existsSync(root) && readdirSync(root).length > 0)) {
+      throw new RlmRuntimeError('RLM kernel storage differs from the selected backend; use a fresh root, original files were not changed', 'RLM_UNAVAILABLE')
+    }
     this.runtimeOwnerKey = resolve(root)
     mkdirSync(root, { recursive: true, mode: 0o700 })
     chmodSync(root, 0o700)
     this.sessionsRoot = join(root, 'sessions')
     mkdirSync(this.sessionsRoot, { recursive: true, mode: 0o700 })
     chmodSync(this.sessionsRoot, 0o700)
-    this.filename = join(root, 'state.json')
+    this.filename = this.quickjs === undefined ? nodeState : guestState
     this.document = this.load()
+    if (this.quickjs !== undefined && !existsSync(this.filename)) this.persist()
     registerRuntimeOwner(this.runtimeOwnerKey, this.runtimeInstanceId)
     const accountingStartedAt = Date.now()
     for (const session of this.document.sessions) {
@@ -593,7 +715,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         this.releaseOwnedControlLeases()
         unregisterRuntimeOwner(this.runtimeOwnerKey, this.runtimeInstanceId)
         this.persistActiveGoalWallClock()
-        for (const kernel of this.kernels.values()) kernel.dispose()
+        await Promise.all([...this.kernels.values()].map(kernel => kernel.dispose()))
         this.kernels.clear()
         this.kernelCommands.clear()
         await new Promise<void>((resolveClose) => { this.bridgeServer.close(() => { resolveClose() }) })
@@ -604,6 +726,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   create(request: RlmRuntimeCreateRequest, bindings: RlmRuntimeHostBindings): Promise<RlmRuntimeSessionSnapshotV1> {
     this.validateLimits(request.limits)
+    const childSpawnPolicy = resolveChildSpawnPolicy(request)
     const requestedChildModelPolicy = request.childModelPolicy
     const resolvedChildModelPolicy: RlmChildModelPolicyV1 = requestedChildModelPolicy
       ?? (request.defaultChildModel === undefined ? 'parent-inherit' : 'allocator-default')
@@ -623,6 +746,9 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       if (existing.snapshot.executionId !== request.executionId || existing.snapshot.workspace !== resolve(request.workspace)) {
         throw new RlmRuntimeError(`RLM session identity conflicts with existing execution: ${String(request.sessionId)}`, 'RLM_COMMAND_CONFLICT')
       }
+      if (!sameChildSpawnPolicy(existing.snapshot.childSpawnPolicy, childSpawnPolicy)) {
+        throw new RlmRuntimeError('RLM session child-spawn policy conflicts with the retained execution', 'RLM_COMMAND_CONFLICT')
+      }
       this.bindings.set(String(request.sessionId), bindings)
       this.settleReceipt(String(request.commandId), requestHash, existing.snapshot)
       return Promise.resolve(existing.snapshot)
@@ -641,6 +767,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       model: request.model,
       ...request.defaultChildModel === undefined ? {} : { defaultChildModel: request.defaultChildModel },
       childModelPolicy: resolvedChildModelPolicy,
+      childSpawnPolicy,
       ...request.executionOptions === undefined ? {} : { executionOptions: request.executionOptions },
       limits: request.limits,
       depth: 0,
@@ -901,7 +1028,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         : new RlmRuntimeError(error instanceof Error ? error.message : String(error), runtimeErrorCode(
           error instanceof Error && 'code' in error ? String(error.code) : undefined,
         ))
-      this.kernels.get(String(request.sessionId))?.dispose()
+      await this.kernels.get(String(request.sessionId))?.dispose()
       this.kernels.delete(String(request.sessionId))
       this.kernelCommands.delete(String(request.sessionId))
       this.updateSession(session, { lifecycle: 'idle' })
@@ -1026,6 +1153,15 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const requestHash = sha256({ ...request, name, task })
     const duplicate = this.receipt<RlmChildHandleV1>(String(request.commandId), requestHash)
     if (duplicate !== undefined) return duplicate
+    const root = this.rootSession(parent.snapshot.sessionId)
+    const childSpawnPolicy = root.snapshot.childSpawnPolicy
+    if (childSpawnPolicy === undefined) throw new RlmRuntimeError('RLM child-spawn policy is unavailable', 'RLM_UNAVAILABLE')
+    if (childSpawnPolicy.mode === 'none' || (childSpawnPolicy.mode === 'root-only' && parent.snapshot.depth !== 0)) {
+      throw new RlmRuntimeError('RLM child-spawn policy refuses this parent', 'RLM_BUDGET_EXCEEDED')
+    }
+    if (this.descendantCount(root) >= childSpawnPolicy.maxTotalChildren) {
+      throw new RlmRuntimeError('RLM cumulative child-spawn budget is exhausted', 'RLM_BUDGET_EXCEEDED')
+    }
     if (parent.snapshot.children.some(child => child.name === name && child.lifecycle !== 'deleted')) {
       throw new RlmRuntimeError(`RLM child name already exists under parent: ${name}`, 'RLM_COMMAND_CONFLICT')
     }
@@ -1056,6 +1192,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       workspace: parent.snapshot.workspace, sessionDir, task, model,
       ...parent.snapshot.defaultChildModel === undefined ? {} : { defaultChildModel: parent.snapshot.defaultChildModel },
       childModelPolicy: childModelPolicy(parent.snapshot),
+      childSpawnPolicy,
       ...parent.snapshot.executionOptions === undefined ? {} : { executionOptions: parent.snapshot.executionOptions },
       limits: parent.snapshot.limits, depth,
       lifecycle: 'idle', stateRevision: 0, eventCursor: this.document.eventSequence, children: [],
@@ -1676,7 +1813,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const requestHash = sha256({ sessionId, expectedStateRevision })
     const duplicate = this.receipt<RlmRuntimeSessionSnapshotV1>(String(commandId), requestHash)
     if (duplicate !== undefined) return Promise.resolve(duplicate)
-    this.kernels.get(String(sessionId))?.dispose()
+    const termination = this.kernels.get(String(sessionId))?.dispose()
     this.kernels.delete(String(sessionId))
     this.kernelCommands.delete(String(sessionId))
     session.variables = []
@@ -1684,7 +1821,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     this.appendEvent(sessionId, 'rlm.kernel.reset', {})
     this.settleReceipt(String(commandId), requestHash, session.snapshot)
     this.persist()
-    return Promise.resolve(session.snapshot)
+    return Promise.resolve(termination).then(() => session.snapshot)
   }
 
   reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSnapshotV1> {
@@ -1724,7 +1861,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     return Promise.resolve(result)
   }
 
-  private kernel(session: StoredSession, cellCommandId: RlmCommandId): PersistentTypeScriptKernel {
+  private kernel(session: StoredSession, cellCommandId: RlmCommandId): PersistentTypeScriptKernel | PersistentQuickJSKernel {
     const key = String(session.snapshot.sessionId)
     this.kernelCommands.set(key, { cellCommandId, callOrdinal: 0 })
     const existing = this.kernels.get(key)
@@ -1895,7 +2032,11 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         }
       },
     }
-    const kernel = new PersistentTypeScriptKernel(session.context, hooks, session.variables)
+    const kernel = this.quickjs === undefined
+      ? new PersistentTypeScriptKernel(session.context, hooks, session.variables)
+      : new PersistentQuickJSKernel(session.context, hooks, session.variables, this.quickjs, {
+        maxBytes: RLM_SNAPSHOT_MAX_BYTES, maxVariableBytes: RLM_SNAPSHOT_MAX_VARIABLE_BYTES,
+      })
     this.kernels.set(key, kernel)
     return kernel
   }
@@ -2611,12 +2752,15 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   }
 
   private load(): StoreDocument {
+    const expectedVersion = this.quickjs === undefined ? RLM_STATE_SCHEMA_VERSION : QUICKJS_STATE_SCHEMA_VERSION
+    const codec = this.quickjs === undefined ? {} : { kernelCodec: 'quickjs-json-v1' as const }
     let text: string
     try {
       text = readFileSync(this.filename, 'utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {
-        version: RLM_STATE_SCHEMA_VERSION,
+        version: expectedVersion,
+        ...codec,
         eventSequence: 0,
         sessions: [],
         receipts: [],
@@ -2632,9 +2776,9 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     // repaired, or written, so the file stays readable by the build that wrote it.
     // oxlint-disable typescript/no-unnecessary-condition
     const parsed = JSON.parse(text) as Partial<StoreDocument> & { readonly version?: unknown }
-    if (parsed.version !== RLM_STATE_SCHEMA_VERSION) {
+    if (parsed.version !== expectedVersion || parsed.kernelCodec !== codec.kernelCodec) {
       throw new RlmRuntimeError(
-        `RLM runtime state has version ${String(parsed.version)}; this build reads only version ${String(RLM_STATE_SCHEMA_VERSION)}, and the file was not changed`,
+        `RLM runtime state has version ${String(parsed.version)}; this build reads only version ${String(expectedVersion)} with the selected kernel codec, and the file was not changed`,
         'RLM_UNAVAILABLE',
       )
     }
@@ -2644,6 +2788,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       || !Array.isArray(parsed.controlLeases) || !Array.isArray(parsed.messageBatchDispatches)) {
       throw new RlmRuntimeError('RLM runtime state has an unsupported shape, and the file was not changed', 'RLM_UNAVAILABLE')
     }
+    validateChildSpawnState(parsed.sessions)
     const loadedAt = now()
     const sessions = parsed.sessions.map((session) => {
       const goal = normalizedGoal(session.snapshot.goal, loadedAt)
@@ -2660,7 +2805,8 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     validateMessageBatchDispatches(parsed.messageBatchDispatches, parsed.messages)
     // oxlint-enable typescript/no-unnecessary-condition
     return {
-      version: RLM_STATE_SCHEMA_VERSION,
+      version: expectedVersion,
+      ...codec,
       eventSequence: parsed.eventSequence,
       sessions,
       receipts: parsed.receipts,

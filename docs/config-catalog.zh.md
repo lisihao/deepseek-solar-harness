@@ -2139,6 +2139,20 @@ export interface Config {
 
 来源： [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
 
+<a id="deepseek-aidsh-research-handoff-local"></a>
+
+## `@deepseek-ai/dsh-research-handoff-local`
+
+```ts config-catalog
+/** Explicit private database location; no implicit account or runtime directory. */
+export interface Config {
+  /** Explicit private SQLite database path; unsupported stored formats are refused. */
+  readonly filename: string
+}
+```
+
+来源： [`packages/orchestration/research-handoff-local/src/index.ts:7`](../packages/orchestration/research-handoff-local/src/index.ts)
+
 <a id="deepseek-aidsh-resident-operator-local"></a>
 
 ## `@deepseek-ai/dsh-resident-operator-local`
@@ -4032,6 +4046,7 @@ export interface Config {
 - `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry`（[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
 - `@deepseek-ai/dsh-model-allocation` — 抽象 `ModelAllocationService`（[`packages/orchestration/model-allocation/src/index.ts`](../packages/orchestration/model-allocation/src/index.ts)）
 - `@deepseek-ai/dsh-orchestration` — 抽象 `OrchestrationService`（[`packages/orchestration/orchestration/src/index.ts`](../packages/orchestration/orchestration/src/index.ts)）
+- `@deepseek-ai/dsh-research-handoff` — 抽象 `ResearchHandoffService`（[`packages/orchestration/research-handoff/src/index.ts`](../packages/orchestration/research-handoff/src/index.ts)）
 - `@deepseek-ai/dsh-resident-operator` — 抽象 `ResidentOperatorService`（[`packages/physical-operator/resident-operator/src/index.ts`](../packages/physical-operator/resident-operator/src/index.ts)）
 - `@deepseek-ai/dsh-rlm-runtime` — 抽象 `RlmRuntimeService`（[`packages/orchestration/rlm-runtime/src/index.ts`](../packages/orchestration/rlm-runtime/src/index.ts)）
 - `@deepseek-ai/dsh-rlm-strategy` — 抽象 `RlmStrategyService`（[`packages/orchestration/rlm-strategy/src/index.ts`](../packages/orchestration/rlm-strategy/src/index.ts)）
@@ -4072,6 +4087,7 @@ export interface Config {
 - `@deepseek-ai/dsh-model-worker-deepseek`（[`packages/orchestration/model-worker-deepseek/src/index.ts`](../packages/orchestration/model-worker-deepseek/src/index.ts)）
 - `@deepseek-ai/dsh-native-command`（[`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts)）
 - `@deepseek-ai/dsh-output-retention`（[`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts)）
+- `@deepseek-ai/dsh-research-workflow`（[`packages/orchestration/research-workflow/src/index.ts`](../packages/orchestration/research-workflow/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox-windows-acl`（[`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts)）
 - `@deepseek-ai/dsh-scope`（[`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts)）
 - `@deepseek-ai/dsh-sdk-client`（[`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts)）

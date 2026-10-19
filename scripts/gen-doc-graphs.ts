@@ -309,6 +309,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Runs the Radar and AI Frontier collectors as bounded child processes, returns their stored JSON documents, and, once the owner turns Radar on, keeps the stored generation current and hands the allocator its evidence.',
   },
   {
+    key: 'researchHandoff',
+    pkg: 'research-handoff',
+    title: 'Owner-scoped research action and evidence seam',
+    mode: 'seam',
+    implementations: ['research-handoff-local'],
+    consumers: ['research-workflow'],
+    note: 'The local SQLite owner retains original actions, complete inputs, captures and attributed verification; the standard Consumer binds a live Agent and Session. Website Drivers and research UI remain separate.',
+  },
+  {
     key: 'rlmStrategy',
     pkg: 'rlm-strategy',
     title: 'Node-local RLM strategy seam',

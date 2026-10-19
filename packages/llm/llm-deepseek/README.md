@@ -74,7 +74,7 @@ DeepSeek request identity is separate from app attribution. After credential res
 - Streaming only (`stream_options.include_usage` always on). `usage` may arrive attached to the finish chunk or as a trailing usage-only chunk — the translator defers both to `[DONE]`, so `usage` always precedes `finish` and nothing follows `finish`.
 - The adapter-owned `off` effort maps to `thinking: {type: 'disabled'}` and never crosses the wire as `reasoning_effort: 'off'`.
 - The first thinking-mode chunk carries `reasoning_content: ""` — handled (no spurious reasoning block).
-- **Reasoning passback rule**: on assistant turns that carried tool calls, `reasoning_content` is serialized back in history (required by the API in thinking mode); on tool-call-free turns it is dropped (ignored anyway — saves tokens).
+- **Reasoning passback rule**: when the current request carries nonempty `tools`, all retained assistant reasoning is serialized as `reasoning_content`, including turns without tool calls. Requests without tools omit historical reasoning without modifying the session messages ([official rule](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)).
 - Cache accounting: `cacheReadTokens` ← `prompt_cache_hit_tokens` / `prompt_tokens_details.cached_tokens`; DeepSeek reports no cache-write metric.
 
 ## Errors
@@ -91,11 +91,11 @@ The adapter enforces `GenerateOptions.admission`: it serializes the body, calls 
 
 #### What the model sees
 
-The selected DeepSeek model receives the harness system prompt, message history, tool schemas, stop sequences, and call config without adapter-authored prompt prose. On a prior assistant turn with tool calls, its reasoning content is passed back as required; reasoning from tool-call-free turns is omitted.
+The selected DeepSeek model receives the harness system prompt, message history, tool schemas, stop sequences, and call config without adapter-authored prompt prose. Historical reasoning follows the current request's tools condition described above, on both text-only and image-capable paths.
 
 #### Token effect
 
-Provider tokenization governs exact input. Conditional reasoning passback increases tool-round-trip context, while dropping other reasoning avoids paying those tokens again; cache-read usage is reported when available.
+Provider tokenization governs exact input. A tools-enabled request includes all retained historical reasoning in its input; omitting it from an offline estimate understates that request. A request without tools omits historical reasoning; cache-read usage is reported when available. Serialized byte counts alone do not establish a tokenizer or template token bound.
 
 #### KV Cache effect
 

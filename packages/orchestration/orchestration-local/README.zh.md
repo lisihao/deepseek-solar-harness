@@ -78,6 +78,8 @@ scope 下的模型命令结束时，daemon 从账本读回它的请求，并在�
 
 独立 RLM 使用同一 daemon 和 Scheduler。必须明确配置 `standaloneRlmOperatorIds`；协议 v8 核对客户端与 daemon 的同一排除清单。Schema 8 在新增持久命令输入及唯一 run 关联前备份 schema 7。收到的 envelope JSON 与规范化相等性哈希分别保留。重新连接只观察原命令；重启封锁未解决的独立身份，不重放；物理效果未知时，在取得实际结算证据前阻止业务重试。
 
+公开根出口提供 EvaluationLedger、parseEvaluationScope 和 evaluationUsageOf，供 daemon 之外的 Consumer 复用同一持久所有者。[离线可运行夹具](../../../examples/headless-agent/offline-rlm.cordis.yml) 通过实际 Worker、Runtime 和固定 fake 传输执行。full/external 配对使用相同的实际模型参数、工具 schema、cell 代码和子调用策略，分别检查持久 context 与首个请求内容。cell 代理只接纳已登记的树内 Session，在转发前计入稳定命令；其 cell 计数和准入／取消期限仅适用于此 Consumer，不支持重建后恢复，也不证明已取消的 Runtime cell 已停止。keyless 快照工具保留原语料字节和完整请求／账本证据。生产 token／reasoning 上界、任意文件读取／oracle 隔离、真实数据许可和官方 Pairs 评分仍未证明；此夹具永不启用付费实验。
+
 ## Model Experience
 
 通过消费上述密封 TaskGraph 节点提示词的 `@deepseek-ai/dsh-tool-orchestration` 与物理算子间接影响模型。

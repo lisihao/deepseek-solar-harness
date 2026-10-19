@@ -52,6 +52,8 @@ export { GouziRegistry } from './gouzi-registry.ts'
 export { RemotePhysicalOperator, createRemotePhysicalOperators, type RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
 export { RemoteSyncHttpClient, RemoteSyncRejectedError, RemoteSyncTransportError } from './remote-sync-http-client.ts'
 export * from './auto-refine.ts'
+export { EvaluationLedger, EvaluationLedgerError, parseEvaluationScope, evaluationUsageOf } from './evaluation-ledger.ts'
+export type { EvaluationScopeV1, EvaluationAttempt, EvaluationLedgerState, EvaluationUsage, EvaluationTotals } from './evaluation-ledger.ts'
 
 export const name = 'orchestration-local'
 

@@ -165,6 +165,7 @@ export function ConversationRoot({
       {hero && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {inputBar}
+      {zone !== undefined && renderSlot('conversation.composer.controls', zone)}
     </div>
   )
 

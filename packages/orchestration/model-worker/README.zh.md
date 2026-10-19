@@ -6,6 +6,10 @@
 
 执行请求可携带编排 parent Agent，供需要启动物理算子的 Provider 使用；进程内 Provider 可以忽略它。
 
+## 显式工具执行
+
+`toolExecution` 选择 Host 持有的工具循环，与 RLM 上下文放置或子调用权限分别控制。`maxToolRounds` 是非负安全整数，计数工具执行轮次；最多还可有一次模型请求用于完成回答。显式策略优先于旧 RLM 推导的轮数限制。Provider 必须声明 `supportsToolExecution`；不支持时，注册服务在调用其执行方法前拒绝请求。具备支持能力的 Provider 在首次模型请求前拒绝缺失或不兼容的 bridge。两种策略均未提供时，普通请求保持既有行为。
+
 ## Evaluation block
 
 `ModelWorkerExecuteRequest.evaluation`（`ModelWorkerEvaluationV1`）只由持有评测 scope 的编排层设置。它给出线上 `model`、单个物理请求的 `maxOutputTokens` 上限、推理 effort、剩余输出 token 的读取器，以及每个请求的 admission 工厂。收到它的 worker 必须在每个物理请求上恰好发送这些生成参数，不得回落到 provider 默认值。没有它的请求保持 worker 的原有行为。

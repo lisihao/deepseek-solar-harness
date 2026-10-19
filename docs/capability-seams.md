@@ -91,6 +91,10 @@ flowchart LR
   pkg_scheduling_evidence["scheduling-evidence"]
   svc_schedulingEvidence["ctx.schedulingEvidence<br/>Scheduling evidence collector gateway"]
   pkg_scheduling_evidence_rpc["scheduling-evidence-rpc"]
+  pkg_research_handoff["research-handoff"]
+  svc_researchHandoff["ctx.researchHandoff<br/>Owner-scoped research action and evidence seam"]
+  pkg_research_handoff_local["research-handoff-local"]
+  pkg_research_workflow["research-workflow"]
   pkg_rlm_strategy["rlm-strategy"]
   svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
   pkg_rlm_strategy_local["rlm-strategy-local"]
@@ -328,6 +332,8 @@ flowchart LR
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
   pkg_remote_auth --> svc_remoteAuth
+  pkg_research_handoff --> svc_researchHandoff
+  pkg_research_handoff_local --> svc_researchHandoff
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
   pkg_rlm_runtime --> svc_rlmRuntime
@@ -449,6 +455,7 @@ flowchart LR
   svc_physicalOperators --> pkg_tool_physical_operator
   svc_remoteAuth --> pkg_connection
   svc_remoteAuth --> pkg_ui_orchestration
+  svc_researchHandoff --> pkg_research_workflow
   svc_residentOperators --> pkg_physical_operator_resident
   svc_rlmRuntime --> pkg_orchestration_local
   svc_rlmStrategy --> pkg_orchestration_local
@@ -566,6 +573,7 @@ flowchart LR
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Selects qualified subscription-first execution offers and recommends parallelism without dispatching work. |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |
 | `ctx.schedulingEvidence` | `core` | [`scheduling-evidence`](../packages/orchestration/scheduling-evidence) | - | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`scheduling-evidence-rpc`](../packages/orchestration/scheduling-evidence-rpc) | - | Runs the Radar and AI Frontier collectors as bounded child processes, returns their stored JSON documents, and, once the owner turns Radar on, keeps the stored generation current and hands the allocator its evidence. |
+| `ctx.researchHandoff` | `seam` | [`research-handoff`](../packages/orchestration/research-handoff) | [`research-handoff-local`](../packages/orchestration/research-handoff-local) | [`research-workflow`](../packages/orchestration/research-workflow) | - | The local SQLite owner retains original actions, complete inputs, captures and attributed verification; the standard Consumer binds a live Agent and Session. Website Drivers and research UI remain separate. |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
 | `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |

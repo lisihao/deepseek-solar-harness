@@ -1,5 +1,5 @@
 import { sep } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   PersistentTypeScriptKernel,
   type KernelHooks,
@@ -32,6 +32,32 @@ function hooks(): KernelHooks {
 }
 
 describe('PersistentTypeScriptKernel namespace snapshots', () => {
+  it('starts fresh and recovered cells without the host environment', async () => {
+    vi.stubEnv('DSH_RLM_HOST_SENTINEL', 'synthetic-host-only-value')
+    const first = new PersistentTypeScriptKernel({ task: 'explicit task input' }, hooks(), [])
+    try {
+      const snapshot = await first.execute([
+        'import processView from "node:process";',
+        'const environmentSize = Object.keys(processView.env).length;',
+        '({ environmentSize, task: context.task })',
+      ].join('\n'), 2_000)
+      expect(snapshot.value).toEqual({ environmentSize: 0, task: 'explicit task input' })
+      first.dispose()
+      const recovered = new PersistentTypeScriptKernel(snapshot.context ?? {}, hooks(), snapshot.variables)
+      try {
+        await expect(recovered.execute('Object.keys(processView.env)', 2_000))
+          .resolves.toMatchObject({ value: [] })
+        await recovered.execute('processView.env.DSH_RLM_HOST_SENTINEL = "cell-local"; void 0', 2_000)
+        expect(process.env.DSH_RLM_HOST_SENTINEL).toBe('synthetic-host-only-value')
+      } finally {
+        recovered.dispose()
+      }
+    } finally {
+      first.dispose()
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('recovers TypeScript declarations, imports, destructuring, and multi-bindings', async () => {
     const first = new PersistentTypeScriptKernel({}, hooks(), [])
     const snapshot = await first.execute([

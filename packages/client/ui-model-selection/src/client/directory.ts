@@ -13,10 +13,22 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
 type SessionModelsResponse = Awaited<ReturnType<IApiClient['sessions']['models']>>
 
+/**
+ * Identify the existing ChatGPT Web route, including its qualified model ids.
+ * @param selection - Host-reported route.
+ * @returns Whether it is the existing ChatGPT Web physical operator.
+ */
+export function isChatGptWebSelection(selection: ModelSelection | null): boolean {
+  return selection?.provider === 'dsh-physical-operator'
+    && (selection.model === 'chatgpt-web' || selection.model.startsWith('chatgpt-web:'))
+}
+
 /** Directory snapshot both entries render from. */
 export interface ModelDirectoryState {
   /** Model selection the host reports for the next assembled step; null before the first load. */
   current: ModelSelection | null
+  /** Host-retained ordinary model for exact mode restoration across browser reconnects. */
+  ordinary?: ModelSelection | undefined
   /**
    * The configuration the host's most recent step was sent with. Absent before the first step; it differs from
    * `current` between a selection and the next step, and for a native route whose lane keeps another profile.
@@ -38,13 +50,16 @@ export interface ModelDirectoryState {
   status: 'idle' | 'loading' | 'ready' | 'selecting' | 'error'
   /** Whole-request or selection failure text; null when none. */
   error: string | null
+  /** Explicit composer-mode transition; sending stays blocked until the Host confirms it. */
+  conversationModePending?: boolean
+  /** Failed explicit route selection; a successful explicit model choice clears the block. */
+  conversationModeError?: string | undefined
 }
 
 /**
  * Keep a provider's previous advisory list visible when an explicit refresh
  * fails only for that provider. Fresh groups always win; stale groups are
  * retained only for provider ids reported in `failures`.
- *
  * @param previous - the last successfully projected provider groups.
  * @param fresh - groups returned by the latest Host request.
  * @param failures - provider-local failures returned beside `fresh`.
@@ -73,6 +88,7 @@ export class ModelDirectory {
   /** Latest operation wins; an older response never overwrites a newer one. */
   private generation = 0
   private disposed = false
+  private ordinarySelection: ModelSelection | undefined
   /** In-flight live-catalog refresh that plain loads join instead of superseding. */
   private refreshing: Promise<SessionModels> | undefined
 
@@ -132,11 +148,15 @@ export class ModelDirectory {
       this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
       throw new Error(`session.models failed: ${result.error.code}: ${result.error.message}`)
     }
-    const { current, effective, routable, groups, failures } = result.value
+    const { current, ordinary, effective, routable, groups, failures, selectionConfirmationRequired } = result.value
+    if (!isChatGptWebSelection(current)) this.ordinarySelection = { ...current }
+    else if (ordinary !== undefined) this.ordinarySelection = { ...ordinary }
     this.store.update((s) => {
       s.current = current
+      s.ordinary = ordinary
       s.effective = effective
       s.routable = routable
+      if (selectionConfirmationRequired === true) s.conversationModeError = '上次对话模式未成功保存，请重新选择确认后再发送'
       s.groups = refresh
         ? mergeRefreshGroups(s.groups, groups, failures)
         : groups
@@ -152,8 +172,9 @@ export class ModelDirectory {
    * updates the shared current; failure surfaces on the store and throws so
    * each entry's own retry surface engages.
    * @param selection - provider, provider-owned model id, and optional adapter-owned effort.
- */
-  async select(selection: ModelSelection): Promise<void> {
+   * @param options - Explicit session-only selection; absence retains ordinary model-menu default persistence.
+   */
+  async select(selection: ModelSelection, options?: { readonly persistDefault: false }): Promise<void> {
     this.assertAvailable()
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'selecting'; s.error = null })
@@ -161,6 +182,7 @@ export class ModelDirectory {
       sessionId: this.sessionId,
       provider: selection.provider,
       model: selection.model,
+      ...options === undefined ? {} : { persistDefault: options.persistDefault },
       ...selection.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: selection.reasoningEffort },
@@ -177,10 +199,48 @@ export class ModelDirectory {
     // landed is by construction one it can serve.
     this.store.update((s) => {
       s.current = result.value.selected
+      s.conversationModeError = undefined
       s.routable = true
       s.status = 'ready'
       s.error = null
     })
+  }
+
+  /**
+   * Select an explicit composer route through the existing Host model RPC.
+   * @param mode - ChatGPT Web or the exact remembered ordinary selection.
+   * @returns Completion after the Host confirms the selected route; errors retain a send block.
+   */
+  async selectConversationMode(mode: 'ordinary' | 'chatgpt'): Promise<void> {
+    const before = this.store.getSnapshot()
+    if (before.conversationModePending === true) throw new Error('对话模式正在切换')
+    this.store.update((s) => { s.conversationModePending = true; s.conversationModeError = undefined })
+    try {
+      const current = this.store.getSnapshot().current
+      if (current === null) throw new Error('尚未读取当前会话模型，请稍后重试')
+      if (mode === 'ordinary' && !isChatGptWebSelection(current)) {
+        this.ordinarySelection = { ...current }
+        if (before.conversationModeError === undefined) return
+      }
+      if (mode === 'chatgpt' && isChatGptWebSelection(current) && before.conversationModeError === undefined) return
+      if (!isChatGptWebSelection(current)) this.ordinarySelection = { ...current }
+      const target: ModelSelection | undefined = mode === 'ordinary' ? this.ordinarySelection
+        : { provider: 'dsh-physical-operator', model: 'chatgpt-web' }
+      if (target === undefined) throw new Error(mode === 'ordinary'
+        ? '没有可恢复的普通对话模型，请在模型菜单中明确选择'
+        : 'ChatGPT Web 算子当前不可用，请检查已有算子配置')
+      await this.select(target, { persistDefault: false })
+      const selected = this.store.getSnapshot().current
+      if (selected?.provider !== target.provider || selected.model !== target.model
+        || (target.reasoningEffort !== undefined && selected.reasoningEffort !== target.reasoningEffort)) {
+        throw new Error('对话模式尚未由当前会话确认，请明确重选')
+      }
+    } catch (error) {
+      this.store.update((s) => { s.status = 'error'; s.conversationModeError = error instanceof Error ? error.message : String(error) })
+      throw error
+    } finally {
+      this.store.update((s) => { s.conversationModePending = false })
+    }
   }
 
   /**

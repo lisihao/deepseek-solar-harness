@@ -22,3 +22,10 @@
   - text: DeepSeek-V4-Flash
   - img
 - button "Send message" [disabled]
+- radiogroup "对话模式":
+  - radio "普通对话" [checked]
+  - text: 普通对话
+  - radio "ChatGPT"
+  - text: ChatGPT
+  - radio "洞察" [disabled]
+  - text: 洞察 暂不可用

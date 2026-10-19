@@ -179,10 +179,7 @@ function serializeAssistant(message: Message): WireMessage {
     // the message sits durably in the session log, a null here bricks every
     // later turn of that session.
     content: text,
-    // Official passback rule (guides/thinking_mode.mdx): reasoning_content
-    // must return on tool-call turns; it is ignored on plain turns, so we
-    // drop it there to save tokens.
-    ...toolCalls.length > 0 && reasoning.length > 0 ? { reasoning_content: reasoning } : {},
+    ...reasoning.length > 0 ? { reasoning_content: reasoning } : {},
     ...toolCalls.length > 0 ? { tool_calls: toolCalls } : {},
   }
 }
@@ -191,7 +188,8 @@ function serializeAssistant(message: Message): WireMessage {
  * Serialize the conversation. `tool-result` blocks become standalone
  * `{role: 'tool'}` messages; the harness puts each tool result in its own
  * user-role message, so a mixed user message contributes its text first and
- * its tool results as separate wire messages after.
+ * its tool results as separate wire messages after. Assistant reasoning is
+ * retained; request assembly omits it only when the current request has no tools.
  * @param messages - the harness conversation, in order.
  * @returns the wire messages; order preserved, each tool result expanded into its own entry.
  */
@@ -229,7 +227,8 @@ export function serializeMessages(messages: Message[]): WireMessage[] {
 /**
  * Serialize image-capable history after resolving durable attachments.
  * Consecutive tool results keep string `tool` messages and share one following
- * user message containing their images.
+ * user message containing their images. Assistant reasoning is retained for
+ * request assembly to apply the current request's tools condition.
  * @param messages - transient request history after request-size offloading.
  * @param attachments - durable image resolver.
  * @param signal - cancellation for attachment reads.
@@ -308,7 +307,13 @@ function requestWithMessages(
   const resolvedThinking = resolveThinking(options, defaults)
   return {
     model: options.model,
-    messages,
+    // DeepSeek requires every retained assistant reasoning block when tools
+    // are enabled, including earlier turns that did not call a tool.
+    messages: tools !== undefined && tools.length > 0 ? messages : messages.map((message) => {
+      if (message.role !== 'assistant') return message
+      const { reasoning_content: _reasoningContent, ...withoutReasoning } = message
+      return withoutReasoning
+    }),
     stream: true,
     stream_options: { include_usage: true },
     ...resolvedThinking.thinking !== undefined ? { thinking: { type: resolvedThinking.thinking } } : {},

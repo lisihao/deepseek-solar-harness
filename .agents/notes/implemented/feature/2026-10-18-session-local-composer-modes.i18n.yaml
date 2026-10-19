@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-18-session-local-composer-modes.md
+2026-10-18-session-local-composer-modes.md: c286a14db84816da89aedf68428727bce9a57f0d
+2026-10-18-session-local-composer-modes.zh.md: 9e4d3a80943fb3405cdd6f1e9254f1fa2f0d2bf9

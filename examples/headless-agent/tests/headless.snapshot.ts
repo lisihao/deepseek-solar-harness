@@ -75,8 +75,8 @@ interface DeepSeekDefaultsServer {
   close(): Promise<void>
 }
 
-/** Serve one deterministic DeepSeek-compatible response while retaining its request body. */
-async function deepseekDefaultsServer(): Promise<DeepSeekDefaultsServer> {
+/** Serve deterministic DeepSeek-compatible responses while retaining request bodies. */
+async function deepseekDefaultsServer(reasoningHistory = false): Promise<DeepSeekDefaultsServer> {
   const requests: JsonObject[] = []
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     let body = ''
@@ -85,6 +85,16 @@ async function deepseekDefaultsServer(): Promise<DeepSeekDefaultsServer> {
     request.on('end', () => {
       requests.push(JSON.parse(body) as JsonObject)
       response.writeHead(200, { 'content-type': 'text/event-stream' })
+      if (reasoningHistory) {
+        const turn = requests.length === 1 ? 'FIRST' : 'SECOND'
+        response.end([
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: `${turn}_REASONING`, content: `${turn}_ANSWER` } }] })}`,
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"completion_tokens_details":{"reasoning_tokens":1}}}',
+          'data: [DONE]',
+          '',
+        ].join('\n\n'))
+        return
+      }
       let keepAlives = 3
       const write = (): void => {
         if (keepAlives-- > 0) {
@@ -513,6 +523,73 @@ describe('headless stream-json snapshots', () => {
         },
       ]
     `)
+  }, LOADER_SMOKE_TEST_TIMEOUT_MS)
+
+  it('replays tool-free assistant reasoning in the next tools-enabled Loader request', async () => {
+    const server = await deepseekDefaultsServer(true)
+    const configPath = fileURLToPath(new URL('./fixtures/deepseek-reasoning.cordis.yml', import.meta.url))
+    const driver = fileURLToPath(new URL('./fixtures/deepseek-reasoning-driver.ts', import.meta.url))
+    try {
+      const result = await runLoaderSmoke({
+        label: 'DeepSeek historical reasoning Loader snapshot',
+        tempDirPrefix: 'headless-snapshot-deepseek-reasoning-',
+        binScript: driver,
+        libBinScript: driver,
+        configPath,
+        binArgs: [configPath],
+        tsconfigPath,
+        env: { DEEPSEEK_API_KEY: 'snapshot-key', DSH_SNAPSHOT_BASE_URL: server.url },
+        inspect: async (cwd) => {
+          const logs = await persistedLogs(cwd)
+          expect(logs).toHaveLength(1)
+          const log = logs[0]
+          if (log === undefined) throw new Error('DeepSeek reasoning snapshot has no persisted session')
+          const events = parseJsonl(normalizeSessionLog(log.content, contextFromLogs([log.content])))
+          const messages = events.filter(event => event.type === 'assistant/message')
+            .map(event => ((event.data as JsonObject).message as JsonObject).content)
+          expect(messages).toMatchInlineSnapshot(`
+            [
+              [
+                {
+                  "text": "FIRST_REASONING",
+                  "type": "reasoning",
+                },
+                {
+                  "text": "FIRST_ANSWER",
+                  "type": "text",
+                },
+              ],
+              [
+                {
+                  "text": "SECOND_REASONING",
+                  "type": "reasoning",
+                },
+                {
+                  "text": "SECOND_ANSWER",
+                  "type": "text",
+                },
+              ],
+            ]
+          `)
+        },
+      })
+      expect(result.stderr).toBe('')
+      expect(server.requests).toHaveLength(2)
+      expect(server.requests.every(request => Array.isArray(request.tools) && request.tools.length > 0)).toBe(true)
+      const history = server.requests[1]?.messages as JsonObject[]
+      expect(history.filter(message => message.role === 'assistant')).toMatchInlineSnapshot(`
+        [
+          {
+            "content": "FIRST_ANSWER",
+            "reasoning_content": "FIRST_REASONING",
+            "role": "assistant",
+          },
+        ]
+      `)
+      expect(parseJsonl(result.stdout).map(result => result.output)).toEqual(['FIRST_ANSWER', 'SECOND_ANSWER'])
+    } finally {
+      await server.close()
+    }
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)
 
   it('keeps provider comments alive and sends DeepSeek defaults through the one-shot app', async () => {

@@ -8,9 +8,9 @@
 
 `ApiProxyService` 消费 `ctx.agentDefaultModel`；它不持有提供方／模型配置或 Settings 分节。共享服务在 `agent-default-model` 下注册 `{provider, model, reasoningEffort?}`：base 组合包的组合条目是底层，`settings.yaml` 把用户选择叠加其上。
 
-会话每次访问时都按三级解析模型选择：本进程内作出的选择，其次是该会话日志中最新的 `request/header`，最后是这个默认值。已经跑过一轮的会话从自己的日志推导选择，空白会话则能观察到创建之后保存的默认值。
+会话每次访问时依次采用本进程内的明确选择、最近的 `session/model-selection` 记录、最近的用户 `request/header`、部署默认值。模式选择记录同时保留普通模型与推理强度；`session.models.ordinary` 仅在已知时返回，不能从当前默认值补造历史普通模型。
 
-`session.selectModel` 会把接受的切换保存为部署默认值；没有单独的选择动作。它存储已解析的 `ModelSelection`，包括适配器实体化的默认推理（reasoning）强度。完整分节写入会在所选模型没有推理强度时清除已存值。存储失败只记日志，不会撤销会话选择。没有设置提供方的部署保留组合条目，切换只对当前会话生效。
+`session.selectModel` 默认把接受的选择保存为部署默认值，包括适配器补全的默认推理强度；完整分节写入清除模型不支持的旧强度。`persistDefault: false` 只改变当前会话，并追加 `session/model-selection` 后等待 `SessionStore.flush` 成功。已存在这种显式记录的会话，其后模型菜单选择也追加新记录，避免重启恢复旧模式。落盘失败通过 RPC 报错，但不撤销已经变更的内存事实；客户端必须明确重新选择后才能解除模式失败的发送阻止。部署默认值保存失败仍沿用原行为：记日志而不撤销会话选择；未组合 Settings Provider 时不写部署默认值。 `session.models.selectionConfirmationRequired` 在当前 Host 中保留该未完成状态，浏览器重建目录不能将它丢弃；只有明确重新选择并落盘成功才清除。
 
 Settings 分节中的 `reasoningEffort` 在 agent-default-model 插件配置中刻意没有对应字段：seam 按字段把用户层合并到组合条目之上，因此缺席的键无法覆盖已有键，组合层中的推理强度会在以后选择没有推理强度的模型时继续存在。推理强度的部署默认值属于按模型解析的适配器 profile。
 

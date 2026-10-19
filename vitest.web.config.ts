@@ -8,7 +8,9 @@ import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
 // explicit local workflows. Real-model cases self-skip without DEEPSEEK_API_KEY.
 try {
   // Node >= 21.7 native; throws when the file does not exist.
-  process.loadEnvFile(new URL('.env', import.meta.url).pathname)
+  if (process.env.DSH_SNAPSHOT !== 'replay' && process.env.DSH_SNAPSHOT !== 'refresh') {
+    process.loadEnvFile(new URL('.env', import.meta.url).pathname)
+  }
 } catch {
   // No .env — fine, the environment may already carry the variables.
 }

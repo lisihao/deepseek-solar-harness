@@ -1,0 +1,96 @@
+{
+  "pairs": [
+    {
+      "spawnMode": "none",
+      "actualSends": 2,
+      "cells": 1,
+      "descendants": 0,
+      "completeUsage": true,
+      "fullRetained": true,
+      "externalReferenceOnly": true,
+      "actualRequestPlacementVerified": true,
+      "sameExecutionParameters": true
+    },
+    {
+      "spawnMode": "root-only",
+      "actualSends": 4,
+      "cells": 2,
+      "descendants": 1,
+      "completeUsage": true,
+      "fullRetained": true,
+      "externalReferenceOnly": true,
+      "actualRequestPlacementVerified": true,
+      "sameExecutionParameters": true
+    },
+    {
+      "spawnMode": "recursive",
+      "actualSends": 6,
+      "cells": 3,
+      "descendants": 2,
+      "completeUsage": true,
+      "fullRetained": true,
+      "externalReferenceOnly": true,
+      "actualRequestPlacementVerified": true,
+      "sameExecutionParameters": true
+    }
+  ],
+  "negatives": [
+    {
+      "scenario": "strict",
+      "actualSends": 0,
+      "completeUsage": true,
+      "unknown": 0,
+      "lateCellRetained": false
+    },
+    {
+      "scenario": "attempt-cap",
+      "actualSends": 1,
+      "completeUsage": true,
+      "unknown": 0,
+      "lateCellRetained": false
+    },
+    {
+      "scenario": "output-cap",
+      "actualSends": 1,
+      "completeUsage": true,
+      "unknown": 0,
+      "lateCellRetained": false
+    },
+    {
+      "scenario": "cell-cap",
+      "actualSends": 4,
+      "completeUsage": true,
+      "unknown": 0,
+      "lateCellRetained": false
+    },
+    {
+      "scenario": "known-unknown",
+      "actualSends": 2,
+      "completeUsage": false,
+      "unknown": 1,
+      "lateCellRetained": false
+    },
+    {
+      "scenario": "over-output",
+      "actualSends": 1,
+      "completeUsage": true,
+      "unknown": 0,
+      "lateCellRetained": false
+    },
+    {
+      "scenario": "late-cell",
+      "actualSends": 1,
+      "completeUsage": true,
+      "unknown": 0,
+      "lateCellRetained": true
+    }
+  ],
+  "proxyIdentityAndCellLimitVerified": true,
+  "consumerResumeRefused": true,
+  "runtimeContextReopenVerified": true,
+  "corpusOriginalBytesVerified": true,
+  "productionTokenBoundProven": false,
+  "oracleIsolationProven": false,
+  "paidLaunchAllowed": false,
+  "experimentReady": false
+}

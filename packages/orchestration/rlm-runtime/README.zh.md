@@ -26,6 +26,10 @@ child 以自己的 `context` 启动：其 parent 的协议键（`runId`、`nodeI
 
 `RlmChildExecutionOptionsV1` 同样在 Root 准入时密封，并原样继承给每个 Child：模型可见的 bridge tools、Host 签发的 Skills、retry policy 与 capability references 都随 child dispatch request 传递。Runtime 只接受 Prime 的 `name`、`model` 与 `thinking` options。Consumer 必须根据实时 provider catalog 校验显式 model/thinking，并且不得在 Parent 已允许集合之外增加工具。
 
+## 独立子调用准入
+
+`RlmRuntimeCreateRequest.childSpawnPolicy` 选择 Host 子调用准入；它与上下文放置、工具循环选择及子模型分配独立。模式为 `none`、`root-only`、`recursive`，并明确累计 `maxTotalChildren`。Provider 持有默认解析、持久化和执行；[Local Provider](../rlm-runtime-local/README.md) 说明其解析后的默认值与同根树计数。Consumer 不得从模型提示或工具可用性推定这项权限。
+
 ## 扩展点
 
 Provider 可以使用本地进程、远端 Worker 或其他持久 Kernel，只要不改变版本化可观察契约。Consumer 可以通过同一 Host interface 绑定 DSH Resident 物理算子或测试 Fixture。

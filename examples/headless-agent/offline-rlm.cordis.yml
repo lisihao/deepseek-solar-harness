@@ -1,0 +1,10 @@
+# Only the model transport is scripted; Worker and Runtime use their real Loader exports.
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+- id: workers
+  name: '../../packages/orchestration/orchestration-local/tests/fixtures/offline-rlm/worker-host.mjs'
+- id: runtime-local
+  name: '@deepseek-ai/dsh-rlm-runtime-local'
+  config: !!js process.env.DSH_HOME + '/runtime'
+- id: scripted-transport
+  name: '../../packages/orchestration/orchestration-local/tests/fixtures/offline-rlm/adapter.mjs'

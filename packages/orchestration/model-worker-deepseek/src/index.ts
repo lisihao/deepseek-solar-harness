@@ -28,6 +28,7 @@ const MODELS = Object.freeze([
 export class DeepSeekModelWorker implements ModelWorkerProvider {
   readonly id = DEEPSEEK_WORKER_ID
   readonly observesPhysicalRequests = true
+  readonly supportsToolExecution = true
   private activeCount = 0
 
   constructor(private readonly ctx: Context) {}
@@ -55,9 +56,17 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
   async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
     this.activeCount += 1
     try {
-      if (request.rlmPlan?.enabled === true) {
-        if (request.modelToolBridge === undefined) throw new ModelWorkerError('RLM model worker requires a genuine model-tool bridge', 'MODEL_WORKER_INVALID')
-        return await this.generateWithTools(request, request.modelToolBridge)
+      const toolExecution = request.toolExecution ?? (request.rlmPlan?.enabled === true
+        ? { version: 1, maxToolRounds: Math.max(4, Math.min(request.rlmPlan.maxTurns * 4, 64)) }
+        : undefined)
+      if (toolExecution !== undefined) {
+        if (!Number.isSafeInteger(toolExecution.maxToolRounds) || toolExecution.maxToolRounds < 0) {
+          throw new ModelWorkerError('tool-execution rounds must be a non-negative safe integer', 'MODEL_WORKER_INVALID')
+        }
+        if (request.modelToolBridge === undefined) {
+          throw new ModelWorkerError('model worker requires a genuine model-tool bridge', 'MODEL_WORKER_INVALID')
+        }
+        return await this.generateWithTools(request, request.modelToolBridge, toolExecution.maxToolRounds)
       }
       return await this.generate(request, [createUserMessage({
         content: [...request.prompt],
@@ -88,16 +97,17 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
     }
   }
 
-  private async generateWithTools(request: ModelWorkerExecuteRequest, bridge: ModelWorkerToolBridgeV1): Promise<ModelWorkerResult> {
+  private async generateWithTools(
+    request: ModelWorkerExecuteRequest, bridge: ModelWorkerToolBridgeV1, maxToolRounds: number,
+  ): Promise<ModelWorkerResult> {
     if (bridge.tools.length !== 1 || bridge.tools[0]?.name !== 'typescript_repl') {
-      throw new ModelWorkerError('DeepSeek RLM requires the single qualified typescript_repl model tool', 'MODEL_WORKER_INVALID')
+      throw new ModelWorkerError('DeepSeek requires the single qualified typescript_repl model tool', 'MODEL_WORKER_INVALID')
     }
     const messages: Message[] = [createUserMessage({
       content: [...request.prompt],
       source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-model-worker-deepseek' },
     })]
     let usage: TokenUsage | undefined
-    const maxToolRounds = Math.max(4, Math.min((request.rlmPlan?.maxTurns ?? 8) * 4, 64))
     for (let round = 0; round <= maxToolRounds; round += 1) {
       const assembler = await this.collectResponse(request, {
         provider: 'deepseek-official',

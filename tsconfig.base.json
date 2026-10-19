@@ -28,6 +28,13 @@
     // not declaration path aliases, keep each package/vendor source compiled
     // under its own tsconfig boundary.
     "paths": {
+      "@deepseek-ai/dsh-research-handoff": ["./packages/orchestration/research-handoff/src/index.ts"],
+      "@deepseek-ai/dsh-research-handoff/api": ["./packages/orchestration/research-handoff/src/api.ts"],
+      "@deepseek-ai/dsh-research-handoff/invariant": ["./packages/orchestration/research-handoff/src/invariant.ts"],
+      "@deepseek-ai/dsh-research-handoff-local": ["./packages/orchestration/research-handoff-local/src/index.ts"],
+      "@deepseek-ai/dsh-research-handoff-local/invariant": ["./packages/orchestration/research-handoff-local/src/invariant.ts"],
+      "@deepseek-ai/dsh-research-workflow": ["./packages/orchestration/research-workflow/src/index.ts"],
+      "@deepseek-ai/dsh-research-workflow/invariant": ["./packages/orchestration/research-workflow/src/invariant.ts"],
       "@deepseek-ai/dsh-physical-operator-rlm/standalone-host": ["./packages/physical-operator/physical-operator-rlm/src/standalone-host.ts"],
       "@deepseek-ai/cordis": ["./vendor/cordis/src"],
       "@deepseek-ai/cosmokit": ["./vendor/cosmokit/src"],

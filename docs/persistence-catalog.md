@@ -1110,6 +1110,76 @@ Source: [`packages/core/session/src/types.ts:309`](../packages/core/session/src/
 
 Source: [`packages/core/session/src/types.ts:304`](../packages/core/session/src/types.ts)
 
+### `research/*`
+
+<a id="researchaction--log-only"></a>
+
+#### `research/action` — log-only
+
+```ts persistence-catalog
+/** Original Host action facts and complete action-specific observation history; absent qualification stays null. */
+'research/action': {
+  readonly ownerId: ResearchOwnerId
+  readonly runId: ResearchRunId
+  readonly snapshot: ResearchActionSnapshot
+  readonly qualification: ResearchQualificationRecord | null
+  readonly observations: readonly ResearchObservationRecord[]
+  readonly deliveries: readonly ResearchDeliveryRecord[]
+}
+```
+
+Source: [`packages/orchestration/research-workflow/src/events.ts:33`](../packages/orchestration/research-workflow/src/events.ts)
+
+<a id="researchinput--log-only"></a>
+
+#### `research/input` — log-only
+
+```ts persistence-catalog
+/** Complete Consumer input intention, including original template and values when prepared; not proof of submission. */
+'research/input': {
+  readonly ownerId: ResearchOwnerId
+  readonly runId: ResearchRunId
+  readonly request: ResearchActionRequest
+  readonly preparedPrompt: ResearchPreparedPrompt | null
+}
+```
+
+Source: [`packages/orchestration/research-workflow/src/events.ts:26`](../packages/orchestration/research-workflow/src/events.ts)
+
+<a id="researchworkflow--log-only"></a>
+
+#### `research/workflow` — log-only
+
+```ts persistence-catalog
+/** Full canonical research definition before standard execution; required on read, not execution authority. */
+'research/workflow': {
+  readonly version: 1
+  readonly ownerId: ResearchOwnerId
+  readonly runId: ResearchRunId
+  readonly sessionId: string
+  readonly definition: ResearchWorkflowDefinition
+}
+```
+
+Source: [`packages/orchestration/research-workflow/src/events.ts:10`](../packages/orchestration/research-workflow/src/events.ts)
+
+<a id="researchworkflow-update--log-only"></a>
+
+#### `research/workflow-update` — log-only
+
+```ts persistence-catalog
+/** Full current original-owner snapshot, including confirmations, delivery history and separate verification state. */
+'research/workflow-update': {
+  readonly version: 1
+  readonly ownerId: ResearchOwnerId
+  readonly runId: ResearchRunId
+  readonly sessionId: string
+  readonly state: ResearchWorkflowState
+}
+```
+
+Source: [`packages/orchestration/research-workflow/src/events.ts:18`](../packages/orchestration/research-workflow/src/events.ts)
+
 ### `sandbox/*`
 
 <a id="sandboxmode--log-only"></a>
@@ -1184,6 +1254,17 @@ Source: [`packages/schedule/schedule/src/types.ts:219`](../packages/schedule/sch
 ```
 
 Source: [`packages/core/session/src/types.ts:332`](../packages/core/session/src/types.ts)
+
+<a id="sessionmodel-selection--log-only"></a>
+
+#### `session/model-selection` — log-only
+
+```ts persistence-catalog
+/** Explicit user route choice; never a request receipt or model-visible prompt input. */
+'session/model-selection': { version: 1; selected: ModelSelection; ordinary: ModelSelection | null }
+```
+
+Source: [`packages/host/apiproxy/src/model-selection-event.ts:36`](../packages/host/apiproxy/src/model-selection-event.ts)
 
 <a id="sessiontitle--log-only"></a>
 

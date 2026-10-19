@@ -26,6 +26,10 @@ Each root seals a `childModelPolicy`. `parent-inherit` is the Prime-compatible r
 
 `RlmChildExecutionOptionsV1` is likewise sealed at root admission and inherited unchanged by every child: the model-visible bridge tools, Host-issued Skills, retry policy, and capability references all travel in the child dispatch request. The runtime accepts only Prime's `name`, `model`, and `thinking` options. A Consumer must validate explicit model/thinking selections against its live provider catalog and must not add tools beyond the sealed parent set.
 
+## Independent child admission
+
+`RlmRuntimeCreateRequest.childSpawnPolicy` selects Host child admission independently of context placement, tool-loop selection and child-model allocation. The modes are `none`, `root-only` and `recursive`, with an explicit cumulative `maxTotalChildren`. The Provider owns default resolution, persistence and enforcement; the [Local Provider](../rlm-runtime-local/README.md) documents its resolved default and same-tree counting. Consumers must not infer this authority from model prompts or tool availability.
+
 ## Extension points
 
 Providers may use a local process, remote worker, or another durable kernel as long as the versioned observable contracts remain unchanged. Consumers may bind DSH Resident physical operators or a test fixture through the same host interface.

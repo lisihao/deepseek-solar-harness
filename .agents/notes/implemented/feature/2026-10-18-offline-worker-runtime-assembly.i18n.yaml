@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-18-offline-worker-runtime-assembly.md
+2026-10-18-offline-worker-runtime-assembly.md: 4570f8de21257bef28002081bb85e40430340fbc
+2026-10-18-offline-worker-runtime-assembly.zh.md: 9d1cf7c50d79946cfb626cfe0d623f6911057c37

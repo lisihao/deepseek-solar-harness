@@ -176,6 +176,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * above the card belongs in `conversation.input.dock`.
      */
     'conversation.composer.dock': { kind: 'list'; scope: 'session'; owner: InputZone }
+    /** Full-width interaction rows below the input card, in both blank and active conversations. */
+    'conversation.composer.controls': { kind: 'list'; scope: 'session'; owner: InputZone }
     /**
      * The left end of the tool row INSIDE the composer card, after the
      * resident chrome (access mode, plan, attach) — the seat for a small
@@ -599,7 +601,7 @@ export type ConversationSlotProps =
     | 'conversation.room.composer'
     | 'conversation.composer' | 'conversation.composer.bar'
     | 'conversation.input.overlay'
-    | 'conversation.input.dock' | 'conversation.composer.dock'
+    | 'conversation.input.dock' | 'conversation.composer.dock' | 'conversation.composer.controls'
     | 'conversation.input.left' | 'conversation.input.right'
     | 'conversation.hero.workspace'
     | 'conversation.hero.agentPreset'

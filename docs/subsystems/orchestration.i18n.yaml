@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/orchestration.md
-orchestration.md: 79e0c7e48961a0cc4953ec80a6fd225f72c4c8e6
-orchestration.zh.md: 0b43df216ba89db8242cda721baa7076c9272ae7
+orchestration.md: 014e205d2573d99b8ac6408672184f8a54499d3a
+orchestration.zh.md: f2477939d97f6a9ebacdf1d58844f7521ffaa8aa

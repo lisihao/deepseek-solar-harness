@@ -1,0 +1,4 @@
+# Runtime-only composition: no model provider or model execution.
+- id: runtime-local
+  name: '@deepseek-ai/dsh-rlm-runtime-local'
+  config: !!js process.env.DSH_HOME + '/runtime'

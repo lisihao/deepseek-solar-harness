@@ -342,6 +342,8 @@ export const sessionModelsRequestSchema = z.object({
 /** session.models response value. */
 export const sessionModelsValueSchema = z.object({
   current: modelSelectionSchema,
+  ordinary: modelSelectionSchema.optional(),
+  selectionConfirmationRequired: z.boolean().optional(),
   effective: modelSelectionSchema.optional(),
   routable: z.boolean(),
   groups: z.array(modelProviderGroupSchema),
@@ -354,6 +356,7 @@ export const sessionSelectModelRequestSchema = z.object({
   provider: z.string().min(1),
   model: z.string().min(1),
   reasoningEffort: z.string().min(1).optional(),
+  persistDefault: z.boolean().optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'session.selectModel'>>>
 
 /** session.selectModel response value. */

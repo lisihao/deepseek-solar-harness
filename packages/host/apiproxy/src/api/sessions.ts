@@ -164,6 +164,10 @@ export interface ModelCatalogFailure {
 export interface SessionModels {
   /** Model selection for the session's next assembled step. */
   current: ModelSelection
+  /** Exact prior ordinary route retained by this Host or recovered from this Session's request headers; absent when unknown. */
+  ordinary?: ModelSelection
+  /** The current Host has not completed persistence for its last explicit choice; sending requires successful reselection. */
+  selectionConfirmationRequired?: boolean
   /**
    * The configuration the most recent step was actually sent with; absent before any step ran. It differs from
    * `current` between a selection and the next step, and for a native route whose lane keeps another profile.
@@ -314,13 +318,16 @@ export interface SessionsApi {
   /**
    * Selects the complete model selection for this session. Exact model metadata
    * validates an optional reasoning effort, while catalog membership remains
-   * advisory. Session-backed subagents reject with `agent-busy`.
+   * advisory. By default it also saves the selection for new sessions;
+   * persistDefault=false limits the change to this Session. Session-backed
+   * subagents reject with agent-busy.
    */
   selectModel(request: RpcRequest<{
     sessionId: SessionId
     provider: string
     model: string
     reasoningEffort?: string
+    persistDefault?: boolean
   }>):
   Promise<RpcResponse<{ selected: ModelSelection }>>
 

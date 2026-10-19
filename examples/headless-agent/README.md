@@ -34,3 +34,9 @@ The overlay creates the same absolute cwd inside the sandbox, but it does not up
 ## Keyless standalone RLM
 
 [`standalone-rlm.cordis.yml`](standalone-rlm.cordis.yml) composes an explicitly owned root with the standalone RLM Provider and the existing execution owner. Its API and Codex snapshot scenarios replace only the external transports; they exercise the real Loader, tool, daemon, and RLM core without credentials. Run `pnpm run test:snapshot -- examples/headless-agent/tests/standalone-rlm.snapshot.ts`; after the host build, set `DSH_EXAMPLE_MODE=lib` to check built package exports under plain Node. This fixture is not a general CLI or Desktop Host integration.
+
+## Local HTTP admission
+
+[`http-admission.cordis.yml`](http-admission.cordis.yml) connects the real Loader, Worker, Runtime, DeepSeek adapter and shared evaluation ledger to a loopback HTTP server with synthetic authentication and responses. Run `pnpm run test:snapshot -- examples/headless-agent/tests/http-admission.snapshot.ts`; after the host build, set `DSH_EXAMPLE_MODE=lib` to check built exports under plain Node. The server records every arrival independently, and the fixture matches request-body hashes and observer events to ledger attempts across root, child and tool rounds. The parent reads the complete child result before its next request; concurrency remains one.
+
+Unproven input bounds refuse before any HTTP arrival. A connection lost after arrival stays durably unknown without a hidden retry and holds the concurrency-one slot; a separate concurrency-two diagnostic proves a later independent success does not erase that unknown. Mutated body associations, unclassified arrivals and missing unknown events must fail validation. The byte-based synthetic scope does not establish real provider token bounds, operating-system isolation or paid-run readiness; this composition makes no external model requests.

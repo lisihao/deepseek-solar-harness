@@ -661,6 +661,42 @@ abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Pro
 
 Source: [`packages/orchestration/orchestration/src/index.ts:783`](../../packages/orchestration/orchestration/src/index.ts)
 
+<a id="ctxresearchhandoff--researchhandoffservice-abstract-seam"></a>
+
+### `ctx.researchHandoff` — `ResearchHandoffService` (abstract seam)
+
+Complete research control seam; implementing this Definition does not establish website compatibility.
+
+```ts cordis-catalog
+/**
+ * Bind an explicit current-process Host; never expose this registration through model or generic JSON RPC.
+ * @param host - Trusted embedding Context owning the grant lifecycle.
+ * @param policy - Explicit deployment/Host bounds, independent of imported policy or saved confirmations.
+ * @param sourceAccess - Optional explicit live source controls; absence disables source Reader execution.
+ * @param scope - Optional trusted lifecycle check, called on reads and existing external-operation guards.
+ * @returns Current callable control and owned revocation; arbitrary trusted same-process plugins share this trust domain.
+ */
+abstract bindHost(host: Context, policy: ResearchHostPolicy, sourceAccess?: ResearchSourceAccess, scope?: ResearchHostScope): ResearchHostRegistration
+
+/**
+ * Register an explicit source Reader under its contribution lifecycle.
+ * @param owner - Trusted Reader lifecycle.
+ * @param reader - Explicit adapter obeying initial and redirect access guards.
+ * @returns Owned registration disposal, without cancelling already accepted remote work.
+ */
+abstract registerSourceReader(owner: Context, reader: ResearchSourceReader): () => Promise<void>
+
+/**
+ * Register one explicitly selected Driver under its plugin lifecycle.
+ * @param owner - Context owning this Driver registration.
+ * @param driver - Actual platform implementation; unknown website interfaces remain unavailable.
+ * @returns Owned registration disposal, without automatic Driver replacement or fallback.
+ */
+abstract registerDriver(owner: Context, driver: ResearchPlatformDriver): () => Promise<void>
+```
+
+Source: [`packages/orchestration/research-handoff/src/index.ts:17`](../../packages/orchestration/research-handoff/src/index.ts)
+
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 
 ### `ctx.rlmRuntime` — `RlmRuntimeService` (abstract seam)
