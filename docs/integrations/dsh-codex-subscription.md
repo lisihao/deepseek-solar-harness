@@ -12,11 +12,11 @@ The migration delivers **two independently installable Solar plugins**: `@lisiha
 | Official Harness baseline | `@deepseek-ai/dsh@0.2.1-rc.2`, tag `dsh-v0.2.1-rc.2`, commit `687f282e8625c6b8d11ff58211a90524be2e4317`. The preceding inspection read the official app's matching version metadata. |
 | Integrated project | [WSL043/dsh-codex-subscription](https://github.com/WSL043/dsh-codex-subscription), reviewed release `v3.1.1`, commit `f9ecdd4dbe56b45e85ed8c2eadf79d98be5942d9`. This is the source-analysis pin, not a claim about the installed version. |
 | Reference source | Release `v3.1.1` was cloned into a separate temporary bare repository outside V4 and read without running project scripts. No source was copied into this repository. |
-| Compatibility | The project's metadata includes Harness `0.2.1-rc.2`. That declaration and the user's successful use are useful evidence, but do not prove every optional feature, future rc, or V4 data-isolation requirement. |
+| Compatibility | The project's metadata includes Harness `0.2.1-rc.2`. That declaration and the user's successful use are useful evidence, but do not prove every optional feature or future rc. |
 | Legacy comparison | DSH Desktop `3.44.2`, tag `DSH-desktop-v3.44.2`, commit `9330e3d801f206e68a914d65df246de77cdcb021`. Earlier read-only analysis inspected its native subagents, physical-operator adapter, Resident drivers, and orchestration. |
-| Current uncertainty | Exact installed plugin versions, active optional backends, and the official app's effective isolated `DSH_HOME` have not been inventoried here. Do not infer them from a successful login or enabled switch. |
+| Current uncertainty | Active optional backends and their behavior have not been fully inventoried here. Do not infer them from a successful login or enabled switch. On 2026-10-19 昊哥 selected the existing `~/.dsh` as the default installation home, superseding the earlier isolated-home requirement. |
 
-The report of working software is accepted as user experience evidence. The private-registry finding below is a source/maintenance boundary issue, not a claim that the user's installation fails. Formal installed acceptance and the D4 isolation boundary remain separate under [AGENTS.md](../../AGENTS.md#hard-boundaries).
+The report of working software is accepted as user experience evidence. The private-registry finding below is a source/maintenance boundary issue, not a claim that the user's installation fails. Formal installed acceptance remains separate under [AGENTS.md](../../AGENTS.md#hard-boundaries); D4 now selects the existing `~/.dsh` home.
 
 ## Existing components and retained functions
 
@@ -151,11 +151,11 @@ Do not copy DSH 3.x `~/.dsh`, settings, credentials, sessions, daemon databases,
 
 ## Implementation order and acceptance
 
-1. Use the recorded published baseline for source development. Exact installed versions and D4's effective isolated GUI home are required before future existing-app acceptance, not before keyless scratch-profile testing. Reuse the user's reported successful use; do not reinstall or run duplicate paid probes.
+1. Use the recorded published baseline for source development. Verify exact installed versions and the selected home before existing-app acceptance; use disposable homes for keyless plugin testing. Reuse the user's reported successful use; do not reinstall or run duplicate paid probes.
 2. Keep the search correction separate from the two-plugin implementation. The installed subscription plugin remains unchanged. A future correction requires its own reviewed fix path and authorization.
 3. Implement the **two authorized Solar plugins** on task branches. Unreleased sources stay under `incubator/`; only an authorized release moves the relevant package under `plugins/`.
 4. Verify the built package against the published baseline in a scratch home. Exercise actual observable behavior and lifecycle; add only focused tests that answer a real question.
-5. Prepare separate source PRs after source/plugin checks pass. Once D4 permits install acceptance and that work is authorized, validate each plugin in the official app using a stable installation artifact/path. Merge and plugin release remain separate authorized steps.
+5. Prepare separate source PRs after source/plugin checks pass. Once installation is authorized, validate each plugin in the official app using a stable installation artifact/path and the selected home (default `~/.dsh`). Merge and plugin release remain separate authorized steps.
 
 | Acceptance area | Required future evidence |
 |---|---|
@@ -165,7 +165,7 @@ Do not copy DSH 3.x `~/.dsh`, settings, credentials, sessions, daemon databases,
 | Cancellation and failure | Startup refusal is surfaced; published activation cancellation uses its lifecycle; no fabricated completion, silent fallback, or automatic replay of uncertain work. |
 | Search boundary | Corrected source contains no private registry access/replacement. In an isolated assembled host, registration leaves the official registry identity and unrelated providers intact; explicit DSH/Codex selection works; selected-provider failure is visible; removal leaves a deliberately configured surviving provider. |
 | Compatibility | Built `lib/`, shared host module instances, supported runtime cohort, and the relevant optional-component readiness are checked. Repeat affected checks when their inputs change. |
-| Installed behavior | Exercise the normal official-app path under the isolated V4 home; inspect relevant UI at default and narrow widths. User-reported current success is retained separately from this candidate's test result. |
+| Installed behavior | Exercise the normal official-app path under the selected Harness home (default `~/.dsh`); inspect relevant UI at default and narrow widths. User-reported current success is retained separately from this candidate's test result. |
 | Publication | New Solar plugin version/tag, market entry, and generated homepage agree after approved release. External dependencies are attributed and are not presented as newly published Solar plugins. |
 
 Source readiness, installed acceptance, and publication are reported separately. The implementation contract and each plugin's README describe the current checks. Installed-GUI acceptance and subscription-search correction are not claimed by source verification.
