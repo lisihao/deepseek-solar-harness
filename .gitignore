@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Test and TypeScript output
+coverage/
+*.tsbuildinfo
+
+# macOS metadata
+.DS_Store

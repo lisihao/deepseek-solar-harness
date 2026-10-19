@@ -1,0 +1,142 @@
+{
+  "verifiedOn": "2026-10-19",
+  "repository": "https://github.com/lisihao/deepseek-solar-harness",
+  "purpose": "Frozen 3.x source archive; not product acceptance",
+  "branches": [
+    {
+      "branch": "codex/archive-3x-20261019/claude/credits-fallback-chain",
+      "commit": "ee0167e64f3fb845832acb68aba93fe3412dcb29",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/claude/desktop-3.40.3",
+      "commit": "17f75bdaee93ff2bb3c13c80811733b00db4f3f7",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/claude/gouzi-remote-hosts-wip",
+      "commit": "585d5611a7dac7113b607e80b58722b4fd39ab95",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/claude/kennel-filter-order",
+      "commit": "ea62fd2cb3bae7b89cd0bc806b11287f600e782b",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/claude/wp1-first-slice-integration",
+      "commit": "8b9ee74e55f3c0c3f85728b6a58f466ab5998758",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/archify-plugin-v2.16.0",
+      "commit": "5d53745ef82cd349ebbee5c9b5346e09bea3ec2d",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/browser-tool-bundle-b4c665b",
+      "commit": "87dcf9ab1adde59021a050abf1410ca47fedf1a5",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/claude-auth-reasons-3.9.4",
+      "commit": "2bf720c50a21c25a8daed86285a74b9df36dedf5",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/desktop-footer-branding-v2.5.0",
+      "commit": "b9760f6fc06b1bb2a6668d98b347cc3c2e692dd5",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/desktop-footer-runtime-v2.5.2",
+      "commit": "af71477e4dc55141e626a05f378924f4cee7b748",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/desktop-resident-electron",
+      "commit": "25c82ce46934c98e18125e0e63104bb9242d0188",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/ego-lite-browser-seam-e8711b8",
+      "commit": "c993d7a1cc83ff9fe2e6d804bc43012779246366",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/fix-code-mode-tool-contract-v2.8.3",
+      "commit": "af29479f9db91ee1d00e491e070c10c9d308973c",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/fix-code-mode-tool-contract-v2.9.1",
+      "commit": "c5143ade16e515e40a96aaaecfb55a645ef9b1bc",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/fix-governance-orchestration-history-v2.7.2",
+      "commit": "7f7c5b0db0245fcc020185bb37890951f9abc687",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/fix-session-resume",
+      "commit": "5d511a5ea173df4ea031045d9d8137dfe1a4df15",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/persistent-bash-prompt-runtime",
+      "commit": "4988d8f152d035faab77e2e90923172f1269dd34",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/codex/pr68-windows-test-timeout",
+      "commit": "50b46974eb33740715b7a5b4e13dff56e10ecec4",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/release/desktop-3.17.1",
+      "commit": "208b9732f1793777970e653f99e4505b031e7f1f",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-20261019/solar",
+      "commit": "d0fff5e1557f499abd7cd77ee57408c78f550ee1",
+      "kind": "previously-local-history"
+    },
+    {
+      "branch": "codex/archive-3x-root-20261019",
+      "commit": "5e6e83341020e49104939d3e5a871f0a75a7bdfc",
+      "kind": "source-snapshot"
+    },
+    {
+      "branch": "codex/archive-3x-wp1-20261019",
+      "commit": "2e33d74806e01f5eab852e905f99e52364d3290c",
+      "kind": "source-snapshot"
+    },
+    {
+      "branch": "codex/archive-3x-task-template-20261019",
+      "commit": "80a73f4c372a0beeb1613dda09a43d63b15c923d",
+      "kind": "source-snapshot"
+    },
+    {
+      "branch": "codex/archive-3x-gouzi-audit-20261019",
+      "commit": "03f2e9cdea3c67d04347ece966e8311d478380ac",
+      "kind": "source-snapshot"
+    },
+    {
+      "branch": "codex/archive-3x-debate-20261019",
+      "commit": "81cd5e20e38d094030834a51a17338407a65febe",
+      "kind": "source-snapshot"
+    },
+    {
+      "branch": "codex/archive-3x-prime-20261019",
+      "commit": "b141faa82010a8ba4f901bbdfa6b42b5f67d03ca",
+      "kind": "source-snapshot"
+    },
+    {
+      "branch": "codex/archive-3x-synapse-fixture-20261019",
+      "commit": "f68504a943eff8589b18ba485d1f06428f5cf77a",
+      "kind": "source-snapshot"
+    }
+  ]
+}
