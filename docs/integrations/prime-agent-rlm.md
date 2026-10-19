@@ -6,6 +6,8 @@ The plugin-construction objective is accepted. The immediate acceptance boundary
 
 The latest human-provided D4 instruction selects the existing official home, `~/.dsh`, for a separately authorized installation; development uses disposable homes. An older base-branch document may still describe the superseded separate-home prerequisite. This design records the current instruction without changing another task's installation documents.
 
+Subsequent clarification (2026-10-19): 昊哥 requires extraction/wrapping to preserve Prime's original RLM and Continual Harness mechanisms. The host replacements and behavioral deviations below remain an unapproved proposal; unchanged Python files do not establish full preservation. The [evaluation specification](../testing/prime-rlm-evaluation.md) defines an original-host differential gate before fidelity or efficacy claims. This document is not implementation approval.
+
 ## 1. Product outcome and completeness
 
 The deliverable is one independent bundle, `@lisihao/dsh-solar-rlm`, developed under `incubator/rlm/`. It lets a DSH user give a task plus authorized data references to an RLM Agent. That Agent operates through a persistent Python environment, programmatically constructs recursive subtasks, retains intermediate data outside its model context, gathers results, and returns a final artifact with a reconstructable execution tree and honest usage evidence.
