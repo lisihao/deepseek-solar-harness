@@ -4,6 +4,7 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
+import { checkRlmClient } from './rlm-client-check.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)))
 const PACKAGE_ROOT = join(ROOT, 'incubator', 'rlm')
@@ -49,6 +50,8 @@ async function buildJavaScript() {
     platform: 'browser',
     target: 'es2022',
     format: 'cjs',
+    banner: { js: 'window.__ModuleLoader__.load({ id: "@lisihao/dsh-solar-rlm", factory: (require) => { var module = { exports: {} }; var exports = module.exports;' },
+    footer: { js: 'return module.exports; } });' },
     sourcemap: true,
   })
 }
@@ -88,7 +91,8 @@ async function main() {
   await rm(LIB, { recursive: true, force: true })
   await buildJavaScript()
   await buildDeclarations()
-  process.stdout.write('build-rlm: generated ESM host entries, CJS client, and declarations.\n')
+  await checkRlmClient(join(LIB, 'client.cjs'))
+  process.stdout.write('build-rlm: generated ESM host entries, DSH module-loader client, and declarations; browser entry check passed.\n')
 }
 
 main().catch((error) => {

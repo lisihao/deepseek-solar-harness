@@ -53,7 +53,7 @@ pnpm build:rlm
 node tools/rlm-capsule.mjs --source <clean-pinned-prime-checkout> --binary <verified-arm64-prime-agent> --python-prefix <prepared-offline-prefix> --output incubator/rlm/assets
 ```
 
-The capsule script performs no dependency installation or source build. It verifies the fixed source and binary, compares loaded Prime Python files with their originals, and creates `assets/runtime.tar.gz` plus its manifest. The packed package must include those assets, built `lib/`, licenses and locks. Startup extracts/verifies them under the plugin namespace and uses `PRIME_AGENT_KERNEL_PYTHON` directly. Normal installation needs no pip, uv, Cargo or build hook.
+The capsule script performs no dependency installation or source build. It verifies the fixed source and binary, compares loaded Prime Python files with their originals, and creates `assets/runtime.tar.gz` plus its manifest. The packed package must include those assets, built `lib/`, licenses and locks. The web entry is CommonJS inside the published DSH `window.__ModuleLoader__.load` factory, with host React shared through its scoped `require`. Build and plugin checks execute the shipped entry without ambient Node globals and verify registration, activation and disposal. Startup extracts/verifies them under the plugin namespace and uses `PRIME_AGENT_KERNEL_PYTHON` directly. Normal installation needs no pip, uv, Cargo or build hook.
 
 This candidate has no public release, tag, market index entry or general installation URL. Authorized local installation uses a fixed packed artifact path, never a removable task worktree. See [UPGRADING.md](UPGRADING.md) for dependency provenance and the upgrade procedure.
 

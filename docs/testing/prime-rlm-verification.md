@@ -16,7 +16,7 @@ Implementation and installation are authorized. Paid experiments, merge, release
 | Python third-party lock SHA-256 | `a7c8ef7ef10f84cca2a788601b4e5f444448812a9ad855af2bd4e891904fa2c7` |
 | Host baseline | Published DSH 0.2.1-rc.2 / Cordis 4.0.5 |
 | Development environment | macOS arm64; plain Node 26.7; source packages share host peer modules |
-| Adapter/test/build input fingerprint | `7a993b1ba5d47febd801359dbacac3356554f8142bb16bf9f73c70b68cabe6b4` (36 files; excludes generated `lib`, payload bytes and prose) |
+| Adapter/test/build input fingerprint | `d526d096f38388505bbfe24770d5e7fbf198af540e9d23f04d6df0a43cc0d2fd` (37 files; excludes generated `lib`, payload bytes and prose) |
 
 The manifest and provenance are in `incubator/rlm/runtime-lock/capsule.json`; large runtime assets are generated and ignored by Git. No Prime source or official Harness runtime was patched. Source identity does not alone certify every provider behavior or evaluation case.
 
@@ -29,7 +29,7 @@ The manifest and provenance are in `incubator/rlm/runtime-lock/capsule.json`; la
 | Actual capsule extraction and critical-file validation | Run: passed; hot validation also passed |
 | DSH plugin metadata audit | Run: 7 OK, 0 warning, 0 error |
 | Root build, strict typecheck and unit suite | Run: build/typecheck passed; 18 test files, 136 tests passed |
-| Affected entrypoint recheck after service-injection repair | Run: 7 tests passed; rebuilt ESM/CJS/declarations passed |
+| Affected entrypoint recheck after service-injection repair | Run: 7 tests passed; rebuilt host/web/declarations passed |
 | Existing native-plugin scratch-profile gate | Run: passed, including Resident shutdown; no repeated run needed for unchanged native source |
 | Built RLM package in disposable published-baseline profile | Run: passed, service and three ordinary tools registered |
 | Actual original native RLM/Harness self-test in that profile | Run: all 14 checks passed; 18 scripted local protocol requests, 0 real-provider calls |
@@ -59,6 +59,8 @@ The next-turn refinement assertion concerns Prime's provider context, **not** a 
 Adapter failure tests cover malformed ACP/framing, causal sequence and prompt mismatches, `end_turn` without native terminal evidence, outstanding descendants/continuations, unknown formats/effects, replay conflicts and restart recovery, full-tree request reservations, and cleanup despite persistence/transport faults. Confirmed native stop with an unsaved receipt is distinguished from an unconfirmed stop.
 
 ## Installation checkpoint
+
+The first installed artifact (`e02c8e7`, package SHA-256 `4874d751c92b623b8d7fb0cd60229701478ac396c7227ea3b5d1a2603340f730`) failed desktop web boot: `ReferenceError: module is not defined`. The client had been emitted as bare CommonJS, whereas the published baseline requires a `window.__ModuleLoader__.load` factory. The new browser-context probe reproduced that failure against the old built entry; the corrected wrapped entry passed registration, shared-React import, slot activation, remote mounting and disposal without Node globals. This probe now runs during both build and plugin checks. Earlier Node-only checks did not cover web activation. Installed acceptance is pending the corrected artifact below. Prime runtime bytes and host adapter behavior are unchanged by this repair.
 
 Pending at this checkpoint: pack the verified build to a stable path; quit the official app; back up affected desktop profile configuration; install only this package through the bundled CLI; relaunch; inspect enabled state and normal explicit local self-test; verify default/narrow rendering and disable/enable behavior; compare unrelated configuration and credentials without publishing their contents.
 

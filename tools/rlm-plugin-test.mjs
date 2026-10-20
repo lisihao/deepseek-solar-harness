@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { checkRlmClient } from './rlm-client-check.mjs'
 
 const ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)))
 const TEMP_ROOT = process.platform === 'darwin' ? '/private/tmp' : tmpdir()
@@ -127,6 +128,7 @@ async function validateBuiltPackages() {
   if (probe.name !== PROBE_NAME) throw new Error(`unexpected probe package name ${String(probe.name)}`)
   for (const file of ['lib/index.js', 'lib/selftest.js', 'lib/client.cjs', 'lib/remote.js', 'lib/typert.js']) await requireFile(join(RLM_PACKAGE, file), `RLM build output ${file}`)
   await requireFile(join(PROBE_PACKAGE, 'lib', 'index.js'), 'RLM probe build output lib/index.js')
+  await checkRlmClient(join(RLM_PACKAGE, 'lib', 'client.cjs'))
 }
 
 async function profileManifest(profileDir) {
