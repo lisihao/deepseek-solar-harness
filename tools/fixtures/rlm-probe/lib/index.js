@@ -81,9 +81,19 @@ class FixtureAdapter extends LlmAdapter {
     options.signal?.throwIfAborted()
     this.requests.push(options)
     const ordinal = this.requests.length
-    const text = ordinal === 1
+    if (ordinal === 1) {
+      const code = 'print("RLM_TOOL_42", 6 * 7)'
+      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+      yield { type: 'tool-call-delta', index: 0, id: 'fixture-python', name: 'python_repl', argumentsDelta: `{"code": ${JSON.stringify(code)}}` }
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: 'fixture-python', name: 'python_repl', arguments: JSON.stringify({ code }) } }
+      yield { type: 'usage', usage: { inputTokens: 8, outputTokens: 2 } }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
+    if (ordinal === 2) assert(options.messages.some(message => message.role === 'tool' && JSON.stringify(message.content).includes('RLM_TOOL_42 42')), 'original Prime did not return the Python fixture output')
+    const text = ordinal === 2
       ? 'RLM_BRIDGE_FIRST_MARKER'
-      : ordinal === 2
+      : ordinal === 3
         ? 'RLM_BRIDGE_SECOND_MARKER'
         : 'RLM_BRIDGE_RESUME_MARKER'
     yield { type: 'block-start', index: 0, blockType: 'text' }
@@ -138,7 +148,7 @@ async function runBridgeAcceptance(ctx, service, status) {
     route: { provider: FIXTURE_PROVIDER, model: FIXTURE_MODEL, maxTokens: 512 },
   }
   const input = {
-    task: 'Reply with the fixture marker. Do not call tools.',
+    task: 'Execute the supplied Python tool call, then reply with the fixture marker.',
     cwd: requiredEnv('SOLAR_RLM_PROBE_WORKSPACE'),
     label: 'RLM local bridge fixture',
     maxModelRequests: 6,
@@ -149,13 +159,13 @@ async function runBridgeAcceptance(ctx, service, status) {
     const firstReceipt = await host.start(input, owner)
     runId = firstReceipt.runId
     const first = await waitForIdle(host, runId, owner.sessionId)
-    assert(first.modelRequests === 1, `first bridge turn modelRequests=${String(first.modelRequests)}`)
+    assert(first.modelRequests === 2, `first bridge turn modelRequests=${String(first.modelRequests)}`)
     assert(first.result?.includes('RLM_BRIDGE_FIRST_MARKER'), 'first bridge marker was not persisted')
 
     const secondReceipt = await host.continue(runId, 'Continue once and return the second fixture marker.', owner)
     assert(secondReceipt.runId === runId, 'continue returned a different run id')
     const second = await waitForIdle(host, runId, owner.sessionId)
-    assert(second.modelRequests === 2, `second bridge turn modelRequests=${String(second.modelRequests)}`)
+    assert(second.modelRequests === 3, `second bridge turn modelRequests=${String(second.modelRequests)}`)
     assert(second.result?.includes('RLM_BRIDGE_SECOND_MARKER'), 'second bridge marker was not persisted')
 
     const cancelled = await host.cancel(runId, owner.sessionId)
@@ -164,7 +174,7 @@ async function runBridgeAcceptance(ctx, service, status) {
     const resumedReceipt = await host.continue(runId, 'Resume explicitly and return the resume fixture marker.', owner)
     assert(resumedReceipt.runId === runId, 'resume returned a different run id')
     const resumed = await waitForIdle(host, runId, owner.sessionId)
-    assert(resumed.modelRequests === 3, `resume bridge turn modelRequests=${String(resumed.modelRequests)}`)
+    assert(resumed.modelRequests === 4, `resume bridge turn modelRequests=${String(resumed.modelRequests)}`)
     assert(resumed.result?.includes('RLM_BRIDGE_RESUME_MARKER'), 'resume bridge marker was not persisted')
     const finalCancelled = await host.cancel(runId, owner.sessionId)
     assert(finalCancelled.state === 'cancelled', `final bridge cancel returned ${String(finalCancelled.state)}`)
@@ -176,11 +186,11 @@ async function runBridgeAcceptance(ctx, service, status) {
     const intents = rows
       .map(row => row.value)
       .filter(value => value?.type === 'model-intent')
-    assert(dispatches.length === 3, `journal model-dispatch count=${String(dispatches.length)}`)
-    assert(intents.length === 3, `journal model-intent count=${String(intents.length)}`)
+    assert(dispatches.length === 4, `journal model-dispatch count=${String(dispatches.length)}`)
+    assert(intents.length === 4, `journal model-intent count=${String(intents.length)}`)
     assert(dispatches.every(value => value.config?.provider === FIXTURE_PROVIDER && value.config?.model === FIXTURE_MODEL && value.config?.reasoningEffort === undefined && value.config?.maxTokens === 512), 'journal route or call controls do not match the fixture route')
     assert(intents.every(value => value.dshRequest?.provider === FIXTURE_PROVIDER && value.dshRequest?.model === FIXTURE_MODEL), 'journal intent route does not match fixture provider/model')
-    assert(adapter.requests.length === 3, `fixture adapter request count=${String(adapter.requests.length)}`)
+    assert(adapter.requests.length === 4, `fixture adapter request count=${String(adapter.requests.length)}`)
     assert(adapter.requests.every(request => request.provider === FIXTURE_PROVIDER && request.model === FIXTURE_MODEL && request.reasoningEffort === undefined && request.maxTokens === 512), 'fixture adapter saw an unexpected route or call controls')
     assert(adapter.resolutions.length > 0 && adapter.resolutions.every(model => model.context?.contextWindow === 8192 && model.defaultMaxTokens === 512 && model.reasoning === undefined), 'fixture model metadata did not preserve context/output bounds or reasoning=false')
     return {
@@ -192,6 +202,7 @@ async function runBridgeAcceptance(ctx, service, status) {
       reasoning: false,
       modelRequests: adapter.requests.length,
       paidProviderCalls: 0,
+      authoritativeToolArgumentsExecuted: true,
       firstState: first.state,
       secondState: second.state,
       resumedState: resumed.state,

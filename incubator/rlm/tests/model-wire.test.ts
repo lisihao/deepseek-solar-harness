@@ -194,14 +194,13 @@ describe('encodeChatStream', () => {
     expect(deltas.map(delta => delta.content).filter(Boolean)).toEqual(['hel', 'lo'])
     expect(deltas.map(delta => delta.reasoning_content).filter(Boolean)).toEqual(['think'])
     const toolDeltas = deltas.flatMap(delta => (delta.tool_calls as Array<Record<string, unknown>> | undefined) ?? [])
-    expect(toolDeltas).toHaveLength(2)
+    expect(toolDeltas).toHaveLength(1)
     expect(toolDeltas[0]).toMatchObject({
       index: 0,
       id: 'call-1',
       type: 'function',
-      function: { name: 'lookup', arguments: '{"id":' },
+      function: { name: 'lookup', arguments: '{"id":1}' },
     })
-    expect(toolDeltas[1]).toMatchObject({ index: 0, function: { arguments: '1}' } })
 
     const usage = chunksOnly.find(event => event.usage !== undefined)?.usage as Record<string, unknown>
     expect(usage).toEqual({
@@ -313,22 +312,80 @@ describe('encodeChatStream', () => {
     expect(finished?.message).toMatchObject({ reasoning_content: 'first final\n' })
   })
 
-  it('still rejects text and tool arguments that do not extend streamed deltas', async () => {
+  it('still rejects text that does not extend streamed deltas', async () => {
     await expect(collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
       yield { type: 'text-delta', index: 0, text: 'draft text' }
       yield { type: 'block-end', index: 0, block: { type: 'text', text: 'revised text' } }
     })(), { id: 'chatcmpl-text-mismatch', model: 'configured-model' }))).rejects
       .toThrow('does not extend its emitted delta')
+  })
 
+  it('emits only authoritative tool arguments after JSON serialization changes', async () => {
+    let finished: { message: unknown } | undefined
+    const lines = await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'tool-call-delta', index: 0, id: ToolCallId('call-normalized'), name: 'python_repl', argumentsDelta: '{"code": ' }
+      yield { type: 'tool-call-delta', index: 0, id: ToolCallId('call-normalized'), argumentsDelta: '"print(42)"}' }
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId('call-normalized'), name: 'python_repl', arguments: '{"code":"print(42)"}' } }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+    })(), { id: 'normalized', model: 'configured-model', onFinish: value => { finished = value } }))
+    const tools = payloads(lines).filter((event): event is Record<string, unknown> => typeof event === 'object' && event !== null)
+      .flatMap(event => (event.choices as Array<{ delta: { tool_calls?: unknown[] } }> | undefined) ?? [])
+      .flatMap(choice => choice.delta.tool_calls ?? [])
+    expect(tools).toEqual([{ index: 0, id: 'call-normalized', type: 'function', function: { name: 'python_repl', arguments: '{"code":"print(42)"}' } }])
+    expect(finished?.message).toMatchObject({ tool_calls: [{ id: 'call-normalized', function: { arguments: '{"code":"print(42)"}' } }] })
+  })
+
+  it('preserves interleaved tool indexes, first close and authoritative revisions', async () => {
+    const lines = await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'tool-call-delta', index: 8, id: ToolCallId('first'), name: 'inspect', argumentsDelta: '{"draft":' }
+      yield { type: 'tool-call-delta', index: 3, id: ToolCallId('second'), argumentsDelta: '{"b": 2}' }
+      yield { type: 'block-end', index: 3, block: { type: 'tool-call', id: ToolCallId('second'), name: 'inspect', arguments: '{"b":2}' } }
+      yield { type: 'block-end', index: 8, block: { type: 'tool-call', id: ToolCallId('first'), name: 'inspect', arguments: '{"a":1}' } }
+      yield { type: 'tool-call-delta', index: 8, id: ToolCallId('ignored'), argumentsDelta: 'ignored' }
+      yield { type: 'block-end', index: 8, block: { type: 'tool-call', id: ToolCallId('ignored'), name: 'ignored', arguments: '{}' } }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+    })(), { id: 'interleaved', model: 'configured-model' }))
+    const tools = payloads(lines).filter((event): event is Record<string, unknown> => typeof event === 'object' && event !== null)
+      .flatMap(event => (event.choices as Array<{ delta: { tool_calls?: unknown[] } }> | undefined) ?? [])
+      .flatMap(choice => choice.delta.tool_calls ?? [])
+    expect(tools).toEqual([
+      { index: 1, id: 'second', type: 'function', function: { name: 'inspect', arguments: '{"b":2}' } },
+      { index: 0, id: 'first', type: 'function', function: { name: 'inspect', arguments: '{"a":1}' } },
+    ])
+  })
+
+  it('flushes delta-only tool arguments once on successful finish', async () => {
+    const onFinish = vi.fn()
+    const lines = await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'tool-call-delta', index: 0, id: ToolCallId('delta-only'), name: 'inspect', argumentsDelta: '{"a":' }
+      yield { type: 'tool-call-delta', index: 0, id: ToolCallId('delta-only'), argumentsDelta: '1}' }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+    })(), { id: 'delta-only', model: 'configured-model', onFinish }))
+    const tools = payloads(lines).filter((event): event is Record<string, unknown> => typeof event === 'object' && event !== null)
+      .flatMap(event => (event.choices as Array<{ delta: { tool_calls?: unknown[] } }> | undefined) ?? [])
+      .flatMap(choice => choice.delta.tool_calls ?? [])
+    expect(tools).toEqual([{ index: 0, id: 'delta-only', type: 'function', function: { name: 'inspect', arguments: '{"a":1}' } }])
+    expect(onFinish).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['id', 'name'] as const)('still rejects a changed tool %s', async field => {
     await expect(collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
-      yield { type: 'tool-call-delta', index: 0, id: ToolCallId('call-mismatch'), name: 'inspect', argumentsDelta: '{"id":' }
-      yield {
-        type: 'block-end',
-        index: 0,
-        block: { type: 'tool-call', id: ToolCallId('call-mismatch'), name: 'inspect', arguments: '{"name":"different"}' },
-      }
-    })(), { id: 'chatcmpl-tool-mismatch', model: 'configured-model' }))).rejects
-      .toThrow('does not extend its emitted delta')
+      yield { type: 'tool-call-delta', index: 0, id: ToolCallId('stable'), name: 'inspect', argumentsDelta: '{}' }
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: ToolCallId(field === 'id' ? 'changed' : 'stable'), name: field === 'name' ? 'changed' : 'inspect', arguments: '{}' } }
+    })(), { id: 'identity', model: 'configured-model' }))).rejects.toThrow(`changed tool call ${field}`)
+  })
+
+  it.each(['error', 'aborted'] as const)('does not flush provisional tool arguments on %s', async kind => {
+    const lines: string[] = []
+    const onFinish = vi.fn()
+    await expect((async () => {
+      for await (const line of encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+        yield { type: 'tool-call-delta', index: 0, id: ToolCallId('unfinished'), name: 'inspect', argumentsDelta: '{"a":' }
+        yield { type: 'finish', reason: { kind, failure: { code: 'FAILED', message: 'stopped' } } }
+      })(), { id: 'unfinished', model: 'configured-model', onFinish })) lines.push(line)
+    })()).rejects.toThrow('stopped')
+    expect(lines).toEqual([])
+    expect(onFinish).not.toHaveBeenCalled()
   })
 
   it('round-trips the final OpenAI assistant message into DSH replay state', async () => {

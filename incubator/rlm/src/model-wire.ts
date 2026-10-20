@@ -59,8 +59,6 @@ interface ToolAccumulator {
   id: string
   name?: string
   arguments: string
-  emitted: boolean
-  emittedName: boolean
 }
 
 interface BlockAccumulator {
@@ -522,6 +520,15 @@ function addRole(delta: JsonRecord, roleSent: boolean): JsonRecord {
   return roleSent ? delta : { role: 'assistant', ...delta }
 }
 
+function toolCallDelta(tool: ToolAccumulator): JsonRecord {
+  return {
+    index: tool.callIndex,
+    id: tool.id,
+    type: 'function',
+    function: { name: tool.name ?? '', arguments: tool.arguments },
+  }
+}
+
 function suffixAfter(authoritative: string, streamed: string, block: number, field: string): string {
   if (!authoritative.startsWith(streamed)) {
     throw new Error(`DSH stream block ${block} ended with ${field} that does not extend its emitted delta`)
@@ -647,8 +654,6 @@ export async function* encodeChatStream(
             callIndex: nextToolCallIndex,
             id: chunk.id,
             arguments: '',
-            emitted: false,
-            emittedName: false,
           }
           nextToolCallIndex += 1
           block.tool = tool
@@ -661,20 +666,9 @@ export async function* encodeChatStream(
           tool.name = chunk.name
         }
         tool.arguments += chunk.argumentsDelta
-        const functionDelta: JsonRecord = { arguments: chunk.argumentsDelta }
-        if (chunk.name !== undefined && !tool.emittedName) {
-          functionDelta.name = chunk.name
-          tool.emittedName = true
-        }
-        const toolDelta: JsonRecord = {
-          index: tool.callIndex,
-          ...tool.emitted ? {} : { id: tool.id, type: 'function' },
-          function: functionDelta,
-        }
-        tool.emitted = true
-        const delta = addRole({ tool_calls: [toolDelta] }, roleSent)
-        roleSent = true
-        yield sse(completionChunk(options, delta, null))
+        // Tool argument deltas may use a different JSON serialization from
+        // the authoritative block-end. OpenAI SSE cannot retract already sent
+        // bytes, so defer the complete call until that block closes.
         break
       }
       case 'block-end': {
@@ -715,8 +709,6 @@ export async function* encodeChatStream(
           id: ended.id,
           name: undefined,
           arguments: '',
-          emitted: false,
-          emittedName: false,
         }
         if (!streamed) {
           nextToolCallIndex += 1
@@ -726,26 +718,11 @@ export async function* encodeChatStream(
         if (tool.name !== undefined && tool.name !== ended.name) {
           throw new Error(`DSH stream changed tool call name for block ${chunk.index}`)
         }
-        const remainder = suffixAfter(ended.arguments, tool.arguments, chunk.index, 'tool arguments')
         tool.arguments = ended.arguments
         tool.name = ended.name
-
-        if (!tool.emitted || remainder !== '' || !tool.emittedName) {
-          const functionDelta: JsonRecord = { arguments: tool.emitted ? remainder : ended.arguments }
-          if (!tool.emittedName) {
-            functionDelta.name = ended.name
-            tool.emittedName = true
-          }
-          const toolDelta: JsonRecord = {
-            index: tool.callIndex,
-            ...tool.emitted ? {} : { id: tool.id, type: 'function' },
-            function: functionDelta,
-          }
-          tool.emitted = true
-          const delta = addRole({ tool_calls: [toolDelta] }, roleSent)
-          roleSent = true
-          yield sse(completionChunk(options, delta, null))
-        }
+        const delta = addRole({ tool_calls: [toolCallDelta(tool)] }, roleSent)
+        roleSent = true
+        yield sse(completionChunk(options, delta, null))
         break
       }
       case 'usage': {
@@ -757,17 +734,22 @@ export async function* encodeChatStream(
       case 'finish': {
         const finishReason = terminalFinishReason(chunk)
         finished = true
-        // A well-formed stream closes every block, but preserve the existing
-        // completeBlock compatibility for a reasoning block that only emitted
-        // deltas before finish. Flush it once on successful completion. Error
-        // and abort finishes throw above, so they never receive this success
-        // frame or a synthetic reasoning delta.
+        // Preserve delta-only protocol compatibility on successful finish.
+        // Error and abort finishes throw above without flushing provisional
+        // reasoning or incomplete tool calls as successful output.
         for (const index of order) {
           const block = blocks.get(index) as BlockAccumulator
-          if (block.blockType !== 'reasoning' || block.block !== undefined || block.text === '') continue
-          const delta = addRole({ reasoning_content: block.text }, roleSent)
-          roleSent = true
-          yield sse(completionChunk(options, delta, null))
+          if (block.block !== undefined) continue
+          if (block.blockType === 'reasoning' && block.text !== '') {
+            const delta = addRole({ reasoning_content: block.text }, roleSent)
+            roleSent = true
+            yield sse(completionChunk(options, delta, null))
+          } else if (block.blockType === 'tool-call') {
+            if (!block.tool) throw new Error(`DSH stream tool block ${index} ended without a tool call`)
+            const delta = addRole({ tool_calls: [toolCallDelta(block.tool)] }, roleSent)
+            roleSent = true
+            yield sse(completionChunk(options, delta, null))
+          }
         }
         const content = order.map(index => completeBlock(blocks.get(index) as BlockAccumulator, index))
         // This is the raw assistant shape Prime sends back in its next
