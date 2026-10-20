@@ -12,7 +12,7 @@ export function apply(ctx) {
       let error
       try {
         const calls = []
-        const draft = JSON.stringify({ summary: '已核实的任务摘要', questions: [{ id: 'q1', question: '下一步优先什么？' }, { id: 'q2', question: '还有什么限制？' }] })
+        const draft = JSON.stringify({ summary: '已核实的任务摘要', questions: [{ id: 'q1', question: '下一步优先什么？', options: ['先跑离线测试', '先复核已有记录'] }, { id: 'q2', question: '还有什么限制？', options: ['不要发布', '沿用已确认限制'] }] })
         class FixtureAdapter extends LlmAdapter {
           async resolveModel(provider, model) { return { provider, id: model, name: model, context: { contextWindow: 1_000_000 } } }
           async *stream(options) {
@@ -40,9 +40,11 @@ export function apply(ctx) {
         const disposeAnswerer = ctx.on('user-questions/request', async (request, next) => {
           if (request.agent?.id !== agent.id) return next()
           if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
+          checks.contextualChoices = request.questions[0]?.options?.some(option => option.label === '先跑离线测试') && request.questions[1]?.options?.some(option => option.label === '不要发布')
+          if (!checks.contextualChoices) throw new Error('Built plugin did not expose contextual answer choices.')
           questionStarted()
           await answerReady
-          return { answers: request.questions.map(question => ({ id: question.id, selected: [], custom: question.id === 'q1' ? '先跑离线测试' : '不要发布' })) }
+          return { answers: request.questions.map(question => ({ id: question.id, selected: question.id === 'q1' ? ['先跑离线测试'] : [], ...(question.id === 'q2' ? { custom: '不要发布' } : {}) })) }
         })
         const oldBulk = 'ORIGINAL_HISTORY_MUST_NOT_REACH_TARGET_'.repeat(180)
         agent.followup(createUserMessage({ content: [{ type: 'text', text: oldBulk }], source: { kind: 'user' } }))

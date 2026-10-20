@@ -53,7 +53,7 @@ interface RuntimeFixture {
   readonly agent: Agent
   readonly engine: TestEngine
   readonly calls: RecordedCall[]
-  readonly asks: Array<{ readonly ids: readonly string[]; readonly detail?: string }>
+  readonly asks: Array<{ readonly ids: readonly string[]; readonly detail?: string; readonly options?: readonly string[][] }>
   readonly root: string
   readonly events: unknown[]
   cleanup(): Promise<void>
@@ -70,8 +70,8 @@ const config = {
 const draft = JSON.stringify({
   summary: '交接摘要：保留目标、已完成工作和未决风险。',
   questions: [
-    { id: 'next', question: '下一步必须先做什么？' },
-    { id: 'risk', question: '需要保留哪些风险？' },
+    { id: 'next', question: '下一步必须先做什么？', options: ['先运行验证。', '先复核当前约束。'] },
+    { id: 'risk', question: '需要保留哪些风险？', options: ['保留失败未知状态。', '先核对未决风险再继续。'] },
   ],
 })
 
@@ -114,6 +114,25 @@ describe('model-handoff runtime boundary', () => {
       'compaction/end',
     ])
     expect(fixture.events.some(event => JSON.stringify(event).includes('旧会话中的原始任务'))).toBe(true)
+  })
+
+  it('offers contextual choices and carries selected full answers without typing into the checkpoint', async () => {
+    const fixture = await createFixture({ chooseCandidates: true })
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)!
+    await fixture.engine.compactRegion(user, user, fixture.agent)
+    expect(fixture.asks[0]?.options).toEqual([
+      ['先运行验证。', '先复核当前约束。', '暂无补充'],
+      ['保留失败未知状态。', '先核对未决风险再继续。', '暂无补充'],
+    ])
+    const saved = await fixture.engine.store.read(fixture.session.id)
+    expect(saved?.answers).toEqual([{ id: 'next', answer: '先运行验证。' }, { id: 'risk', answer: '保留失败未知状态。' }])
+    const checkpoint = JSON.stringify(fixture.session.deriveMessages())
+    expect(checkpoint).toContain('回答1：先运行验证。')
+    expect(checkpoint).toContain('回答2：保留失败未知状态。')
+    expect(checkpoint).not.toContain('先复核当前约束。')
+    expect(fixture.calls).toHaveLength(1)
   })
 
   it('does not call Luna when the draft is already persisted and confirmed', async () => {
@@ -592,6 +611,7 @@ type FixtureOptions = {
   readonly approveBudget?: boolean
   readonly malformedLuna?: boolean
   readonly includeUsage?: boolean
+  readonly chooseCandidates?: boolean
 }
 
 async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixture & {
@@ -603,7 +623,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
   const root = await mkdtemp(join(tmpdir(), 'model-handoff-runtime-'))
   const ctx = new Context()
   const calls: RecordedCall[] = []
-  const asks: Array<{ readonly ids: readonly string[]; readonly detail?: string }> = []
+  const asks: Array<{ readonly ids: readonly string[]; readonly detail?: string; readonly options?: readonly string[][] }> = []
   const targetRequests: string[] = []
   const events: unknown[] = []
   let releaseQuestions!: () => void
@@ -683,8 +703,8 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
   })
   let resolveQuestions!: () => void
   const removeQuestions = ctx.provide('userQuestions', {
-    ask: async (request: { questions: readonly { id: string; detail?: string }[]; signal?: AbortSignal; agent: Agent; }): Promise<unknown> => {
-      asks.push({ ids: request.questions.map(question => question.id), ...request.questions[0]?.detail === undefined ? {} : { detail: request.questions[0].detail } })
+    ask: async (request: { questions: readonly { id: string; detail?: string; options?: readonly { label: string }[] }[]; signal?: AbortSignal; agent: Agent; }): Promise<unknown> => {
+      asks.push({ ids: request.questions.map(question => question.id), options: request.questions.map(question => question.options?.map(option => option.label) ?? []), ...request.questions[0]?.detail === undefined ? {} : { detail: request.questions[0].detail } })
       if (blockedQuestions > 0) {
         blockedQuestions -= 1
         await new Promise<void>((resolve, reject) => {
@@ -694,6 +714,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
       }
       if (request.questions[0]?.id === 'handoff-budget' && options.approveBudget) return { answers: [{ id: 'handoff-budget', selected: ['按此上限继续'] }] }
       if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
+      if (options.chooseCandidates) return { answers: request.questions.map(question => ({ id: question.id, selected: [question.options![0]!.label] })) }
       return { answers: [{ id: 'next', selected: [], custom: '先运行验证。' }, { id: 'risk', selected: [], custom: '保留失败未知状态。' }] }
     },
   })

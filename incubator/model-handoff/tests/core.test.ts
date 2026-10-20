@@ -7,6 +7,26 @@ import {
 } from '../src/core.js'
 
 describe('model handoff core', () => {
+  it('requires contextual choices for a fresh model draft and preserves exact option text', () => {
+    const questions = [
+      { id: 'next', question: '下一步选哪一项？', options: ['先列离线测试，暂不写代码', '先复核已有约束'] },
+      { id: 'scope', question: '测试范围？', options: ['预算更正与边界条件', '预算更正、边界条件与异常恢复'] },
+    ]
+    const result = parseDraft(JSON.stringify({ summary: '预算1800元，3000元作废。', questions }), true)
+    expect(result.questions).toEqual(questions)
+    expect(() => parseDraft(JSON.stringify({ summary: '旧摘要', questions: questions.map(({ id, question }) => ({ id, question })) }), true)).toThrowError(HandoffError)
+    expect(renderHandoff(result, [{ id: 'next', answer: questions[0]!.options[0]! }, { id: 'scope', answer: '桥梁🧭-042' }], { provider: 'p', model: 'm' })).toContain('回答1：先列离线测试，暂不写代码')
+  })
+
+  it.each([
+    [], ['唯一选项'], ['a', 'b', 'c', 'd'], ['a', 'a'], ['a', ' a '], ['a', '   '], ['a', '暂无补充'], ['a', 7], ['a', '字'.repeat(181)],
+  ].map(options => ({ options })))('rejects unusable candidate answers %j', ({ options }) => {
+    expect(() => parseDraft(JSON.stringify({ summary: '摘要', questions: [
+      { id: 'a', question: '下一步？', options },
+      { id: 'b', question: '范围？', options: ['只检查已知范围', '先确认未决事项'] },
+    ] }), true)).toThrowError(HandoffError)
+  })
+
   it('preserves code fences inside a valid JSON summary', () => {
     const summary = '必要原代码：\n```ts\nconst count = 0\n```'
     expect(parseDraft(JSON.stringify({ summary, questions: [{ id: 'a', question: '下一步？' }, { id: 'b', question: '限制？' }] })).summary).toBe(summary)

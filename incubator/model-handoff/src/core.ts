@@ -1,6 +1,8 @@
 export interface HandoffQuestion {
   readonly id: string
   readonly question: string
+  /** Missing only on drafts saved by earlier plugin builds. */
+  readonly options?: readonly string[]
 }
 
 export interface HandoffDraft {
@@ -90,7 +92,7 @@ function requireBoundedText(value: unknown, label: string, maximum: number): str
   return value
 }
 
-function validateDraft(value: unknown): HandoffDraft {
+function validateDraft(value: unknown, requireOptions = false): HandoffDraft {
   if (!isRecord(value)) {
     throw new HandoffError('invalid-shape', 'draft must be a JSON object')
   }
@@ -110,20 +112,32 @@ function validateDraft(value: unknown): HandoffDraft {
     if (!isRecord(item)) {
       throw new HandoffError('invalid-shape', `${label} must be an object`)
     }
-    requireExactKeys(item, QUESTION_KEYS, label)
+    const hasOptions = Object.hasOwn(item, 'options')
+    requireExactKeys(item, hasOptions ? [...QUESTION_KEYS, 'options'] : QUESTION_KEYS, label)
     const id = requireBoundedText(item.id, `${label}.id`, 64)
     if (ids.has(id)) {
       throw new HandoffError('duplicate-id', `questions contains duplicate id "${id}"`)
     }
     ids.add(id)
     const question = requireBoundedText(item.question, `${label}.question`, 1_000)
-    questions.push({ id, question })
+    let options: string[] | undefined
+    if (hasOptions || requireOptions) {
+      if (!Array.isArray(item.options) || item.options.length < 2 || item.options.length > 3) {
+        throw new HandoffError('invalid-shape', `${label}.options must contain 2 or 3 candidate answers`)
+      }
+      options = item.options.map((option, optionIndex) => requireBoundedText(option, `${label}.options[${optionIndex}]`, 180))
+      const unique = new Set(options.map(option => option.trim()))
+      if (unique.size !== options.length || unique.has('暂无补充')) {
+        throw new HandoffError('invalid-shape', `${label}.options must be distinct and must not include the built-in no-addition choice`)
+      }
+    }
+    questions.push({ id, question, ...(options === undefined ? {} : { options }) })
   }
   return { summary, questions }
 }
 
 /** Parse the model's handoff draft without coercing or normalizing its text. */
-export function parseDraft(text: string): HandoffDraft {
+export function parseDraft(text: string, requireOptions = false): HandoffDraft {
   if (typeof text !== 'string') {
     throw new HandoffError('invalid-input', 'draft text must be a string')
   }
@@ -137,7 +151,7 @@ export function parseDraft(text: string): HandoffDraft {
   } catch {
     throw new HandoffError('invalid-json', 'draft is not valid JSON')
   }
-  return validateDraft(value)
+  return validateDraft(value, requireOptions)
 }
 
 function validateAnswer(value: unknown, index: number): HandoffAnswer {
