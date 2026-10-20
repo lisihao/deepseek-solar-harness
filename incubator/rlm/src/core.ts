@@ -34,7 +34,7 @@ function cleanEnvironment(): NodeJS.ProcessEnv {
 }
 export interface StartInput { task: string; cwd: string; label?: string; inputs?: string[]; maxModelRequests: number; maxWallTimeMs: number; autonomous?: NativeAutonomous }
 export interface Owner { sessionId: string; route: ModelRoute; signal?: AbortSignal }
-export interface NativeSettings { factoryEnabled: boolean; harnessRefinements: boolean }
+export interface NativeSettings { factoryEnabled: boolean; harnessRefinements: boolean; rlmMaxDepth?: number }
 export class RlmStoppedReceiptError extends Error {
   constructor(cause: unknown) { super(`RLM_STOPPED_RECEIPT_UNSAVED: 原生进程已停止，但停止回执写入失败：${errorText(cause)}`, { cause }); this.name = 'RlmStoppedReceiptError' }
 }
@@ -73,7 +73,10 @@ export class RlmHost {
   private lastCheck?: SelfTestReport
   private backgroundError?: string
   private disposed = false
-  constructor(readonly ctx: Context, readonly dataRoot: string, readonly packageRoot: string, readonly maxInputBytes: number, readonly nativeSettings: NativeSettings = { factoryEnabled: false, harnessRefinements: true }) { this.store = new RunStore(dataRoot) }
+  constructor(readonly ctx: Context, readonly dataRoot: string, readonly packageRoot: string, readonly maxInputBytes: number, readonly nativeSettings: NativeSettings = { factoryEnabled: false, harnessRefinements: true }) {
+    if (nativeSettings.rlmMaxDepth !== undefined && (!Number.isSafeInteger(nativeSettings.rlmMaxDepth) || nativeSettings.rlmMaxDepth < 0)) throw new Error('RLM_NATIVE_DEPTH_INVALID: 原生递归深度上限必须是非负安全整数。')
+    this.store = new RunStore(dataRoot)
+  }
   runtime(): Promise<RuntimePaths> { return this.runtimePromise ??= loadRuntime(this.packageRoot, this.dataRoot) }
   private async save(live: Live): Promise<void> { live.record.updatedAt = new Date().toISOString(); await this.store.save(live.record) }
   async status(): Promise<RlmUiStatus> {
@@ -142,7 +145,7 @@ export class RlmHost {
     if (Buffer.byteLength(socket) >= 100) throw new Error('RLM_SOCKET_PATH_TOO_LONG: Harness home 路径过长，无法创建原生 IPC。')
     const token = randomBytes(32).toString('hex'), controller = new AbortController()
     await mkdir(agentDir, { recursive: true, mode: 0o700 }); await mkdir(join(this.dataRoot, 's'), { recursive: true, mode: 0o700 })
-    if (!resumeRecord) await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ factory: { enabled: this.nativeSettings.factoryEnabled }, harnessRefinements: this.nativeSettings.harnessRefinements }), { mode: 0o600 })
+    if (!resumeRecord) await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ factory: { enabled: this.nativeSettings.factoryEnabled }, harnessRefinements: this.nativeSettings.harnessRefinements, ...(this.nativeSettings.rlmMaxDepth === undefined ? {} : { rlmMaxDepth: this.nativeSettings.rlmMaxDepth }) }), { mode: 0o600 })
     const env = { ...cleanEnvironment(), PRIME_AGENT_CODING_AGENT_DIR: agentDir, PRIME_AGENT_SESSION_DIR: join(agentDir, 'sessions'), PRIME_AGENT_DAEMON_SOCKET: socket, PRIME_AGENT_KERNEL_PYTHON: runtime.python, PI_PACKAGE_DIR: runtime.packageDir, SOLAR_RLM_TOKEN: token }
     await writeFile(join(directory, 'control.json'), JSON.stringify({ formatVersion: 1, socket, agentDir }), { mode: 0o600 })
     const inputRows: { name: string; path: string; size: number; sha256: string }[] = []

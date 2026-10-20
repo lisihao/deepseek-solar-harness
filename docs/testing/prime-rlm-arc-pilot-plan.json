@@ -102,7 +102,7 @@
     ]
   },
   "contrasts": {
-    "S_vs_B": "Full Prime harness effect for this fixed model and small game panel; includes persistent Python and autonomous execution.",
+    "S_vs_B": "Full Prime workflow comparison for this fixed model and small game panel; includes authored behavioral guidance, persistent Python and autonomous execution. The ordinary B system prompt is separately frozen and is not prompt-matched, so this contrast cannot isolate the causal effect of the execution engine or recursion.",
     "S_vs_R": "Plugin-versus-original execution fidelity under the shared provider relay; stochastic outcomes do not prove equivalence."
   },
   "budget": {
@@ -116,7 +116,7 @@
     "paidApiFallback": false,
     "extraCredits": false,
     "previousAuthorizedCumulativeCap": 146,
-    "authorization": "Direct user approval: \u6279\u51c6\uff1a\u65b0\u589e\u6700\u591a 384 \u6b21\uff0c\u7d2f\u8ba1\u4e0a\u9650 522 \u6b21\uff08\u63a8\u8350\uff09"
+    "authorization": "Direct user approval: 批准：新增最多 384 次，累计上限 522 次（推荐）"
   },
   "launchGates": [
     "Native built-package positive and negative acceptance",

@@ -16,6 +16,17 @@ async function fixture() {
 }
 
 describe('durable run evidence and recovery fence', () => {
+  it('rejects an invalid native depth cap before creating a run or dispatching a model', async () => {
+    const { directory, store } = await fixture()
+    const before = await store.list()
+    for (const rlmMaxDepth of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => new RlmHost({} as Context, directory, '/unused-package', 100, { factoryEnabled: false, harnessRefinements: false, rlmMaxDepth })).toThrow('RLM_NATIVE_DEPTH_INVALID')
+    }
+    expect(await store.list()).toEqual(before)
+    const host = new RlmHost({} as Context, directory, '/unused-package', 100, { factoryEnabled: false, harnessRefinements: false, rlmMaxDepth: 0 })
+    await host.dispose()
+  })
+
   it('serializes complete journal lines and snapshots a manifest before waiting for its writer', async () => {
     const { directory, store, record } = await fixture()
     const operations = Array.from({ length: 20 }, (_, ordinal) => store.append(record.runId, { ordinal, text: '中文\nJSON text' }))
