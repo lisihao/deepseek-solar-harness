@@ -21,7 +21,8 @@ This package does not vendor or patch an external open-source project. Its execu
 3. Re-read the Resident contract and bump its protocol version only with an explicit compatibility decision.
 4. Confirm `ResidentApi.models(cwd)` and `bindBridge(bridgeId, owner, allowedTools)` semantics, including the pre-submit bridge binding boundary and the absence of endpoint/token data in graph records.
 5. Run the built-bundle scratch-profile test, focused allocation/DAG/bridge/lifecycle tests, strict type check, and the package's lifecycle tests without credentials or model calls.
-6. Run the built browser-module factory check and Host control tests. Recheck the installed conversation/settings entries and read-only status at normal and narrow widths. Native canaries require separate quota approval.
-7. Record any public API change here before changing the adapter. There are no carried patches to reapply.
+6. Confirm the public `--dsw-alias-*` text, surface, border and state tokens still exist. Do not substitute guessed CSS variable names with light-only fallbacks.
+7. Run the built browser-module factory check and Host control tests. Recheck the installed conversation/settings entries and read-only status at normal and narrow widths. Native canaries require separate quota approval.
+8. Record any public API change here before changing the adapter. There are no carried patches to reapply.
 
 The official Desktop install path and real provider behavior are separate acceptance checks and are not implied by the source tests.

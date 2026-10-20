@@ -102,6 +102,8 @@ const panelStyle: CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
   padding: 16,
+  color: 'var(--dsw-alias-label-primary)',
+  background: 'var(--dsw-alias-bg-base)',
 }
 
 const sectionStyle: CSSProperties = {
@@ -109,9 +111,9 @@ const sectionStyle: CSSProperties = {
   gap: 10,
   minWidth: 0,
   padding: 14,
-  border: '1px solid var(--dsh-border-color, #d7d7d7)',
+  border: '1px solid var(--dsw-alias-settings-card-stroke)',
   borderRadius: 10,
-  background: 'var(--dsh-surface-color, transparent)',
+  background: 'var(--dsw-alias-settings-card-fill)',
 }
 
 const actionRowStyle: CSSProperties = {
@@ -125,9 +127,9 @@ const buttonStyle: CSSProperties = {
   minHeight: 32,
   maxWidth: '100%',
   padding: '6px 10px',
-  border: '1px solid var(--dsh-border-color, #b6b6b6)',
+  border: '1px solid var(--dsw-alias-settings-card-stroke)',
   borderRadius: 6,
-  background: 'var(--dsh-button-color, transparent)',
+  background: 'var(--dsw-alias-bg-module-platform)',
   color: 'inherit',
   cursor: 'pointer',
   overflowWrap: 'anywhere',
@@ -135,7 +137,7 @@ const buttonStyle: CSSProperties = {
 
 const mutedStyle: CSSProperties = {
   margin: 0,
-  color: 'var(--dsh-text-muted-color, #6a6a6a)',
+  color: 'var(--dsw-alias-label-secondary)',
   overflowWrap: 'anywhere',
 }
 
@@ -147,7 +149,7 @@ const preStyle: CSSProperties = {
   overflowWrap: 'anywhere',
   padding: 10,
   borderRadius: 6,
-  background: 'var(--dsh-code-background, rgba(127, 127, 127, 0.12))',
+  background: 'var(--dsw-alias-bg-module-platform)',
 }
 
 function useRemoteAccess(store: RemoteAccessStore): RemoteAccessSnapshot {
@@ -208,12 +210,33 @@ function testLabel(executor: Executor): string {
     : 'Claude Code 原生连接测试'
 }
 
+function waitReasonLabel(reason: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    failed: '执行失败', cancelled: '已取消',
+    'cancellation-requested': '正在请求中断，尚未确认停止',
+    'shutdown-cancellation-requested': '服务退出时已请求中断，尚未确认停止',
+    'owner-retry': '所有者已明确允许再次尝试',
+    'owner-failed': '所有者已将未确认结果裁决为失败',
+    'owner-resolution-required': '执行结果未确认，需要所有者处理',
+    'recovery-ready': '恢复后等待调度',
+    BRIDGE_UNAVAILABLE: 'DSH 工具桥暂不可用',
+    'session-busy': '原生会话正在执行其他任务',
+    'session-fenced': '原生会话有未确认结果，暂不能继续',
+    'scope-conflict': '相同文件范围正在被其他任务使用',
+    'scope-conflict-indeterminate': '相同文件范围被未确认任务占用',
+    'failed-dependency': '前置任务失败，当前节点不会执行',
+    'admission-conflict': '执行身份冲突，需要检查任务记录',
+    'retry-delay': '正在等待已配置的再次尝试时间',
+  }
+  return labels[reason] ?? '执行条件尚未满足，详细原因请查看任务记录。'
+}
+
 function GraphNode({ node, index }: { readonly node: NodeSnapshot; readonly index: number }): ReactElement {
   return createElement('details', { style: { minWidth: 0, padding: '8px 0' } }, [
     createElement('summary', { key: 'summary', style: { cursor: 'pointer', overflowWrap: 'anywhere' } }, `节点 ${index + 1} · ${nodeStatusLabel(node.status)}`),
     node.waitReason === undefined
       ? null
-      : createElement('p', { key: 'wait', style: mutedStyle }, `等待原因：${node.waitReason}`),
+      : createElement('p', { key: 'wait', style: mutedStyle }, `任务说明：${waitReasonLabel(node.waitReason)}`),
     node.output === undefined
       ? null
       : createElement('div', { key: 'output', style: { display: 'grid', gap: 6, marginTop: 8 } }, [
@@ -222,7 +245,7 @@ function GraphNode({ node, index }: { readonly node: NodeSnapshot; readonly inde
       ]),
     node.error === undefined
       ? null
-      : createElement('div', { key: 'error', role: 'alert', style: { display: 'grid', gap: 6, marginTop: 8, color: 'var(--dsh-danger-color, #b42318)' } }, [
+      : createElement('div', { key: 'error', role: 'alert', style: { display: 'grid', gap: 6, marginTop: 8, color: 'var(--dsw-alias-state-error-primary)' } }, [
         createElement('strong', { key: 'label' }, '错误详情'),
         createElement('pre', { key: 'value', style: preStyle }, node.error.message),
       ]),
@@ -256,9 +279,9 @@ function GraphCard({ snapshot, pendingGraphIds, inspectionRequiredGraphIds, onCo
         style: {
           ...mutedStyle,
           color: verdict.kind === 'passed'
-            ? 'var(--dsh-success-color, #067647)'
+            ? 'var(--dsw-alias-state-success-primary)'
             : verdict.kind === 'failed' || verdict.kind === 'unconfirmed'
-              ? 'var(--dsh-danger-color, #b42318)'
+              ? 'var(--dsw-alias-state-error-primary)'
               : mutedStyle.color,
         },
       }, `连接测试：${verdict.label}`),
@@ -492,13 +515,13 @@ function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: Remot
     ]),
     remote.error === undefined
       ? null
-      : createElement('p', { key: 'mount-error', role: 'alert', style: { ...sectionStyle, color: 'var(--dsh-danger-color, #b42318)' } }, `无法连接智能协同控制通道：${remote.error}`),
+      : createElement('p', { key: 'mount-error', role: 'alert', style: { ...sectionStyle, color: 'var(--dsw-alias-state-error-primary)' } }, `无法连接智能协同控制通道：${remote.error}`),
     notice === undefined
       ? null
       : createElement('p', {
         key: 'notice',
         role: notice.tone === 'error' ? 'alert' : 'status',
-        style: { ...sectionStyle, color: notice.tone === 'error' ? 'var(--dsh-danger-color, #b42318)' : 'inherit' },
+        style: { ...sectionStyle, color: notice.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'inherit' },
       }, notice.message),
     createElement('section', { key: 'registration', style: sectionStyle }, [
       createElement('div', { key: 'heading', style: { display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap' } }, [
