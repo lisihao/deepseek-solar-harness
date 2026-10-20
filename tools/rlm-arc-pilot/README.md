@@ -4,6 +4,10 @@ This manual evaluation runner compares the frozen ordinary game-tools baseline (
 
 The cumulative model-request cap is 522, including 138 retained historical charges (135 confirmed and 3 unknown). Each of twelve conditions has at most 32 physical requests. No retry, failed-condition replay, paid API fallback or credit purchase is enabled. B and R/S have separately frozen prompts: B versus S compares the complete workflows, including guidance, Python and autonomous execution. It does not isolate the effect of any one mechanism.
 
+## Completed experiment boundary
+
+The default plan is now completed. The [results](../../docs/testing/prime-rlm-arc-results.md) report all twelve attempts, 325 new physical requests and 463 cumulative charges, with no demonstrated quality improvement. prepare/run/resume reject that completed plan before provider loading or new effects; non-provider analysis can still generate derived reports. Commands below document the accepted workflow, not authorization for another panel. A future separately approved preparation translates only the two author /workspace paths and records the original/rendered prompts and mapping; measured inputs stay unchanged.
+
 ## Zero-model checks
 
 `pnpm test:arc` runs portable synthetic checks for message/replay handling, official durable image storage, guarded broker behavior, independent scoring and durable logical/physical admission. It does not import the private provider or credentials. `pnpm test:arc:native` is a separate Node 22 macOS sandbox/IPC boundary check; it does not by itself prove that Prime and Python run inside that sandbox.

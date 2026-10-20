@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "status": "budget_approved_runner_acceptance_pending",
+  "status": "completed",
   "kind": "arc-full-harness-exploratory-pilot",
   "sourceCommit": "398d4dd63cf01d00adbea41c13437ba0b8ad40fc",
   "primeCommit": "7cbffa77b38facd7c87277fa3c82bcadbe816880",
@@ -128,5 +128,19 @@
     "Whole-tree physical admission and unknown-effect cleanup accepted",
     "User approves revised cumulative model-request cap"
   ],
-  "stopRule": "Execute each frozen case/arm once. Retain all failures, ties, unknowns and adverse results. Do not substitute cases, replay failed games or continue sampling until a favorable result. No real launch before every gate is met."
+  "stopRule": "Execute each frozen case/arm once. Retain all failures, ties, unknowns and adverse results. Do not substitute cases, replay failed games or continue sampling until a favorable result. No real launch before every gate is met.",
+  "completion": {
+    "date": "2026-10-21",
+    "timezone": "Asia/Shanghai",
+    "conditionsAttemptedOnce": 12,
+    "newModelRequests": 325,
+    "cumulativeModelRequests": 463,
+    "confirmedRequests": 456,
+    "unknownChargedRequests": 7,
+    "unusedAuthorizationRequests": 59,
+    "budgetFieldsDescribe": "Original pre-launch authorization snapshot, not remaining spend after completion.",
+    "newExperimentRequiresExplicitApproval": true,
+    "originalApprovedPlanSha256": "256608c1f9424dace9e13b4690ad1e29174b91a1567889fbe7da1c938405672a",
+    "results": "prime-rlm-arc-results.md"
+  }
 }

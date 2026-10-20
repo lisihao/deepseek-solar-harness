@@ -3,7 +3,7 @@
 /**
  * Trusted parent-side runner for the frozen four-game ARC pilot.
  *
- * This file deliberately has four separate modes.  `prepare`, `keyless`, and
+ * This file deliberately separates preparation, analysis and execution modes.  `prepare`, `keyless`, and
  * `analyze` never import the private provider module and never read a
  * credential.  `run` and the explicitly accepted `resume-unstarted` mode are
  * the only provider-loading code paths.  Both refuse to begin until their
@@ -228,7 +228,7 @@ function conditionId(index, gameId, arm) {
 
 function assertPlan(plan) {
   if (!isRecord(plan) || plan.formatVersion !== 1) fail('ARC_PLAN_FORMAT', 'formatVersion 1 is required')
-  if (plan.status !== 'budget_approved_runner_acceptance_pending') fail('ARC_PLAN_STATUS', 'plan is not at the approved runner-acceptance state')
+  if (!['budget_approved_runner_acceptance_pending', 'completed'].includes(plan.status)) fail('ARC_PLAN_STATUS', 'plan must be approved or completed')
   if (plan.kind !== 'arc-full-harness-exploratory-pilot') fail('ARC_PLAN_KIND', 'unexpected plan kind')
   if (typeof plan.sourceCommit !== 'string' || !/^[a-f0-9]{40}$/i.test(plan.sourceCommit)) fail('ARC_PLAN_SOURCE', 'sourceCommit must be a git SHA')
   if (typeof plan.primeCommit !== 'string' || !/^[a-f0-9]{40}$/i.test(plan.primeCommit)) fail('ARC_PLAN_PRIME', 'primeCommit must be a git SHA')
@@ -288,6 +288,10 @@ function assertPlan(plan) {
     fail('ARC_PLAN_BUDGET', 'the 138 + 384 = 522 authorization is not intact')
   }
   return plan
+}
+
+function assertPlanOpen(plan) {
+  if (plan.status === 'completed') fail('ARC_PLAN_COMPLETED', 'the fixed panel is closed; unused requests do not authorize another experiment')
 }
 
 export async function loadPlan(planPath = DEFAULT_PLAN) {
@@ -510,7 +514,7 @@ function fixedGateCommand({ python, workspace, proxySocket, stateRoot }) {
   ].join(' ')
 }
 
-async function prepareConditionDirectories({ output, sharedRuntimeRoot, gatePython, author, plan }) {
+export async function prepareConditionDirectories({ output, sharedRuntimeRoot, gatePython, author, plan }) {
   const arms = ['B', 'R', 'S']
   const conditions = []
   let ordinal = 0
@@ -537,14 +541,25 @@ async function prepareConditionDirectories({ output, sharedRuntimeRoot, gatePyth
       await copyFile(author.authorFiles['broker_client.py'].path, join(workspace, 'broker_client.py'), fsConstants.COPYFILE_EXCL)
       await symlink(sharedRuntimeRoot, join(data, 'runtimes'), 'dir')
       const bootstrap = bootstrapInstructions(proxySocket, stateRoot)
+      const originalInitialPrompt = arm === 'B' ? null : await readFile(author.authorFiles['game-prompt.txt'].path, 'utf8')
+      const pathAdaptations = {
+        '/workspace/AGENTS.md': join(workspace, 'AGENTS.md'),
+        '/workspace/fixed_broker_client.py': join(workspace, 'broker_client.py'),
+      }
+      let initialPrompt = originalInitialPrompt
+      if (initialPrompt !== null) {
+        for (const [original, staged] of Object.entries(pathAdaptations)) initialPrompt = initialPrompt.replaceAll(original, staged)
+      }
       const task = arm === 'B'
         ? plan.arms.B.systemPrompt
-        : `${await readFile(author.authorFiles['game-prompt.txt'].path, 'utf8')}\n\n${bootstrap}`
+        : `${initialPrompt}\n\n${bootstrap}`
       const prompt = arm === 'B'
         ? { systemPrompt: plan.arms.B.systemPrompt }
         : {
             guidance: await readFile(author.authorFiles['AGENTS.md'].path, 'utf8'),
-            initialPrompt: await readFile(author.authorFiles['game-prompt.txt'].path, 'utf8'),
+            originalInitialPrompt,
+            initialPrompt,
+            pathAdaptations,
             bootstrap,
             task,
           }
@@ -619,6 +634,7 @@ export async function preparePilot({
   const source = await assertDirectory(sourceRoot, 'sourceRoot')
   const packageDirectory = await assertDirectory(packageRoot, 'packageRoot')
   const { path: frozenPlanPath, plan, hash: planHash, canonicalHash: planCanonicalHash } = await loadPlan(planPath)
+  assertPlanOpen(plan)
   await assertNewDirectory(outputRoot, 'output')
   try {
     const parentPrivate = join(outputRoot, 'parent-private')
@@ -1214,6 +1230,7 @@ async function nextContinuationPaths(root) {
  */
 export async function prepareUnstartedContinuation({ output, continuationArtifact, continuationSha256 } = {}) {
   const { root, manifest } = await readPreparedManifest(output)
+  assertPlanOpen((await loadPlan(manifest.plan.path)).plan)
   const continuation = await loadContinuationAcceptance({ artifact: continuationArtifact, sha256: continuationSha256, manifest })
   await assertPreparedFingerprint(manifest, { continuation })
   const keyless = await loadKeylessGate(root, manifest)
@@ -1650,6 +1667,7 @@ export async function runPilot({
 } = {}) {
   const { root, manifest } = await readPreparedManifest(output)
   await assertPanelNotStarted(root)
+  assertPlanOpen((await loadPlan(manifest.plan.path)).plan)
   await assertPreparedFingerprint(manifest)
   const keyless = await loadKeylessGate(root, manifest)
   const external = await loadExternalAcceptance({ artifact: acceptanceArtifact, sha256: acceptanceSha256, manifest })

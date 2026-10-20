@@ -1,6 +1,6 @@
 # Prime RLM verification record
 
-Date: 2026-10-20, Asia/Shanghai. PR: [#280](https://github.com/lisihao/deepseek-solar-harness/pull/280).
+Date: 2026-10-21, Asia/Shanghai. PR: [#280](https://github.com/lisihao/deepseek-solar-harness/pull/280).
 
 Implementation and the earlier local installation are authorized. Later instructions authorize an isolated Codex subscription pilot using `gpt-6.1-sol / high`, initially with at most 48 cumulative model requests including root, tool-return and descendant calls, later increased explicitly to 146. The closed fixed-panel ledger charges 138 under its then-146 cap. The subsequent fixed four-game ARC panel is explicitly authorized for at most 384 new requests, cumulative cap 522. They do not authorize paid API fallback, extra-credit purchase, merge, release, tags, Pages or market publication. The package remains `@lisihao/dsh-solar-rlm@0.1.0-dev.0` under `incubator/rlm`.
 
@@ -95,7 +95,7 @@ Live UI acceptance then exposed a Remote descriptor using the namespace `solarRl
 
 ## Evaluation claims still unavailable
 
-The [evaluation contract](prime-rlm-evaluation.md) remains separate from these engineering checks. G1 has source identity and representative native mechanism evidence; its complete F01–F12 differential matrix and real-provider coverage are not certified by this report. G2 has only a bounded single-task development pilot, not evidence of general reasoning-quality benefit. G3 original-paper reproduction and G4 held-out Continual Harness improvement are **not run**.
+The [evaluation contract](prime-rlm-evaluation.md) remains separate from these engineering checks. G1 has source identity and representative native mechanism evidence; its complete F01–F12 differential matrix and real-provider coverage are not certified by this report. G2 has bounded real text trials and a fixed four-game ARC panel, without demonstrated general reasoning-quality benefit. G3 original-paper reproduction and G4 held-out Continual Harness improvement are **not run**.
 
 No measured reasoning, cost or latency improvement is claimed. Forced scripted recursion is plumbing evidence. Installation, unit tests, a native self-test or a passing CI job does not replace matched real runs, independent grading, full-tree accounting and negative controls.
 
@@ -185,3 +185,12 @@ The first continuation's source gate passed 37 portable ARC checks and CI at `07
 
 
 The baseline-consumer repair passed **44 portable ARC checks**. The EOF-order and post-finish EOF-error regressions fail on the preceding source and pass after the repair. A separate zero-model replay used the actual compiled `model-wire.mjs`/`ReplayRegistry` and the captured B203 chunks: the synthetic ledger settled one local replay with zero unknowns before its `observe` tool ran (`/private/tmp/arc-captured-drain-CxNNIu/report.json`). Unexpected trailing chunks, errors and cancellation do not execute game tools; cleanup errors do not hide the primary stream error. Native runtime and compiled plugin bytes are unchanged. This evidence validates the evaluator repair, not a real-game success or reasoning improvement.
+
+
+## Completed fixed ARC panel (2026-10-21)
+
+All 12 frozen B/R/S conditions were attempted once. Trusted full-game WIN was **0/4 in every arm**; all final games remained ACTIVE and all owned cleanups passed. The panel charged **325 new requests**, cumulative **463/522**, with **456 confirmed and seven unknown** including historical charges. No request remains in flight and no failed condition was replayed. The 59 unused requests were not reassigned.
+
+The [complete result and limitations](prime-rlm-arc-results.md) retain the invalid B/ls20 control, two later baseline context-window failures, all native request-cap stops, observed path/bootstrap deviations and the exact execution-version boundary. S cleared more levels than B on one of three usable controls and fewer on two; it did not establish stable benefit. The author protocol disables recursive children and refinement, so this is not RLM-recursion or Continual Harness effect evidence.
+
+Post-panel source closes the completed plan to new provider runs and mechanically normalizes two staged prompt paths for any separately approved future preparation. Original results, prompts and receipts are unchanged; the path correction was only checked without a model. The installed app has not been updated by this follow-up.

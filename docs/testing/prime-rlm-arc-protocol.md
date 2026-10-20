@@ -1,6 +1,6 @@
 # Prime ARC protocol alignment and next experiment boundary
 
-Date: 2026-10-20, Asia/Shanghai. This is a preparation and acceptance contract, not a reported ARC score or an efficacy result. The closed earlier experiment charged 138 requests under its then-146 cap. The user later approved the [fixed four-game panel](prime-rlm-arc-pilot-plan.json), up to 384 new requests and cumulative cap 522. Preparation and scripted acceptance use zero real model requests.
+Date: 2026-10-20, Asia/Shanghai. This records the preparation and acceptance contract. The fixed panel later completed; its [actual outcomes and limitations](prime-rlm-arc-results.md) are reported separately. The closed earlier experiment charged 138 requests under its then-146 cap. The user later approved the [fixed four-game panel](prime-rlm-arc-pilot-plan.json), up to 384 new requests and cumulative cap 522. Preparation and scripted acceptance use zero real model requests.
 
 ## What the published ARC result tests
 
@@ -62,6 +62,11 @@ The first S/ls20 condition ended after 32 charged requests with two completed le
 
 ## Baseline stream-consumer failure and repair boundary
 
-After direct R/ls20 finished at 32 requests, two levels and 131 actions without WIN, the first B/ls20 response produced an authoritative `observe` tool call and reported token usage. The shared encoder returns at a successful finish; B's pull-based wrapper propagated that return to the parent model iterator before EOF. The parent correctly retained `ARC_STREAM_ABANDONED` as a charged unknown and fenced the next call. The tool was not executed and the game had zero actions. This is an evaluator failure, not a measured model error. The B condition remains in the fixed panel and is not replayed; its paired quality comparison is unavailable. A raw WIN-count denominator of four must not turn that failed control into evidence for S's reasoning advantage.
+After direct R/ls20 finished at 32 requests, two levels and 131 actions without WIN, the first B/ls20 response produced an authoritative `observe` tool call and reported token usage. The shared encoder returns at a successful finish; B's pull-based wrapper propagated that return to the parent model iterator before EOF. The parent correctly retained `ARC_STREAM_ABANDONED` as a charged unknown and fenced the next call. The captured read-only `observe` did execute, but no game action was submitted; the next model admission was rejected by the fenced ledger. The game had zero actions. This is an evaluator failure, not a measured model error. The B condition remains in the fixed panel and is not replayed; its paired quality comparison is unavailable. A raw WIN-count denominator of four must not turn that failed control into evidence for S's reasoning advantage.
 
 The repair makes the baseline consume the original model stream to its confirmed end before executing broker tools. A continuation supplement explicitly binds the changed runner, baseline consumer and ledger closure bytes; prompts, game cases, native runtime and compiled adapter stay frozen. `transport_closed` names an inspected closed transport with unknown usage, not a refunded or successful request. All earlier receipts remain immutable. At this pause cumulative accounting is 203/522, including 198 confirmed and five unknown requests; nine conditions have never started. Subsequent results must identify this execution-version boundary.
+
+
+## Fixed-panel closure (2026-10-21)
+
+All twelve conditions have immutable outcomes and verified owned cleanup. Final accounting is 463/522 (325 new, 456 confirmed and seven unknown including history); all three arms observed 0/4 complete-game WIN. See the [result](prime-rlm-arc-results.md) for every cell, failure and version boundary. The default plan is closed to new experiments. After closure only, future preparation was corrected to stage the two initial prompt paths consistently and retain the original-to-rendered mapping. This did not change any measured task or result and was not tested with another real model.

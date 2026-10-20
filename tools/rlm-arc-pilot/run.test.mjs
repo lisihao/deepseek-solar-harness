@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -17,6 +17,10 @@ import {
   loadPlan,
   nextContinuationPaths,
   parseArgs,
+  prepareConditionDirectories,
+  preparePilot,
+  prepareUnstartedContinuation,
+  runPilot,
   summarizeConditionResources,
   validateClosureBeforeMarker,
   verifyPriorRun,
@@ -53,6 +57,16 @@ async function withPrivateOutput(name, callback) {
     return await callback(directory)
   } finally {
     await rm(directory, { recursive: true, force: true })
+  }
+}
+
+async function pathExists(path) {
+  try {
+    await lstat(path)
+    return true
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw error
   }
 }
 
@@ -493,4 +507,135 @@ test('recorded baseline-drain and ledger repairs require an exact explicit hash 
   const nativeFile = 'tools/rlm-arc-pilot/native-worker.mjs'
   const changedNative = { ...current, [nativeFile]: 'd'.repeat(64) }
   assert.throws(() => assertRunnerOnlyContinuation(manifest, { ...continuation, executionRepairFiles: [...files, nativeFile], currentExecutionHashes: changedNative }, changedNative, next), /ARC_CONTINUATION_EXECUTION/)
+})
+
+test('a completed plan is readable but closes prepare, run, and continuation before side effects', async () => {
+  const loaded = await loadPlan(PLAN)
+  assert.equal(loaded.plan.status, 'completed')
+
+  await withPrivateOutput('arc-completed-plan-gates', async directory => {
+    const prepareOutput = join(directory, 'prepare-output')
+    let compilerCalled = false
+    await assert.rejects(
+      () => preparePilot({
+        output: prepareOutput,
+        planPath: PLAN,
+        sourceRoot: ROOT,
+        packageRoot: join(ROOT, 'incubator/rlm'),
+        authorPreparation: join(directory, 'synthetic-author-preparation'),
+        compiler: async () => {
+          compilerCalled = true
+          throw new Error('compiler must not run for a completed plan')
+        },
+      }),
+      /ARC_PLAN_COMPLETED/,
+    )
+    assert.equal(compilerCalled, false)
+    assert.equal(await pathExists(prepareOutput), false)
+
+    const runOutput = join(directory, 'run-output')
+    await mkdir(runOutput, { recursive: true, mode: 0o700 })
+    await writeFile(join(runOutput, 'arc-pilot-manifest.json'), `${JSON.stringify({
+      formatVersion: 1,
+      kind: 'prime-rlm-arc-pilot-prepared',
+      plan: { path: PLAN },
+    })}\n`)
+    await assert.rejects(
+      () => runPilot({
+        output: runOutput,
+        providerModule: join(directory, 'provider.mjs'),
+        providerSha256: 'a'.repeat(64),
+        providerPackage: 'synthetic-provider',
+        credentialFile: join(directory, 'credentials.json'),
+        acceptanceArtifact: join(directory, 'acceptance.json'),
+        acceptanceSha256: 'b'.repeat(64),
+      }),
+      /ARC_PLAN_COMPLETED/,
+    )
+    assert.equal(await pathExists(join(runOutput, 'real-run-started.json')), false)
+
+    const continuationOutput = join(directory, 'continuation-output')
+    await mkdir(continuationOutput, { recursive: true, mode: 0o700 })
+    await writeFile(join(continuationOutput, 'arc-pilot-manifest.json'), `${JSON.stringify({
+      formatVersion: 1,
+      kind: 'prime-rlm-arc-pilot-prepared',
+      plan: { path: PLAN },
+    })}\n`)
+    await assert.rejects(
+      () => prepareUnstartedContinuation({ output: continuationOutput }),
+      /ARC_PLAN_COMPLETED/,
+    )
+    assert.equal(await pathExists(join(continuationOutput, 'resume-unstarted-started-01.json')), false)
+  })
+})
+
+test('condition preparation adapts author workspace paths while preserving source bytes and B prompts', async () => {
+  await withPrivateOutput('x', async directory => {
+    const authorRoot = join(directory, 'author')
+    const output = join(directory, 'o')
+    const sharedRuntimeRoot = join(directory, 'rt')
+    await mkdir(authorRoot, { recursive: true, mode: 0o700 })
+    await mkdir(sharedRuntimeRoot, { recursive: true, mode: 0o700 })
+    const guidanceText = 'synthetic guidance\nkeep bytes exactly\n'
+    const clientText = 'print("synthetic broker client")\n'
+    const originalInitialPrompt = 'Read /workspace/AGENTS.md, then invoke /workspace/fixed_broker_client.py.\n'
+    const guidancePath = join(authorRoot, 'AGENTS.md')
+    const clientPath = join(authorRoot, 'broker_client.py')
+    const promptPath = join(authorRoot, 'game-prompt.txt')
+    await writeFile(guidancePath, guidanceText)
+    await writeFile(clientPath, clientText)
+    await writeFile(promptPath, originalInitialPrompt)
+    const author = {
+      authorFiles: {
+        'AGENTS.md': { path: guidancePath },
+        'broker_client.py': { path: clientPath },
+        'game-prompt.txt': { path: promptPath },
+      },
+    }
+    const { plan } = await loadPlan(PLAN)
+    const conditions = await prepareConditionDirectories({
+      output,
+      sharedRuntimeRoot,
+      gatePython: '/tmp/p',
+      author,
+      plan,
+    })
+
+    assert.equal(conditions.length, 12)
+    assert.deepEqual(
+      conditions.reduce((counts, condition) => ({ ...counts, [condition.arm]: (counts[condition.arm] ?? 0) + 1 }), {}),
+      { B: 4, R: 4, S: 4 },
+    )
+    const sourceGuidanceBytes = await readFile(guidancePath)
+    const sourceClientBytes = await readFile(clientPath)
+    for (const condition of conditions) {
+      const stagedGuidancePath = join(condition.workspace, 'AGENTS.md')
+      const stagedClientPath = join(condition.workspace, 'broker_client.py')
+      assert.equal(await pathExists(stagedGuidancePath), true)
+      assert.equal(await pathExists(stagedClientPath), true)
+      assert.deepEqual(await readFile(stagedGuidancePath), sourceGuidanceBytes)
+      assert.deepEqual(await readFile(stagedClientPath), sourceClientBytes)
+
+      if (condition.arm === 'B') {
+        assert.deepEqual(condition.prompt, { systemPrompt: plan.arms.B.systemPrompt })
+        continue
+      }
+
+      const expectedInitialPrompt = originalInitialPrompt
+        .replaceAll('/workspace/AGENTS.md', stagedGuidancePath)
+        .replaceAll('/workspace/fixed_broker_client.py', stagedClientPath)
+      assert.equal(condition.prompt.originalInitialPrompt, originalInitialPrompt)
+      assert.equal(condition.prompt.initialPrompt, expectedInitialPrompt)
+      assert.deepEqual(condition.prompt.pathAdaptations, {
+        '/workspace/AGENTS.md': stagedGuidancePath,
+        '/workspace/fixed_broker_client.py': stagedClientPath,
+      })
+      assert.equal(condition.prompt.guidance, guidanceText)
+      assert.match(condition.prompt.initialPrompt, new RegExp(stagedGuidancePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.match(condition.prompt.initialPrompt, new RegExp(stagedClientPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.equal(condition.prompt.task, `${expectedInitialPrompt}\n\n${condition.prompt.bootstrap}`)
+      assert.equal(condition.prompt.task.includes(stagedGuidancePath), true)
+      assert.equal(condition.prompt.task.includes(stagedClientPath), true)
+    }
+  })
 })

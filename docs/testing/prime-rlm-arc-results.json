@@ -1,0 +1,358 @@
+{
+  "formatVersion": 1,
+  "kind": "sanitized-fixed-arc-comparison",
+  "createdAt": "2026-10-20T16:58:30.348638+00:00",
+  "timezone": "Asia/Shanghai",
+  "route": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high"
+  },
+  "fingerprint": "c2d55d0d8f60118e3d7fdcd548e85304fb85aea92a27c19487c5fa4521b11f22",
+  "stableRepairHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+  "primaryMetric": "trusted broker WIN / four fixed games",
+  "byArm": {
+    "B": {
+      "observedWins": 0,
+      "denominator": 4,
+      "modelRequests": 69,
+      "unknownRequests": 3
+    },
+    "R": {
+      "observedWins": 0,
+      "denominator": 4,
+      "modelRequests": 128,
+      "unknownRequests": 0
+    },
+    "S": {
+      "observedWins": 0,
+      "denominator": 4,
+      "modelRequests": 128,
+      "unknownRequests": 1
+    }
+  },
+  "accounting": {
+    "historical": 138,
+    "newPanel": 325,
+    "cumulative": 463,
+    "confirmed": 456,
+    "unknown": 7,
+    "maximumCumulative": 522,
+    "unallocatedRemainder": 59,
+    "newPhysical": 325
+  },
+  "results": [
+    {
+      "runnerSourceHead": "37a63d48f281e1ff0b8f7055fa155514ef70395a",
+      "gameId": "ls20-9607627b",
+      "arm": "S",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 2,
+      "actions": 97,
+      "modelRequests": 32,
+      "confirmed": 31,
+      "unknown": 1,
+      "elapsedMs": 287499,
+      "knownUsageTotals": {
+        "inputTokens": 70245,
+        "outputTokens": 5494,
+        "totalTokens": 905179
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [
+        "TRANSPORT"
+      ],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "075a63f9e9df96870cc81e7d47273236cbf885a6",
+      "gameId": "ls20-9607627b",
+      "arm": "R",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 2,
+      "actions": 131,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 314480,
+      "knownUsageTotals": {
+        "inputTokens": 39947,
+        "outputTokens": 5933,
+        "totalTokens": 865848
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "075a63f9e9df96870cc81e7d47273236cbf885a6",
+      "gameId": "ls20-9607627b",
+      "arm": "B",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 0,
+      "actions": 0,
+      "modelRequests": 1,
+      "confirmed": 0,
+      "unknown": 1,
+      "elapsedMs": 13591,
+      "knownUsageTotals": {
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [
+        "EVALUATOR_STREAM_CONSUMER"
+      ],
+      "validModelQualityControl": false,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "cd82-fb555c5d",
+      "arm": "R",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 2,
+      "actions": 44,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 341953,
+      "knownUsageTotals": {
+        "inputTokens": 49665,
+        "outputTokens": 6510,
+        "totalTokens": 893807
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "cd82-fb555c5d",
+      "arm": "B",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 1,
+      "actions": 81,
+      "modelRequests": 24,
+      "confirmed": 23,
+      "unknown": 1,
+      "elapsedMs": 279918,
+      "knownUsageTotals": {
+        "inputTokens": 878218,
+        "outputTokens": 4598,
+        "totalTokens": 8449024
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [
+        "CONTEXT_WINDOW_EXCEEDED"
+      ],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "cd82-fb555c5d",
+      "arm": "S",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 4,
+      "actions": 68,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 393708,
+      "knownUsageTotals": {
+        "inputTokens": 56012,
+        "outputTokens": 8087,
+        "totalTokens": 1212131
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "sp80-589a99af",
+      "arm": "S",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 0,
+      "actions": 40,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 412182,
+      "knownUsageTotals": {
+        "inputTokens": 64658,
+        "outputTokens": 8444,
+        "totalTokens": 820366
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "sp80-589a99af",
+      "arm": "B",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 3,
+      "actions": 42,
+      "modelRequests": 12,
+      "confirmed": 11,
+      "unknown": 1,
+      "elapsedMs": 115856,
+      "knownUsageTotals": {
+        "inputTokens": 840360,
+        "outputTokens": 1795,
+        "totalTokens": 3202475
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [
+        "CONTEXT_WINDOW_EXCEEDED"
+      ],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "sp80-589a99af",
+      "arm": "R",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 2,
+      "actions": 23,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 321072,
+      "knownUsageTotals": {
+        "inputTokens": 49228,
+        "outputTokens": 7443,
+        "totalTokens": 1035999
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "lp85-305b61c3",
+      "arm": "R",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 4,
+      "actions": 64,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 304305,
+      "knownUsageTotals": {
+        "inputTokens": 46342,
+        "outputTokens": 7580,
+        "totalTokens": 956450
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "lp85-305b61c3",
+      "arm": "S",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 5,
+      "actions": 60,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 306755,
+      "knownUsageTotals": {
+        "inputTokens": 46861,
+        "outputTokens": 8259,
+        "totalTokens": 1001424
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    },
+    {
+      "runnerSourceHead": "10ade5f2f58a70373984051f01d28ecb8dbcb1c0",
+      "gameId": "lp85-305b61c3",
+      "arm": "B",
+      "terminal": "ACTIVE",
+      "win": 0,
+      "levels": 7,
+      "actions": 195,
+      "modelRequests": 32,
+      "confirmed": 32,
+      "unknown": 0,
+      "elapsedMs": 616852,
+      "knownUsageTotals": {
+        "inputTokens": 327423,
+        "outputTokens": 19640,
+        "totalTokens": 5422775
+      },
+      "executionCompleted": false,
+      "cleanupComplete": true,
+      "providerOrConsumerErrors": [],
+      "validModelQualityControl": true,
+      "automaticProtocolReview": "not-reviewed"
+    }
+  ],
+  "evidenceHashes": {
+    "manifest": "5f437ee56760060d891e3988291a9eea5679fce050236ce1e507c0e3a549cb0d",
+    "plan": "256608c1f9424dace9e13b4690ad1e29174b91a1567889fbe7da1c938405672a",
+    "ledger": "d877c1006a6967bd064ffd30b28b2093e8525eb75685d304f06180d0f3bb4a32",
+    "results": {
+      "arc-01-S-ls20-9607627b-0c8231053b8c": "c8014bba455e82d50bee92d1e2ba699142ed91f933c54d614da3220e25e7dd9c",
+      "arc-02-R-ls20-9607627b-652b8d93969d": "c3b6e62af0689d92a4ac5bc2a79709ae6fc43cb760bb77f9f16ad065396208f8",
+      "arc-03-B-ls20-9607627b-72d75458420d": "356b7b5b0c77039602b594aff8e7a32ba0a4abeff41adc1fa60641a477b16480",
+      "arc-04-R-cd82-fb555c5d-2844ee2bb6de": "0c1e05b607ec4452e49211867c4c7842d0b4c843a16be67b2f61b10bb405423e",
+      "arc-05-B-cd82-fb555c5d-9edde33a639b": "ea4bf6d2e155e33a1a5e0b0efbda801be15d06c227e8c81cf10511011f524dad",
+      "arc-06-S-cd82-fb555c5d-e89935fcd5a3": "7b4421ad29e2607ad477d2a187c5e6d9e16ea9aaf032364c8c85e190903922fa",
+      "arc-07-S-sp80-589a99af-12dcf4b864f1": "867e417ba3d9447536ebf0af8fac1030e88cba4754ad42a82c7ed6ec736cb8f9",
+      "arc-08-B-sp80-589a99af-37419c17ddf7": "4cd8591824ac75a122c81607bf8a408fdb4bd92b09edadb0a5e7a632b0a1f4e9",
+      "arc-09-R-sp80-589a99af-7bfe3e0521bc": "ce2da0eed39dc66e4c72d1cb9e2103f5cbbb9b7c4a571f21edf99d4d26f9bc57",
+      "arc-10-R-lp85-305b61c3-071496eba580": "610eef1083adfe0c5b40a126bf709e5505c2e0359747a4ab428f4274115bb4ff",
+      "arc-11-S-lp85-305b61c3-187586fd9699": "14fb1ad60869d0aa10cbe18dd0e95b25cfe6f95651db2cc5b230311096c1d9fd",
+      "arc-12-B-lp85-305b61c3-c334b1deabfc": "acfb28fcf41605a6f8e845e1de7a9787917831a7797c34b19c498d36cfe47293"
+    }
+  },
+  "limitations": [
+    "Public fixed four-game pilot; one attempt per condition.",
+    "B/ls20 is a retained evaluator failure, not evidence of model weakness.",
+    "B has different frozen guidance and raw JSON-frame game tools; R/S use the author guidance and persistent Python. This is a full-workflow comparison.",
+    "R/S use unchanged Prime CLI 0.10.0 and a shared Codex transport, not the historical author model/version.",
+    "Native RLM child depth is zero and learning is disabled per ARC guidance; this is not a recursion or Continual Harness benefit test.",
+    "All failed/unknown outcomes remain. Raw WIN denominator does not turn a failed control into a quality claim.",
+    "Behavioral review is partial and separate from observed broker scores."
+  ]
+}
