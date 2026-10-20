@@ -15,6 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import { createWebUiApi, type WebUiWire } from './client-remote.js'
 import { RPC_REMOTE } from './remote.js'
 import {
   WEB_STAGE_LABELS,
@@ -644,14 +645,14 @@ export function apply(ctx: Context): void {
         await disposer()
         return
       }
-      const api = ctx.get('remote.solarChatGptWebControl') as unknown as ChatGptWebControlApi | undefined
-      if (api === undefined) {
+      const wire = ctx.get('remote.solarChatGptWebControl') as unknown as WebUiWire | undefined
+      if (wire === undefined) {
         await disposer()
         remoteStore.setError('本机没有提供 ChatGPT 网页控制服务。')
         return
       }
       disposeRemote = disposer
-      remoteStore.setApi(api)
+      remoteStore.setApi(createWebUiApi(wire))
     }).catch((error: unknown) => {
       if (!disposed) remoteStore.setError(errorText(error))
     })

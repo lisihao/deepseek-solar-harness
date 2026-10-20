@@ -31,6 +31,8 @@ No ChatGPT prompt was submitted in these checks. Preparation and selected contro
 
 ## Installation and remaining acceptance
 
-Not yet installed. Normal/narrow rendered UI, a button-path live synthetic request, exact user-message receipt, stable full answer extraction and original conversation retention remain unrun. A real request requires the user's separate cost approval under `AGENTS.md`; unknown effects must be observed against the same resource without resubmission.
+The first installed candidate was source `feef8465f888a150c0c757a05d2dece2e57096ec`, development version `0.1.0-dev.0`. The official bundled CLI installed it after normal exit and a profile backup; all 25 prior direct dependency versions and 39 enabled bundles remained present. All 30 non-manifest packed files matched the installed files; pnpm changed package-manifest formatting only. Its tab appeared, but the content panel was blank, so installed UI acceptance failed.
+
+The client had incorrectly consumed the official `RemoteResult<T>` carrier as a plain status object. The source correction now unwraps success values and preserves Remote failures for all four methods, with two dedicated regressions plus the built-loader regression. Normal/narrow rendered UI and the separately authorized one-message synthetic request still need to run on the corrected artifact. Unknown effects must be observed against the same resource without resubmission.
 
 The separate Gemini/ChatGPT research workflow remains outside this operator's acceptance. No research result or quality benefit is claimed.
