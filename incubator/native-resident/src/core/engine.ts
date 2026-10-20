@@ -30,6 +30,8 @@ const MAX_TEXT_LENGTH = 1_000_000
 const MAX_PROMPT_LENGTH = 1_000_000
 const MAX_NODES = 4_096
 const MAX_PARALLEL = 64
+const DEPENDENCY_INPUT_START = '--- BEGIN RESIDENT DEPENDENCY INPUTS (JSON) ---'
+const DEPENDENCY_INPUT_END = '--- END RESIDENT DEPENDENCY INPUTS ---'
 
 type Row = Record<string, unknown>
 
@@ -958,6 +960,10 @@ export class ResidentEngine implements ResidentApi {
         try {
           return this.persistAdmission(candidate, now)
         } catch (error) {
+          if (error instanceof ResidentError && isDependencyInputFailureCode(error.code)) {
+            this.failDependencyInputAdmission(candidate, error, now)
+            continue
+          }
           if (error instanceof ResidentError && isAdmissionConflictCode(error.code)) {
             this.blockAdmissionConflict(candidate, error, now)
             continue
@@ -1017,6 +1023,18 @@ export class ResidentEngine implements ResidentApi {
     const current = this.requireNode(candidate.graph.id, candidate.node.id)
     if (current.status !== 'ready') throw new ResidentError('SCHEDULER_RACE', 'Node readiness changed during admission')
     const driver = this.requireDriver(candidate.node.executor)
+    let prompt = candidate.node.prompt
+    let renderedNodeJson: string | undefined
+    if ((candidate.node.inputFrom?.length ?? 0) > 0) {
+      if (current.attempt === 0) {
+        prompt = this.renderDependencyInput(candidate.graph, candidate.node)
+        renderedNodeJson = JSON.stringify({ ...candidate.node, prompt })
+      } else {
+        // The first admission writes the exact executable input atomically with
+        // its attempt. Known retries and owner-authorized retries reuse it.
+        prompt = this.readNodeDefinition(current).prompt
+      }
+    }
     const attempt = current.attempt + 1
     const commandId = `attempt:${hashValue({
       graphId: candidate.graph.id,
@@ -1031,7 +1049,7 @@ export class ResidentEngine implements ResidentApi {
       attempt,
       executor: candidate.node.executor,
       cwd: candidate.graph.cwd,
-      prompt: candidate.node.prompt,
+      prompt,
     })
     let nativeSessionId: string | undefined
     const profileJson = effectiveProfileJson(candidate.node.profile)
@@ -1083,6 +1101,14 @@ export class ResidentEngine implements ResidentApi {
       }
     }
 
+    if (renderedNodeJson !== undefined) {
+      this.run(
+        'UPDATE nodes SET node_json = ? WHERE graph_id = ? AND node_id = ?',
+        renderedNodeJson,
+        candidate.graph.id,
+        candidate.node.id,
+      )
+    }
     this.run(
       `INSERT INTO attempts (
          graph_id, node_id, attempt, command_id, command_hash, status, native_session_id, created_at, settled_at
@@ -1117,7 +1143,7 @@ export class ResidentEngine implements ResidentApi {
       nodeId: candidate.node.id,
       executor: candidate.node.executor,
       cwd: candidate.graph.cwd,
-      prompt: candidate.node.prompt,
+      prompt,
       ...(candidate.node.sessionKey ? { sessionKey: candidate.node.sessionKey } : {}),
       ...(candidate.node.profile ? { profile: candidate.node.profile } : {}),
       profileJson,
@@ -1133,6 +1159,46 @@ export class ResidentEngine implements ResidentApi {
       cancelRequested: false,
       shutdownAbort: false,
     }
+  }
+
+  private renderDependencyInput(graph: TaskGraph, node: TaskNode): string {
+    const predecessors = (node.inputFrom ?? []).map((nodeId) => {
+      const predecessor = this.requireNode(graph.id, nodeId)
+      if (predecessor.status !== 'succeeded' || predecessor.output === null) {
+        throw new ResidentError(
+          'SCHEDULER_RACE',
+          `Predecessor ${nodeId} is not available as a successful dependency input for node ${node.id}`,
+        )
+      }
+      return { nodeId, output: predecessor.output }
+    })
+    const rendered = `${node.prompt}\n\n${DEPENDENCY_INPUT_START}\n${stableJson({ formatVersion: 1, predecessors })}\n${DEPENDENCY_INPUT_END}`
+    if (rendered.length > MAX_PROMPT_LENGTH) {
+      throw new ResidentError(
+        'DEPENDENCY_INPUT_TOO_LARGE',
+        `Rendered dependency input for node ${node.id} exceeds the existing ${MAX_PROMPT_LENGTH}-character prompt limit`,
+      )
+    }
+    return rendered
+  }
+
+  private failDependencyInputAdmission(candidate: Candidate, error: ResidentError, now: number): void {
+    const node = this.requireNode(candidate.graph.id, candidate.node.id)
+    if (node.status !== 'ready') return
+    this.run(
+      `UPDATE nodes
+         SET status = 'failed', error_code = ?, error_message = ?,
+             wait_reason = 'dependency-input-too-large', updated_at = ?
+       WHERE graph_id = ? AND node_id = ?`,
+      error.code,
+      truncate(error.message, 4_096),
+      now,
+      candidate.graph.id,
+      candidate.node.id,
+    )
+    this.bumpGraph(candidate.graph.id, now)
+    this.event(candidate.graph.id, candidate.node.id, 'node.failed', `Dependency input could not be rendered: ${error.code}`, now)
+    this.refreshGraphStatus(candidate.graph.id, now)
   }
 
   private blockAdmissionConflict(candidate: Candidate, error: ResidentError, now: number): void {
@@ -2074,6 +2140,12 @@ function normalizeGraph(raw: unknown): TaskGraph {
       }
       if (dependency === node.id) throw new ResidentError('GRAPH_INVALID', `Node ${node.id} cannot depend on itself`)
     }
+    const directPredecessors = new Set(node.dependsOn ?? [])
+    for (const input of node.inputFrom ?? []) {
+      if (!directPredecessors.has(input)) {
+        throw new ResidentError('GRAPH_INVALID', `Node ${node.id} inputFrom entry ${input} must name a direct dependency`)
+      }
+    }
   }
   assertAcyclic(nodes)
   const notBefore = optionalTime(record.notBefore, 'graph.notBefore')
@@ -2092,12 +2164,13 @@ function normalizeGraph(raw: unknown): TaskGraph {
 
 function normalizeNode(raw: unknown): TaskNode {
   const record = requireRecord(raw, 'node')
-  assertOnlyKeys(record, ['id', 'executor', 'prompt', 'dependsOn', 'scope', 'sessionKey', 'profile', 'notBefore', 'retry'], 'node')
+  assertOnlyKeys(record, ['id', 'executor', 'prompt', 'dependsOn', 'inputFrom', 'scope', 'sessionKey', 'profile', 'notBefore', 'retry'], 'node')
   const executor = record.executor
   if (executor !== 'codex' && executor !== 'claude-code') {
     throw new ResidentError('GRAPH_INVALID', 'node.executor must be codex or claude-code')
   }
   const dependsOn = normalizeDependencies(record.dependsOn)
+  const inputFrom = normalizeInputFrom(record.inputFrom)
   const scope = normalizeScope(record.scope)
   const sessionKey = record.sessionKey === undefined ? undefined : requireOpaqueId(record.sessionKey, 'node.sessionKey')
   const profile = normalizeProfile(record.profile)
@@ -2108,6 +2181,7 @@ function normalizeNode(raw: unknown): TaskNode {
     executor,
     prompt: requireText(record.prompt, 'node.prompt', MAX_PROMPT_LENGTH),
     ...(dependsOn.length === 0 ? {} : { dependsOn }),
+    ...(inputFrom.length === 0 ? {} : { inputFrom }),
     ...(scope === undefined ? {} : { scope }),
     ...(sessionKey === undefined ? {} : { sessionKey }),
     ...(profile === undefined ? {} : { profile }),
@@ -2139,6 +2213,16 @@ function normalizeDependencies(raw: unknown): string[] {
     throw new ResidentError('GRAPH_INVALID', 'node.dependsOn cannot contain duplicates')
   }
   return dependencies
+}
+
+function normalizeInputFrom(raw: unknown): string[] {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) throw new ResidentError('GRAPH_INVALID', 'node.inputFrom must be an array')
+  const inputs = raw.map((value) => requireOpaqueId(value, 'node.inputFrom entry'))
+  if (new Set(inputs).size !== inputs.length) {
+    throw new ResidentError('GRAPH_INVALID', 'node.inputFrom cannot contain duplicates')
+  }
+  return inputs
 }
 
 function normalizeScope(raw: unknown): TaskScope | undefined {
@@ -2360,6 +2444,10 @@ function isIndeterminateCode(code: string): boolean {
 
 function isAdmissionConflictCode(code: string): boolean {
   return code === 'PROFILE_CONFLICT' || code === 'SESSION_PROFILE_CONFLICT'
+}
+
+function isDependencyInputFailureCode(code: string): boolean {
+  return code === 'DEPENDENCY_INPUT_TOO_LARGE'
 }
 
 function asGraphStatus(value: unknown): GraphStatus {

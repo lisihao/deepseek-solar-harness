@@ -19,6 +19,8 @@ export interface WebRunRequest {
   readonly prompt: string
   readonly modelLabel?: string
   readonly effortLabel?: string
+  /** Enables the separately observed ChatGPT webpage-search control. */
+  readonly webSearch?: boolean
 }
 
 export interface WebRunResource {
@@ -30,6 +32,8 @@ export interface WebRunResource {
 export interface WebRunObserved {
   readonly modelLabel?: string
   readonly effortLabel?: string
+  /** Present only when the current composer exposed the semantic search pill. */
+  readonly webSearchActive?: boolean
 }
 
 export interface WebRunOutput {
@@ -129,6 +133,10 @@ function assertOptionalString(value: JsonRecord, key: string): void {
   if (hasOwn(value, key) && value[key] === null) throw invalidState()
 }
 
+function assertOptionalBoolean(value: JsonRecord, key: string): void {
+  if (hasOwn(value, key) && value[key] !== undefined && typeof value[key] !== 'boolean') throw invalidState()
+}
+
 function assertIsoTimestamp(value: unknown): asserts value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
     throw invalidState()
@@ -157,15 +165,17 @@ function isChatGptUrl(value: string): boolean {
 
 function validateRequest(value: unknown): WebRunRequest {
   if (!isObject(value)) throw invalidState()
-  assertKeys(value, ['prompt', 'modelLabel', 'effortLabel'])
+  assertKeys(value, ['prompt', 'modelLabel', 'effortLabel', 'webSearch'])
   if (!hasOwn(value, 'prompt')) throw invalidState()
   assertString(value.prompt)
   assertOptionalString(value, 'modelLabel')
   assertOptionalString(value, 'effortLabel')
+  assertOptionalBoolean(value, 'webSearch')
   return {
     prompt: value.prompt,
     ...(value.modelLabel === undefined ? {} : { modelLabel: value.modelLabel as string }),
     ...(value.effortLabel === undefined ? {} : { effortLabel: value.effortLabel as string }),
+    webSearch: value.webSearch === true,
   }
 }
 
@@ -186,12 +196,14 @@ function validateResource(value: unknown): WebRunResource {
 
 function validateObserved(value: unknown): WebRunObserved {
   if (!isObject(value)) throw invalidState()
-  assertKeys(value, ['modelLabel', 'effortLabel'])
+  assertKeys(value, ['modelLabel', 'effortLabel', 'webSearchActive'])
   assertOptionalString(value, 'modelLabel')
   assertOptionalString(value, 'effortLabel')
+  assertOptionalBoolean(value, 'webSearchActive')
   return {
     ...(value.modelLabel === undefined ? {} : { modelLabel: value.modelLabel as string }),
     ...(value.effortLabel === undefined ? {} : { effortLabel: value.effortLabel as string }),
+    ...(value.webSearchActive === undefined ? {} : { webSearchActive: value.webSearchActive as boolean }),
   }
 }
 

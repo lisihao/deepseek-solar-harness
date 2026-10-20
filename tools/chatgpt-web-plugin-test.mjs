@@ -153,7 +153,7 @@ async function readProbeMarker(path) {
   let marker
   try { marker = JSON.parse(await readFile(path, 'utf8')) } catch (error) { throw new Error(`chatgpt-web probe marker is missing or invalid at ${path}: ${String(error)}`) }
   if (marker?.ok !== true) throw new Error(`chatgpt-web probe reported failure: ${JSON.stringify(marker)}`)
-  for (const name of ['tool', 'provider', 'providerContract', 'status', 'emptyRuns', 'emptyActiveIds', 'noExecutorInvocation', 'noBrowserTask', 'registrationsDisposed', 'noPersistentArtifacts']) {
+  for (const name of ['tool', 'provider', 'providerContract', 'mainModelProvider', 'mainModelCatalog', 'mainModelDisposed', 'status', 'emptyRuns', 'emptyActiveIds', 'noExecutorInvocation', 'noBrowserTask', 'registrationsDisposed', 'noPersistentArtifacts']) {
     if (marker.checks?.[name] !== true) throw new Error(`chatgpt-web probe did not pass ${name}: ${JSON.stringify(marker)}`)
   }
   return marker

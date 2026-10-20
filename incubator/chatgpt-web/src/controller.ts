@@ -103,6 +103,7 @@ function observationLabels(observation: ChatGptPageObservation): WebRunObserved 
   return {
     ...(observation.modelLabel === undefined ? {} : { modelLabel: observation.modelLabel }),
     ...(observation.effortLabel === undefined ? {} : { effortLabel: observation.effortLabel }),
+    ...(observation.webSearchActive === undefined ? {} : { webSearchActive: observation.webSearchActive }),
   }
 }
 
@@ -127,6 +128,7 @@ function requestSnapshot(request: WebRunRequest): WebRunRequest {
     prompt: request.prompt,
     ...(request.modelLabel === undefined ? {} : { modelLabel: request.modelLabel }),
     ...(request.effortLabel === undefined ? {} : { effortLabel: request.effortLabel }),
+    webSearch: request.webSearch === true,
   }
 }
 
@@ -135,6 +137,7 @@ function requestsEqual(left: WebRunRequest | undefined, right: WebRunRequest): b
     && left.prompt === right.prompt
     && left.modelLabel === right.modelLabel
     && left.effortLabel === right.effortLabel
+    && (left.webSearch === true) === (right.webSearch === true)
 }
 
 function normalizeReceiptText(value: string): string {
@@ -577,6 +580,9 @@ export class WebController {
     if (request.effortLabel !== undefined && observation.effortLabel !== request.effortLabel) {
       return { code: 'WEB_EFFORT_MISMATCH', message: 'ChatGPT selected effort does not match the requested effort' }
     }
+    if (request.webSearch === true && observation.webSearchActive !== true) {
+      return { code: 'WEB_SEARCH_ACTIVE_REQUIRED', message: 'ChatGPT webpage search was not confirmed before submission' }
+    }
     return undefined
   }
 
@@ -585,6 +591,9 @@ export class WebController {
     verified: WebRunObserved | undefined,
     observation: ChatGptPageObservation,
   ): WebRunErrorDetail | undefined {
+    if (request.webSearch === true && verified?.webSearchActive !== true) {
+      return { code: 'WEB_SEARCH_ACTIVE_REQUIRED', message: 'ChatGPT webpage search was not confirmed before submission' }
+    }
     if (observation.modelLabel !== undefined) {
       const expected = verified?.modelLabel ?? request.modelLabel
       if (expected !== undefined && observation.modelLabel !== expected) {

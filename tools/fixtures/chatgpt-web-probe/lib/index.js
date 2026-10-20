@@ -1,7 +1,8 @@
-import { mkdir, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 const SERVICE = 'solarChatGptWebControl'
+const PREFERENCES_SERVICE = 'solarWebPreferences'
 const PROVIDER = 'chatgpt-web'
 const TOOL = 'solar_chatgpt_web'
 
@@ -38,6 +39,16 @@ async function runtimeArtifacts(root) {
     .filter(path => path.endsWith('.pid') || path.endsWith('.sock') || path.endsWith('.socket'))
 }
 
+async function exists(path) {
+  try {
+    await stat(path)
+    return true
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  }
+}
+
 async function runProbe(ctx) {
   const markerPath = requiredEnv('SOLAR_PLUGIN_PROBE_MARKER')
   const webRoot = join(requiredEnv('DSH_HOME'), 'solar', 'chatgpt-web')
@@ -45,12 +56,20 @@ async function runProbe(ctx) {
     tool: false,
     provider: false,
     providerContract: false,
+    mainModelProvider: false,
+    mainModelCatalog: false,
+    mainModelInsightCatalog: false,
+    preferencesControl: false,
+    preferencesDefaults: false,
+    preferencesReadNoEffect: false,
+    mainModelDisposed: false,
     status: false,
     emptyRuns: false,
     emptyActiveIds: false,
     noExecutorInvocation: false,
     noBrowserTask: false,
     registrationsDisposed: false,
+    preferencesDisposed: false,
     noPersistentArtifacts: false,
   }
   const exit = ctx.get('appExit')
@@ -80,6 +99,32 @@ async function runProbe(ctx) {
       assert(provider.inheritsParentContext === false, 'chatgpt-web provider must not inherit parent context')
       checks.providerContract = true
     }
+
+    const llm = ctx.get('llm')
+    assert(llm !== undefined, 'llm service is unavailable')
+    const mainProviders = await llm.listProviders()
+    assert(mainProviders.some(item => item.id === 'solar-chatgpt-web'), 'main Web provider missing')
+    checks.mainModelProvider = true
+    const mainModels = await llm.listModels('solar-chatgpt-web')
+    assert(mainModels.some(item => item.id === 'chatgpt-web' && item.name === 'ChatGPT 网页算子'), 'main Web catalog entry missing')
+    checks.mainModelCatalog = true
+    assert(mainModels.some(item => item.id === 'insight-analysis' && item.name === '洞察分析'), 'main Insight catalog entry missing')
+    checks.mainModelInsightCatalog = true
+
+    const preferencesPath = join(webRoot, 'preferences.json')
+    assert(!(await exists(preferencesPath)), 'ChatGPT Web preferences exist before a read-only probe')
+    const preferences = ctx.get(PREFERENCES_SERVICE)
+    assert(preferences !== undefined && typeof preferences.read === 'function', `${PREFERENCES_SERVICE}.read() is unavailable`)
+    const defaults = await preferences.read()
+    const repeatedDefaults = await preferences.read()
+    assert(defaults?.formatVersion === 1 && defaults.revision === 0, 'PreferencesControl.read() did not return the version-one defaults')
+    assert(defaults.web?.modelLabel === 'GPT-6' && defaults.web?.effortLabel === 'medium', 'PreferencesControl.read() did not return the configured Web defaults')
+    assert(defaults.insight?.formatVersion === 1, 'PreferencesControl.read() did not return default Insight preferences')
+    assert(JSON.stringify(defaults) === JSON.stringify(repeatedDefaults), 'PreferencesControl.read() returned unstable defaults')
+    assert(!(await exists(preferencesPath)), 'PreferencesControl.read() created persistent preferences')
+    checks.preferencesControl = true
+    checks.preferencesDefaults = true
+    checks.preferencesReadNoEffect = true
 
     const control = ctx.get(SERVICE)
     assert(control !== undefined && typeof control.status === 'function', `${SERVICE}.status() is unavailable`)
@@ -111,6 +156,10 @@ async function runProbe(ctx) {
     assert(subagents.getProvider(PROVIDER) === undefined, `${PROVIDER} provider remained registered after dispose`)
     assert(tools.get(TOOL) === undefined, `${TOOL} tool remained registered after dispose`)
     checks.registrationsDisposed = true
+    assert(ctx.get(PREFERENCES_SERVICE) === undefined, `${PREFERENCES_SERVICE} remained registered after dispose`)
+    checks.preferencesDisposed = true
+    assert(!(await llm.listProviders()).some(item => item.id === 'solar-chatgpt-web'), 'main Web provider remained registered after dispose')
+    checks.mainModelDisposed = true
 
     finalArtifacts = await runtimeArtifacts(webRoot)
     assert(finalArtifacts.length === 0, `ChatGPT Web runtime artifacts remained after dispose: ${JSON.stringify(finalArtifacts)}`)
@@ -135,7 +184,7 @@ async function runProbe(ctx) {
 }
 
 export const name = 'chatgpt-web-plugin-probe'
-export const inject = ['appReady', SERVICE, 'subagents', 'tools']
+export const inject = ['appReady', SERVICE, 'subagents', 'tools', 'llm']
 
 export function apply(ctx) {
   const ready = ctx.get('appReady')

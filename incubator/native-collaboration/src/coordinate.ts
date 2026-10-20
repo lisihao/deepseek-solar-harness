@@ -41,6 +41,7 @@ export interface CoordinateNodeAssignment {
 
 export interface CoordinateOutput {
   readonly kind: 'resident-graph'
+  readonly uiNotice?: string
   readonly graphId: string
   readonly status: GraphSnapshot['status']
   readonly revision: number
@@ -53,6 +54,7 @@ interface RawNode {
   readonly executor?: Executor
   readonly role?: string
   readonly dependsOn?: readonly string[]
+  readonly inputFrom?: readonly string[]
   readonly scope?: TaskScope
   readonly sessionKey?: string
   readonly profile?: NativeProfile
@@ -246,7 +248,7 @@ function parseNode(value: unknown, index: number): RawNode {
   const field = `graph.nodes[${index}]`
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${field} must be an object`)
   const source = value as Record<string, unknown>
-  const allowed = new Set(['id', 'prompt', 'executor', 'role', 'dependsOn', 'scope', 'sessionKey', 'session_key', 'profile', 'allocation', 'notBefore', 'retry'])
+  const allowed = new Set(['id', 'prompt', 'executor', 'role', 'dependsOn', 'inputFrom', 'scope', 'sessionKey', 'session_key', 'profile', 'allocation', 'notBefore', 'retry'])
   for (const key of Object.keys(source)) if (!allowed.has(key)) throw new Error(`${field} has unsupported field "${key}"`)
   const id = text(source.id, `${field}.id`)
   const prompt = text(source.prompt, `${field}.prompt`)
@@ -256,6 +258,12 @@ function parseNode(value: unknown, index: number): RawNode {
   if (source.dependsOn !== undefined) {
     if (!Array.isArray(source.dependsOn)) throw new Error(`${field}.dependsOn must be an array`)
     dependsOn = source.dependsOn.map((dependency, dependencyIndex) => text(dependency, `${field}.dependsOn[${dependencyIndex}]`))
+  }
+  let inputFrom: readonly string[] | undefined
+  if (source.inputFrom !== undefined) {
+    if (!Array.isArray(source.inputFrom)) throw new Error(`${field}.inputFrom must be an array`)
+    inputFrom = source.inputFrom.map((entry, i) => text(entry, `${field}.inputFrom[${i}]`))
+    if (new Set(inputFrom).size !== inputFrom.length || inputFrom.some(id => !dependsOn?.includes(id))) throw new Error(`${field}.inputFrom must name unique direct dependencies`)
   }
   if (source.sessionKey !== undefined && source.session_key !== undefined) throw new Error(`${field} must provide only one of sessionKey or session_key`)
   const sessionKey = optionalText(source.sessionKey ?? source.session_key, `${field}.sessionKey`)
@@ -275,6 +283,7 @@ function parseNode(value: unknown, index: number): RawNode {
     ...(selectedExecutor === undefined ? {} : { executor: selectedExecutor }),
     ...(role === undefined ? {} : { role }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
+    ...(inputFrom === undefined ? {} : { inputFrom }),
     ...(scope(source.scope, `${field}.scope`) === undefined ? {} : { scope: scope(source.scope, `${field}.scope`) }),
     ...(sessionKey === undefined ? {} : { sessionKey }),
     ...(taskProfile === undefined ? {} : { profile: taskProfile }),
@@ -496,6 +505,7 @@ export async function buildCoordinateGraph(
       executor: selection.executor,
       prompt: materializePrompt(node, assignment),
       ...(node.dependsOn === undefined ? {} : { dependsOn: node.dependsOn }),
+      ...(node.inputFrom === undefined ? {} : { inputFrom: node.inputFrom }),
       ...(node.scope === undefined ? {} : { scope: node.scope }),
       ...(node.sessionKey === undefined ? {} : { sessionKey: node.sessionKey }),
       ...(nativeProfile === undefined ? {} : { profile: nativeProfile }),

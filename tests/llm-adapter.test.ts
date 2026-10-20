@@ -1,0 +1,307 @@
+import { describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { LlmRuntime } from '@deepseek-ai/dsh-llm'
+import {
+  serializeConversationRequest,
+  WebLlmAdapter,
+  WEB_LLM_MODEL,
+  WEB_LLM_NAME,
+  WEB_LLM_PROVIDER,
+} from '../incubator/chatgpt-web/src/llm-adapter.js'
+import type { WebLlmController } from '../incubator/chatgpt-web/src/llm-adapter.js'
+import type { WebRunRecord, WebRunRequest } from '../incubator/chatgpt-web/src/store.js'
+
+const sessionId = 'session-llm-adapter' as GenerateOptions['sessionId']
+
+function record(
+  id: string,
+  request: WebRunRequest,
+  stage: WebRunRecord['stage'] = 'completed',
+  overrides: Partial<WebRunRecord> = {},
+): WebRunRecord {
+  const timestamp = '2026-10-20T00:00:00.000Z'
+  return {
+    formatVersion: 1,
+    id,
+    revision: 1,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    request,
+    stage,
+    ...overrides,
+  }
+}
+
+function fakeController(overrides: Partial<{
+  start: WebLlmController['start']
+  observe: WebLlmController['observe']
+}> = {}): WebLlmController & {
+  start: ReturnType<typeof vi.fn>
+  observe: ReturnType<typeof vi.fn>
+} {
+  const value = {
+    start: vi.fn(async (id: string, request: WebRunRequest) => record(id, request, 'completed', {
+      output: { text: 'plain', markdown: '**网页回答**' },
+    })),
+    observe: vi.fn(async (id: string) => record(id, { prompt: 'observed' }, 'completed', {
+      output: { text: 'plain', markdown: 'observed answer' },
+    })),
+    ...overrides,
+  }
+  return value as WebLlmController & { start: ReturnType<typeof vi.fn>; observe: ReturnType<typeof vi.fn> }
+}
+
+function options(overrides: Partial<GenerateOptions> = {}): GenerateOptions {
+  return {
+    provider: WEB_LLM_PROVIDER,
+    model: WEB_LLM_MODEL,
+    sessionId,
+    messages: [{
+      id: 'user-1' as never,
+      role: 'user',
+      source: { kind: 'user' },
+      content: [{ type: 'text', text: '请用 Markdown 回答。' }],
+    }],
+    ...overrides,
+  }
+}
+
+async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
+  const chunks: StreamChunk[] = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return chunks
+}
+
+describe('WebLlmAdapter', () => {
+  it('advertises the public provider, one catalog model, and no automatic retries', async () => {
+    const adapter = new WebLlmAdapter(fakeController(), { modelLabel: 'GPT-6', effortLabel: 'medium' })
+    expect(adapter.providerInfo(WEB_LLM_PROVIDER)).toEqual({ id: WEB_LLM_PROVIDER, name: WEB_LLM_NAME })
+    await expect(adapter.listModels(WEB_LLM_PROVIDER)).resolves.toEqual([
+      { provider: WEB_LLM_PROVIDER, id: WEB_LLM_MODEL, name: WEB_LLM_NAME },
+    ])
+    expect(adapter.providerRetryPolicy(WEB_LLM_PROVIDER)).toMatchObject({ mode: 'normal', maxRetries: 0 })
+    const policy = adapter.providerRetryPolicy(WEB_LLM_PROVIDER)
+    expect(policy.mode).toBe('normal')
+    if (policy.mode === 'normal') expect(policy.retryableCodes.length).toBeGreaterThan(0)
+  })
+
+  it('registers through the public rc.2 LlmRuntime and captures maxRetries=0', () => {
+    const adapter = new WebLlmAdapter(fakeController())
+    const runtime = new LlmRuntime(new Context())
+    const unregister = runtime.registerAdapter([WEB_LLM_PROVIDER], adapter)
+    expect(runtime.listProviders()).toEqual([{ id: WEB_LLM_PROVIDER, name: WEB_LLM_NAME }])
+    expect(runtime.providerRetryPolicy(WEB_LLM_PROVIDER)).toMatchObject({ mode: 'normal', maxRetries: 0 })
+    unregister()
+  })
+
+  it('serializes complete roles, system context, labels, and historical tool data while omitting reasoning', async () => {
+    const fake = fakeController()
+    const adapter = new WebLlmAdapter(fake, { modelLabel: 'GPT-6', effortLabel: 'medium' })
+    const hidden = 'do not send hidden reasoning'
+    const input = options({
+      system: '保持正式语气并保留 Markdown。',
+      reasoningEffort: 'high' as never,
+      messages: [
+        {
+          id: 'user-1' as never,
+          role: 'user',
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: '用户上下文' }],
+        },
+        {
+          id: 'assistant-1' as never,
+          role: 'assistant',
+          source: { kind: 'model', provider: 'other', model: 'other-model' },
+          content: [
+            { type: 'reasoning', text: hidden },
+            { type: 'text', text: '助手历史' },
+            { type: 'tool-call', id: 'call-1' as never, name: 'never-run', arguments: '{"x":1}' },
+          ],
+        },
+        {
+          id: 'tool-1' as never,
+          role: 'tool',
+          source: { kind: 'tool', callId: 'call-1' as never },
+          toolCallId: 'call-1' as never,
+          isError: false,
+          content: [{ type: 'text', text: '工具历史结果' }],
+        },
+      ] as GenerateOptions['messages'],
+    })
+
+    await collect(adapter.stream(input))
+    const prompt = fake.start.mock.calls[0]?.[1].prompt as string
+    expect(prompt).toContain('[message system role=system id=request-system]')
+    expect(prompt).toContain('role=user id=user-1')
+    expect(prompt).toContain('role=assistant id=assistant-1')
+    expect(prompt).toContain('role=tool id=tool-1')
+    expect(prompt).toContain('用户上下文')
+    expect(prompt).toContain('助手历史')
+    expect(prompt).toContain('工具历史结果')
+    expect(prompt).toContain('never-run')
+    expect(prompt).toContain('never execute')
+    expect(prompt).toContain('Preserve Markdown')
+    expect(prompt).not.toContain(hidden)
+    expect(prompt).toContain('high')
+    expect(fake.start).toHaveBeenCalledOnce()
+  })
+
+  it('captures the exact serialized request before start and blocks the browser when capture fails', async () => {
+    const events: string[] = []
+    const fake = fakeController({
+      start: vi.fn(async (id, request) => {
+        events.push(`start:${id}`)
+        return record(id, request, 'completed', { output: { text: '', markdown: 'done' } })
+      }),
+    })
+    const captured: Array<{ id: string; sessionId: string; request: WebRunRequest }> = []
+    const adapter = new WebLlmAdapter(fake, {
+      modelLabel: 'GPT-6',
+      onRequest: async (input) => {
+        events.push(`capture:${input.id}`)
+        captured.push(input)
+      },
+    })
+    await collect(adapter.stream(options()))
+    expect(events[0]).toMatch(/^capture:/)
+    expect(events[1]).toBe(`start:${captured[0]?.id}`)
+    expect(captured[0]?.sessionId).toBe(sessionId)
+    expect(captured[0]?.request.prompt).toContain('请用 Markdown 回答。')
+
+    const blocked = fakeController()
+    const rejected = new WebLlmAdapter(blocked, { onRequest: async () => { throw new Error('capture failed') } })
+    await expect(collect(rejected.stream(options()))).rejects.toMatchObject({ code: 'WEB_REQUEST_CAPTURE_FAILED' })
+    expect(blocked.start).not.toHaveBeenCalled()
+  })
+
+  it('exports the same bounded pure serializer used for durable identity', () => {
+    const serialized = serializeConversationRequest(options(), { modelLabel: 'GPT-6', effortLabel: 'medium' })
+    expect(serialized.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(serialized.canonical).toContain('user-1')
+    expect(serialized.prompt).toContain('GPT-6')
+    expect(Buffer.byteLength(serialized.prompt, 'utf8')).toBeLessThanOrEqual(128 * 1024)
+  })
+
+  it('rejects images and files before controller admission', async () => {
+    const fake = fakeController()
+    const adapter = new WebLlmAdapter(fake)
+    await expect(collect(adapter.stream(options({
+      messages: [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'image', attachment: {} as never }] } as never],
+    })))).rejects.toMatchObject({ code: 'CHATGPT_WEB_IMAGE_UNSUPPORTED' })
+    await expect(collect(adapter.stream(options({
+      messages: [{ role: 'user', source: { kind: 'user' }, content: [{ type: 'file', attachment: {} as never }] } as never],
+    })))).rejects.toMatchObject({ code: 'CHATGPT_WEB_FILE_UNSUPPORTED' })
+    expect(fake.start).not.toHaveBeenCalled()
+    expect(fake.observe).not.toHaveBeenCalled()
+  })
+
+  it('checks the complete prompt UTF-8 byte length before admission without truncating it', async () => {
+    const source = fakeController()
+    await collect(new WebLlmAdapter(source).stream(options({
+      messages: [{
+        id: 'unicode-user' as never,
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: '😀'.repeat(64) }],
+      }],
+    })))
+    const prompt = source.start.mock.calls[0]?.[1].prompt as string
+    const bytes = Buffer.byteLength(prompt, 'utf8')
+    const limited = fakeController()
+    await expect(collect(new WebLlmAdapter(limited, { maxPromptBytes: bytes - 1 }).stream(options({
+      messages: [{
+        id: 'unicode-user' as never,
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: '😀'.repeat(64) }],
+      }],
+    })))).rejects.toMatchObject({ code: 'WEB_PROMPT_TOO_LARGE' })
+    expect(limited.start).not.toHaveBeenCalled()
+  })
+
+  it('uses a stable command id for the same durable request and a new id for a new message', async () => {
+    const fake = fakeController()
+    const adapter = new WebLlmAdapter(fake)
+    const first = options()
+    await collect(adapter.stream(first))
+    await collect(adapter.stream(first))
+    const second = options({
+      messages: [{
+        id: 'user-2' as never,
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text: '请用 Markdown 回答。' }],
+      }],
+    })
+    await collect(adapter.stream(second))
+    expect(fake.start).toHaveBeenCalledTimes(2)
+    expect(fake.observe).toHaveBeenCalledTimes(1)
+    expect(fake.start.mock.calls[0]?.[0]).toBe(fake.observe.mock.calls[0]?.[0])
+    expect(fake.start.mock.calls[0]?.[0]).not.toBe(fake.start.mock.calls[1]?.[0])
+  })
+
+  it('emits only a complete text block and stop for a completed record', async () => {
+    const fake = fakeController({
+      start: vi.fn(async (id, request) => record(id, request, 'completed', {
+        output: { text: 'ignored plain text', markdown: '# 完整 Markdown\n\nanswer' },
+      })),
+    })
+    const chunks = await collect(new WebLlmAdapter(fake).stream(options()))
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: '# 完整 Markdown\n\nanswer' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: '# 完整 Markdown\n\nanswer' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+  })
+
+  it('turns an indeterminate result into a named error without resending on retry', async () => {
+    const fake = fakeController({
+      start: vi.fn(async (id, request) => record(id, request, 'indeterminate', {
+        error: { code: 'WEB_SUBMISSION_MISMATCH', message: 'receipt unknown' },
+      })),
+      observe: vi.fn(async (id) => record(id, { prompt: 'observed' }, 'completed', {
+        output: { text: '', markdown: 'reconciled answer' },
+      })),
+    })
+    const adapter = new WebLlmAdapter(fake)
+    await expect(collect(adapter.stream(options()))).rejects.toMatchObject({ code: 'WEB_RUN_INDETERMINATE' })
+    await expect(collect(adapter.stream(options()))).resolves.toEqual(expect.arrayContaining([
+      { type: 'text-delta', index: 0, text: 'reconciled answer' },
+    ]))
+    expect(fake.start).toHaveBeenCalledOnce()
+    expect(fake.observe).toHaveBeenCalledOnce()
+    expect(fake.start.mock.calls[0]?.[0]).toBe(fake.observe.mock.calls[0]?.[0])
+  })
+
+  it('forwards cancellation to the controller and rejects an aborted result', async () => {
+    const caller = new AbortController()
+    let forwarded: AbortSignal | undefined
+    const fake = fakeController({
+      start: vi.fn((id, request, signal) => new Promise<WebRunRecord>(resolve => {
+        forwarded = signal
+        if (signal?.aborted) {
+          resolve(record(id, request, 'cancelled'))
+          return
+        }
+        signal?.addEventListener('abort', () => resolve(record(id, request, 'cancelled')), { once: true })
+      })),
+    })
+    const adapter = new WebLlmAdapter(fake)
+    const pending = collect(adapter.stream(options({ signal: caller.signal })))
+    caller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'WEB_RUN_ABORTED' })
+    expect(forwarded).toBe(caller.signal)
+  })
+
+  it('rejects auxiliary purposes without touching the browser controller', async () => {
+    const fake = fakeController()
+    const adapter = new WebLlmAdapter(fake)
+    await expect(collect(adapter.stream(options({ purpose: 'compaction' })))).rejects.toMatchObject({ code: 'WEB_PURPOSE_UNSUPPORTED' })
+    await expect(collect(adapter.stream(options({ purpose: 'session-title' })))).rejects.toMatchObject({ code: 'WEB_PURPOSE_UNSUPPORTED' })
+    await expect(collect(adapter.stream(options({ sessionId: undefined })))).rejects.toMatchObject({ code: 'WEB_SESSION_REQUIRED' })
+    expect(fake.start).not.toHaveBeenCalled()
+    expect(fake.observe).not.toHaveBeenCalled()
+  })
+})

@@ -1,0 +1,33 @@
+# Session workflow verification — 2026-10-20
+
+This record covers the unreleased conversation workflow candidate on `codex/chatgpt-web`, extending PR #281. It does not replace the earlier installed one-shot ChatGPT Web canary record. Dates here use Asia/Shanghai; durable runtime logs retain UTC.
+
+## Scope and evidence
+
+The acceptance boundary is [the session workflow contract](session-workflow-editor.md): ordinary/smart session mode, Native predecessor inputs, current-session source flows, immutable editable drafts, explicit reruns/continuation, normal conversation output, and the configurable Web/Insight routes. No official app, upstream module, authentication, account, automation, release tag, or market index was changed by this candidate.
+
+| Check | Evidence and current result |
+| --- | --- |
+| Source types and build | Passed `pnpm build` and `pnpm typecheck` after the final continuation guard. |
+| Unit regressions | The stable-boundary 353-case suite passed 352 cases and found one obsolete internal-label assertion. The corrected Native mapper suite passed all 6 cases. Three later continuation/delivery regressions were added; the affected four-file suite passed all 35 cases. Unchanged passing evidence is reused; the initial full-gate command itself is recorded as failed, not relabelled successful. |
+| Built scratch profiles | Passed `pnpm test:plugin` using built `lib/`, plain Node and the published rc.2 CLI for both Native and Web probes. They verify registration, owner RPC, model catalog, no-effect preferences/status reads and disposal without an executor or browser call. The initial CLI probe found a required `sessionController` dependency absent from that minimal profile; delivery now resolves it lazily and reports a named error if unavailable. |
+| Homepage | Passed `pnpm homepage:check`; generated release-tag output remains unchanged. |
+| Browser editor | Actual React/XYFlow components rendered in Ego against the local in-memory fixture. The current source is selected on opening. Pointer dragging, prompt/model edits and stale-status clearing were exercised. Editing left fixture model starts at zero. Final dark control icons and accurate run/resume quota wording were visually checked. The affected client-loading/helper/fixture suite passed all 14 cases after that small polish; build and types passed again. |
+| CSS containment | The editor's internal React Flow receives its base CSS variables; a panel-external React Flow sentinel receives none. This was read from the actual rendered page. |
+| Narrow layout and explicit run/resume | Passed actual 430px viewport and a 620px panel inside a 1280px viewport: no document horizontal overflow, inspector below the canvas. Fit View displays all four fixture stages. Save/validate left model starts at zero; one explicit rerun produced one fake model start, inspection produced no second start. A separate explicit source continuation used the original run identity (`resumes: 1`, `runs: 0`, `modelStarts: 0`); source refresh observed completion. Smart mode selection also produced no model start. |
+| Independent source review | Four reachable issues were repaired: missing pending source fences, Native completion without a driver, unresolved-phase continuation, and ignored output prompts. A follow-up found possible double delivery if source continuation took over while the original main request was still active. Provider guards now reject that takeover before Host admission; Web/Insight lifecycle and both Host continuation paths have regressions. The bounded final source review found no remaining blocker in those paths. |
+| Installed official-app UI | Not run for this candidate. The shared official App is held by another separately authorized handoff acceptance. No profile/install/restart action was performed by this task. |
+| Real provider calls | Zero for this candidate. The prior one-shot GPT-6/medium canary belongs to the older candidate only; Codex was not repeated. Claude's earlier quota blocker remains unprobed. |
+| Full real Insight workflow | Blocked: no fresh cost authorization; Gemini Deep Research plan/start/report semantics have not been accepted; the exact requested GPT-6 Astra Pro webpage label has not been observed. Missing known configuration rejects before the Native clarification call. |
+
+The browser fixture is [reproducible source](../tools/fixtures/workflow-studio-browser/README.md), not an installed Harness or a real provider run. Its explicit execution counter is deliberately fake. It cannot prove website compatibility, account quota, or real model quality.
+
+## Recovery and provenance checks
+
+Keyless regressions cover exact session ownership, CAS/version conflicts, source/run resource fences, complete predecessor transfer, immutable input snapshots, local cancellation versus unknown remote effects, no duplicate external admission, explicit original-command continuation, and durable completion-delivery deduplication. A completion prompt accepted by `SessionController.prompt` means queued admission, not proof the final assistant answer was visibly rendered.
+
+The output node is a local `{report}` layout template, not another model. Removing or reconnecting stages changes the actual terminal outputs and omission disclosures. Requested and observed selections remain separate; Gemini quota fallback requires explicit no-active-effect quota evidence and uses ChatGPT webpage search and analysis, never ChatGPT Deep Research. Visible reports, sources and configured activity may be retained; hidden reasoning is not collected.
+
+The current candidate is not reported installed, usable, or fully Insight-accepted until the corresponding blocked rows above have run and passed. The local browser fixture tests actual client components against fake ports; it is not evidence that the new routes have run inside the official app.
+
+Local gate logs retained for this task: `/private/tmp/dsh-session-workflow-gate-20261020.log` (initial full gate and label failure), `/private/tmp/dsh-session-workflow-gate-repair-20261020.log` (mapper regression), `/private/tmp/dsh-session-workflow-plugin-gate-20261020.log` (initial CLI dependency failure), and `/private/tmp/dsh-session-workflow-final-affected-20261020.log` (final build, types, 35 affected regressions, both built CLI probes and homepage check). The final client-only polish log is `/private/tmp/dsh-session-workflow-client-polish-20261020.log`. These local files are not shipped in the plugin or committed to the public repository.

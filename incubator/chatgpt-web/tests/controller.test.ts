@@ -24,8 +24,8 @@ async function makeRoot(): Promise<string> {
   return join(root, 'records')
 }
 
-function request(): WebRunRequest {
-  return { prompt: TEST_PROMPT, modelLabel: 'gpt-5', effortLabel: 'medium' }
+function request(overrides: Partial<WebRunRequest> = {}): WebRunRequest {
+  return { prompt: TEST_PROMPT, modelLabel: 'gpt-5', effortLabel: 'medium', ...overrides }
 }
 
 function page(overrides: Partial<ChatGptPageObservation> = {}): ChatGptPageObservation {
@@ -202,6 +202,40 @@ describe('WebController', () => {
       observed: { modelLabel: 'gpt-5', effortLabel: 'medium' },
       output: { text: 'answer', markdown: 'answer' },
     })
+  })
+
+  it('records confirmed webpage search at preflight without requiring an unknown post-send pill location', async () => {
+    const root = await makeRoot()
+    const store = new WebRunStore(root)
+    const browser = new FakeBrowser()
+    browser.prepare = async (resource: WebRunResource) => {
+      browser.prepareResources.push(resource)
+      return page({ webSearchActive: true })
+    }
+    browser.submitResult = receipt()
+    browser.observations = [answer(), answer()]
+    const controller = new WebController(store, browser, options())
+
+    const result = await controller.start(randomUUID(), request({ webSearch: true }))
+
+    expect(result).toMatchObject({
+      stage: 'completed',
+      request: { webSearch: true },
+      observed: { webSearchActive: true },
+    })
+    expect(browser.submitResources).toEqual([browser.resource])
+  })
+
+  it('blocks a webpage-search request before submission when the pill was not observed', async () => {
+    const root = await makeRoot()
+    const store = new WebRunStore(root)
+    const browser = new FakeBrowser()
+    const controller = new WebController(store, browser, options())
+
+    const result = await controller.start(randomUUID(), request({ webSearch: true }))
+
+    expect(result).toMatchObject({ stage: 'blocked', error: { code: 'WEB_SEARCH_ACTIVE_REQUIRED' } })
+    expect(browser.submitResources).toEqual([])
   })
 
   it.each([

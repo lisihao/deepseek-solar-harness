@@ -1,4 +1,12 @@
 import { NativeControl } from './control.js'
+import { createHash } from 'node:crypto'
+import { WorkflowStudio, buildStudioDeliveryPrompt, buildStudioSourceDeliveryPrompt } from './studio.js'
+import { StudioControl } from './studio-control.js'
+import { SessionModeController, installSessionMode } from './session-mode.js'
+import { createNativeStudioProvider, nativeGraphToStudio, nativeSnapshotToStudioRun } from './studio-native.js'
+import { createWaitTool } from './wait.js'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
+import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
@@ -10,9 +18,14 @@ import { disposeOwnedActivations, trackOwnedActivation } from './lifecycle.js'
 import type { NormalizedCollaborationInput } from './validation.js'
 
 const RESIDENT_SERVICE = 'solarNativeResident'
+function requiredResident(ctx: Context): ResidentApi {
+  const resident = ctx.get(RESIDENT_SERVICE) as ResidentApi | undefined
+  if (resident?.protocolVersion !== 1) throw new Error('RESIDENT_UNAVAILABLE: 请启用 Resident 后再执行协同任务。')
+  return resident
+}
 
 export const name = 'native-collaboration'
-export const inject = ['tools', 'subagents']
+export const inject = ['tools', 'subagents', 'agents', 'systemPrompt']
 
 export interface Config {
   /** Registered public subagent provider id for the Codex executor. */
@@ -86,7 +99,7 @@ function renderCoordinateOutput(_args: unknown, value: CoordinateOutput): [{ typ
   }).join('; ')
   return [{
     type: 'text',
-    text: `已提交 Resident 协作任务图。任务图引用：${value.graphId}。分配结果：${assignments || '(无节点分配)'}。请使用该引用查询状态和结果；提交回执不代表最终成功。`,
+    text: `已提交 Resident 协作任务图。任务图引用：${value.graphId}。分配结果：${assignments || '(无节点分配)'}。请使用该引用等待并核对结果；提交回执不代表最终成功。${value.uiNotice ?? ''}`,
   }]
 }
 
@@ -238,6 +251,7 @@ export function createCoordinateTool(ctx: Context, config: Config): ToolDefiniti
           graphId: { type: 'string', required: true },
           status: { type: 'string', enum: [...GRAPH_STATUSES], required: true },
           revision: { type: 'integer', required: true },
+          uiNotice: { type: 'string' },
           assignments: {
             type: 'array',
             required: true,
@@ -262,7 +276,7 @@ export function createCoordinateTool(ctx: Context, config: Config): ToolDefiniti
       if (resident === undefined) {
         throw new Error('solar_coordinate requires the solarNativeResident service; install and enable the native-resident plugin')
       }
-      return coordinateResident(args.graph, args.allocation, args.dsh_tools, exec, {
+      const output = await coordinateResident(args.graph, args.allocation, args.dsh_tools, exec, {
         allocationProfiles: config.allocationProfiles,
         roleMapping: config.roleMapping,
       }, {
@@ -271,11 +285,74 @@ export function createCoordinateTool(ctx: Context, config: Config): ToolDefiniti
           ? undefined
           : (bridgeId, owner, allowedTools) => resident.bindBridge!(bridgeId, owner, allowedTools),
       })
+      const studio = ctx.get('solarWorkflowStudio') as WorkflowStudio | undefined
+      if (exec.agent !== undefined && typeof studio?.capture === 'function') {
+        try {
+          const snapshot = await resident.inspect(output.graphId)
+          const sessionId = String(exec.agent.session.id)
+          await studio.capture({ id: stableUuid(`native-source:${sessionId}:${output.graphId}`), graph: nativeGraphToStudio(snapshot.graph, sessionId), runId: output.graphId, run: nativeSnapshotToStudioRun(snapshot, sessionId, output.graphId, new Date()) })
+        } catch (error) {
+          return { ...output, uiNotice: `任务图已提交，但当前会话的流程图记录未能保存：${error instanceof Error ? error.message : String(error)}。请保留原任务引用，不要重复提交。` }
+        }
+      }
+      return output
     },
   })
 }
 
+function stableUuid(input: string): string {
+  const h = createHash('sha256').update(input).digest('hex')
+  return `${h.slice(0,8)}-${h.slice(8,12)}-5${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`
+}
+
 export function apply(ctx: Context, config: Config): void {
+  const shutdown = new AbortController()
+  ctx.effect(() => () => shutdown.abort())
+  const modes = new SessionModeController()
+  const studio = new WorkflowStudio(ctx, modes, {
+    onSourceCompleted: async source => {
+      if(!source.runId || !source.run) throw new Error('STUDIO_SOURCE_RESULT_MISSING: 原流程缺少执行结果。')
+      const sessionController=ctx.get('sessionController')
+      if(!sessionController)throw new Error('STUDIO_DELIVERY_UNAVAILABLE: 当前 Host 没有会话回写服务；流程产物已保留。')
+      await sessionController.prompt({
+        requestId: stableUuid(`studio-delivery:${source.runId}`) as Parameters<typeof ctx.sessionController.prompt>[0]['requestId'],
+        sessionId: source.graph.sessionId as Parameters<typeof ctx.sessionController.prompt>[0]['sessionId'],
+        mode:'queue',content:[{type:'text',text:buildStudioSourceDeliveryPrompt(source)}],
+      },shutdown.signal)
+    },
+    onCompleted: async record => {
+      const sessionController=ctx.get('sessionController')
+      if(!sessionController)throw new Error('STUDIO_DELIVERY_UNAVAILABLE: 当前 Host 没有会话回写服务；流程产物已保留。')
+      await sessionController.prompt({
+        requestId: stableUuid(`studio-delivery:${record.commandId}`) as Parameters<typeof ctx.sessionController.prompt>[0]['requestId'],
+        sessionId: record.graph.sessionId as Parameters<typeof ctx.sessionController.prompt>[0]['sessionId'],
+        mode: 'queue', content: [{ type: 'text', text: buildStudioDeliveryPrompt(record) }],
+      }, shutdown.signal)
+    },
+  })
+  new StudioControl(ctx, studio)
+  const residentProxy = {
+    submit: (request: Parameters<ResidentApi['submit']>[0]) => requiredResident(ctx).submit(request),
+    inspect: (id: string) => requiredResident(ctx).inspect(id),
+  }
+  const nativeProvider = createNativeStudioProvider({ resident: residentProxy, label: '原生协同任务' })
+  ctx.effect(() => studio.register({
+    ...nativeProvider,
+    validate: async graph => {
+      const issues = [...await nativeProvider.validate(graph)]
+      if (residentFrom(ctx) === undefined) issues.push({ message: '请先启用 Resident，再执行原生协同流程。' })
+      return issues
+    },
+    observeSource: async source => {
+      const snapshot = await requiredResident(ctx).inspect(source.graph.id)
+      return nativeSnapshotToStudioRun(snapshot, source.graph.sessionId, source.runId ?? snapshot.graph.id, new Date())
+    },
+  }))
+  ctx.effect(async () => {
+    const installation = installSessionMode(ctx, modes, { coordinateToolName: config.coordinateToolName })
+    try { await installation.ready } catch (error) { installation(); throw error }
+    return installation
+  })
   const activations = new Set<SubagentActivation>()
   const trackActivation = (activation: SubagentActivation): void => {
     trackOwnedActivation(activations, activation, (message) => {
@@ -286,13 +363,15 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => {
     const unregisterDelegate = ctx.tools.register(createDelegateTool(ctx, config, trackActivation))
     const unregisterCoordinate = ctx.tools.register(createCoordinateTool(ctx, config))
+    const unregisterWait = ctx.tools.register(createWaitTool(() => requiredResident(ctx)))
     return () => {
+      unregisterWait()
       unregisterCoordinate()
       unregisterDelegate()
     }
   })
 
-  new NativeControl(ctx, { codex: config.codexProvider, claudeCode: config.claudeCodeProvider }, [config.toolName, config.coordinateToolName])
+  new NativeControl(ctx, { codex: config.codexProvider, claudeCode: config.claudeCodeProvider }, [config.toolName, config.coordinateToolName, 'solar_wait'])
 
   ctx.effect(() => () => {
     return disposeOwnedActivations(activations)

@@ -1,29 +1,9 @@
 import { RPC_REMOTE } from './remote.js'
-
-/** Explicit public Typert host metadata for the ChatGPT Web control service. */
 export const TYPERT = {
-  package: RPC_REMOTE.package,
-  face: 'host',
-  schemas: [],
-  model: {
-    services: [{
-      tags: [],
-      key: 'solarChatGptWebControl',
-      exportName: 'WebControl',
-      description: 'Owner-only ChatGPT webpage task controls',
-      summary: 'ChatGPT 网页算子控制',
-      jsDoc: 'Read webpage task state and explicitly launch, observe, or cancel a task.',
-      members: RPC_REMOTE.descriptors.map(value => ({
-        name: value.method,
-        kind: 'method',
-        signature: value.method === 'status'
-          ? '(): Promise<unknown>'
-          : '(input: unknown): Promise<unknown>',
-      })),
-      types: [],
-    }],
-    events: [],
-    objects: [],
-  },
+  package: RPC_REMOTE.package, face: 'host', schemas: [],
+  model: { services: [
+    { key: 'solarChatGptWebControl', exportName: 'WebControl' },
+    { key: 'solarWebPreferences', exportName: 'PreferencesControl' },
+  ].map(service => ({ ...service, tags: [], description: 'Owner-only Web conversation controls', summary: 'Web and Insight settings', jsDoc: 'Configure future requests and observe existing Web executions.', members: RPC_REMOTE.descriptors.filter(value => value.service === service.key).map(value => ({ name: value.method, kind: 'method', signature: '(input?: unknown): Promise<unknown>' })), types: [] })), events: [], objects: [] },
   invocations: RPC_REMOTE.descriptors,
-} as const
+}

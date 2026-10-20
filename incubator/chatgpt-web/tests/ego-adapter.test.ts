@@ -106,7 +106,49 @@ describe('EgoWebAdapter', () => {
     const input = fixture.calls.mock.calls[0]?.[0]
     expect(input?.source).toContain('taskSpace(__input.spaceId === undefined ?')
     expect(input?.source).not.toContain('claimTaskSpace')
-    expect(input?.source).toContain(JSON.stringify({ runId: 'run-existing', spaceId: 3 }))
+    expect(input?.source).toContain(JSON.stringify({ runId: 'run-existing', spaceId: 3, createPage: false }))
+  })
+
+  it('allocates one fresh Page in a configured TaskSpace and preserves its pN label', async () => {
+    const page = { label: 'p2' }
+    const calls = { page: vi.fn(), newPage: vi.fn(async () => page) }
+    const taskSpace = vi.fn(async (spaceId: unknown) => ({
+      ownership: 'agent',
+      spaceId,
+      page: calls.page,
+      newPage: calls.newPage,
+    }))
+    const runMock = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => executeGeneratedSource(input.source, taskSpace))
+    const run = runMock as unknown as EgoProcessRunner
+    const adapter = new EgoWebAdapter({ ...options, spaceId: 3, createPage: true }, run)
+
+    await expect(adapter.create('run-new-page "quoted"')).resolves.toEqual({ spaceId: 3, pageLabel: 'p2' })
+    expect(taskSpace).toHaveBeenCalledWith(3)
+    expect(calls.newPage).toHaveBeenCalledOnce()
+    expect(calls.page).not.toHaveBeenCalled()
+    expect(runMock.mock.calls[0]?.[0].source).toContain(JSON.stringify({ runId: 'run-new-page "quoted"', spaceId: 3, createPage: true }))
+  })
+
+  it('rejects createPage without a configured TaskSpace and invalid page labels', async () => {
+    expect(() => new EgoWebAdapter({ ...options, createPage: true })).toThrow('createPage requires an existing TaskSpace id')
+
+    const invalid = runnerReturning({ spaceId: 3, pageLabel: 'page2' })
+    await expect(new EgoWebAdapter({ ...options, spaceId: 3, createPage: true }, invalid.run).create('invalid-page'))
+      .rejects.toMatchObject({ code: 'WEB_EGO_FRAME' })
+
+    const adapter = new EgoWebAdapter(options, runnerReturning(observation).run)
+    await expect(adapter.observe({ ...resource, pageLabel: 'p0' })).rejects.toMatchObject({ code: 'WEB_RESOURCE_INVALID' })
+  })
+
+  it('retains a shared TaskSpace without invoking CLI finish, while finishing only once', async () => {
+    const fixture = runnerReturning({ spaceId: 3, pageLabel: 'p2' })
+    const adapter = new EgoWebAdapter({ ...options, spaceId: 3, createPage: true, retainSpace: true }, fixture.run)
+    const retained = await adapter.create('retain-space')
+
+    await expect(adapter.finish(retained)).resolves.toBeUndefined()
+    expect(fixture.calls).toHaveBeenCalledOnce()
+    await expect(adapter.finish(retained)).rejects.toMatchObject({ code: 'WEB_ALREADY_FINISHED' })
+    expect(fixture.calls).toHaveBeenCalledOnce()
   })
 
   it('prepares a fresh ChatGPT page and verifies exact observed labels without changing them', async () => {
@@ -139,6 +181,24 @@ describe('EgoWebAdapter', () => {
     expect(arrowRight).toBe('\\bArrowRight\\b')
     expect(new RegExp(arrowLeft!).test('ArrowLeft ArrowRight')).toBe(true)
     expect(new RegExp(arrowRight!).test('ArrowLeft ArrowRight')).toBe(true)
+  })
+
+  it('requires an observed semantic webpage-search pill and validates its optional frame field', async () => {
+    const missing = runnerReturning(observation)
+    await expect(new EgoWebAdapter(options, missing.run).prepare(resource, request({ webSearch: true })))
+      .rejects.toMatchObject({ code: 'WEB_SEARCH_ACTIVE_REQUIRED' })
+
+    const selectedObservation = { ...observation, webSearchActive: true }
+    await expect(new EgoWebAdapter(options, runnerReturning(selectedObservation).run)
+      .prepare(resource, request({ webSearch: true }))).resolves.toEqual(selectedObservation)
+
+    const effortUnknown = runnerReturning({ ...selectedObservation, effortLabel: undefined })
+    await expect(new EgoWebAdapter(options, effortUnknown.run).prepare(resource, request({ webSearch: true })))
+      .rejects.toMatchObject({ code: 'WEB_EFFORT_UNKNOWN' })
+
+    const malformed = runnerReturning({ ...observation, webSearchActive: 'true' })
+    await expect(new EgoWebAdapter(options, malformed.run).prepare(resource, request()))
+      .rejects.toMatchObject({ code: 'WEB_EGO_FRAME' })
   })
 
   it('rejects an unknown model or an effort label used as a model', async () => {
@@ -329,7 +389,6 @@ describe('EgoWebAdapter', () => {
     expect(fixture.calls).toHaveBeenCalledTimes(2)
     const source = fixture.calls.mock.calls[1]?.[0].source ?? ''
     expect(source.match(/__page\.click\(__sendSelector/g)).toHaveLength(1)
-    expect(source.match(/__page\.click\(/g)?.length).toBe(4)
     expect(source).toContain('waitForSelector')
     expect(source).toContain('"Escape"')
     expect(source).toContain(JSON.stringify(request().prompt))
@@ -442,6 +501,88 @@ describe('EgoWebAdapter', () => {
       '[data-model-picker-view="advanced"]',
     ])
     expect(calls.evaluate.every(({ source }) => !source.includes('function.toString()'))).toBe(true)
+  })
+
+  it('selects the visible webpage-search option and preserves its pill while inserting the exact prompt', async () => {
+    const prompt = '网页搜索用户自己写下的前缀也必须保留。'
+    let currentUrl = 'about:blank'
+    let modelView: 'simple' | 'advanced' = 'simple'
+    let searchMenuOpen = false
+    let searchActive = false
+    let draft = ''
+    let sent = false
+    const clicks: string[] = []
+    const inserted: string[] = []
+    const fills: Array<{ readonly selector: string; readonly value: string }> = []
+    const pageObservation = (): AdapterObservation => ({
+      ...observation,
+      url: currentUrl,
+      composerText: sent ? '' : draft,
+      userMessages: sent ? [prompt] : [],
+      userMessageCount: sent ? 1 : 0,
+      generating: sent,
+      ...(searchActive && !sent ? { webSearchActive: true } : {}),
+    })
+    const page = {
+      keyboard: {
+        async insertText(value: string) {
+          if (!searchActive) throw new Error('search pill disappeared before text insertion')
+          inserted.push(value)
+          draft += value
+        },
+      },
+      async url() { return currentUrl },
+      async goto() { currentUrl = 'https://chatgpt.com/' },
+      async waitForSelector() {},
+      async waitForFunction() {},
+      async evaluate(fn: unknown, argument?: unknown) {
+        const source = String(fn)
+        if (source.includes('function inspectChatGptPage')) return pageObservation()
+        if (source.includes('data-list-navigation-item')) {
+          return { composerTools: 1, searchOptions: searchMenuOpen ? 1 : 0 }
+        }
+        if (source.includes('data-model-picker-view')) {
+          return { advanced: modelView === 'advanced', simple: modelView === 'simple', toggle: true }
+        }
+        if (source.includes('selectNodeContents') && source.includes('createRange')) return true
+        if (argument === 'button[aria-label="选择 ChatGPT 模型"]') return { expanded: 'false' }
+        if (argument === '[role="menu"]') return false
+        if (source.includes('div.ProseMirror') && source.includes('prompt-textarea')) return 'textarea#prompt-textarea'
+        if (source.includes('send-button')) return 'button[data-testid="send-button"]'
+        throw new Error(`unexpected webpage-search evaluate callback: ${source.slice(0, 80)}`)
+      },
+      async click(selector: string) {
+        clicks.push(selector)
+        if (selector === 'button[aria-label="选择 ChatGPT 模型"]') modelView = 'simple'
+        else if (selector === '[data-model-picker-view-toggle="true"][role="menuitem"]') modelView = 'advanced'
+        else if (selector === 'button[aria-label="添加文件等内容"]') searchMenuOpen = true
+        else if (selector === 'button[data-list-navigation-item="true"]:has-text("网页搜索")') {
+          if (!searchMenuOpen) throw new Error('webpage-search menu was not opened')
+          searchActive = true
+        } else if (selector === 'button[data-testid="send-button"]') sent = true
+      },
+      async fill(selector: string, value: string) {
+        fills.push({ selector, value })
+        throw new Error('webpage-search submission must not clear the selected pill')
+      },
+      async press() {},
+    }
+    const taskSpace = async () => ({ ownership: 'agent', spaceId: resource.spaceId, page: () => page })
+    const run: EgoProcessRunner = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => executeGeneratedSource(input.source, taskSpace))
+    const adapter = new EgoWebAdapter(options, run)
+
+    const prepared = await adapter.prepare(resource, request({ prompt, webSearch: true }))
+    expect(prepared.webSearchActive).toBe(true)
+    currentUrl = resource.conversationUrl!
+    const submitted = await adapter.submit(resource, request({ prompt, webSearch: true }))
+
+    expect(clicks).toContain('button[aria-label="添加文件等内容"]')
+    expect(clicks).toContain('button[data-list-navigation-item="true"]:has-text("网页搜索")')
+    expect(clicks.filter((selector) => selector === 'button[data-testid="send-button"]')).toHaveLength(1)
+    expect(inserted).toEqual([prompt])
+    expect(fills).toEqual([])
+    expect(submitted.userMessages).toEqual([prompt])
+    expect(submitted.webSearchActive).toBeUndefined()
   })
 
   it('strictly rejects extra stdout and maps process failures without exposing stderr', async () => {

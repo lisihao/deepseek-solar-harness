@@ -45,6 +45,8 @@ export interface TaskNode {
   readonly executor: Executor
   readonly prompt: string
   readonly dependsOn?: readonly string[]
+  /** Complete outputs from these direct predecessors are appended to the native input. */
+  readonly inputFrom?: readonly string[]
   readonly scope?: TaskScope
   /** Stable per-workspace native conversation, reused only after confirmed settlement. */
   readonly sessionKey?: string

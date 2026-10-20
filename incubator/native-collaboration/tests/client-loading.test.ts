@@ -5,7 +5,7 @@ import { expect, test, vi } from 'vitest'
 
 const require = createRequire(import.meta.url)
 
-test('built browser bundle registers an rc.2 module factory and contributes both official slots', async () => {
+test('built browser bundle registers an rc.2 module factory and contributes flow, mode, and diagnostics slots', async () => {
   let contribution: { id: string; factory: (require: (id: string) => unknown) => { name: string; inject: string[]; apply: (ctx: unknown) => void } } | undefined
   const load = vi.fn((value: NonNullable<typeof contribution>) => { contribution = value })
   const source = await readFile(new URL('../lib/client.cjs', import.meta.url), 'utf8')
@@ -14,7 +14,7 @@ test('built browser bundle registers an rc.2 module factory and contributes both
   expect(load).toHaveBeenCalledTimes(1)
   expect(contribution?.id).toBe('@lisihao/dsh-solar-native-collaboration')
   const plugin = contribution!.factory(id => {
-    expect(id).toBe('react')
+    expect(['react', 'react/jsx-runtime', 'react-dom']).toContain(id)
     return require(id)
   })
   expect(plugin.name).toBe('native-collaboration')
@@ -30,7 +30,14 @@ test('built browser bundle registers an rc.2 module factory and contributes both
     slots: { inject: (_name: string, callback: () => void) => callback(), register },
   })
   await Promise.resolve()
-  expect(register.mock.calls.map(call => (call[0] as { name: string }).name)).toEqual(['conversation.view', 'settings.section'])
+  const slots = register.mock.calls.map(call => call[0] as { name: string; id: string; label?: () => string })
+  expect(slots.map(slot => slot.name)).toEqual(['conversation.view', 'conversation.session.header.actions', 'settings.section'])
+  expect(slots).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'solar-native-collaboration', label: expect.any(Function) }),
+    expect.objectContaining({ id: 'solar-session-collaboration-mode' }),
+  ]))
+  expect(slots.find(slot => slot.id === 'solar-native-collaboration')?.label?.()).toBe('执行流程')
+  expect(slots.find(slot => slot.name === 'settings.section')?.label?.()).toBe('协同诊断')
   expect(mount).toHaveBeenCalledTimes(1)
   cleanup?.()
   await Promise.resolve()

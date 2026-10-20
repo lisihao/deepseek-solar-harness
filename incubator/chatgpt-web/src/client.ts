@@ -17,6 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createWebUiApi, type WebUiWire } from './client-remote.js'
 import { RPC_REMOTE } from './remote.js'
+import { PreferencesPanel, createPreferencesApi, type PreferencesClientApi, type PreferencesWire } from './preferences-client.js'
 import {
   WEB_STAGE_LABELS,
   type ChatGptWebControlApi,
@@ -28,6 +29,7 @@ export const name = 'chatgpt-web'
 export const inject = ['slots', 'remote', 'connection']
 
 interface RemoteAccessSnapshot {
+  readonly preferences?: PreferencesClientApi
   readonly api: ChatGptWebControlApi | undefined
   readonly error: string | undefined
 }
@@ -43,8 +45,8 @@ class RemoteAccessStore {
     return () => this.listeners.delete(listener)
   }
 
-  setApi(api: ChatGptWebControlApi): void {
-    this.snapshot = { api, error: undefined }
+  setApi(api: ChatGptWebControlApi, preferences: PreferencesClientApi): void {
+    this.snapshot = { api, preferences, error: undefined }
     this.publish()
   }
 
@@ -652,7 +654,9 @@ export function apply(ctx: Context): void {
         return
       }
       disposeRemote = disposer
-      remoteStore.setApi(createWebUiApi(wire))
+      const preferencesWire = ctx.get('remote.solarWebPreferences') as unknown as PreferencesWire | undefined
+      if (!preferencesWire) { await disposer(); remoteStore.setError('本机没有提供网页与洞察设置服务。'); return }
+      remoteStore.setApi(createWebUiApi(wire), createPreferencesApi(preferencesWire))
     }).catch((error: unknown) => {
       if (!disposed) remoteStore.setError(errorText(error))
     })
@@ -663,17 +667,15 @@ export function apply(ctx: Context): void {
     }
   }, 'chatgpt-web: remote')
 
-  const View = (): ReactElement => createElement(ChatGptWebPanel, { remoteStore })
-  ctx.slots.inject('conversation.view', () => ctx.slots.register({
-    name: 'conversation.view',
-    id: 'solar-chatgpt-web',
-    order: 45,
-    label: () => 'ChatGPT 网页算子',
-  }, View))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'solar-chatgpt-web',
-    order: 45,
-    label: () => 'ChatGPT 网页算子',
-  }, View))
+  const Settings = (): ReactElement => {
+    const remote = useRemoteAccess(remoteStore)
+    return createElement('main', {}, [
+      createElement(PreferencesPanel, { key: 'preferences', api: remote.preferences }),
+      createElement('details', { key: 'diagnostics' }, [
+        createElement('summary', { key: 'title' }, '网页连接诊断与历史记录'),
+        createElement(ChatGptWebPanel, { key: 'panel', remoteStore }),
+      ]),
+    ])
+  }
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'solar-chatgpt-web', order: 46, label: () => '网页与洞察' }, Settings))
 }

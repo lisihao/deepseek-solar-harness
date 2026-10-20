@@ -5,7 +5,7 @@ import { expect, test, vi } from 'vitest'
 
 const require = createRequire(import.meta.url)
 
-test('built browser bundle registers an rc.2 module factory and contributes both official slots', async () => {
+test('built browser bundle registers an rc.2 module factory and contributes the Web and Insight settings slot', async () => {
   let contribution: {
     id: string
     factory: (require: (id: string) => unknown) => {
@@ -42,7 +42,10 @@ test('built browser bundle registers an rc.2 module factory and contributes both
     slots: { inject: (_name: string, callback: () => void) => callback(), register },
   })
   await Promise.resolve()
-  expect(register.mock.calls.map(call => (call[0] as { name: string }).name)).toEqual(['conversation.view', 'settings.section'])
+  const slots = register.mock.calls.map(call => call[0] as { name: string; id: string; label?: () => string })
+  expect(slots.map(slot => slot.name)).toEqual(['settings.section'])
+  expect(slots[0]).toMatchObject({ id: 'solar-chatgpt-web' })
+  expect(slots[0]?.label?.()).toBe('网页与洞察')
   expect(mount).toHaveBeenCalledTimes(1)
   cleanup?.()
   await Promise.resolve()

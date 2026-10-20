@@ -44,6 +44,8 @@ export interface ChatGptPageObservation {
   readonly modelLabel?: string
   /** Explicit observed effort identifier or visible label; it is never inferred. */
   readonly effortLabel?: string
+  /** Present only when the unique current composer contains the semantic search pill. */
+  readonly webSearchActive?: boolean
   readonly visibleError?: string
 }
 
@@ -80,9 +82,19 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     return true
   }
 
+  const isSemanticWebSearchPill = (element: BrowserElement): boolean =>
+    element.tagName === 'SPAN'
+      && element.hasAttribute('data-inline-selection-pill')
+      && element.getAttribute('data-system-hint-type') === 'search'
+      && element.getAttribute('data-system-hint-label') === '网页搜索'
+      && element.getAttribute('data-prompt-link-href') === 'chatgpt-system-hint://search'
+      && element.getAttribute('data-prompt-link-label') === '网页搜索'
+      && element.getAttribute('contenteditable') === 'false'
+
   const ignored = (element: BrowserElement): boolean => {
     const tag = element.tagName
     return element.getAttribute('data-markdown-copy') === 'exclude'
+      || isSemanticWebSearchPill(element)
       || tag === 'BUTTON' || tag === 'SVG' || tag === 'STYLE' || tag === 'SCRIPT'
   }
 
@@ -110,6 +122,7 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     if (node.nodeType !== 1) return ''
     const element = node as BrowserElement
     if (!visible(element)) return ''
+    if (isSemanticWebSearchPill(element)) return ''
     if (element.tagName === 'BR') return hasClass(element, 'ProseMirror-trailingBreak') ? '' : newline
     return Array.from(element.childNodes).map(composerNodeText).join('')
   }
@@ -119,9 +132,17 @@ export function inspectChatGptPage(): ChatGptPageObservation {
       return normalizeNewlines((element as HTMLTextAreaElement | HTMLInputElement).value)
     }
     const children = Array.from(element.children).filter(visible)
+    const childText = children.reduce<string[]>((parts, child) => {
+      const value = composerNodeText(child)
+      // The search pill is a selection control, not an empty paragraph. Do
+      // not introduce a synthetic leading newline when it precedes the text.
+      if (value.length === 0 && isSemanticWebSearchPill(child)) return parts
+      parts.push(value)
+      return parts
+    }, [])
     const text = children.length === 0
       ? Array.from(element.childNodes).map(composerNodeText).join('')
-      : children.map(composerNodeText).join(newline)
+      : childText.join(newline)
     return normalizeNewlines(text)
   }
 
@@ -403,6 +424,11 @@ export function inspectChatGptPage(): ChatGptPageObservation {
   })
   const url = location.href
   const observedComposerText = composerCandidates.length === 1 ? composerText(composerCandidates[0] as BrowserElement) : ''
+  const searchPills = composerCandidates.length === 1
+    ? Array.from((composerCandidates[0] as BrowserElement).querySelectorAll<BrowserElement>('span[data-inline-selection-pill][data-system-hint-type="search"]'))
+      .filter((element) => visible(element) && isSemanticWebSearchPill(element))
+    : []
+  const webSearchActive = searchPills.length === 1 ? true : undefined
   const attachmentsPresent = composerCandidates.some(hasAttachments)
   const modelLabel = observedControlLabel('model')
   const effortLabel = observedControlLabel('effort')
@@ -420,6 +446,7 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     generating,
     ...modelLabel === undefined ? {} : { modelLabel },
     ...effortLabel === undefined ? {} : { effortLabel },
+    ...webSearchActive === undefined ? {} : { webSearchActive },
     ...error === undefined ? {} : { visibleError: error },
   }
 }

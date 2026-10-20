@@ -1,3 +1,4 @@
+import { RPC_WEB_PREFERENCES } from './preferences-remote.js'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 
 const PKG = '@lisihao/dsh-solar-chatgpt-web'
@@ -27,7 +28,7 @@ const resultType = (method: string): string => {
 
 export const RPC_REMOTE: TypertRemoteContribution = {
   package: PKG,
-  descriptors: (['status', 'launch', 'observe', 'cancel'] as const).map(method => ({
+  descriptors: [...(['status', 'launch', 'observe', 'cancel'] as const).map(method => ({
     id: `${PKG}#solarChatGptWebControl/${method}`,
     service: 'solarChatGptWebControl',
     namespace: 'solarChatGptWebControl',
@@ -37,5 +38,5 @@ export const RPC_REMOTE: TypertRemoteContribution = {
       ? []
       : [{ name: 'input', wire: 'input', source: 'json' as const, codec: codec(method === 'launch' ? 'WebLaunchInput' : 'WebIdInput') }],
     result: codec(resultType(method)),
-  })),
+  })), ...RPC_WEB_PREFERENCES.descriptors],
 }

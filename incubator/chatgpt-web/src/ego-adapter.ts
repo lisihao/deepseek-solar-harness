@@ -17,6 +17,8 @@ const MODEL_MENU_SELECTOR = '[role="menu"]'
 const MODEL_VIEW_TOGGLE_SELECTOR = '[data-model-picker-view-toggle="true"][role="menuitem"]'
 const MODEL_ADVANCED_VIEW_SELECTOR = '[data-model-picker-view="advanced"]'
 const MODEL_SIMPLE_VIEW_SELECTOR = '[data-model-picker-view="simple"]'
+const COMPOSER_TOOL_BUTTON_SELECTOR = 'button[aria-label="添加文件等内容"]'
+const WEB_SEARCH_OPTION_SELECTOR = 'button[data-list-navigation-item="true"]:has-text("网页搜索")'
 const COMPOSER_SELECTORS = [
   'div.ProseMirror[contenteditable="true"]',
   'textarea#prompt-textarea',
@@ -40,6 +42,7 @@ const OBSERVATION_KEYS = [
   'generating',
   'modelLabel',
   'effortLabel',
+  'webSearchActive',
   'visibleError',
 ] as const
 
@@ -55,6 +58,10 @@ export interface EgoWebAdapterOptions {
   readonly commandTimeoutMs: number
   readonly stdoutMaxBytes: number
   readonly spaceId?: number
+  /** Allocate a fresh Page inside the configured TaskSpace instead of reusing p1. */
+  readonly createPage?: boolean
+  /** Retain the shared TaskSpace for the enclosing multi-stage flow. */
+  readonly retainSpace?: boolean
 }
 
 type EgoOperation = 'create' | 'prepare' | 'observe' | 'submit' | 'finish'
@@ -107,7 +114,8 @@ function assertResource(resource: WebRunResource): void {
   if (!isRecord(resource) || !Number.isSafeInteger(resource.spaceId) || resource.spaceId <= 0) {
     throw browserError('WEB_RESOURCE_INVALID', 'ChatGPT Web resource is invalid')
   }
-  if (typeof resource.pageLabel !== 'string' || resource.pageLabel.length === 0) {
+  if (typeof resource.pageLabel !== 'string' || !/^p[1-9]\d*$/.test(resource.pageLabel)
+    || !Number.isSafeInteger(Number(resource.pageLabel.slice(1)))) {
     throw browserError('WEB_RESOURCE_INVALID', 'ChatGPT Web page label is invalid')
   }
   if (resource.conversationUrl !== undefined && !isChatGptUrl(resource.conversationUrl)) {
@@ -125,18 +133,32 @@ function assertRequest(request: WebRunRequest): void {
   if (request.effortLabel !== undefined && typeof request.effortLabel !== 'string') {
     throw browserError('WEB_REQUEST_INVALID', 'ChatGPT Web effort label is invalid')
   }
+  if (request.webSearch !== undefined && typeof request.webSearch !== 'boolean') {
+    throw browserError('WEB_REQUEST_INVALID', 'ChatGPT Web search mode is invalid')
+  }
 }
 
 function isEffortLike(value: string | undefined): boolean {
   return value !== undefined && /^(?:low|medium|high|xhigh|very high|standard|fast)$/i.test(value.trim())
 }
 
-function assertRequestedLabels(request: WebRunRequest, observation: ChatGptPageObservation): void {
+function assertRequestedLabels(
+  request: WebRunRequest,
+  observation: ChatGptPageObservation,
+  requireWebSearch = false,
+): void {
   if (observation.modelLabel === undefined || observation.modelLabel.trim().length === 0) {
     throw browserError('WEB_MODEL_UNKNOWN', 'The observed ChatGPT model is unavailable')
   }
   if (isEffortLike(observation.modelLabel)) {
     throw browserError('WEB_MODEL_MISMATCH', 'The observed model label is an effort label')
+  }
+  if (requireWebSearch && request.webSearch === true && observation.webSearchActive !== true) {
+    throw browserError('WEB_SEARCH_ACTIVE_REQUIRED', 'The observed ChatGPT webpage search mode is unavailable')
+  }
+  if (requireWebSearch && request.webSearch === true
+    && (observation.effortLabel === undefined || observation.effortLabel.trim().length === 0)) {
+    throw browserError('WEB_EFFORT_UNKNOWN', 'The observed ChatGPT reasoning effort is unavailable')
   }
   if (request.modelLabel !== undefined && observation.modelLabel !== request.modelLabel) {
     throw browserError('WEB_MODEL_MISMATCH', 'The observed model label does not match the request')
@@ -174,6 +196,9 @@ function assertObservation(value: unknown): ChatGptPageObservation {
     if (hasOwn(value, key) && value[key] !== undefined && typeof value[key] !== 'string') {
       throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid optional observation field')
     }
+  }
+  if (hasOwn(value, 'webSearchActive') && value.webSearchActive !== undefined && typeof value.webSearchActive !== 'boolean') {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid optional observation field')
   }
   return value as unknown as ChatGptPageObservation
 }
@@ -773,17 +798,113 @@ const __selectRequestedEffort = async (requestedLabel) => {
 `
 }
 
+function webSearchSource(): string {
+  return `
+const __searchControlState = async () => {
+  try {
+    return await __page.evaluate(() => {
+      const visible = (element) => {
+        for (let current = element; current !== null; current = current.parentElement) {
+          if (current.hasAttribute("hidden") || current.getAttribute("aria-hidden") === "true" || current.hasAttribute("inert")) return false;
+          const style = getComputedStyle(current);
+          if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") return false;
+          if (style.display !== "contents" && current.getClientRects().length === 0) return false;
+        }
+        return true;
+      };
+      const enabled = (element) => !element.hasAttribute("disabled")
+        && element.getAttribute("aria-disabled") !== "true"
+        && (!("disabled" in element) || !element.disabled);
+      const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+      const composerTools = Array.from(document.querySelectorAll(${JSON.stringify(COMPOSER_TOOL_BUTTON_SELECTOR)}))
+        .filter((element) => visible(element) && enabled(element));
+      const searchOptions = Array.from(document.querySelectorAll('button[data-list-navigation-item="true"]'))
+        .filter((element) => visible(element) && enabled(element))
+        .filter((element) => normalize(element.textContent).startsWith("网页搜索查找实时新闻和信息"));
+      return { composerTools: composerTools.length, searchOptions: searchOptions.length };
+    });
+  } catch {
+    __throw("WEB_SEARCH_UNAVAILABLE", "ChatGPT webpage search controls could not be inspected");
+  }
+};
+
+const __assertSearchBaseline = (observation) => {
+  if (!observation || typeof observation.modelLabel !== "string" || observation.modelLabel.trim().length === 0) {
+    __throw("WEB_MODEL_UNKNOWN", "ChatGPT selected model could not be observed before webpage search");
+  }
+  if (/^(?:low|medium|high|xhigh|very high|standard|fast)$/i.test(observation.modelLabel.trim())) {
+    __throw("WEB_MODEL_MISMATCH", "Observed model label is an effort label");
+  }
+  if (typeof observation.effortLabel !== "string" || observation.effortLabel.trim().length === 0) {
+    __throw("WEB_EFFORT_UNKNOWN", "ChatGPT selected effort could not be observed before webpage search");
+  }
+};
+
+const __waitForWebSearchPill = async () => {
+  try {
+    await __page.waitForFunction(() => {
+      const visible = (element) => {
+        for (let current = element; current !== null; current = current.parentElement) {
+          if (current.hasAttribute("hidden") || current.getAttribute("aria-hidden") === "true" || current.hasAttribute("inert")) return false;
+          const style = getComputedStyle(current);
+          if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") return false;
+          if (style.display !== "contents" && current.getClientRects().length === 0) return false;
+        }
+        return true;
+      };
+      const composers = Array.from(document.querySelectorAll(${JSON.stringify(COMPOSER_SELECTORS)})).filter(visible);
+      if (composers.length !== 1) return false;
+      const pills = Array.from(composers[0].querySelectorAll('span[data-inline-selection-pill][data-system-hint-type="search"][data-system-hint-label="网页搜索"][data-prompt-link-href="chatgpt-system-hint://search"][data-prompt-link-label="网页搜索"][contenteditable="false"]'))
+        .filter(visible);
+      return pills.length === 1;
+    }, undefined, { timeout: __input.timeoutMs });
+  } catch {
+    __throw("WEB_SEARCH_PILL_MISSING", "ChatGPT webpage search pill was not observed after selection");
+  }
+};
+
+const __selectWebSearch = async () => {
+  const __beforeControls = await __searchControlState();
+  if (!__beforeControls || __beforeControls.composerTools !== 1) {
+    __throw("WEB_SEARCH_TOOL_UNAVAILABLE", "ChatGPT webpage search menu control is unavailable or ambiguous");
+  }
+  try {
+    await __page.click(${JSON.stringify(COMPOSER_TOOL_BUTTON_SELECTOR)}, { timeout: __input.timeoutMs, label: "open ChatGPT webpage search menu" });
+  } catch {
+    __throw("WEB_SEARCH_TOOL_UNAVAILABLE", "ChatGPT webpage search menu could not be opened");
+  }
+  const __openedControls = await __searchControlState();
+  if (!__openedControls || __openedControls.searchOptions !== 1) {
+    __throw("WEB_SEARCH_OPTION_UNAVAILABLE", "ChatGPT webpage search choice is unavailable or ambiguous");
+  }
+  try {
+    await __page.click(${JSON.stringify(WEB_SEARCH_OPTION_SELECTOR)}, { timeout: __input.timeoutMs, label: "select ChatGPT webpage search" });
+  } catch {
+    __throw("WEB_SEARCH_OPTION_UNAVAILABLE", "ChatGPT webpage search choice could not be selected");
+  }
+  await __waitForWebSearchPill();
+  const __afterSelection = await __page.evaluate(__inspect);
+  if (!__afterSelection || __afterSelection.webSearchActive !== true) {
+    __throw("WEB_SEARCH_PILL_MISSING", "ChatGPT webpage search pill was not observed after selection");
+  }
+  return __afterSelection;
+};
+`
+}
+
 function scriptFor(operation: EgoOperation, input: unknown): string {
   const data = JSON.stringify(input)
   const inspectSource = String(inspectChatGptPage)
   const menuSource = modelMenuSource()
+  const searchSource = webSearchSource()
   let body: string
   switch (operation) {
     case 'create':
       body = `
 const __task = await taskSpace(__input.spaceId === undefined ? "ChatGPT Web " + __input.runId : __input.spaceId);
 __assertAgent(__task);
-const __page = __task.page("p1");
+const __page = __input.createPage ? await __task.newPage() : __task.page("p1");
+if (!__page || typeof __page.label !== "string") __throw("WEB_RESOURCE_INVALID", "Ego browser returned an invalid Page");
 __emit({ ok: true, value: { spaceId: __task.spaceId, pageLabel: __page.label } });
 `
       break
@@ -794,6 +915,7 @@ __assertAgent(__task);
 const __page = __task.page(__input.resource.pageLabel);
 const __inspect = ${inspectSource};
 ${menuSource}
+${searchSource}
 const __currentUrl = await __page.url();
 const __isChatGptUrl = (value) => {
   try {
@@ -836,10 +958,22 @@ if (!__composerReady) {
   else __throw("WEB_PAGE_NOT_READY", "ChatGPT composer is unavailable");
 } else {
   let __observation;
-  let __needsEffort = false;
+  if (__input.request.webSearch === true) {
+    const __preSearch = await __page.evaluate(__inspect);
+    if (__preSearch.loginRequired) __throw("WEB_LOGIN_REQUIRED", "ChatGPT login is required");
+    if (__preSearch.visibleError) __throw("WEB_PAGE_ERROR", "ChatGPT page reported a visible error");
+    if (__preSearch.composerCount !== 1) __throw("WEB_PAGE_NOT_READY", "ChatGPT has no unique composer");
+    if (!__isEmptyChat(__preSearch)) __throw("WEB_CONVERSATION_NOT_EMPTY", "ChatGPT conversation is not empty");
+    const __originalSelection = await __observeModelMenu();
+    __assertSearchBaseline(__originalSelection);
+    if (__originalSelection.webSearchActive === true) {
+      __throw("WEB_SEARCH_ALREADY_ACTIVE", "ChatGPT webpage search was already active before preparation");
+    }
+    await __selectWebSearch();
+  }
   if (__input.request.effortLabel !== undefined) {
     const __simpleObservation = await __observeEffortMenu();
-    __needsEffort = __simpleObservation.effortLabel !== __input.request.effortLabel;
+    const __needsEffort = __simpleObservation.effortLabel !== __input.request.effortLabel;
     if (__needsEffort) await __selectRequestedEffort(__input.request.effortLabel);
     __observation = await __observeModelMenu();
   } else {
@@ -848,6 +982,9 @@ if (!__composerReady) {
   const __needsModel = __input.request.modelLabel !== undefined && __observation.modelLabel !== __input.request.modelLabel;
   if (__needsModel) {
     __observation = await __selectRequestedModel(__input.request.modelLabel);
+  }
+  if (__input.request.webSearch === true && __observation.webSearchActive !== true) {
+    __throw("WEB_SEARCH_PILL_MISSING", "ChatGPT webpage search pill was not observed after preparation");
   }
   __emit({ ok: true, value: __observation });
 }
@@ -876,6 +1013,7 @@ if (__input.resource.conversationUrl && await __page.url() !== __input.resource.
 }
 const __inspect = ${inspectSource};
 ${menuSource}
+${searchSource}
 const __initial = await __page.evaluate(__inspect);
 if (__initial.loginRequired) __throw("WEB_LOGIN_REQUIRED", "ChatGPT login is required");
 if (__initial.visibleError) __throw("WEB_PAGE_ERROR", "ChatGPT page reported a visible error");
@@ -883,6 +1021,12 @@ if (__initial.composerCount !== 1) __throw("WEB_PAGE_NOT_READY", "ChatGPT has no
 const __before = await __observeModelMenu();
 if (__before.generating || __before.composerText !== "" || __before.hasAttachments || __before.userMessageCount !== 0 || __before.assistantMessages.length !== 0) {
   __throw("WEB_CONVERSATION_NOT_EMPTY", "ChatGPT conversation is not empty");
+}
+if (__input.request.webSearch === true) {
+  __assertSearchBaseline(__before);
+  if (__before.webSearchActive !== true) {
+    __throw("WEB_SEARCH_ACTIVE_REQUIRED", "ChatGPT webpage search was not confirmed before submission");
+  }
 }
 if (__input.request.modelLabel !== undefined && __before.modelLabel !== __input.request.modelLabel) {
   __throw("WEB_MODEL_MISMATCH", "Observed model label does not match the request");
@@ -914,10 +1058,35 @@ const __composerSelector = await __page.evaluate(() => {
   return null;
 });
 if (!__composerSelector) __throw("WEB_PAGE_NOT_READY", "ChatGPT composer is unavailable");
-await __page.fill(__composerSelector, __input.request.prompt, { clearFirst: true });
+if (__input.request.webSearch === true) {
+  const __focused = await __page.evaluate((selector) => {
+    const composer = document.querySelector(selector);
+    if (!composer || !(composer instanceof HTMLElement)) return false;
+    const selection = document.getSelection();
+    if (!selection) return false;
+    const range = document.createRange();
+    range.selectNodeContents(composer);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    composer.focus();
+    return document.activeElement === composer;
+  }, __composerSelector);
+  if (!__focused) __throw("WEB_SEARCH_COMPOSER_FOCUS_FAILED", "ChatGPT composer could not be focused after webpage search selection");
+  try {
+    await __page.keyboard.insertText(__input.request.prompt);
+  } catch {
+    __throw("WEB_SEARCH_TEXT_INSERT_FAILED", "ChatGPT prompt could not be inserted without clearing webpage search");
+  }
+} else {
+  await __page.fill(__composerSelector, __input.request.prompt, { clearFirst: true });
+}
 const __afterFill = await __observeModelMenu();
 if (__afterFill.composerText !== __input.request.prompt || __afterFill.hasAttachments) {
   __throw("WEB_DRAFT_MISMATCH", "ChatGPT composer readback did not match the request");
+}
+if (__input.request.webSearch === true && __afterFill.webSearchActive !== true) {
+  __throw("WEB_SEARCH_PILL_MISSING", "ChatGPT webpage search pill was not observed before submission");
 }
 if (__input.request.modelLabel !== undefined && __afterFill.modelLabel !== __input.request.modelLabel) {
   __throw("WEB_MODEL_MISMATCH", "Observed model label does not match the request");
@@ -980,13 +1149,19 @@ function validateFrameObservation(value: unknown): ChatGptPageObservation {
 export class EgoWebAdapter implements WebBrowserAdapter {
   readonly #config: Required<Pick<EgoWebAdapterOptions, 'executable' | 'cwd' | 'commandTimeoutMs'>>
   readonly #spaceId: number | undefined
+  readonly #createPage: boolean
+  readonly #retainSpace: boolean
   readonly #stdoutMaxBytes: number
   readonly #stderrMaxBytes: number
   readonly #run: EgoProcessRunner
   #lastNotices: string[] = []
   readonly #created = new Map<string, WebRunResource>()
   readonly #creating = new Map<string, Promise<WebRunResource>>()
-  readonly #prepared = new Map<number, { readonly modelLabel?: string; readonly effortLabel?: string }>()
+  readonly #prepared = new Map<number, {
+    readonly modelLabel?: string
+    readonly effortLabel?: string
+    readonly webSearchActive?: boolean
+  }>()
   readonly #submitted = new Set<number>()
   readonly #finishing = new Set<number>()
   readonly #finished = new Set<number>()
@@ -1005,12 +1180,21 @@ export class EgoWebAdapter implements WebBrowserAdapter {
     if (config.spaceId !== undefined && (!Number.isSafeInteger(config.spaceId) || config.spaceId <= 0)) {
       throw browserError('WEB_CONFIG_INVALID', 'Ego browser TaskSpace id is invalid')
     }
+    if ((config.createPage !== undefined && typeof config.createPage !== 'boolean')
+      || (config.retainSpace !== undefined && typeof config.retainSpace !== 'boolean')) {
+      throw browserError('WEB_CONFIG_INVALID', 'Ego browser page/space retention options are invalid')
+    }
+    if (config.createPage === true && config.spaceId === undefined) {
+      throw browserError('WEB_CONFIG_INVALID', 'Ego browser createPage requires an existing TaskSpace id')
+    }
     this.#config = {
       executable: config.executable,
       cwd: config.cwd,
       commandTimeoutMs: config.commandTimeoutMs,
     }
     this.#spaceId = config.spaceId
+    this.#createPage = config.createPage === true
+    this.#retainSpace = config.retainSpace === true
     this.#stdoutMaxBytes = stdoutMaxBytes
     this.#stderrMaxBytes = Math.max(
       DEFAULT_STDERR_MAX_BYTES,
@@ -1035,8 +1219,11 @@ export class EgoWebAdapter implements WebBrowserAdapter {
       const value = await this.#invoke<{ spaceId: number; pageLabel: string }>('create', {
         runId,
         ...(this.#spaceId === undefined ? {} : { spaceId: this.#spaceId }),
+        createPage: this.#createPage,
       }, signal)
-      if (!isRecord(value) || !Number.isSafeInteger(value.spaceId) || value.spaceId <= 0 || value.pageLabel !== 'p1') {
+      if (!isRecord(value) || !Number.isSafeInteger(value.spaceId) || value.spaceId <= 0
+        || typeof value.pageLabel !== 'string' || !/^p[1-9]\d*$/.test(value.pageLabel)
+        || !Number.isSafeInteger(Number(value.pageLabel.slice(1)))) {
         throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid TaskSpace resource')
       }
       const resource: WebRunResource = { spaceId: value.spaceId, pageLabel: value.pageLabel }
@@ -1060,10 +1247,11 @@ export class EgoWebAdapter implements WebBrowserAdapter {
       timeoutMs: this.#config.commandTimeoutMs,
     }, signal))
     this.#assertReady(observation, true)
-    assertRequestedLabels(request, observation)
+    assertRequestedLabels(request, observation, true)
     this.#prepared.set(resource.spaceId, {
       ...(observation.modelLabel === undefined ? {} : { modelLabel: observation.modelLabel }),
       ...(observation.effortLabel === undefined ? {} : { effortLabel: observation.effortLabel }),
+      ...(observation.webSearchActive === undefined ? {} : { webSearchActive: observation.webSearchActive }),
     })
     return observation
   }
@@ -1089,6 +1277,9 @@ export class EgoWebAdapter implements WebBrowserAdapter {
     if (request.effortLabel !== undefined && prepared.effortLabel !== request.effortLabel) {
       throw browserError('WEB_EFFORT_MISMATCH', 'ChatGPT reasoning effort was not prepared for this request')
     }
+    if (request.webSearch === true && prepared.webSearchActive !== true) {
+      throw browserError('WEB_SEARCH_ACTIVE_REQUIRED', 'ChatGPT webpage search was not prepared for this request')
+    }
     this.#submitted.add(resource.spaceId)
     const observation = validateFrameObservation(await this.#invoke('submit', {
       resource,
@@ -1106,6 +1297,10 @@ export class EgoWebAdapter implements WebBrowserAdapter {
     }
     this.#finishing.add(resource.spaceId)
     try {
+      if (this.#retainSpace) {
+        this.#finished.add(resource.spaceId)
+        return
+      }
       const value = await this.#invoke<{ finished: boolean }>('finish', { resource }, undefined)
       if (!isRecord(value) || value.finished !== true) throw browserError('WEB_EGO_FRAME', 'Ego browser did not confirm TaskSpace finish')
       this.#finished.add(resource.spaceId)

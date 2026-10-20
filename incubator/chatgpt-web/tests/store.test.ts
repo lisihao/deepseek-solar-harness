@@ -40,6 +40,42 @@ describe('WebRunStore', () => {
     expect(await reopened.list()).toEqual([created])
   })
 
+  it('keeps the v1 web-search fields strict while reading legacy records without them', async () => {
+    const root = await makeRoot()
+    const id = randomUUID()
+    const store = new WebRunStore(root)
+    const created = await store.create(id, request())
+    const revisionPath = join(root, id, '0.json')
+    const legacy = JSON.parse(await readFile(revisionPath, 'utf8')) as {
+      request: Record<string, unknown>
+      observed?: Record<string, unknown>
+    }
+    delete legacy.request.webSearch
+    await writeFile(revisionPath, JSON.stringify(legacy), { mode: 0o600 })
+
+    await expect(new WebRunStore(root).read(id)).resolves.toMatchObject({
+      request: { ...request(), webSearch: false },
+    })
+
+    legacy.request.webSearch = 'true'
+    await writeFile(revisionPath, JSON.stringify(legacy), { mode: 0o600 })
+    await expect(new WebRunStore(root).read(id)).rejects.toMatchObject({ code: 'WEB_STATE_INVALID' })
+
+    legacy.request.webSearch = true
+    legacy.observed = { modelLabel: 'gpt-5', effortLabel: 'high', webSearchActive: 'true' }
+    await writeFile(revisionPath, JSON.stringify(legacy), { mode: 0o600 })
+    await expect(new WebRunStore(root).read(id)).rejects.toMatchObject({ code: 'WEB_STATE_INVALID' })
+
+    const selected = await store.create(randomUUID(), { ...request(), webSearch: true })
+    const observed = await store.transition(selected.id, selected.revision, {
+      observed: { modelLabel: 'gpt-5', effortLabel: 'high', webSearchActive: true },
+    })
+    expect(observed).toMatchObject({
+      request: { webSearch: true },
+      observed: { webSearchActive: true },
+    })
+  })
+
   it('returns the latest revision for an idempotent create and rejects changed input without leaking it', async () => {
     const root = await makeRoot()
     const id = randomUUID()

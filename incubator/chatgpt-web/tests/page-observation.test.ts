@@ -149,6 +149,17 @@ function composer(...children: Array<Child | string>): FakeElement {
   return element('div', { class: 'ProseMirror', contenteditable: 'true' }, ...children)
 }
 
+function webSearchPill(): FakeElement {
+  return element('span', {
+    'data-inline-selection-pill': '',
+    'data-system-hint-type': 'search',
+    'data-system-hint-label': '网页搜索',
+    'data-prompt-link-href': 'chatgpt-system-hint://search',
+    'data-prompt-link-label': '网页搜索',
+    contenteditable: 'false',
+  }, '网页搜索')
+}
+
 function assistant(...children: Array<Child | string>): FakeElement {
   return element('article', { 'data-message-author-role': 'assistant' },
     element('div', { 'data-markdown-text-style': 'assistant-message' }, ...children))
@@ -283,6 +294,18 @@ describe('inspectChatGptPage', () => {
 
     expect(result.composerText).toBe('keep this draft')
     expect(result.hasAttachments).toBe(true)
+  })
+
+  it('recognizes only the semantic webpage-search pill and excludes only that pill from prompts', () => {
+    const prompt = '网页搜索用户自己写下的前缀必须保留'
+    const result = inspect(element('main', {},
+      element('form', {}, composer(webSearchPill(), element('div', {}, prompt))),
+      element('article', { 'data-message-author-role': 'user' }, webSearchPill(), prompt),
+    ))
+
+    expect(result.webSearchActive).toBe(true)
+    expect(result.composerText).toBe(prompt)
+    expect(result.userMessages).toEqual([prompt])
   })
 
   it('uses a visible stop control as the generation observation', () => {
