@@ -28,6 +28,13 @@ for (const name of packages) {
     sourcemap: true,
   })
 }
+await build({
+  entryPoints: ['src/client.ts'], absWorkingDir: join(root, 'incubator/model-handoff'),
+  outfile: 'lib/client.js', bundle: true, packages: 'external', platform: 'browser', target: 'es2022', format: 'cjs', sourcemap: true,
+  banner: { js: 'window.__ModuleLoader__.load({id:"@lisihao/dsh-solar-model-handoff",factory(require,module,exports){' },
+  footer: { js: 'return module.exports;}});' },
+})
+execFileSync(join(root, 'node_modules/.bin/tsc'), ['-p', join(root, 'tools/tsconfig.handoff-client.json')], { cwd: root, stdio: 'inherit' })
 const declarations = join(root, '.build-types')
 await rm(declarations, { recursive: true, force: true })
 const config = join(root, 'tools', 'tsconfig.build.json')
@@ -35,7 +42,7 @@ await writeFile(config, JSON.stringify({
   extends: '../tsconfig.json',
   compilerOptions: { noEmit: false, declaration: true, emitDeclarationOnly: true, rootDir: '../incubator', outDir: '../.build-types' },
   include: ['../incubator/*/src/**/*.ts'],
-  exclude: ['../incubator/*/tests/**', '../incubator/*/lib/**', '../node_modules/**'],
+  exclude: ['../incubator/*/tests/**', '../incubator/*/lib/**', '../node_modules/**', '../incubator/model-handoff/src/client.ts'],
 }, null, 2) + '\n')
 execFileSync(join(root, 'node_modules/.bin/tsc'), ['-p', config], { cwd: root, stdio: 'inherit' })
 for (const name of packages) {
@@ -44,3 +51,5 @@ for (const name of packages) {
   await cp(join(declarations, name, 'src'), target, { recursive: true })
 }
 console.log(`Built ${packages.join(', ')} and declarations.`)
+
+execFileSync(join(root, 'node_modules/.bin/tsc'), ['-p', join(root, 'tools/tsconfig.handoff-client.json'), '--noEmit', 'false', '--declaration', '--emitDeclarationOnly', '--outDir', join(root, 'incubator/model-handoff/lib/types')], { cwd: root, stdio: 'inherit' })

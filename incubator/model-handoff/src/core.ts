@@ -154,7 +154,7 @@ export function parseDraft(text: string, requireOptions = false): HandoffDraft {
   return validateDraft(value, requireOptions)
 }
 
-function validateAnswer(value: unknown, index: number): HandoffAnswer {
+export function validateAnswer(value: unknown, index: number): HandoffAnswer {
   const label = `answers[${index}]`
   if (!isRecord(value)) {
     throw new HandoffError('invalid-shape', `${label} must be an object`)

@@ -12,9 +12,10 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import z from '@deepseek-ai/schemastery'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { parseDraft, renderHandoff, type HandoffTarget } from './core.js'
+import { parseDraft, renderHandoff, validateAnswer, type HandoffTarget } from './core.js'
 import { HandoffStore, hash, type HandoffState } from './store.js'
 import { chunkProvenance, planChunks } from './chunks.js'
+import { HANDOFF_COMPACTION_PREFIX } from './progress.js'
 
 export const name = 'model-handoff'
 export const inject = ['llm', 'agents', 'sessions', 'sessionQuery', 'tokenMeter', 'userQuestions', 'commands']
@@ -86,12 +87,16 @@ export class HandoffEngine extends CompactionEngine {
     const measurement = this.ctx.tokenMeter.measure(session)
     const shadowedTokenCount = measurement.nodes.filter(node => shadowedSeqs.includes(node.seq)).reduce((sum, node) => sum + node.heuristicTokens, 0)
     if (raw.events.length !== session.seq) throw new Error('准备交接时会话已经变化。')
-    const compactionId = CompactionId(randomUUID())
+    const compactionId = CompactionId(HANDOFF_COMPACTION_PREFIX + randomUUID())
     const operation = this.operations.get(session)
     if (operation) operation.compactionId = compactionId
     const startEvent = session.append('compaction/start', { compactionId, turn })
     let closingAttempted = false
     try {
+      // Publish the native transaction before any provider wait so the Client
+      // can lock its retained editor while the existing Host gate is armed.
+      await this.ctx.sessions.flush(session)
+      signal.throwIfAborted()
       const result = await this.summarize({ messages: [] }, agent, signal)
       signal.throwIfAborted()
       if (JSON.stringify(session.surface.nodes) !== JSON.stringify(nodes)) throw new Error('等待期间会话上下文已变化，未替换旧范围。')
@@ -238,14 +243,29 @@ export class HandoffEngine extends CompactionEngine {
     }
     if (!state.draftText || !state.rawOutput) throw new Error('交接记录缺少完整摘要结果，拒绝继续。')
     const draft = parseDraft(state.draftText)
-    if (!state.answers) {
-      const answer = await this.ctx.userQuestions.ask({ agent, signal, questions: draft.questions.map(q => ({ id: q.id, question: q.question, options: [...(q.options ?? []).map(label => ({ label })), { label: '暂无补充' }] })) })
-      state.answers = answer.answers.map(item => ({ id: item.id, answer: item.custom ?? item.selected.join('、') }))
-      renderHandoff(draft, state.answers, op.target)
-      state.phase = 'answered'
+    const answers = (state.answers ?? []).map(validateAnswer)
+    if (new Set(answers.map(answer => answer.id)).size !== answers.length
+      || answers.some(answer => !draft.questions.some(question => question.id === answer.id))) {
+      throw new Error('已保存的补充答案与当前问题不匹配。')
+    }
+    for (const [index, question] of draft.questions.entries()) {
+      if (answers.some(answer => answer.id === question.id)) continue
+      // A native option's Enter submits its entire request. Keep each request
+      // to one question so that Enter can settle it without unanswered siblings.
+      const response = await this.ctx.userQuestions.ask({ agent, signal, questions: [{
+        id: question.id, question: `补充问题 ${index + 1}/${draft.questions.length}：${question.question}`,
+        options: [...(question.options ?? []).map(label => ({ label })), { label: '暂无补充' }],
+      }] })
+      const item = response.answers[0]
+      if (response.answers.length !== 1 || item?.id !== question.id || item.selected.length > 1) {
+        throw new Error('补充问题需要对应的一项选择或自定义答案。')
+      }
+      answers.push(validateAnswer({ id: item.id, answer: item.custom ?? item.selected[0] ?? '暂无补充' }, index))
+      state.answers = [...answers]
+      state.phase = answers.length === draft.questions.length ? 'answered' : 'draft'
       await this.store.write(state)
     }
-    let finalText = renderHandoff(draft, state.answers, op.target)
+    let finalText = renderHandoff(draft, answers, op.target)
     if (Buffer.byteLength(finalText) > this.settings.maxHandoffBytes) throw new Error('交接正文超出上限，未截断用户答案。')
     if (state.phase !== 'confirmed') {
       while (true) {
@@ -257,7 +277,7 @@ export class HandoffEngine extends CompactionEngine {
         const choice = answer.answers[0]
         if (choice?.custom?.trim()) {
           const edited = parseDraft(JSON.stringify({ ...draft, summary: choice.custom }))
-          finalText = renderHandoff(edited, state.answers, op.target)
+          finalText = renderHandoff(edited, answers, op.target)
           if (Buffer.byteLength(finalText) > this.settings.maxHandoffBytes) throw new Error('编辑后的交接正文超出上限。')
           state.draftText = JSON.stringify(edited)
           state.phase = 'answered'

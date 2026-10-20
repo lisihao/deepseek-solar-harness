@@ -85,7 +85,7 @@ describe('model-handoff runtime boundary', () => {
   })
 
   it('runs the isolated compaction subclass on a real Session and keeps the original log', async () => {
-    const fixture = await createFixture()
+    const fixture = await createFixture({ assertPreparationPublished: true })
     fixtures.push(fixture)
     fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
 
@@ -98,7 +98,7 @@ describe('model-handoff runtime boundary', () => {
     expect(fixture.calls[0]?.model).toBe(config.summaryModel)
     const summaryPrompt = fixture.calls[0]?.messages.at(-1)?.content
     expect(summaryPrompt?.[0]).toMatchObject({ type: 'text', text: expect.stringContaining('旧会话中的原始任务') })
-    expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+    expect(fixture.asks.map(ask => ask.ids)).toEqual([['next'], ['risk'], ['handoff-confirm']])
     const messages = fixture.session.deriveMessages().map(message => message.content)
     expect(messages).toHaveLength(2)
     expect(messages[0]).toEqual([{ type: 'text', text: '系统头' }])
@@ -122,7 +122,8 @@ describe('model-handoff runtime boundary', () => {
     fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
     const user = fixture.session.surface.nodes.at(-1)!
     await fixture.engine.compactRegion(user, user, fixture.agent)
-    expect(fixture.asks[0]?.options).toEqual([
+    expect(fixture.asks.every(ask => ask.ids.length === 1)).toBe(true)
+    expect(fixture.asks.slice(0, 2).flatMap(ask => ask.options ?? [])).toEqual([
       ['先运行验证。', '先复核当前约束。', '暂无补充'],
       ['保留失败未知状态。', '先核对未决风险再继续。', '暂无补充'],
     ])
@@ -133,6 +134,25 @@ describe('model-handoff runtime boundary', () => {
     expect(checkpoint).toContain('回答2：保留失败未知状态。')
     expect(checkpoint).not.toContain('先复核当前约束。')
     expect(fixture.calls).toHaveLength(1)
+  })
+
+  it('persists each choice before asking the next question and resumes without re-asking it or calling Luna', async () => {
+    const fixture = await createFixture({ chooseCandidates: true, blockQuestionId: 'risk' })
+    fixtures.push(fixture)
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const controller = new AbortController()
+    const user = fixture.session.surface.nodes.at(-1)!
+    const pending = fixture.engine.compactRegion(user, user, fixture.agent, controller.signal)
+    await waitFor(() => fixture.asks.length === 2)
+    const saved = await fixture.engine.store.read(fixture.session.id)
+    expect(saved?.phase).toBe('draft')
+    expect(saved?.answers).toEqual([{ id: 'next', answer: '先运行验证。' }])
+    controller.abort(new Error('pause on second question'))
+    await expect(pending).rejects.toThrow('pause on second question')
+    await fixture.engine.compactRegion(user, user, fixture.agent)
+    expect(fixture.calls).toHaveLength(1)
+    expect(fixture.asks.map(ask => ask.ids)).toEqual([['next'], ['risk'], ['risk'], ['handoff-confirm']])
+    expect((await fixture.engine.store.read(fixture.session.id))?.answers).toHaveLength(2)
   })
 
   it('does not call Luna when the draft is already persisted and confirmed', async () => {
@@ -194,7 +214,7 @@ describe('model-handoff runtime boundary', () => {
     expect(fixture.targetRequests).toHaveLength(0)
     fixture.releaseQuestions()
     await pending
-    expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+    expect(fixture.asks.map(ask => ask.ids)).toEqual([['next'], ['risk'], ['handoff-confirm']])
     expect(fixture.targetRequests).toHaveLength(0)
   })
 
@@ -246,7 +266,7 @@ describe('model-handoff runtime boundary', () => {
       expect(fixture.targetRequests[0]).toContain('新触发输入')
       expect(fixture.targetRequests[0]).not.toContain('旧会话中的原始任务')
       expect(resolvedRoute).toBe(1)
-      expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+      expect(fixture.asks.map(ask => ask.ids)).toEqual([['next'], ['risk'], ['handoff-confirm']])
     } finally {
       removeCommands(); removeAgents()
       if (previousHome === undefined) delete process.env.DSH_HOME
@@ -271,7 +291,7 @@ describe('model-handoff runtime boundary', () => {
       await waitFor(() => fixture.asks.length === 1)
       expect(fixture.targetRequests).toHaveLength(0)
       fixture.releaseQuestions()
-      await waitFor(() => fixture.asks.length === 2)
+      await waitFor(() => fixture.asks.length === 3)
       expect(fixture.targetRequests).toHaveLength(0)
       await waitFor(() => fixture.session.deriveMessages().some(message => message.content.some(block => block.type === 'text' && block.text.includes('模型交接'))))
       const receiptStore = new HandoffStore(join(fixture.root, 'solar', 'model-handoff'))
@@ -326,7 +346,7 @@ describe('model-handoff runtime boundary', () => {
       expect(fixture.calls[0]?.model).toBe(config.summaryModel)
       expect(fixture.targetRequests).toHaveLength(0)
       expect((await receiptStore.read(fixture.session.id))?.target).toEqual(latest)
-      expect(fixture.asks.map(ask => ask.ids)).toEqual([['next', 'risk'], ['handoff-confirm']])
+      expect(fixture.asks.map(ask => ask.ids)).toEqual([['next'], ['risk'], ['handoff-confirm']])
     } finally {
       removeCommands(); removeAgents()
       if (previousHome === undefined) delete process.env.DSH_HOME
@@ -437,7 +457,7 @@ describe('model-handoff runtime boundary', () => {
         step: 1,
         signal: new AbortController().signal,
       }, async () => target)
-      await waitFor(() => fixture.asks.length === 2 && fixture.flushPending())
+      await waitFor(() => fixture.asks.length === 3 && fixture.flushPending())
       expect(fixture.flushPending()).toBe(true)
       const newerTarget = { provider: 'new-provider', model: 'new-model' }
       const selection = fixture.session.append('model/selection', newerTarget)
@@ -601,6 +621,7 @@ describe('model-handoff runtime boundary', () => {
 })
 
 type FixtureOptions = {
+  readonly assertPreparationPublished?: boolean
   readonly blockLuna?: boolean
   readonly blockQuestions?: boolean
   readonly extraHistory?: boolean
@@ -612,6 +633,7 @@ type FixtureOptions = {
   readonly malformedLuna?: boolean
   readonly includeUsage?: boolean
   readonly chooseCandidates?: boolean
+  readonly blockQuestionId?: string
 }
 
 async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixture & {
@@ -629,7 +651,8 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
   let releaseQuestions!: () => void
   let releaseFlush!: () => void
   let flushIsPending = false
-  let blockedQuestions = options.blockQuestions === true ? 1 : 0
+  let flushedThrough = -1
+  let blockedQuestions = options.blockQuestions === true || options.blockQuestionId !== undefined ? 1 : 0
 
   const session = Session.create(SessionId(`runtime-${Math.random().toString(16).slice(2)}`))
   const append = <T extends Parameters<Session['append']>[0]>(type: T, data: Parameters<Session['append']>[1], opts?: Parameters<Session['append']>[2]) => {
@@ -656,6 +679,12 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
 
   const removeLlm = ctx.provide('llm', {
     async prepareCall(request: { provider: string; model: string }) {
+      if (options.assertPreparationPublished && request.provider === config.summaryProvider) {
+        const start = session.snapshotEvents().findLast(event => event.type === 'compaction/start')
+        expect(start).toBeDefined()
+        expect(start?.data.compactionId).toMatch(/^solar-model-handoff:/)
+        expect(flushedThrough).toBeGreaterThanOrEqual(start!.seq)
+      }
       return {
         config: { ...request, maxTokens: config.maxOutputTokens },
         retryPolicy: {},
@@ -691,7 +720,8 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
   })
   const removeSessions = ctx.provide('sessions', {
     flush: async () => {
-      if (!options.blockFlush) return
+      flushedThrough = session.seq - 1
+      if (!options.blockFlush || !session.snapshotEvents().some(event => event.type === 'compaction/end')) return
       await new Promise<void>(resolve => {
         flushIsPending = true
         releaseFlush = () => { flushIsPending = false; resolve() }
@@ -705,7 +735,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
   const removeQuestions = ctx.provide('userQuestions', {
     ask: async (request: { questions: readonly { id: string; detail?: string; options?: readonly { label: string }[] }[]; signal?: AbortSignal; agent: Agent; }): Promise<unknown> => {
       asks.push({ ids: request.questions.map(question => question.id), options: request.questions.map(question => question.options?.map(option => option.label) ?? []), ...request.questions[0]?.detail === undefined ? {} : { detail: request.questions[0].detail } })
-      if (blockedQuestions > 0) {
+      if (blockedQuestions > 0 && (options.blockQuestionId === undefined || request.questions[0]?.id === options.blockQuestionId)) {
         blockedQuestions -= 1
         await new Promise<void>((resolve, reject) => {
           resolveQuestions = resolve
@@ -715,7 +745,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
       if (request.questions[0]?.id === 'handoff-budget' && options.approveBudget) return { answers: [{ id: 'handoff-budget', selected: ['按此上限继续'] }] }
       if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
       if (options.chooseCandidates) return { answers: request.questions.map(question => ({ id: question.id, selected: [question.options![0]!.label] })) }
-      return { answers: [{ id: 'next', selected: [], custom: '先运行验证。' }, { id: 'risk', selected: [], custom: '保留失败未知状态。' }] }
+      return { answers: request.questions.map(question => ({ id: question.id, selected: [], custom: question.id === 'next' ? '先运行验证。' : '保留失败未知状态。' })) }
     },
   })
   const agent = {
