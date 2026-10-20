@@ -45,7 +45,7 @@ export interface InsightModelSelection {
   readonly provider: InsightProvider
   /** Native executors may require an exact model id distinct from a display label. */
   readonly modelId?: string
-  /** The exact requested label. It is never substituted with an inferred alias. */
+  /** Exact pin; only an ordinary ChatGPT Web stage may use empty to follow its target page. */
   readonly modelLabel: string
   readonly effortLabel?: string
   readonly modeLabel?: string
@@ -57,6 +57,7 @@ export interface InsightObservedSelection {
   readonly providerLabel?: string
   readonly modelLabel?: string
   readonly effortLabel?: string
+  readonly effortId?: string
   readonly modeLabel?: string
 }
 

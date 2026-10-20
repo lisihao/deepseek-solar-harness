@@ -12,11 +12,22 @@ import {
 } from 'react'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { InsightConfigV1, InsightModelSelection } from './insight-contract.js'
+import type {
+  WebEffortChoice,
+  WebModelCatalog,
+  WebModelCatalogApi,
+  WebModelChoice,
+} from './model-catalog.js'
 import type { WebPreferences, WebPreferencesSaveInput } from './preferences.js'
 
 export interface PreferencesClientApi {
   read(): Promise<WebPreferences>
   save(input: WebPreferencesSaveInput): Promise<WebPreferences>
+}
+
+export interface PreferencesPanelApis {
+  readonly api?: PreferencesClientApi
+  readonly modelCatalog?: WebModelCatalogApi
 }
 
 export interface PreferencesWire {
@@ -153,6 +164,86 @@ function InputField(props: {
   ])
 }
 
+/** Return only choices the target Ego Lite page reported as enabled. */
+export function availableCatalogModels(catalog: WebModelCatalog | undefined): readonly WebModelChoice[] {
+  return catalog?.models.filter(choice => choice.available) ?? []
+}
+
+/**
+ * Effort choices are scoped to the model used for the explicit catalogue
+ * observation.  An effort observed for another model is never presented as a
+ * universal option.
+ */
+export function availableCatalogEfforts(catalog: WebModelCatalog | undefined, modelLabel: string): readonly WebEffortChoice[] {
+  if (catalog === undefined || modelLabel !== catalog.effortModelLabel) return []
+  return catalog.efforts.filter(choice => choice.available)
+}
+
+/** ChatGPT Insight stages share the Ego Lite catalogue; Codex/Gemini do not. */
+export function shouldOfferCatalogChoices(selection: InsightModelSelection): boolean {
+  return selection.provider === 'chatgpt'
+}
+
+export function catalogValueIsUnmatched(value: string, choices: readonly { readonly label: string }[]): boolean {
+  return value.length > 0 && !choices.some(choice => choice.label === value)
+}
+
+export function formatCatalogObservedAt(value: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZoneName: 'short',
+  }).format(date)
+}
+
+function CatalogChoiceField(props: {
+  readonly id: string
+  readonly label: string
+  readonly value: string
+  readonly choices: readonly { readonly label: string }[]
+  readonly catalogObserved?: boolean
+  readonly allowEmpty?: boolean
+  readonly emptyLabel?: string
+  readonly onChange: (value: string) => void
+}): ReactElement | null {
+  if (props.choices.length === 0) {
+    if (props.catalogObserved !== true || props.value.length === 0) return null
+    return createElement('p', { style: mutedStyle }, '当前保存的精确标签在这次目标浏览器目录中没有可用项，仍会保留；不会自动替换。')
+  }
+  const unmatched = catalogValueIsUnmatched(props.value, props.choices)
+  const options = [
+    props.allowEmpty === true ? createElement('option', { key: 'empty', value: '' }, props.emptyLabel ?? '留空：跟随目标浏览器当前选择') : null,
+    unmatched ? createElement('option', { key: 'unmatched', value: props.value }, `当前保存的“${props.value}”（目录未匹配）`) : null,
+    ...props.choices.map(choice => createElement('option', { key: choice.label, value: choice.label }, choice.label)),
+  ]
+  return createElement('div', { style: fieldStyle }, [
+    createElement('label', { key: 'label', htmlFor: props.id }, props.label),
+    createElement('select', {
+      key: 'select',
+      id: props.id,
+      value: props.value,
+      onChange: (event: ChangeEvent<HTMLSelectElement>) => props.onChange(event.target.value),
+      style: inputStyle,
+    }, options),
+    unmatched
+      ? createElement('p', { key: 'note', style: mutedStyle }, '当前保存的精确标签不在这次目标浏览器目录中，仍会保留；不会自动替换。')
+      : null,
+  ])
+}
+
+function CatalogTargetSummary({ catalog }: { readonly catalog: WebModelCatalog }): ReactElement {
+  const selectedEffort = catalog.selected.effortLabel ?? catalog.selected.effortId ?? '未观测到思考档'
+  return createElement('section', { key: 'catalog-summary', style: sectionStyle }, [
+    createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '目标浏览器模型目录'),
+    createElement('p', { key: 'target', style: mutedStyle }, '插件目标浏览器：Ego Lite；目录只来自该插件目标，不是用户的 Chrome。'),
+    createElement('p', { key: 'observed', style: mutedStyle }, `目录观测时间（浏览器本地）：${formatCatalogObservedAt(catalog.observedAt)}`),
+    createElement('p', { key: 'selected', style: mutedStyle }, `目标浏览器当前选择：${catalog.selected.modelLabel} / ${selectedEffort}`),
+    createElement('p', { key: 'scope', style: mutedStyle }, `本次思考档目录属于模型：${catalog.effortModelLabel}；模型和思考档的可用项均来自这次显式观测。`),
+  ])
+}
+
 function TemplateField(props: { readonly id: string; readonly label: string; readonly value: string; readonly onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void }): ReactElement {
   return createElement('div', { style: fieldStyle }, [
     createElement('label', { key: 'label', htmlFor: props.id }, props.label),
@@ -168,9 +259,12 @@ function stageTemplate(config: InsightConfigV1, stage: Exclude<ConfigStageKey, '
   return (config as unknown as Record<ConfigStageKey, { template: { text: string } }>)[stage].template.text
 }
 
-export function PreferencesPanel({ api }: { readonly api?: PreferencesClientApi }): ReactElement {
+export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): ReactElement {
   const fieldId = useId()
   const [preferences, setPreferences] = useState<WebPreferences | undefined>()
+  const [catalog, setCatalog] = useState<WebModelCatalog | undefined>()
+  const [catalogTargetModel, setCatalogTargetModel] = useState('')
+  const [catalogRefreshing, setCatalogRefreshing] = useState(false)
   const [advancedJson, setAdvancedJson] = useState('')
   const [advancedDirty, setAdvancedDirty] = useState(false)
   const [geminiJson, setGeminiJson] = useState('{}')
@@ -203,6 +297,23 @@ export function PreferencesPanel({ api }: { readonly api?: PreferencesClientApi 
   useEffect(() => {
     void read()
   }, [read])
+
+  // Reading a cached snapshot is safe during mount.  Refresh is deliberately
+  // separate and is only started by the explicit button below.
+  useEffect(() => {
+    if (modelCatalog === undefined) {
+      setCatalog(undefined)
+      return
+    }
+    let active = true
+    void modelCatalog.read().then(value => {
+      if (!active) return
+      setCatalog(value)
+    }).catch(error => {
+      if (active) setNotice({ tone: 'error', message: `无法读取模型目录缓存：${errorText(error)}` })
+    })
+    return () => { active = false }
+  }, [modelCatalog])
 
   const update = useCallback((next: WebPreferences): void => {
     setPreferences(next)
@@ -248,6 +359,22 @@ export function PreferencesPanel({ api }: { readonly api?: PreferencesClientApi 
     }
   }, [advancedDirty, advancedJson, api, geminiDirty, geminiJson, preferences, saving, update])
 
+  const refreshModelCatalog = useCallback(async (): Promise<void> => {
+    if (modelCatalog === undefined || catalogRefreshing) return
+    setCatalogRefreshing(true)
+    try {
+      const value = await modelCatalog.refresh({
+        ...(catalogTargetModel.trim().length === 0 ? {} : { modelLabel: catalogTargetModel }),
+      })
+      setCatalog(value)
+      setNotice({ tone: 'info', message: '已读取目标浏览器模型目录；没有提交模型请求。' })
+    } catch (error) {
+      setNotice({ tone: 'error', message: `目标浏览器模型目录刷新未完成：${errorText(error)}` })
+    } finally {
+      setCatalogRefreshing(false)
+    }
+  }, [catalogRefreshing, catalogTargetModel, modelCatalog])
+
   if (api === undefined) {
     return createElement('main', { style: panelStyle }, [
       createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem' } }, '网页和洞察设置'),
@@ -267,11 +394,62 @@ export function PreferencesPanel({ api }: { readonly api?: PreferencesClientApi 
   const geminiNotice = createElement('p', { key: 'gemini-notice', style: mutedStyle }, !hasGeminiSemantics
     ? 'Gemini Deep Research 的语义选择器尚未在实时界面中核实；当前未配置选择器，不能声称该流程可用。若取得新的界面证据，请在高级 JSON 中填写并保存，实际运行仍需单独核对。'
     : 'Gemini Deep Research 的语义选择器来自显式配置，实时界面可用性仍未核实；保存配置不会声称该流程已经可用。')
+  const catalogModels = availableCatalogModels(catalog)
+  const catalogWebEfforts = availableCatalogEfforts(catalog, current.web.modelLabel.trim() || catalog?.effortModelLabel || '')
+  const catalogSection = modelCatalog === undefined
+    ? createElement('section', { key: 'catalog', style: sectionStyle }, [
+      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '目标浏览器模型目录'),
+      createElement('p', { key: 'hint', style: mutedStyle }, '目录控制通道尚未连接；手工填写的模型和思考档标签仍会按原样保留。'),
+    ])
+    : createElement('section', { key: 'catalog', style: sectionStyle }, [
+      catalog === undefined
+        ? createElement('p', { key: 'empty', style: mutedStyle }, '尚未读取到缓存目录。点击“刷新目标浏览器模型目录”后才会进行一次显式目标浏览器观测。')
+        : createElement(CatalogTargetSummary, { key: 'summary', catalog }),
+      createElement(CatalogChoiceField, {
+        key: 'target-model',
+        id: `${fieldId}-catalog-target-model`,
+        label: '刷新时选择模型（可选）',
+        value: catalogTargetModel,
+        choices: catalogModels,
+        catalogObserved: catalog !== undefined,
+        allowEmpty: true,
+        onChange: setCatalogTargetModel,
+      }),
+      createElement('div', { key: 'actions', style: actionRowStyle }, [
+        createElement('button', {
+          key: 'refresh',
+          type: 'button',
+          disabled: catalogRefreshing,
+          onClick: () => { void refreshModelCatalog() },
+          style: buttonStyle,
+        }, catalogRefreshing ? '正在读取目标浏览器模型目录…' : '刷新目标浏览器模型目录'),
+      ]),
+    ])
   const webSection = createElement('section', { key: 'web', style: sectionStyle }, [
     createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '普通 ChatGPT 网页请求'),
-    createElement('p', { key: 'hint', style: mutedStyle }, '默认请求标签为 GPT-6 / medium；实际网页档位以提交前观测结果为准。'),
-    createElement(InputField, { key: 'model', id: `${fieldId}-web-model`, label: '模型标签', value: current.web.modelLabel, onChange: (event: ChangeEvent<HTMLInputElement>) => setPreferences({ ...current, web: { ...current.web, modelLabel: event.target.value } }) }),
-    createElement(InputField, { key: 'effort', id: `${fieldId}-web-effort`, label: '思考档标签', value: current.web.effortLabel, onChange: (event: ChangeEvent<HTMLInputElement>) => setPreferences({ ...current, web: { ...current.web, effortLabel: event.target.value } }) }),
+    createElement('p', { key: 'hint', style: mutedStyle }, '模型和思考档留空表示跟随目标浏览器当前选择；填写或选择精确标签后才会请求该标签。'),
+    createElement(CatalogChoiceField, {
+      key: 'model-choice',
+      id: `${fieldId}-web-model-choice`,
+      label: '已观测模型（可选）',
+      value: current.web.modelLabel,
+      choices: catalogModels,
+      catalogObserved: catalog !== undefined,
+      allowEmpty: true,
+      onChange: value => setPreferences({ ...current, web: { ...current.web, modelLabel: value } }),
+    }),
+    createElement(InputField, { key: 'model', id: `${fieldId}-web-model`, label: '模型标签（可手工填写精确值）', value: current.web.modelLabel, onChange: (event: ChangeEvent<HTMLInputElement>) => setPreferences({ ...current, web: { ...current.web, modelLabel: event.target.value } }) }),
+    createElement(CatalogChoiceField, {
+      key: 'effort-choice',
+      id: `${fieldId}-web-effort-choice`,
+      label: `已观测思考档（${catalog?.effortModelLabel ?? '尚未确定所属模型'}）`,
+      value: current.web.effortLabel,
+      choices: catalogWebEfforts,
+      catalogObserved: catalog !== undefined,
+      allowEmpty: true,
+      onChange: value => setPreferences({ ...current, web: { ...current.web, effortLabel: value } }),
+    }),
+    createElement(InputField, { key: 'effort', id: `${fieldId}-web-effort`, label: '思考档标签（可手工填写精确值）', value: current.web.effortLabel, onChange: (event: ChangeEvent<HTMLInputElement>) => setPreferences({ ...current, web: { ...current.web, effortLabel: event.target.value } }) }),
   ])
 
   const clarification = current.insight.clarification
@@ -287,9 +465,34 @@ export function PreferencesPanel({ api }: { readonly api?: PreferencesClientApi 
 
   const stageSections = STAGES.map(stage => {
     const requested = stageRequested(current.insight, stage.id)
+    const useCatalog = shouldOfferCatalogChoices(requested)
+    const stageEfforts = useCatalog ? availableCatalogEfforts(catalog, requested.modelLabel) : []
     return createElement('section', { key: stage.id, style: sectionStyle }, [
       createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, stage.label),
+      useCatalog
+        ? createElement(CatalogChoiceField, {
+          key: 'model-choice',
+          id: `${fieldId}-${stage.id}-model-choice`,
+          label: '已观测模型',
+          value: requested.modelLabel,
+          choices: catalogModels,
+          catalogObserved: catalog !== undefined,
+          onChange: value => update(updateRequested(current, stage.id, 'modelLabel', value)),
+        })
+        : null,
       createElement(InputField, { key: 'model', id: `${fieldId}-${stage.id}-model`, label: '模型标签', value: requested.modelLabel, onChange: event => update(updateRequested(current, stage.id, 'modelLabel', event.target.value)) }),
+      useCatalog
+        ? createElement(CatalogChoiceField, {
+          key: 'effort-choice',
+          id: `${fieldId}-${stage.id}-effort-choice`,
+          label: `已观测思考档（${catalog?.effortModelLabel ?? '尚未确定所属模型'}）`,
+          value: requested.effortLabel ?? '',
+          choices: stageEfforts,
+          catalogObserved: catalog !== undefined,
+          allowEmpty: true,
+          onChange: value => update(updateRequested(current, stage.id, 'effortLabel', value)),
+        })
+        : null,
       createElement(InputField, { key: 'effort', id: `${fieldId}-${stage.id}-effort`, label: '思考档标签', value: requested.effortLabel ?? '', onChange: event => update(updateRequested(current, stage.id, 'effortLabel', event.target.value)) }),
       stage.mode ? createElement(InputField, { key: 'mode', id: `${fieldId}-${stage.id}-mode`, label: '模式标签', value: requested.modeLabel ?? '', onChange: event => update(updateRequested(current, stage.id, 'modeLabel', event.target.value)) }) : null,
       createElement(TemplateField, { key: 'template', id: `${fieldId}-${stage.id}-template`, label: 'prompt 模板', value: stageTemplate(current.insight, stage.id), onChange: event => update(updateTemplate(current, stage.id, event.target.value)) }),
@@ -315,7 +518,7 @@ export function PreferencesPanel({ api }: { readonly api?: PreferencesClientApi 
       createElement('p', { key: 'snapshot', style: mutedStyle }, '这些设置只影响新运行；已经开始的运行继续使用各自保存的配置快照。'),
     ]),
     notice === undefined ? null : createElement('p', { key: 'notice', role: notice.tone === 'error' ? 'alert' : 'status', style: { ...sectionStyle, color: notice.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'inherit' } }, notice.message),
-    createElement('form', { key: 'form', onSubmit: save }, [webSection, clarificationSection, ...stageSections, advanced, createElement('div', { key: 'actions', style: actionRowStyle }, [
+    createElement('form', { key: 'form', onSubmit: save }, [catalogSection, webSection, clarificationSection, ...stageSections, advanced, createElement('div', { key: 'actions', style: actionRowStyle }, [
       createElement('button', { key: 'save', type: 'submit', disabled: saving || loading, style: buttonStyle }, saving ? '正在保存…' : '保存设置'),
       createElement('button', { key: 'reload', type: 'button', disabled: saving || loading, onClick: () => { void read() }, style: buttonStyle }, '重新读取'),
     ])]),

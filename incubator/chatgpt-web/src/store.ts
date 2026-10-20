@@ -32,6 +32,8 @@ export interface WebRunResource {
 export interface WebRunObserved {
   readonly modelLabel?: string
   readonly effortLabel?: string
+  /** Independent raw website identifier, when exposed. */
+  readonly effortId?: string
   /** Present only when the current composer exposed the semantic search pill. */
   readonly webSearchActive?: boolean
 }
@@ -196,13 +198,15 @@ function validateResource(value: unknown): WebRunResource {
 
 function validateObserved(value: unknown): WebRunObserved {
   if (!isObject(value)) throw invalidState()
-  assertKeys(value, ['modelLabel', 'effortLabel', 'webSearchActive'])
+  assertKeys(value, ['modelLabel', 'effortLabel', 'effortId', 'webSearchActive'])
   assertOptionalString(value, 'modelLabel')
   assertOptionalString(value, 'effortLabel')
+  assertOptionalString(value, 'effortId')
   assertOptionalBoolean(value, 'webSearchActive')
   return {
     ...(value.modelLabel === undefined ? {} : { modelLabel: value.modelLabel as string }),
     ...(value.effortLabel === undefined ? {} : { effortLabel: value.effortLabel as string }),
+    ...(value.effortId === undefined ? {} : { effortId: value.effortId as string }),
     ...(value.webSearchActive === undefined ? {} : { webSearchActive: value.webSearchActive as boolean }),
   }
 }

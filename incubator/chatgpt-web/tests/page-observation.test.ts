@@ -245,8 +245,10 @@ describe('inspectChatGptPage', () => {
       element('form', {}, composer()),
       element('button', { 'aria-label': '选择 ChatGPT 模型' }, 'Medium'),
       element('div', { role: 'menu' },
-        element('div', { role: 'menuitemradio', 'aria-checked': 'true' }, 'GPT-6'),
-        element('div', { role: 'menuitemradio', 'aria-checked': 'false' }, 'GPT-5.6 Sol'),
+        element('div', { 'data-model-picker-view': 'advanced' },
+          element('div', { role: 'menuitemradio', 'aria-checked': 'true' }, 'GPT-6'),
+          element('div', { role: 'menuitemradio', 'aria-checked': 'false' }, 'GPT-5.6 Sol'),
+        ),
       ),
     ))
 
@@ -254,7 +256,7 @@ describe('inspectChatGptPage', () => {
     expect(result.effortLabel).toBe('Medium')
   })
 
-  it('prefers the observed raw effort identifier over contaminated trigger text', () => {
+  it('keeps the visible effort label and raw identifier separate', () => {
     const result = inspect(element('main', {},
       element('form', {}, composer()),
       element('button', {
@@ -266,14 +268,17 @@ describe('inspectChatGptPage', () => {
       element('span', {}, '中'),
       ),
       element('div', { role: 'menu' },
-        element('div', { role: 'menuitemradio', 'aria-checked': 'true' }, 'GPT-6'),
-        element('div', { role: 'menuitemradio', 'aria-checked': 'false' }, 'GPT-5.6 Sol'),
+        element('div', { 'data-model-picker-view': 'advanced' },
+          element('div', { role: 'menuitemradio', 'aria-checked': 'true' }, 'GPT-6'),
+          element('div', { role: 'menuitemradio', 'aria-checked': 'false' }, 'GPT-5.6 Sol'),
+        ),
       ),
       element('button', { 'data-effort-label': 'stale display label' }, 'stale display label'),
     ))
 
     expect(result.modelLabel).toBe('GPT-6')
-    expect(result.effortLabel).toBe('medium')
+    expect(result.effortLabel).toBe('中')
+    expect(result.effortId).toBe('medium')
   })
 
   it('does not select a composer when more than one visible input is present', () => {

@@ -1,3 +1,4 @@
+import { matchesWebEffort } from './web-selection.js'
 import { createHash } from 'node:crypto'
 import { isAbsolute, join, parse } from 'node:path'
 
@@ -231,13 +232,14 @@ function observedSelection(
   webSearch: boolean,
 ): InsightObservedSelection | undefined {
   const observed = record.observed
-  if (observed?.modelLabel === undefined || observed.modelLabel !== request.requested.modelLabel) return undefined
-  if (request.requested.effortLabel !== undefined && observed.effortLabel !== request.requested.effortLabel) return undefined
+  if (observed?.modelLabel === undefined || (request.requested.modelLabel !== '' && observed.modelLabel !== request.requested.modelLabel)) return undefined
+  if (!matchesWebEffort(request.requested.effortLabel, observed)) return undefined
   if (webSearch && observed.webSearchActive !== true) return undefined
   return {
     availability: 'observed',
     modelLabel: observed.modelLabel,
     ...(observed.effortLabel === undefined ? {} : { effortLabel: observed.effortLabel }),
+    ...(observed.effortId === undefined ? {} : { effortId: observed.effortId }),
     ...(webSearch ? { modeLabel: request.requested.modeLabel } : {}),
   }
 }
@@ -272,6 +274,7 @@ function outputFromRecord(
             ...(record.resource?.conversationUrl === undefined ? [] : [`Conversation URL: ${record.resource.conversationUrl}`]),
             `Model: ${observed.modelLabel ?? ''}`,
             ...(observed.effortLabel === undefined ? [] : [`Reasoning effort: ${observed.effortLabel}`]),
+            ...(observed.effortId === undefined ? [] : [`Reasoning identifier: ${observed.effortId}`]),
             ...(webSearch ? ['Web search: enabled'] : []),
           ],
           citations: markdownCitations(record.output.markdown),
@@ -348,7 +351,7 @@ function chatGptRequest(request: StudioExternalPortRequest, enforceInputLimit: b
   if (request.requested.provider !== 'chatgpt' || request.resource.provider !== 'chatgpt') {
     return { code: 'STUDIO_WEB_PROVIDER_UNSUPPORTED', reason: 'ChatGPT Web stage requires ChatGPT requested and resource identities.' }
   }
-  if (!nonEmpty(request.requested.modelLabel)) {
+  if (!nonEmpty(request.requested.modelLabel) && !(request.nodeKind === 'chatgpt-web' && request.requested.modelLabel === '')) {
     return { code: 'STUDIO_WEB_MODEL_INVALID', reason: 'ChatGPT Web stage requires an exact non-empty requested model label.' }
   }
   const fallbackSearch = (request.nodeKind === 'gemini-research' || request.nodeKind === 'gemini-thinking')
@@ -381,7 +384,7 @@ function chatGptRequest(request: StudioExternalPortRequest, enforceInputLimit: b
   return {
     request: {
       prompt: request.renderedInput,
-      modelLabel: request.requested.modelLabel,
+      ...(request.requested.modelLabel === '' ? {} : { modelLabel: request.requested.modelLabel }),
       ...(request.requested.effortLabel === undefined ? {} : { effortLabel: request.requested.effortLabel }),
       webSearch,
     },

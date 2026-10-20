@@ -7,6 +7,7 @@ import { WebRunStore } from './store.js'
 import { WebController } from './controller.js'
 import { EgoWebAdapter } from './ego-adapter.js'
 import { WebControl } from './control.js'
+import { ModelCatalogControl } from './model-catalog-control.js'
 import { createWebProvider, createWebTool } from './bindings.js'
 import { WEB_LLM_PROVIDER } from './llm-adapter.js'
 import { ConversationRuntime } from './conversation-runtime.js'
@@ -60,6 +61,11 @@ export function apply(ctx: Context, config: Config): void {
     ...(config.effortLabel.trim() ? { effortLabel: config.effortLabel.trim() } : {}),
   }
   new WebControl(ctx, controller, defaults)
+  // Discovery uses a new isolated page in the plugin's own browser, never Chrome state.
+  new ModelCatalogControl(ctx, new EgoWebAdapter({
+    executable: config.executablePath, cwd: root, commandTimeoutMs: config.commandTimeoutMs,
+    stdoutMaxBytes: 512 * 1024,
+  }), async () => (await controller.list()).some(run => ['prepared', 'ready', 'submission-unknown', 'submitted', 'indeterminate'].includes(run.stage)))
   const initial = defaultWebPreferences()
   const preferences = new PreferencesStore(root, { ...initial, web: { ...initial.web, ...defaults } })
   new PreferencesControl(ctx, preferences)

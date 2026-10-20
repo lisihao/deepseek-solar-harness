@@ -292,7 +292,7 @@ export function defaultWebPreferences(): WebPreferences {
   return {
     formatVersion: 1,
     revision: 0,
-    web: { modelLabel: 'GPT-6', effortLabel: 'medium' },
+    web: { modelLabel: '', effortLabel: '' },
     insight: normalizeInsight(defaultInsightConfig()),
   }
 }

@@ -79,6 +79,17 @@ function ports(overrides: Partial<StudioBoundPorts> = {}): StudioBoundPorts {
 }
 
 describe('editable Studio Web/Insight providers', () => {
+  it('preserves target-browser current selection through a saved ordinary Web graph', async () => {
+    const graph = buildWebStudioGraph({ sessionId: 'session-current', context: '', question: 'follow target browser', config: { ...webConfig(), requested: { provider: 'chatgpt', modelLabel: '' } } })
+    const received: StudioExternalPortRequest[] = []
+    const provider = createWebStudioProvider({ root: await root(), ports: ports({ execute: async request => { received.push(request); return completion(request, 'current browser answer') } }) })
+    expect(await provider.validate(graph)).toEqual([])
+    const id = randomUUID()
+    expect((await provider.execute({ commandId: id, sessionId: graph.sessionId, graph })).status).toBe('completed')
+    expect(received[0]?.requested.modelLabel).toBe('')
+    expect((await provider.store.read(graph.sessionId, id))?.nodes[0]?.phases[0]?.requested?.modelLabel).toBe('')
+  })
+
   it('captures an edited/reordered/deleted Insight graph exactly and labels omitted stages', async () => {
     const stateRoot = await root()
     const base = buildInsightStudioGraph({

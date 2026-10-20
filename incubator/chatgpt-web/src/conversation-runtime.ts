@@ -107,7 +107,7 @@ export class ConversationRuntime extends LlmAdapter {
   }
   private async onWebRequest(input:WebLlmRequestCapture):Promise<void> {
     const graph=buildWebStudioGraph({sessionId:input.sessionId,context:'',question:input.request.prompt,config:{
-      requested:{provider:'chatgpt',modelLabel:input.request.modelLabel ?? '网页当前模型',...(input.request.effortLabel?{effortLabel:input.request.effortLabel}:{})},
+      requested:{provider:'chatgpt',modelLabel:input.request.modelLabel ?? '',...(input.request.effortLabel?{effortLabel:input.request.effortLabel}:{})},
       template:versionedTemplate('web-conversation','1',input.request.prompt),title:'ChatGPT 网页回答',parameters:{inputForm:'complete-request'},
     }})
     await this.options.logRequest(input.sessionId,JSON.stringify({kind:'web-request',id:input.id,request:input.request}))

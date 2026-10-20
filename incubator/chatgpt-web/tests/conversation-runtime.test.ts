@@ -241,13 +241,20 @@ describe('ConversationRuntime', () => {
     expect(source?.graph.providerId).toBe('web')
     expect(source?.graph.metadata.question).toContain('solar-chatgpt-web conversation')
     expect(source?.graph.nodes[0]?.prompt).toBe(source?.graph.metadata.question)
+    expect(source?.graph.nodes[0]?.parameters.requested).toEqual({ provider: 'chatgpt', modelLabel: '' })
+    const browserRequest = value.controller.start.mock.calls[0]?.[1] as WebRunRequest | undefined
+    expect(browserRequest?.modelLabel).toBeUndefined()
+    expect(browserRequest?.effortLabel).toBeUndefined()
     const completed = value.captures.find(capture => capture.run?.status === 'completed')
     expect(completed?.run?.output).toBe('普通网页完整回答')
     expect(value.logs.some(text => text.includes('web-request'))).toBe(true)
   })
 
   it('retains the prepared Web model and effort after preferences change', async () => {
-    const value = await fixture()
+    const value = await fixture({ preferences: {
+      ...defaultWebPreferences(),
+      web: { modelLabel: 'GPT-6', effortLabel: 'medium' },
+    } })
     const prepared = await value.runtime.prepareCall(PROVIDER, 'chatgpt-web')
     expect(prepared.model.reasoning?.defaultEffort).toBe('medium')
     const current = await value.preferences.read()

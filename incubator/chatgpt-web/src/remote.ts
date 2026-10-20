@@ -1,4 +1,5 @@
 import { RPC_WEB_PREFERENCES } from './preferences-remote.js'
+import { RPC_WEB_MODEL_CATALOG } from './model-catalog-remote.js'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 
 const PKG = '@lisihao/dsh-solar-chatgpt-web'
@@ -38,5 +39,5 @@ export const RPC_REMOTE: TypertRemoteContribution = {
       ? []
       : [{ name: 'input', wire: 'input', source: 'json' as const, codec: codec(method === 'launch' ? 'WebLaunchInput' : 'WebIdInput') }],
     result: codec(resultType(method)),
-  })), ...RPC_WEB_PREFERENCES.descriptors],
+  })), ...RPC_WEB_PREFERENCES.descriptors, ...RPC_WEB_MODEL_CATALOG.descriptors],
 }

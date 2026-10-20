@@ -6,6 +6,10 @@ Harness peers and dev packages are pinned to `0.2.1-rc.2` in `package.json` and 
 
 The `./operator` export is for trusted JavaScript callers and trusted external adapters; it is not an arbitrary-code model tool. `src/process.ts` owns stdin-only CLI transport and bounded process cleanup. `src/ego-adapter.ts` is the thin public TaskSpace/Page adapter. `src/page-observation.ts` owns the visible DOM selectors and Markdown projection. `src/controller.ts` owns durable admission/submission state, polling and unknown-effect handling. `src/conversation-runtime.ts` and `src/conversation-adapter.ts` bind the public model catalog, immutable per-request preferences, normal assistant chunks, captured source flows and known completion delivery. `src/studio-provider.ts` owns editable Web/Insight phase execution; `src/studio-bindings.ts` binds Native, ChatGPT and Gemini effects. `src/gemini-port.ts` / `src/gemini-page.ts` own the Gemini public page adapter; unobserved Deep Research controls remain explicitly unconfigured. `src/insight-preset.ts` uses the public preset and request waterfall, without private model-selection registries. UI uses the official rc.2 module loader, conversation/settings slots and Typert Remote services, with actual `--dsw-alias-*` theme tokens.
 
+`src/model-catalog-control.ts` owns explicit no-prompt discovery and its volatile owner-only cache. Model/effort options are runtime observations, not pinned versions in source. `src/model-catalog.ts` defines their target-browser scope. Website control protocol changes can still require adapter maintenance; ordinary model additions do not.
+
+New format-one Web/Insight records can contain optional observed `effortId`, separate from the visible `effortLabel`. New readers accept old records without rewriting them. Older strict readers may reject the additional key.
+
 ## Upgrade procedure
 
 1. Read the new public Ego API and Harness release changes before running them. Verify CLI version/API independently; do not silently run a browser upgrader or replace authentication.

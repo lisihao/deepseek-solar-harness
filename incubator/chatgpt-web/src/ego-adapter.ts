@@ -5,6 +5,7 @@ import {
   WebBrowserError,
   type WebBrowserAdapter,
 } from './browser-contract.js'
+import type { WebModelCatalog, WebModelCatalogRefreshInput } from './model-catalog.js'
 import { runEgoProcess } from './process.js'
 import { EgoProcessError, type EgoProcessRequest, type EgoProcessResult } from './process-contract.js'
 import type { WebRunRequest, WebRunResource } from './store.js'
@@ -29,6 +30,8 @@ const COMPOSER_SELECTORS = [
 const DEFAULT_STDOUT_MAX_BYTES = 512 * 1024
 const DEFAULT_STDERR_MAX_BYTES = 32 * 1024
 const STDERR_NOTICE_OVERHEAD_BYTES = 64 * 1024
+/** Operational output bound, never a list of model or effort names. */
+const MAX_CATALOG_CHOICES = 128
 const EGO_NOTICE_PREFIX = '[ego-browser:notice]'
 const OBSERVATION_KEYS = [
   'url',
@@ -42,6 +45,7 @@ const OBSERVATION_KEYS = [
   'generating',
   'modelLabel',
   'effortLabel',
+  'effortId',
   'webSearchActive',
   'visibleError',
 ] as const
@@ -64,7 +68,7 @@ export interface EgoWebAdapterOptions {
   readonly retainSpace?: boolean
 }
 
-type EgoOperation = 'create' | 'prepare' | 'observe' | 'submit' | 'finish'
+type EgoOperation = 'create' | 'catalog' | 'prepare' | 'observe' | 'submit' | 'finish'
 
 interface FrameSuccess {
   readonly ok: true
@@ -138,8 +142,8 @@ function assertRequest(request: WebRunRequest): void {
   }
 }
 
-function isEffortLike(value: string | undefined): boolean {
-  return value !== undefined && /^(?:low|medium|high|xhigh|very high|standard|fast)$/i.test(value.trim())
+function matchesRequestedEffort(observation: Pick<ChatGptPageObservation, 'effortLabel' | 'effortId'>, requested: string | undefined): boolean {
+  return requested === undefined || observation.effortLabel === requested || observation.effortId === requested
 }
 
 function assertRequestedLabels(
@@ -150,20 +154,18 @@ function assertRequestedLabels(
   if (observation.modelLabel === undefined || observation.modelLabel.trim().length === 0) {
     throw browserError('WEB_MODEL_UNKNOWN', 'The observed ChatGPT model is unavailable')
   }
-  if (isEffortLike(observation.modelLabel)) {
-    throw browserError('WEB_MODEL_MISMATCH', 'The observed model label is an effort label')
-  }
   if (requireWebSearch && request.webSearch === true && observation.webSearchActive !== true) {
     throw browserError('WEB_SEARCH_ACTIVE_REQUIRED', 'The observed ChatGPT webpage search mode is unavailable')
   }
   if (requireWebSearch && request.webSearch === true
-    && (observation.effortLabel === undefined || observation.effortLabel.trim().length === 0)) {
+    && (observation.effortLabel === undefined || observation.effortLabel.trim().length === 0)
+    && (observation.effortId === undefined || observation.effortId.trim().length === 0)) {
     throw browserError('WEB_EFFORT_UNKNOWN', 'The observed ChatGPT reasoning effort is unavailable')
   }
   if (request.modelLabel !== undefined && observation.modelLabel !== request.modelLabel) {
     throw browserError('WEB_MODEL_MISMATCH', 'The observed model label does not match the request')
   }
-  if (request.effortLabel !== undefined && observation.effortLabel !== request.effortLabel) {
+  if (!matchesRequestedEffort(observation, request.effortLabel)) {
     throw browserError('WEB_EFFORT_MISMATCH', 'The observed reasoning label does not match the request')
   }
 }
@@ -192,7 +194,7 @@ function assertObservation(value: unknown): ChatGptPageObservation {
       throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid assistant message')
     }
   }
-  for (const key of ['modelLabel', 'effortLabel', 'visibleError'] as const) {
+  for (const key of ['modelLabel', 'effortLabel', 'effortId', 'visibleError'] as const) {
     if (hasOwn(value, key) && value[key] !== undefined && typeof value[key] !== 'string') {
       throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid optional observation field')
     }
@@ -201,6 +203,98 @@ function assertObservation(value: unknown): ChatGptPageObservation {
     throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid optional observation field')
   }
   return value as unknown as ChatGptPageObservation
+}
+
+function assertCatalogInput(value: WebModelCatalogRefreshInput): void {
+  if (!isRecord(value)) throw browserError('WEB_CATALOG_INVALID', 'ChatGPT model catalog input is invalid')
+  assertExactKeys(value, ['modelLabel'], 'WEB_CATALOG_INVALID', 'ChatGPT model catalog input is invalid')
+  if (value.modelLabel !== undefined && (typeof value.modelLabel !== 'string' || value.modelLabel.length > 120)) {
+    throw browserError('WEB_CATALOG_INVALID', 'ChatGPT model catalog model label is invalid')
+  }
+}
+
+function assertCatalogLabel(value: unknown, message: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > 512) {
+    throw browserError('WEB_EGO_FRAME', message)
+  }
+}
+
+function assertCatalogModelChoice(value: unknown): { readonly label: string; readonly available: boolean; readonly selected: boolean } {
+  if (!isRecord(value)) throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog choice')
+  assertExactKeys(value, ['label', 'available', 'selected'], 'WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog choice')
+  assertCatalogLabel(value.label, 'Ego browser returned an invalid model catalog label')
+  if (typeof value.available !== 'boolean' || typeof value.selected !== 'boolean') {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog choice')
+  }
+  return value as { readonly label: string; readonly available: boolean; readonly selected: boolean }
+}
+
+function assertCatalogEffortChoice(value: unknown): { readonly label: string; readonly id?: string; readonly index?: number; readonly available: boolean; readonly selected: boolean } {
+  if (!isRecord(value)) throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid effort catalog choice')
+  assertExactKeys(value, ['label', 'id', 'index', 'available', 'selected'], 'WEB_EGO_FRAME', 'Ego browser returned an invalid effort catalog choice')
+  assertCatalogLabel(value.label, 'Ego browser returned an invalid effort catalog label')
+  if (hasOwn(value, 'id') && value.id !== undefined) assertCatalogLabel(value.id, 'Ego browser returned an invalid effort catalog identifier')
+  if (hasOwn(value, 'index') && value.index !== undefined && (!Number.isSafeInteger(value.index) || typeof value.index !== 'number')) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid effort catalog index')
+  }
+  if (typeof value.available !== 'boolean' || typeof value.selected !== 'boolean') {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid effort catalog choice')
+  }
+  return value as { readonly label: string; readonly id?: string; readonly index?: number; readonly available: boolean; readonly selected: boolean }
+}
+
+function assertModelCatalog(value: unknown, resource: WebRunResource): WebModelCatalog {
+  if (!isRecord(value)) throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog')
+  assertExactKeys(value, ['formatVersion', 'observedAt', 'browser', 'models', 'effortModelLabel', 'efforts', 'selected'], 'WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog shape')
+  if (value.formatVersion !== 1 || typeof value.observedAt !== 'string' || value.observedAt.length > 64 || Number.isNaN(Date.parse(value.observedAt))) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog header')
+  }
+  if (!isRecord(value.browser)) throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog browser')
+  assertExactKeys(value.browser, ['kind', 'spaceId', 'pageLabel'], 'WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog browser')
+  if (value.browser.kind !== 'ego-lite' || value.browser.spaceId !== resource.spaceId || value.browser.pageLabel !== resource.pageLabel) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned a model catalog for another target page')
+  }
+  if (!Array.isArray(value.models) || value.models.length === 0 || value.models.length > MAX_CATALOG_CHOICES) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid model catalog choices list')
+  }
+  const models = value.models.map(assertCatalogModelChoice)
+  if (new Set(models.map((choice) => choice.label)).size !== models.length || models.filter((choice) => choice.selected).length !== 1) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an ambiguous model catalog')
+  }
+  assertCatalogLabel(value.effortModelLabel, 'Ego browser returned an invalid effort model label')
+  if (!models.some((choice) => choice.label === value.effortModelLabel)) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an effort catalog for an unknown model')
+  }
+  if (!Array.isArray(value.efforts) || value.efforts.length > MAX_CATALOG_CHOICES) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid effort catalog choices list')
+  }
+  const efforts = value.efforts.map(assertCatalogEffortChoice)
+  if (new Set(efforts.map((choice) => `${choice.index ?? ''}\u0000${choice.id ?? ''}\u0000${choice.label}`)).size !== efforts.length
+    || (efforts.length > 0 && efforts.filter((choice) => choice.selected).length !== 1)) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an ambiguous effort catalog')
+  }
+  if (!isRecord(value.selected)) throw browserError('WEB_EGO_FRAME', 'Ego browser returned an invalid selected catalog value')
+  const selected = value.selected
+  assertExactKeys(selected, ['modelLabel', 'effortLabel', 'effortId'], 'WEB_EGO_FRAME', 'Ego browser returned an invalid selected catalog value')
+  assertCatalogLabel(selected.modelLabel, 'Ego browser returned an invalid selected model label')
+  if (!models.some((choice) => choice.label === selected.modelLabel && choice.selected)) {
+    throw browserError('WEB_EGO_FRAME', 'Ego browser returned an inconsistent selected model')
+  }
+  if (hasOwn(selected, 'effortLabel') && selected.effortLabel !== undefined) {
+    assertCatalogLabel(selected.effortLabel, 'Ego browser returned an invalid selected effort label')
+  }
+  if (hasOwn(selected, 'effortId') && selected.effortId !== undefined) {
+    assertCatalogLabel(selected.effortId, 'Ego browser returned an invalid selected effort identifier')
+  }
+  if (selected.modelLabel === value.effortModelLabel) {
+    const selectedEffort = efforts.find((choice) => choice.selected)
+    if ((selectedEffort === undefined && (selected.effortLabel !== undefined || selected.effortId !== undefined))
+      || (selectedEffort !== undefined && (selected.effortLabel !== selectedEffort.label
+        || (selectedEffort.id !== undefined && selected.effortId !== selectedEffort.id)))) {
+      throw browserError('WEB_EGO_FRAME', 'Ego browser returned an inconsistent selected effort')
+    }
+  }
+  return value as unknown as WebModelCatalog
 }
 
 function decodeFrame(stdout: string, maxBytes = DEFAULT_STDOUT_MAX_BYTES): EgoFrame {
@@ -451,7 +545,7 @@ const __waitForRequestedModel = async (requestedLabel) => {
       const matches = Array.from(document.querySelectorAll('[role="menuitemradio"][aria-checked="true"]'))
         .filter((element) => element.closest(${JSON.stringify(MODEL_ADVANCED_VIEW_SELECTOR)}) !== null)
         .filter((element) => visible(element) && enabled(element))
-        .filter((element) => [element.getAttribute("aria-label"), element.innerText, element.textContent]
+        .filter((element) => [element.getAttribute("data-model-label"), element.getAttribute("data-model-name"), element.getAttribute("aria-label"), element.innerText, element.textContent]
           .map(normalize).filter((value) => value.length > 0).includes(label));
       return matches.length === 1;
     }, requestedLabel, { timeout: __input.timeoutMs });
@@ -551,9 +645,6 @@ const __observeModelMenu = async () => {
     if (!__menuObservation || typeof __menuObservation.modelLabel !== "string" || __menuObservation.modelLabel.trim().length === 0) {
       __throw("WEB_MODEL_UNKNOWN", "ChatGPT model menu has no checked model");
     }
-    if (/^(?:low|medium|high|xhigh|very high|standard|fast)$/i.test(__menuObservation.modelLabel.trim())) {
-      __throw("WEB_MODEL_MISMATCH", "Observed model label is an effort label");
-    }
     return __menuObservation;
   } finally {
     await __closeModelMenu();
@@ -568,6 +659,10 @@ const __observeEffortMenu = async () => {
     await __closeModelMenu();
   }
 };
+
+const __matchesRequestedEffort = (observation, requestedLabel) => requestedLabel === undefined
+  || observation?.effortLabel === requestedLabel
+  || observation?.effortId === requestedLabel;
 
 const __cssPath = (element) => {
   const parts = [];
@@ -610,7 +705,7 @@ const __selectRequestedModel = async (requestedLabel) => {
         .filter((element) => element.closest(${JSON.stringify(MODEL_ADVANCED_VIEW_SELECTOR)}) !== null)
         .filter((element) => visible(element) && enabled(element));
       const matches = radios.filter((element) => {
-        const labels = [element.getAttribute("aria-label"), element.innerText, element.textContent]
+        const labels = [element.getAttribute("data-model-label"), element.getAttribute("data-model-name"), element.getAttribute("aria-label"), element.innerText, element.textContent]
           .map(normalize)
           .filter((value) => value.length > 0);
         return labels.includes(label);
@@ -647,6 +742,48 @@ const __selectRequestedModel = async (requestedLabel) => {
   }
 };
 
+const __readModelChoices = async () => __page.evaluate(() => {
+  const visible = (element) => {
+    for (let current = element; current !== null; current = current.parentElement) {
+      if (current.hasAttribute("hidden") || current.getAttribute("aria-hidden") === "true" || current.hasAttribute("inert")) return false;
+      const style = getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") return false;
+      if (style.display !== "contents" && current.getClientRects().length === 0) return false;
+    }
+    return true;
+  };
+  const enabled = (element) => !element.hasAttribute("disabled")
+    && element.getAttribute("aria-disabled") !== "true"
+    && (!("disabled" in element) || !element.disabled);
+  const normalize = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+  const radios = Array.from(document.querySelectorAll('[role="menuitemradio"]'))
+    .filter((element) => element.closest(${JSON.stringify(MODEL_ADVANCED_VIEW_SELECTOR)}) !== null)
+    .filter(visible);
+  if (radios.length === 0 || radios.length > ${MAX_CATALOG_CHOICES}) return null;
+  const choices = radios.map((element) => {
+    const label = [element.getAttribute("data-model-label"), element.getAttribute("data-model-name"), element.getAttribute("aria-label"), element.innerText, element.textContent]
+      .map(normalize).find((value) => value.length > 0);
+    if (!label) return null;
+    return { label, available: enabled(element), selected: element.getAttribute("aria-checked") === "true" };
+  });
+  if (choices.some((choice) => choice === null)) return null;
+  if (new Set(choices.map((choice) => choice.label)).size !== choices.length) return null;
+  if (choices.filter((choice) => choice.selected).length !== 1) return null;
+  return choices;
+});
+
+const __catalogModelChoices = async () => {
+  try {
+    await __openModelMenu("advanced");
+    await __waitForCheckedModel();
+    const choices = await __readModelChoices();
+    if (!choices) __throw("WEB_MODEL_UNKNOWN", "ChatGPT model choices are unavailable or ambiguous");
+    return choices;
+  } finally {
+    await __closeModelMenu();
+  }
+};
+
 const __readEffortState = async () => __page.evaluate(() => {
   const visible = (element) => {
     for (let current = element; current !== null; current = current.parentElement) {
@@ -672,11 +809,14 @@ const __readEffortState = async () => __page.evaluate(() => {
   const max = Number(slider.getAttribute("aria-valuemax"));
   const now = Number(slider.getAttribute("aria-valuenow"));
   if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || !Number.isSafeInteger(now)
-    || min > max || max - min > 20 || now < min || now > max) return null;
+    || min > max || max - min >= ${MAX_CATALOG_CHOICES} || now < min || now > max) return null;
   const buttons = Array.from(document.querySelectorAll(${JSON.stringify(MODEL_BUTTON_SELECTOR)})).filter(visible);
   if (buttons.length !== 1) return null;
   const rawId = (buttons[0].getAttribute("data-selected-reasoning-effort") || "").trim();
-  if (rawId.length === 0) return null;
+  const displayLabel = (slider.getAttribute("aria-valuetext")
+    || buttons[0].getAttribute("data-reasoning-effort-label")
+    || buttons[0].getAttribute("data-effort-label")
+    || "").replace(/\\s+/g, " ").trim();
   const cssPath = (element) => {
     const parts = [];
     let current = element;
@@ -690,8 +830,49 @@ const __readEffortState = async () => __page.evaluate(() => {
     }
     return parts.join(" > ");
   };
-  return { sliderSelector: cssPath(wrappers[0]), min, max, now, rawId };
+  return {
+    sliderSelector: cssPath(wrappers[0]), min, max, now,
+    ...(rawId.length === 0 ? {} : { rawId }),
+    ...(displayLabel.length === 0 ? {} : { displayLabel }),
+  };
 });
+
+const __readEffortReading = async (state) => {
+  const observation = await __page.evaluate(__inspect);
+  const observedLabel = typeof observation?.effortLabel === "string" && observation.effortLabel.trim().length > 0
+    ? observation.effortLabel
+    : undefined;
+  const observedId = typeof observation?.effortId === "string" && observation.effortId.trim().length > 0
+    ? observation.effortId
+    : undefined;
+  const label = observedLabel ?? state.displayLabel ?? state.rawId;
+  const id = observedId ?? state.rawId;
+  return {
+    ...(label === undefined ? {} : { label }),
+    ...(id === undefined ? {} : { id }),
+  };
+};
+
+const __hasVisibleEffortControl = async () => {
+  try {
+    return await __page.evaluate(() => {
+      const visible = (element) => {
+        for (let current = element; current !== null; current = current.parentElement) {
+          if (current.hasAttribute("hidden") || current.getAttribute("aria-hidden") === "true" || current.hasAttribute("inert")) return false;
+          const style = getComputedStyle(current);
+          if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") return false;
+          if (style.display !== "contents" && current.getClientRects().length === 0) return false;
+        }
+        return true;
+      };
+      const wrappers = Array.from(document.querySelectorAll('[data-reasoning-slider="true"][role="menuitem"]'))
+        .filter((element) => visible(element) && element.querySelector('[role="slider"]') !== null);
+      return wrappers.length === 1;
+    });
+  } catch {
+    return true;
+  }
+};
 
 const __waitForEffortControl = async () => {
   try {
@@ -718,7 +899,7 @@ const __waitForEffortControl = async () => {
       const max = Number(slider.getAttribute("aria-valuemax"));
       const now = Number(slider.getAttribute("aria-valuenow"));
       return Number.isSafeInteger(min) && Number.isSafeInteger(max) && Number.isSafeInteger(now)
-        && min <= max && max - min <= 20 && now >= min && now <= max;
+        && min <= max && max - min < ${MAX_CATALOG_CHOICES} && now >= min && now <= max;
     }, undefined, { timeout: __input.timeoutMs });
   } catch {
     __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider is unavailable");
@@ -741,7 +922,7 @@ const __waitEffortIndex = async (sliderSelector, expectedIndex) => {
 const __restoreEffortIndex = async (sliderSelector, targetIndex) => {
   let __state = await __readEffortState();
   if (!__state) return false;
-  for (let __step = 0; __step < 21 && __state.now !== targetIndex; __step += 1) {
+  for (let __step = 0; __step < ${MAX_CATALOG_CHOICES} && __state.now !== targetIndex; __step += 1) {
     const __key = __state.now > targetIndex ? "ArrowLeft" : "ArrowRight";
     const __expectedIndex = __state.now + (__key === "ArrowLeft" ? -1 : 1);
     await __page.press(sliderSelector, __key, { timeout: __input.timeoutMs });
@@ -767,7 +948,8 @@ const __selectRequestedEffort = async (requestedLabel) => {
     if (!__state) __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider disappeared");
     let __found = false;
     for (let __step = 0; __step <= __state.max - __state.min; __step += 1) {
-      if (__state.rawId === requestedLabel) {
+      const __reading = await __readEffortReading(__state);
+      if (__matchesRequestedEffort({ effortLabel: __reading.label, effortId: __reading.id }, requestedLabel)) {
         __found = true;
         break;
       }
@@ -792,6 +974,74 @@ const __selectRequestedEffort = async (requestedLabel) => {
     }
     throw __error;
   } finally {
+    await __closeModelMenu();
+  }
+};
+
+const __captureSelectedEffort = async () => {
+  try {
+    await __openModelMenu("simple");
+    const state = await __readEffortState();
+    if (!state) {
+      if (await __hasVisibleEffortControl()) __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider is unavailable");
+      return undefined;
+    }
+    const reading = await __readEffortReading(state);
+    if (reading.label === undefined && reading.id === undefined) {
+      __throw("WEB_EFFORT_UNKNOWN", "ChatGPT selected reasoning effort could not be observed");
+    }
+    return { state, reading };
+  } finally {
+    await __closeModelMenu();
+  }
+};
+
+const __catalogEfforts = async () => {
+  let originalState;
+  try {
+    await __openModelMenu("simple");
+    originalState = await __readEffortState();
+    if (!originalState) {
+      if (await __hasVisibleEffortControl()) __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider is unavailable");
+      return { efforts: [] };
+    }
+    if (!await __restoreEffortIndex(originalState.sliderSelector, originalState.min)) {
+      __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider could not reach its minimum");
+    }
+    const efforts = [];
+    let state = await __readEffortState();
+    if (!state) __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider disappeared");
+    for (let step = 0; step < ${MAX_CATALOG_CHOICES}; step += 1) {
+      const reading = await __readEffortReading(state);
+      const label = reading.label ?? reading.id;
+      if (label === undefined) __throw("WEB_EFFORT_UNKNOWN", "ChatGPT reasoning effort label could not be observed");
+      efforts.push({
+        label,
+        ...(reading.id === undefined ? {} : { id: reading.id }),
+        index: state.now,
+        available: true,
+        selected: state.now === originalState.now,
+      });
+      if (state.now >= state.max) break;
+      const expectedIndex = state.now + 1;
+      await __page.press(state.sliderSelector, "ArrowRight", { timeout: __input.timeoutMs });
+      if (!await __waitEffortIndex(state.sliderSelector, expectedIndex)) {
+        __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider transition was not confirmed");
+      }
+      state = await __readEffortState();
+      if (!state) __throw("WEB_EFFORT_SELECTION_UNAVAILABLE", "ChatGPT reasoning slider disappeared");
+    }
+    if (efforts.length === 0 || efforts.length > ${MAX_CATALOG_CHOICES} || !efforts.some((effort) => effort.selected)) {
+      __throw("WEB_CATALOG_BOUND", "ChatGPT reasoning effort catalog is invalid");
+    }
+    const selected = efforts.find((effort) => effort.selected);
+    return { efforts, selected };
+  } finally {
+    if (originalState) {
+      let restored = false;
+      try { restored = await __restoreEffortIndex(originalState.sliderSelector, originalState.now); } catch { /* report below */ }
+      if (!restored) __throw("WEB_SELECTION_RESTORE_FAILED", "ChatGPT reasoning effort restoration could not be confirmed");
+    }
     await __closeModelMenu();
   }
 };
@@ -832,10 +1082,8 @@ const __assertSearchBaseline = (observation) => {
   if (!observation || typeof observation.modelLabel !== "string" || observation.modelLabel.trim().length === 0) {
     __throw("WEB_MODEL_UNKNOWN", "ChatGPT selected model could not be observed before webpage search");
   }
-  if (/^(?:low|medium|high|xhigh|very high|standard|fast)$/i.test(observation.modelLabel.trim())) {
-    __throw("WEB_MODEL_MISMATCH", "Observed model label is an effort label");
-  }
-  if (typeof observation.effortLabel !== "string" || observation.effortLabel.trim().length === 0) {
+  if ((typeof observation.effortLabel !== "string" || observation.effortLabel.trim().length === 0)
+    && (typeof observation.effortId !== "string" || observation.effortId.trim().length === 0)) {
     __throw("WEB_EFFORT_UNKNOWN", "ChatGPT selected effort could not be observed before webpage search");
   }
 };
@@ -897,7 +1145,7 @@ function scriptFor(operation: EgoOperation, input: unknown): string {
   const inspectSource = String(inspectChatGptPage)
   const menuSource = modelMenuSource()
   const searchSource = webSearchSource()
-  let body: string
+  let body = ''
   switch (operation) {
     case 'create':
       body = `
@@ -906,6 +1154,99 @@ __assertAgent(__task);
 const __page = __input.createPage ? await __task.newPage() : __task.page("p1");
 if (!__page || typeof __page.label !== "string") __throw("WEB_RESOURCE_INVALID", "Ego browser returned an invalid Page");
 __emit({ ok: true, value: { spaceId: __task.spaceId, pageLabel: __page.label } });
+`
+      break
+    case 'catalog':
+      body = `
+const __task = await taskSpace(__input.resource.spaceId);
+__assertAgent(__task);
+const __page = __task.page(__input.resource.pageLabel);
+const __inspect = ${inspectSource};
+${menuSource}
+const __isChatGptUrl = (value) => {
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    return parsed.protocol === "https:" && (hostname === "chatgpt.com" || hostname.endsWith(".chatgpt.com") || hostname === "chat.openai.com" || hostname.endsWith(".chat.openai.com"));
+  } catch {
+    return false;
+  }
+};
+const __isChatGptRoot = (value) => {
+  try { return __isChatGptUrl(value) && new URL(value).pathname === "/"; } catch { return false; }
+};
+const __isEmptyChat = (value) => value.composerText === ""
+  && !value.hasAttachments
+  && value.userMessageCount === 0
+  && Array.isArray(value.userMessages) && value.userMessages.length === 0
+  && value.assistantMessages.length === 0
+  && !value.generating;
+let __currentUrl = await __page.url();
+if (__isChatGptUrl(__currentUrl)) {
+  if (!__isChatGptRoot(__currentUrl)) __throw("WEB_RESOURCE_CHANGED", "ChatGPT catalog initial route is not the root page");
+} else if (__currentUrl !== "about:blank" && !String(__currentUrl).startsWith("about:blank#")) {
+  __throw("WEB_RESOURCE_CHANGED", "ChatGPT catalog initial page is not blank or ChatGPT");
+} else {
+  await __page.goto("https://chatgpt.com/", { waitUntil: "domcontentloaded", timeout: __input.timeoutMs });
+  __currentUrl = await __page.url();
+  if (!__isChatGptRoot(__currentUrl)) __throw("WEB_RESOURCE_CHANGED", "ChatGPT catalog navigation did not reach the root page");
+}
+try {
+  await __page.waitForSelector(${JSON.stringify(COMPOSER_SELECTORS)}, { state: "visible", timeout: __input.timeoutMs });
+} catch {
+  const initial = await __page.evaluate(__inspect);
+  if (initial?.loginRequired) __throw("WEB_LOGIN_REQUIRED", "ChatGPT login is required");
+  __throw("WEB_PAGE_NOT_READY", "ChatGPT composer is unavailable");
+}
+const __initial = await __page.evaluate(__inspect);
+if (!__initial || __initial.loginRequired) __throw("WEB_LOGIN_REQUIRED", "ChatGPT login is required");
+if (__initial.visibleError) __throw("WEB_PAGE_ERROR", "ChatGPT page reported a visible error");
+if (__initial.composerCount !== 1) __throw("WEB_PAGE_NOT_READY", "ChatGPT has no unique composer");
+if (!__isEmptyChat(__initial)) __throw("WEB_CONVERSATION_NOT_EMPTY", "ChatGPT conversation is not empty");
+const __originalModels = await __catalogModelChoices();
+const __originalModel = __originalModels.find((choice) => choice.selected);
+if (!__originalModel) __throw("WEB_MODEL_UNKNOWN", "ChatGPT selected model could not be observed");
+const __originalEffort = await __captureSelectedEffort();
+const __requestedModel = typeof __input.input?.modelLabel === "string" && __input.input.modelLabel.trim().length > 0
+  ? __input.input.modelLabel
+  : undefined;
+const __effortModelLabel = __requestedModel ?? __originalModel.label;
+let __catalog;
+try {
+  if (__effortModelLabel !== __originalModel.label) await __selectRequestedModel(__effortModelLabel);
+  const __targetModels = await __catalogModelChoices();
+  if (!__targetModels.some((choice) => choice.selected && choice.label === __effortModelLabel)) {
+    __throw("WEB_MODEL_SELECTION_UNAVAILABLE", "Requested ChatGPT model selection was not confirmed");
+  }
+  const __targetEfforts = await __catalogEfforts();
+  __catalog = {
+    formatVersion: 1,
+    observedAt: new Date().toISOString(),
+    browser: { kind: "ego-lite", spaceId: __input.resource.spaceId, pageLabel: __input.resource.pageLabel },
+    models: __originalModels,
+    effortModelLabel: __effortModelLabel,
+    efforts: __targetEfforts.efforts,
+    selected: {
+      modelLabel: __originalModel.label,
+      ...(__originalEffort?.reading.label === undefined ? {} : { effortLabel: __originalEffort.reading.label }),
+      ...(__originalEffort?.reading.id === undefined ? {} : { effortId: __originalEffort.reading.id }),
+    },
+  };
+} finally {
+  let __restored = false;
+  try {
+    if (__effortModelLabel !== __originalModel.label) await __selectRequestedModel(__originalModel.label);
+    const __originalEffortKey = __originalEffort?.reading.id ?? __originalEffort?.reading.label;
+    if (__originalEffort && !__originalEffortKey) __throw("WEB_SELECTION_RESTORE_FAILED", "ChatGPT original reasoning effort is not observable");
+    if (__originalEffortKey) await __selectRequestedEffort(__originalEffortKey);
+    const __restoredObservation = await __observeModelMenu();
+    __restored = __restoredObservation?.modelLabel === __originalModel.label
+      && (!__originalEffortKey || __matchesRequestedEffort(__restoredObservation, __originalEffortKey));
+  } catch { /* report below */ }
+  try { await __closeModelMenu(); } catch { /* restoration status is authoritative */ }
+  if (!__restored) __throw("WEB_SELECTION_RESTORE_FAILED", "ChatGPT model or reasoning effort restoration could not be confirmed");
+}
+__emit({ ok: true, value: __catalog });
 `
       break
     case 'prepare':
@@ -957,31 +1298,30 @@ if (!__composerReady) {
   if (__initial.loginRequired) __emit({ ok: true, value: __initial });
   else __throw("WEB_PAGE_NOT_READY", "ChatGPT composer is unavailable");
 } else {
-  let __observation;
+  let __observation = await __observeModelMenu();
+  const __needsModel = __input.request.modelLabel !== undefined && __observation.modelLabel !== __input.request.modelLabel;
+  if (__needsModel) {
+    __observation = await __selectRequestedModel(__input.request.modelLabel);
+  }
   if (__input.request.webSearch === true) {
-    const __preSearch = await __page.evaluate(__inspect);
+    const __preSearch = __observation;
     if (__preSearch.loginRequired) __throw("WEB_LOGIN_REQUIRED", "ChatGPT login is required");
     if (__preSearch.visibleError) __throw("WEB_PAGE_ERROR", "ChatGPT page reported a visible error");
     if (__preSearch.composerCount !== 1) __throw("WEB_PAGE_NOT_READY", "ChatGPT has no unique composer");
     if (!__isEmptyChat(__preSearch)) __throw("WEB_CONVERSATION_NOT_EMPTY", "ChatGPT conversation is not empty");
-    const __originalSelection = await __observeModelMenu();
-    __assertSearchBaseline(__originalSelection);
-    if (__originalSelection.webSearchActive === true) {
+    __assertSearchBaseline(__preSearch);
+    if (__preSearch.webSearchActive === true) {
       __throw("WEB_SEARCH_ALREADY_ACTIVE", "ChatGPT webpage search was already active before preparation");
     }
     await __selectWebSearch();
   }
   if (__input.request.effortLabel !== undefined) {
     const __simpleObservation = await __observeEffortMenu();
-    const __needsEffort = __simpleObservation.effortLabel !== __input.request.effortLabel;
+    const __needsEffort = !__matchesRequestedEffort(__simpleObservation, __input.request.effortLabel);
     if (__needsEffort) await __selectRequestedEffort(__input.request.effortLabel);
     __observation = await __observeModelMenu();
   } else {
     __observation = await __observeModelMenu();
-  }
-  const __needsModel = __input.request.modelLabel !== undefined && __observation.modelLabel !== __input.request.modelLabel;
-  if (__needsModel) {
-    __observation = await __selectRequestedModel(__input.request.modelLabel);
   }
   if (__input.request.webSearch === true && __observation.webSearchActive !== true) {
     __throw("WEB_SEARCH_PILL_MISSING", "ChatGPT webpage search pill was not observed after preparation");
@@ -1031,7 +1371,7 @@ if (__input.request.webSearch === true) {
 if (__input.request.modelLabel !== undefined && __before.modelLabel !== __input.request.modelLabel) {
   __throw("WEB_MODEL_MISMATCH", "Observed model label does not match the request");
 }
-if (__input.request.effortLabel !== undefined && __before.effortLabel !== __input.request.effortLabel) {
+if (!__matchesRequestedEffort(__before, __input.request.effortLabel)) {
   __throw("WEB_EFFORT_MISMATCH", "Observed reasoning label does not match the request");
 }
 const __composerSelector = await __page.evaluate(() => {
@@ -1091,7 +1431,7 @@ if (__input.request.webSearch === true && __afterFill.webSearchActive !== true) 
 if (__input.request.modelLabel !== undefined && __afterFill.modelLabel !== __input.request.modelLabel) {
   __throw("WEB_MODEL_MISMATCH", "Observed model label does not match the request");
 }
-if (__input.request.effortLabel !== undefined && __afterFill.effortLabel !== __input.request.effortLabel) {
+if (!__matchesRequestedEffort(__afterFill, __input.request.effortLabel)) {
   __throw("WEB_EFFORT_MISMATCH", "Observed reasoning label does not match the request");
 }
 const __sendSelector = await __page.evaluate(() => {
@@ -1122,7 +1462,12 @@ const __sendSelector = await __page.evaluate(() => {
 if (!__sendSelector) __throw("WEB_SEND_UNAVAILABLE", "ChatGPT send control is unavailable");
 await __page.click(__sendSelector, { timeout: __input.timeoutMs, label: "send ChatGPT prompt" });
 const __afterClick = await __page.evaluate(__inspect);
-__emit({ ok: true, value: { ...__afterClick, modelLabel: __afterFill.modelLabel, effortLabel: __afterFill.effortLabel } });
+__emit({ ok: true, value: {
+  ...__afterClick,
+  modelLabel: __afterFill.modelLabel,
+  effortLabel: __afterFill.effortLabel,
+  effortId: __afterFill.effortId,
+} });
 `
       break
     case 'finish':
@@ -1160,6 +1505,7 @@ export class EgoWebAdapter implements WebBrowserAdapter {
   readonly #prepared = new Map<number, {
     readonly modelLabel?: string
     readonly effortLabel?: string
+    readonly effortId?: string
     readonly webSearchActive?: boolean
   }>()
   readonly #submitted = new Set<number>()
@@ -1238,6 +1584,16 @@ export class EgoWebAdapter implements WebBrowserAdapter {
     }
   }
 
+  async catalog(resource: WebRunResource, input: WebModelCatalogRefreshInput, signal?: AbortSignal): Promise<WebModelCatalog> {
+    assertResource(resource)
+    assertCatalogInput(input)
+    return assertModelCatalog(await this.#invoke('catalog', {
+      resource,
+      input,
+      timeoutMs: this.#config.commandTimeoutMs,
+    }, signal), resource)
+  }
+
   async prepare(resource: WebRunResource, request: WebRunRequest, signal?: AbortSignal): Promise<ChatGptPageObservation> {
     assertResource(resource)
     assertRequest(request)
@@ -1251,6 +1607,7 @@ export class EgoWebAdapter implements WebBrowserAdapter {
     this.#prepared.set(resource.spaceId, {
       ...(observation.modelLabel === undefined ? {} : { modelLabel: observation.modelLabel }),
       ...(observation.effortLabel === undefined ? {} : { effortLabel: observation.effortLabel }),
+      ...(observation.effortId === undefined ? {} : { effortId: observation.effortId }),
       ...(observation.webSearchActive === undefined ? {} : { webSearchActive: observation.webSearchActive }),
     })
     return observation
@@ -1274,7 +1631,7 @@ export class EgoWebAdapter implements WebBrowserAdapter {
     if (request.modelLabel !== undefined && prepared.modelLabel !== request.modelLabel) {
       throw browserError('WEB_MODEL_MISMATCH', 'ChatGPT model was not prepared for this request')
     }
-    if (request.effortLabel !== undefined && prepared.effortLabel !== request.effortLabel) {
+    if (!matchesRequestedEffort(prepared, request.effortLabel)) {
       throw browserError('WEB_EFFORT_MISMATCH', 'ChatGPT reasoning effort was not prepared for this request')
     }
     if (request.webSearch === true && prepared.webSearchActive !== true) {

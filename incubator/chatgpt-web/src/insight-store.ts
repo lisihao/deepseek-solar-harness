@@ -154,11 +154,12 @@ function assertSelection(value: unknown): asserts value is InsightModelSelection
 
 function assertObserved(value: unknown): asserts value is InsightObservedSelection {
   if (!isObject(value)) throw invalidState()
-  assertKeys(value, ['availability', 'providerLabel', 'modelLabel', 'effortLabel', 'modeLabel'])
+  assertKeys(value, ['availability', 'providerLabel', 'modelLabel', 'effortLabel', 'effortId', 'modeLabel'])
   if (value.availability !== 'observed' && value.availability !== 'not-exposed') throw invalidState()
   assertOptionalString(value, 'providerLabel')
   assertOptionalString(value, 'modelLabel')
   assertOptionalString(value, 'effortLabel')
+  assertOptionalString(value, 'effortId')
   assertOptionalString(value, 'modeLabel')
 }
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Solar Web model catalogue fixture</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        --dsw-alias-label-primary: #f3f4f6;
+        --dsw-alias-label-secondary: #aeb7c5;
+        --dsw-alias-bg-base: #15171b;
+        --dsw-alias-bg-module-platform: #1b2028;
+        --dsw-alias-settings-card-fill: #20242b;
+        --dsw-alias-settings-card-stroke: #414853;
+        --dsw-alias-state-error-primary: #ef8b8b;
+      }
+      body { margin: 0; min-width: 0; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); }
+      #fixture-root { max-width: 760px; margin: 0 auto; }
+      @media (max-width: 480px) { #fixture-root { width: 100%; } }
+    </style>
+  </head>
+  <body>
+    <div id="fixture-root"></div>
+    <script src="/model-catalog-fixture.js"></script>
+  </body>
+</html>

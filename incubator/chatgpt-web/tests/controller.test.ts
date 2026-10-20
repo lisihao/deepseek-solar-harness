@@ -150,6 +150,34 @@ class FakeBrowser implements WebBrowserAdapter {
 }
 
 describe('WebController', () => {
+  it.each(['Pro plus', 'future-budget-id'])('accepts a future effort by exact label or id: %s', async requestedEffort => {
+    const store = new WebRunStore(await makeRoot())
+    const browser = new FakeBrowser()
+    const selection = { modelLabel: 'Future Omega', effortLabel: 'Pro plus', effortId: 'future-budget-id' }
+    browser.prepare = async () => page(selection)
+    browser.submitResult = receipt(selection)
+    browser.observations = [answer('future answer', '**future answer**', selection), answer('future answer', '**future answer**', selection)]
+    const controller = new WebController(store, browser, options())
+    const id = randomUUID()
+    const result = await controller.start(id, request({ modelLabel: 'Future Omega', effortLabel: requestedEffort }))
+    expect(result.stage).toBe('completed')
+    expect(result.observed).toEqual(selection)
+    expect((await store.read(id))?.observed).toEqual(selection)
+    expect(browser.submitResources).toHaveLength(1)
+  })
+
+  it('does not accept a changed raw effort identity merely because its visible label is unchanged', async () => {
+    const store = new WebRunStore(await makeRoot())
+    const browser = new FakeBrowser()
+    browser.prepare = async () => page({ effortLabel: 'Pro plus', effortId: 'budget-original' })
+    browser.submitResult = receipt({ effortLabel: 'Pro plus', effortId: 'budget-changed' })
+    const controller = new WebController(store, browser, options())
+    const result = await controller.start(randomUUID(), request({ effortLabel: 'Pro plus' }))
+    expect(result.stage).toBe('indeterminate')
+    expect(result.error?.code).toBe('WEB_EFFORT_MISMATCH')
+    expect(browser.submitResources).toHaveLength(1)
+  })
+
   it('does no browser work for list/read, then completes only after stable full visible output', async () => {
     const root = await makeRoot()
     const store = new WebRunStore(root)

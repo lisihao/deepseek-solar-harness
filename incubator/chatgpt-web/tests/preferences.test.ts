@@ -18,9 +18,18 @@ describe('WebPreferences store', () => {
     const second = await store.read()
     expect(modelCalls).toBe(0)
     expect(second).not.toBe(first)
-    expect(second).toMatchObject({ formatVersion: 1, revision: 0, web: { modelLabel: 'GPT-6', effortLabel: 'medium' } })
+    expect(second).toMatchObject({ formatVersion: 1, revision: 0, web: { modelLabel: '', effortLabel: '' } })
     expect(second.insight.plan.requested).toMatchObject({ provider: 'gemini' })
     expect(second.insight.research.requested).toMatchObject({ provider: 'gemini' })
+  })
+
+  it('keeps an existing explicit model and effort when defaults later change', async () => {
+    const path = await root()
+    const store = new PreferencesStore(path)
+    const value = await store.read()
+    await store.save({ ...value, web: { modelLabel: 'Future Model Omega', effortLabel: 'Pro+' } }, value.revision)
+    const restarted = new PreferencesStore(path)
+    expect((await restarted.read()).web).toEqual({ modelLabel: 'Future Model Omega', effortLabel: 'Pro+' })
   })
 
   it('saves with an exact CAS revision and preserves complete insight fields', async () => {

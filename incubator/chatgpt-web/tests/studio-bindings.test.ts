@@ -118,6 +118,36 @@ function baseOptions(rootValue: string, factories: StudioBoundPortsFactories) {
 }
 
 describe('Studio provider bindings', () => {
+  it('follows the ordinary Web target selection without sending a made-up model name', async () => {
+    const flow = { forRun: vi.fn(async () => 71), finish: vi.fn(async () => undefined) }
+    const controller = new FakeController()
+    controller.start.mockImplementation(async (id, request) => completeRecord(id, request, { observed: { modelLabel: 'Future Omega', effortLabel: 'Pro plus', effortId: 'future-budget-id' } }))
+    const ports = createStudioBoundPorts(baseOptions(await root(), { createFlowSpaces: () => flow, createWebController: () => controller }))
+    const result = await ports.execute(external({ requested: { provider: 'chatgpt', modelLabel: '' } }))
+    expect(controller.start.mock.calls[0]?.[1]).not.toHaveProperty('modelLabel')
+    expect(controller.start.mock.calls[0]?.[1]).not.toHaveProperty('effortLabel')
+    expect(result).toMatchObject({ kind: 'complete', observed: { modelLabel: 'Future Omega', effortLabel: 'Pro plus', effortId: 'future-budget-id' } })
+    await ports.dispose()
+  })
+
+  it('retains the visible future effort and its separate raw identifier in Insight provenance', async () => {
+    const flow = { forRun: vi.fn(async () => 71), finish: vi.fn(async () => undefined) }
+    const ports = createStudioBoundPorts(baseOptions(await root(), {
+      createFlowSpaces: () => flow,
+      createWebController: () => {
+        const controller = new FakeController()
+        controller.start.mockImplementation(async (id, request) => completeRecord(id, request, {
+          observed: { modelLabel: 'Future Omega', effortLabel: 'Pro plus', effortId: 'future-budget-id' },
+        }))
+        return controller
+      },
+    }))
+    const request = external({ requested: { provider: 'chatgpt', modelLabel: 'Future Omega', effortLabel: 'future-budget-id' } })
+    const result = await ports.execute(request)
+    expect(result).toMatchObject({ kind: 'complete', observed: { modelLabel: 'Future Omega', effortLabel: 'Pro plus', effortId: 'future-budget-id' } })
+    await ports.dispose()
+  })
+
   it('submits the exact rendered ChatGPT request once with the requested model, effort, and semantic webpage search', async () => {
     const rootValue = await root()
     const flow = { forRun: vi.fn(async () => 71), finish: vi.fn(async () => undefined) }

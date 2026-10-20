@@ -284,3 +284,9 @@ describe('workflow studio client helpers', () => {
     expect(editableStudioDraft(saved)).toMatchObject({ id: 'draft-a', expectedRevision: 4, sourceId: 'source-a' })
   })
 })
+
+it('represents an empty ordinary Web model as target-browser current selection', () => {
+  const node = { ...graph().nodes[0]!, kind: 'chatgpt-web' as const, parameters: { requested: { provider: 'chatgpt', modelLabel: 'Pinned future model' } } }
+  expect(withProviderNodeStringProperty(node, 'web', 'modelLabel', '').parameters.requested).toEqual({ provider: 'chatgpt', modelLabel: '' })
+  expect(node.parameters.requested.modelLabel).toBe('Pinned future model')
+})

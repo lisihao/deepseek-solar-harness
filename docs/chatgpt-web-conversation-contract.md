@@ -57,3 +57,7 @@ The implementation changes are scoped to `incubator/chatgpt-web`, its explicit b
 Required keyless checks cover public model/preset registration and disposal, real built-package loading, complete-context projection, stable command deduplication, normal assistant chunks, clarification/answer persistence, stage ordering, known-quota fallback versus unknown-effect fencing, complete artifact handoffs, template changes, restart observation and cancellation behavior. The stable full project gate is run once, then only affected checks after fixes.
 
 Installed acceptance must exercise the actual model picker and original transcript, the new-conversation preset, settings, progress/questions and normal/narrow layouts. A previously passing standalone panel does not count. Live native/Web/Deep Research tests require a new bounded cost allowance; the earlier one-message allowance was fully used. Do not claim a faithful or usable full workflow from fake drivers, registry presence or source CI alone.
+
+## Dynamic website choices
+
+The [target-browser selection contract](web-model-selection.md) supersedes any earlier assumption that a test browser default or a compiled complete model label is an account-wide availability check. Runtime menu discovery supplies future model/effort options; explicit pins, target-browser current selection and immutable run observations remain distinct.

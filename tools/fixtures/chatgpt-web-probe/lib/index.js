@@ -118,13 +118,19 @@ async function runProbe(ctx) {
     const defaults = await preferences.read()
     const repeatedDefaults = await preferences.read()
     assert(defaults?.formatVersion === 1 && defaults.revision === 0, 'PreferencesControl.read() did not return the version-one defaults')
-    assert(defaults.web?.modelLabel === 'GPT-6' && defaults.web?.effortLabel === 'medium', 'PreferencesControl.read() did not return the configured Web defaults')
+    assert(defaults.web?.modelLabel === '' && defaults.web?.effortLabel === '', 'PreferencesControl.read() did not return the configured Web defaults')
     assert(defaults.insight?.formatVersion === 1, 'PreferencesControl.read() did not return default Insight preferences')
     assert(JSON.stringify(defaults) === JSON.stringify(repeatedDefaults), 'PreferencesControl.read() returned unstable defaults')
     assert(!(await exists(preferencesPath)), 'PreferencesControl.read() created persistent preferences')
     checks.preferencesControl = true
     checks.preferencesDefaults = true
     checks.preferencesReadNoEffect = true
+
+    const catalog = ctx.get('solarWebModelCatalog')
+    assert(catalog !== undefined && typeof catalog.read === 'function' && typeof catalog.refresh === 'function', 'Web model catalog is not registered')
+    assert(await catalog.read() === undefined, 'Unrefreshed catalog should have no browser observation')
+    assert(await catalog.read() === undefined, 'Reading the catalog must not start discovery')
+    checks.modelCatalogReadNoEffect = true
 
     const control = ctx.get(SERVICE)
     assert(control !== undefined && typeof control.status === 'function', `${SERVICE}.status() is unavailable`)
@@ -157,6 +163,8 @@ async function runProbe(ctx) {
     assert(tools.get(TOOL) === undefined, `${TOOL} tool remained registered after dispose`)
     checks.registrationsDisposed = true
     assert(ctx.get(PREFERENCES_SERVICE) === undefined, `${PREFERENCES_SERVICE} remained registered after dispose`)
+    assert(ctx.get('solarWebModelCatalog') === undefined, 'Web model catalog remained registered after dispose')
+    checks.modelCatalogDisposed = true
     checks.preferencesDisposed = true
     assert(!(await llm.listProviders()).some(item => item.id === 'solar-chatgpt-web'), 'main Web provider remained registered after dispose')
     checks.mainModelDisposed = true

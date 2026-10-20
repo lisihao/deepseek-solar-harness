@@ -207,7 +207,7 @@ function copyResource(base: InsightExternalResource, received: InsightExternalRe
 
 function validObserved(value: unknown): value is InsightObservedSelection {
   if (!isObject(value) || (value.availability !== 'observed' && value.availability !== 'not-exposed')) return false
-  return ['providerLabel', 'modelLabel', 'effortLabel', 'modeLabel'].every((field) => value[field] === undefined || typeof value[field] === 'string')
+  return ['providerLabel', 'modelLabel', 'effortLabel', 'effortId', 'modeLabel'].every((field) => value[field] === undefined || typeof value[field] === 'string')
 }
 
 function validResource(value: unknown): value is InsightExternalResource {

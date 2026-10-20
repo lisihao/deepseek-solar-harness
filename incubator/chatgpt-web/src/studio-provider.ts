@@ -260,10 +260,10 @@ function edgeMaps(graph: StudioGraph): { readonly incoming: ReadonlyMap<string, 
   return { incoming, outgoing, ...(order.length === graph.nodes.length ? { order } : {}) }
 }
 
-function validSelection(value: unknown): value is InsightModelSelection {
+function validSelection(value: unknown, allowCurrentWebModel = false): value is InsightModelSelection {
   return isObject(value)
     && (value.provider === 'codex' || value.provider === 'gemini' || value.provider === 'chatgpt')
-    && nonEmpty(value.modelLabel)
+    && (nonEmpty(value.modelLabel) || (allowCurrentWebModel && value.provider === 'chatgpt' && value.modelLabel === ''))
     && (value.modelId === undefined || nonEmpty(value.modelId))
     && (value.effortLabel === undefined || nonEmpty(value.effortLabel))
     && (value.modeLabel === undefined || nonEmpty(value.modeLabel))
@@ -281,7 +281,7 @@ function validTemplate(value: unknown): value is InsightTemplate {
 
 function selectionFrom(node: StudioNode, field = 'requested'): InsightModelSelection | undefined {
   const value = node.parameters[field]
-  return validSelection(value) ? cloneInsight(value) : undefined
+  return validSelection(value, node.kind === 'chatgpt-web' && field === 'requested') ? cloneInsight(value) : undefined
 }
 
 function templateFrom(node: StudioNode, field = 'template'): InsightTemplate {
@@ -314,7 +314,7 @@ function resourceProgression(base: InsightExternalResource, received: InsightExt
 function validObserved(value: unknown): value is InsightObservedSelection {
   return isObject(value)
     && (value.availability === 'observed' || value.availability === 'not-exposed')
-    && ['providerLabel', 'modelLabel', 'effortLabel', 'modeLabel'].every((field) => value[field] === undefined || typeof value[field] === 'string')
+    && ['providerLabel', 'modelLabel', 'effortLabel', 'effortId', 'modeLabel'].every((field) => value[field] === undefined || typeof value[field] === 'string')
 }
 
 function validArtifact(value: unknown, provider: InsightModelSelection['provider']): value is InsightPortArtifact {
@@ -574,7 +574,7 @@ class EditableStudioProvider implements StudioExecutionProvider {
       }
       if (!Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) issues.push({ nodeId: node.id, field: 'position', message: 'Node position must be finite' })
       if (node.kind !== 'output') {
-        if (!validSelection(selectionFrom(node))) issues.push({ nodeId: node.id, field: 'parameters.requested', message: 'Requested model selection is invalid' })
+        if (!validSelection(selectionFrom(node), node.kind === 'chatgpt-web')) issues.push({ nodeId: node.id, field: 'parameters.requested', message: 'Requested model selection is invalid' })
         if (!validTemplate(node.parameters.template)) issues.push({ nodeId: node.id, field: 'parameters.template', message: 'Versioned template is invalid' })
       }
       if (node.kind === 'gemini-research') {

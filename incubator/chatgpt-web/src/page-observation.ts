@@ -42,8 +42,10 @@ export interface ChatGptPageObservation {
   readonly assistantMessages: readonly ChatGptAssistantMessage[]
   readonly generating: boolean
   readonly modelLabel?: string
-  /** Explicit observed effort identifier or visible label; it is never inferred. */
+  /** Visible reasoning-effort label; it is never inferred from an identifier. */
   readonly effortLabel?: string
+  /** Raw reasoning-effort identifier exposed by the target page, when present. */
+  readonly effortId?: string
   /** Present only when the unique current composer contains the semantic search pill. */
   readonly webSearchActive?: boolean
   readonly visibleError?: string
@@ -331,55 +333,72 @@ export function inspectChatGptPage(): ChatGptPageObservation {
 
   const messageMarkdown = (body: BrowserElement): string => renderBlocks(body).join(`${newline}${newline}`)
 
-  const observedControlLabel = (kind: 'model' | 'effort'): string | undefined => {
-    const selectors = kind === 'model'
-      ? [
-          '[data-model-label]',
-          '[data-testid="model-switcher-dropdown-button"]',
-          '[data-testid="model-switcher-button"]',
-          '[data-testid="model-picker-button"]',
-          '[data-testid="model-selector"]',
-        ]
-      : [
-          '[data-effort-label]',
-          '[data-reasoning-effort-label]',
-          // The currently observed model-menu trigger is an effort source
-          // only. Its `data-selected-reasoning-effort` wins over its rendered
-          // text, which can include hidden measurement and heading nodes.
-          'button[aria-label="选择 ChatGPT 模型"]',
-          '[data-testid="reasoning-effort-button"]',
-          '[data-testid="reasoning-selector"]',
-          '[data-testid="effort-selector"]',
-        ]
-    const controls = fromSelectors(selectors)
-    if (kind === 'effort') {
-      const selectedIdentifiers = Array.from(new Set(controls
-        .map((element) => normalizedLabel(element.getAttribute('data-selected-reasoning-effort')))
-        .filter(Boolean)))
-      if (selectedIdentifiers.length === 1) return selectedIdentifiers[0]
-      if (selectedIdentifiers.length > 1) return undefined
-    }
-    const explicitLabels = controls.map((element) => {
-      const attributes = kind === 'model'
-        ? ['data-model-label', 'data-model-name']
-        : ['data-effort-label', 'data-reasoning-effort-label']
-      for (const attribute of attributes) {
-        const value = normalizedLabel(element.getAttribute(attribute))
-        if (value.length > 0) return value
-      }
-      const visibleLabel = normalizedLabel(visibleControlText(element))
-      return kind === 'effort'
-        ? visibleLabel.replace(/^(?:(?:思考强度|强度)\s*)+/u, '').trim()
-        : visibleLabel
-    }).filter(Boolean)
-    const checkedModelLabels = kind !== 'model' ? [] : fromSelectors([
-      '[role="menuitemradio"][aria-checked="true"]',
-    ]).filter((element) => element.closest('[role="menu"],[role="listbox"],[role="dialog"]') !== null)
-      .filter(() => fromSelectors(['button[aria-label="选择 ChatGPT 模型"]']).length === 1)
-      .map((element) => normalizedLabel(element.textContent))
-      .filter(Boolean)
-    const labels = Array.from(new Set([...explicitLabels, ...checkedModelLabels]))
+  const uniqueLabel = (values: readonly string[]): string | undefined => {
+    const labels = Array.from(new Set(values.filter(Boolean)))
     return labels.length === 1 ? labels[0] : undefined
+  }
+
+  const controlLabel = (element: BrowserElement, attributes: readonly string[], removeEffortHeading = false): string | undefined => {
+    for (const attribute of attributes) {
+      const value = normalizedLabel(element.getAttribute(attribute))
+      if (value.length > 0) return value
+    }
+    const visibleLabel = normalizedLabel(visibleControlText(element))
+    const result = removeEffortHeading
+      ? visibleLabel.replace(/^(?:(?:思考强度|强度)\s*)+/u, '').trim()
+      : visibleLabel
+    return result.length > 0 ? result : undefined
+  }
+
+  const observedModelLabel = (): string | undefined => {
+    const explicitLabels = fromSelectors([
+      '[data-model-label]',
+      '[data-testid="model-switcher-dropdown-button"]',
+      '[data-testid="model-switcher-button"]',
+      '[data-testid="model-picker-button"]',
+      '[data-testid="model-selector"]',
+    ]).map((element) => controlLabel(element, ['data-model-label', 'data-model-name']))
+      .filter((value): value is string => value !== undefined)
+
+    // A checked radio is a model only when it belongs to the picker’s explicit
+    // advanced-model view. The simple view contains reasoning controls whose
+    // labels may coincidentally resemble model names.
+    const checkedModelLabels = fromSelectors(['[role="menuitemradio"][aria-checked="true"]'])
+      .filter((element) => element.closest('[data-model-picker-view="advanced"]') !== null)
+      .map((element) => controlLabel(element, ['data-model-label', 'data-model-name']))
+      .filter((value): value is string => value !== undefined)
+    return uniqueLabel([...explicitLabels, ...checkedModelLabels])
+  }
+
+  const observedEffort = (): { readonly label?: string; readonly id?: string } => {
+    // The known picker trigger is the primary source for its visible effort
+    // label. A separate stale generic marker must not override that rendered
+    // value. The raw identifier is retained independently for exact matching.
+    const primaryControls = fromSelectors(['button[aria-label="选择 ChatGPT 模型"]'])
+    const fallbackControls = fromSelectors([
+      '[data-effort-label]',
+      '[data-reasoning-effort-label]',
+      '[data-testid="reasoning-effort-button"]',
+      '[data-testid="reasoning-selector"]',
+      '[data-testid="effort-selector"]',
+      '[role="slider"][aria-valuetext]',
+    ])
+    const primaryLabels = primaryControls
+      .map((element) => controlLabel(element, ['data-effort-label', 'data-reasoning-effort-label'], true))
+      .filter((value): value is string => value !== undefined)
+    const fallbackLabels = fallbackControls
+      .map((element) => controlLabel(element, ['aria-valuetext', 'data-effort-label', 'data-reasoning-effort-label'], true))
+      .filter((value): value is string => value !== undefined)
+    const primaryLabel = uniqueLabel(primaryLabels)
+    const label = primaryLabel ?? (primaryLabels.length === 0 ? uniqueLabel(fallbackLabels) : undefined)
+    const ids = Array.from(new Set([...primaryControls, ...fallbackControls]
+      .map((element) => normalizedLabel(element.getAttribute('data-selected-reasoning-effort')))
+      .filter(Boolean)))
+    const id = ids.length === 1 ? ids[0] : undefined
+    return {
+      ...label === undefined ? {} : { label },
+      ...id === undefined ? {} : { id },
+    }
   }
 
   const visibleError = (): string | undefined => {
@@ -430,8 +449,8 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     : []
   const webSearchActive = searchPills.length === 1 ? true : undefined
   const attachmentsPresent = composerCandidates.some(hasAttachments)
-  const modelLabel = observedControlLabel('model')
-  const effortLabel = observedControlLabel('effort')
+  const modelLabel = observedModelLabel()
+  const effort = observedEffort()
   const error = visibleError()
 
   return {
@@ -445,7 +464,8 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     assistantMessages,
     generating,
     ...modelLabel === undefined ? {} : { modelLabel },
-    ...effortLabel === undefined ? {} : { effortLabel },
+    ...effort.label === undefined ? {} : { effortLabel: effort.label },
+    ...effort.id === undefined ? {} : { effortId: effort.id },
     ...webSearchActive === undefined ? {} : { webSearchActive },
     ...error === undefined ? {} : { visibleError: error },
   }

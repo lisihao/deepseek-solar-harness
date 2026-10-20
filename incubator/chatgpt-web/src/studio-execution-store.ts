@@ -185,16 +185,16 @@ function assertSelection(value: unknown): asserts value is InsightModelSelection
   assertKeys(value, ['provider', 'modelId', 'modelLabel', 'effortLabel', 'modeLabel'])
   if (value.provider !== 'codex' && value.provider !== 'gemini' && value.provider !== 'chatgpt') throw invalid()
   if (value.modelId !== undefined) assertNonEmpty(value.modelId)
-  assertNonEmpty(value.modelLabel)
+  if (!(value.provider === 'chatgpt' && value.modelLabel === '')) assertNonEmpty(value.modelLabel)
   if (value.effortLabel !== undefined) assertNonEmpty(value.effortLabel)
   if (value.modeLabel !== undefined) assertNonEmpty(value.modeLabel)
 }
 
 function assertObserved(value: unknown): asserts value is InsightObservedSelection {
   if (!isObject(value)) throw invalid()
-  assertKeys(value, ['availability', 'providerLabel', 'modelLabel', 'effortLabel', 'modeLabel'])
+  assertKeys(value, ['availability', 'providerLabel', 'modelLabel', 'effortLabel', 'effortId', 'modeLabel'])
   if (value.availability !== 'observed' && value.availability !== 'not-exposed') throw invalid()
-  for (const field of ['providerLabel', 'modelLabel', 'effortLabel', 'modeLabel']) if (value[field] !== undefined) assertString(value[field])
+  for (const field of ['providerLabel', 'modelLabel', 'effortLabel', 'effortId', 'modeLabel']) if (value[field] !== undefined) assertString(value[field])
 }
 
 function assertTemplate(value: unknown): asserts value is InsightTemplate {

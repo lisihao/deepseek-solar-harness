@@ -349,7 +349,8 @@ export function withProviderNodeStringProperty(
   const requested = isJsonObject(parameters.requested) ? cloneJson(parameters.requested) : {}
   const requestedKey = key === 'modelProvider' ? 'provider' : key
   const normalized = value.trim()
-  if (normalized.length === 0) delete requested[requestedKey]
+  if (normalized.length === 0 && key === 'modelLabel' && node.kind === 'chatgpt-web') requested.modelLabel = ''
+  else if (normalized.length === 0) delete requested[requestedKey]
   else requested[requestedKey] = normalized
   if (Object.keys(requested).length === 0) delete parameters.requested
   else parameters.requested = requested

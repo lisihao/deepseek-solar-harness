@@ -42,11 +42,13 @@ The settings status separates registration from login and execution. A registere
 
 ## Configuration and exact labels
 
-Settings contributes **`网页与洞察`** for the ordinary Web model/effort labels, clarification/research/review/polishing selections, prompt templates, limits, and advanced JSON configuration. Saving uses the exact preference revision and affects new runs only; a prepared request and a saved execution keep their own snapshots. Deep Research selector configuration is maintenance data and remains unaccepted until observed on the real site.
+Model and reasoning choices are discovered from the plugin's target Ego Lite browser, independently of Chrome. **刷新目标浏览器模型目录** reads current model choices and the selected model's effort options without sending a prompt. Newly added choices can be selected and saved without a plugin release while the menu contract remains compatible. Cached choices do not replace per-request verification. See [selection contract](../../docs/web-model-selection.md).
+
+Settings contributes **`网页与洞察`** for the ordinary Web model/effort labels, clarification/research/review/polishing selections, prompt templates, limits, and advanced JSON configuration. New ordinary Web settings leave model/effort empty to follow that target browser's current choice; existing saved values remain unchanged. Saving uses the exact preference revision and affects new runs only; a prepared request and a saved execution keep their own snapshots. Deep Research selector configuration is maintenance data and remains unaccepted until observed on the real site.
 
 The profile fields are `executablePath`, `taskSpaceId`, `commandTimeoutMs`, `runTimeoutMs`, `pollMs`, `maxOutputBytes`, `modelLabel`, and `effortLabel`. Defaults are an absolute `~/.local/bin/ego-browser` path resolved for the current home, `taskSpaceId: 0`, `commandTimeoutMs: 25000`, `runTimeoutMs: 300000`, `pollMs: 2000`, `maxOutputBytes: 1048576`, and empty configured labels. These are local bounds and defaults, not provider latency or capability claims.
 
-Website labels are preserved exactly. A visible `GPT-6` label is not renamed to `GPT-6 Astra`; `data-selected-reasoning-effort` is retained as its raw identifier (for example `medium`). An empty configured label means to use the page's observed selection. A requested label that the page does not expose is a named failure, not permission to substitute another model.
+Website labels are preserved exactly. A visible `GPT-6` label is not renamed to `GPT-6 Astra`; `effortLabel` records the observed visible reasoning label and optional `effortId` independently records the website identifier, without assuming that Pro maps to a fixed identifier. An empty configured label means to use the page's observed selection. A requested label that the page does not expose is a named failure, not permission to substitute another model.
 
 Optional `geminiSemantics` is accepted only as explicitly observed website selectors/markers. It is stored as configuration evidence, not proof that Gemini Deep Research or any particular model is available.
 

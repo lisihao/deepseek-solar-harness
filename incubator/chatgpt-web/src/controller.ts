@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { matchesWebEffort } from './web-selection.js'
 import { chmod, link, lstat, open, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -103,6 +104,7 @@ function observationLabels(observation: ChatGptPageObservation): WebRunObserved 
   return {
     ...(observation.modelLabel === undefined ? {} : { modelLabel: observation.modelLabel }),
     ...(observation.effortLabel === undefined ? {} : { effortLabel: observation.effortLabel }),
+    ...(observation.effortId === undefined ? {} : { effortId: observation.effortId }),
     ...(observation.webSearchActive === undefined ? {} : { webSearchActive: observation.webSearchActive }),
   }
 }
@@ -577,7 +579,7 @@ export class WebController {
     if (request.modelLabel !== undefined && observation.modelLabel !== request.modelLabel) {
       return { code: 'WEB_MODEL_MISMATCH', message: 'ChatGPT selected model does not match the requested model' }
     }
-    if (request.effortLabel !== undefined && observation.effortLabel !== request.effortLabel) {
+    if (!matchesWebEffort(request.effortLabel, observation)) {
       return { code: 'WEB_EFFORT_MISMATCH', message: 'ChatGPT selected effort does not match the requested effort' }
     }
     if (request.webSearch === true && observation.webSearchActive !== true) {
@@ -599,6 +601,9 @@ export class WebController {
       if (expected !== undefined && observation.modelLabel !== expected) {
         return { code: 'WEB_MODEL_MISMATCH', message: 'ChatGPT selected model changed after preflight' }
       }
+    }
+    if (observation.effortId !== undefined && verified?.effortId !== undefined && observation.effortId !== verified.effortId) {
+      return { code: 'WEB_EFFORT_MISMATCH', message: 'ChatGPT selected effort identifier changed after preflight' }
     }
     if (observation.effortLabel !== undefined) {
       const expected = verified?.effortLabel ?? request.effortLabel
