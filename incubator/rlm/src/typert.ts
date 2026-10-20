@@ -8,7 +8,7 @@ export const TYPERT = {
   model: {
     services: [{
       tags: [],
-      key: 'solarRlmControl',
+      key: 'solarRlm',
       exportName: 'SolarRlmControl',
       description: 'Owner-only Prime RLM runtime controls',
       summary: 'Prime RLM runtime status and keyless self-test',

@@ -8,6 +8,8 @@ import {
   createInspectTool,
   createRunTool,
 } from '../src/index.js'
+import { RPC_REMOTE } from '../src/remote.js'
+import { TYPERT } from '../src/typert.js'
 import type { RlmHost } from '../src/core.js'
 import type { RunSummary } from '../src/ui-contract.js'
 
@@ -163,6 +165,22 @@ describe('RLM tools and owner service', () => {
     expect(fixture.check).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000000')
     expect(fixture.inspect).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001')
     expect(fixture.cancel).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001')
+  })
+
+  it('resolves every web descriptor to the actual active Cordis service', async () => {
+    const fixture = hostFixture()
+    const ctx = new Context()
+    const service = new SolarRlmControl(ctx, fixture.host)
+    for (const descriptor of RPC_REMOTE.descriptors) {
+      expect(descriptor.service).toBe(service.typertRemote.serviceKey)
+      expect(descriptor.namespace).toBe(service.typertRemote.namespace)
+      expect(ctx.get(descriptor.service)).toBeDefined()
+      expect(TYPERT.model.services.some(value => value.key === descriptor.service)).toBe(true)
+    }
+    const descriptor = RPC_REMOTE.descriptors.find(value => value.method === 'status')!
+    const active = ctx.get(descriptor.service) as SolarRlmControl
+    await active.status()
+    expect(fixture.status).toHaveBeenCalledOnce()
   })
 
   it('registers all RLM tools with the real ToolRuntime schema validator', async () => {

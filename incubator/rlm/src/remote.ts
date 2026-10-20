@@ -20,7 +20,7 @@ export const RPC_REMOTE: TypertRemoteContribution = {
   descriptors: [
     {
       id: `${PKG}#solarRlmControl/status`,
-      service: 'solarRlmControl',
+      service: 'solarRlm',
       namespace: 'solarRlmControl',
       method: 'status',
       invocation: { kind: 'direct' as const },
@@ -29,7 +29,7 @@ export const RPC_REMOTE: TypertRemoteContribution = {
     },
     {
       id: `${PKG}#solarRlmControl/check`,
-      service: 'solarRlmControl',
+      service: 'solarRlm',
       namespace: 'solarRlmControl',
       method: 'check',
       invocation: { kind: 'direct' as const },
@@ -38,7 +38,7 @@ export const RPC_REMOTE: TypertRemoteContribution = {
     },
     {
       id: `${PKG}#solarRlmControl/inspect`,
-      service: 'solarRlmControl',
+      service: 'solarRlm',
       namespace: 'solarRlmControl',
       method: 'inspect',
       invocation: { kind: 'direct' as const },
@@ -47,7 +47,7 @@ export const RPC_REMOTE: TypertRemoteContribution = {
     },
     {
       id: `${PKG}#solarRlmControl/cancel`,
-      service: 'solarRlmControl',
+      service: 'solarRlm',
       namespace: 'solarRlmControl',
       method: 'cancel',
       invocation: { kind: 'direct' as const },
