@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { PrimeEvidence, type PrimeEvidenceMeta } from '../src/prime-evidence.js'
 
 function frame(eventSequence: number, promptTurnId: number, phase: string, extra: PrimeEvidenceMeta = {}): PrimeEvidenceMeta {
-  return { eventSequence, promptTurnId, phase, ...extra }
+  return { eventSequence, promptTurnId, phase, ...(phase === 'responseBoundary' ? { terminalQuiescenceExpected: true } : {}), ...extra }
 }
 
 function settledEvidence(): PrimeEvidence {
@@ -87,7 +87,7 @@ describe('PrimeEvidence', () => {
     expect(() => incomplete.assertSettled('end_turn')).toThrow('RLM_EFFECT_INDETERMINATE')
   })
 
-  it('does not settle while children or autonomous continuations remain', () => {
+  it('does not settle while native children remain', () => {
     const evidence = new PrimeEvidence()
     evidence.beginTurn()
     evidence.observe(frame(1, 1, 'responseBoundary', { outcome: 'result' }))
@@ -97,14 +97,61 @@ describe('PrimeEvidence', () => {
     }))
     expect(() => evidence.assertSettled('end_turn')).toThrow('RLM_EFFECT_INDETERMINATE')
 
-    const continuation = new PrimeEvidence()
-    continuation.beginTurn()
-    continuation.observe(frame(1, 1, 'responseBoundary', { outcome: 'result' }))
-    continuation.observe(frame(2, 1, 'terminalQuiescence', {
+  })
+
+  it('accepts unused continuation capacity after a real native terminal barrier', () => {
+    const evidence = new PrimeEvidence()
+    evidence.beginTurn()
+    evidence.observe(frame(1, 1, 'responseBoundary', { outcome: 'result' }))
+    evidence.observe(frame(2, 1, 'terminalQuiescence', {
       outcome: 'result',
-      quiescence: { outstandingSubagents: 0, remainingAutonomousContinuations: 1 },
+      quiescence: { outstandingSubagents: 0, remainingAutonomousContinuations: 2 },
+      autonomous: { enabled: true, continuationsUsed: 1, turnsUsed: 3, tokensUsed: 30 },
     }))
-    expect(() => continuation.assertSettled('end_turn')).toThrow('RLM_EFFECT_INDETERMINATE')
+    expect(() => evidence.assertSettled('end_turn')).not.toThrow()
+    expect(evidence.terminal?.quiescence).toEqual({ outstandingSubagents: 0, remainingAutonomousContinuations: 2 })
+  })
+
+  it('still fences missing or malformed native continuation capacity', () => {
+    for (const remaining of [undefined, -1, 1.5, '2', null]) {
+      const evidence = new PrimeEvidence()
+      evidence.beginTurn()
+      evidence.observe(frame(1, 1, 'responseBoundary', { outcome: 'result' }))
+      evidence.observe(frame(2, 1, 'terminalQuiescence', {
+        outcome: 'result',
+        quiescence: { outstandingSubagents: 0, remainingAutonomousContinuations: remaining },
+      }))
+      expect(() => evidence.assertSettled('end_turn')).toThrow('RLM_EFFECT_INDETERMINATE')
+    }
+  })
+
+  it('does not accept an autonomous gate failure as a successful end_turn', () => {
+    const evidence = new PrimeEvidence()
+    evidence.beginTurn()
+    evidence.observe(frame(1, 1, 'responseBoundary', { outcome: 'result' }))
+    evidence.observe(frame(2, 1, 'terminalQuiescence', {
+      outcome: 'result',
+      quiescence: { outstandingSubagents: 0, remainingAutonomousContinuations: 0 },
+      autonomous: { enabled: true, continuationsUsed: 3, turnsUsed: 4, tokensUsed: 40, gateAttempt: 4, gateFailure: 'exited with code 1' },
+    }))
+    expect(() => evidence.assertSettled('end_turn')).toThrow('RLM_NATIVE_GATE_FAILED')
+  })
+
+  it('fences missing boundary intent and inconsistent autonomous evidence', () => {
+    for (const expected of [undefined, false]) {
+      const evidence = new PrimeEvidence()
+      evidence.beginTurn()
+      evidence.observe(frame(1, 1, 'responseBoundary', { outcome: 'result', terminalQuiescenceExpected: expected }))
+      evidence.observe(frame(2, 1, 'terminalQuiescence', { outcome: 'result', quiescence: { outstandingSubagents: 0, remainingAutonomousContinuations: 0 } }))
+      expect(() => evidence.assertSettled('end_turn')).toThrow('RLM_EFFECT_INDETERMINATE')
+    }
+    for (const autonomous of [undefined, { enabled: false }, { enabled: true }, { enabled: true, continuationsUsed: 0, turnsUsed: -1, tokensUsed: 0 }]) {
+      const evidence = new PrimeEvidence()
+      evidence.beginTurn()
+      evidence.observe(frame(1, 1, 'responseBoundary', { outcome: 'result' }))
+      evidence.observe(frame(2, 1, 'terminalQuiescence', { outcome: 'result', quiescence: { outstandingSubagents: 0, remainingAutonomousContinuations: 1 }, autonomous }))
+      expect(() => evidence.assertSettled('end_turn')).toThrow('RLM_EFFECT_INDETERMINATE')
+    }
   })
 
   it('accepts a complete current boundary and terminal and preserves native fields', () => {

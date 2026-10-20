@@ -111,6 +111,19 @@ describe('RLM tools and owner service', () => {
     expect(fixture.start.mock.calls[0]?.[1].signal).toBeUndefined()
   })
 
+  it('admits explicit bounded native autonomous settings without changing the route', async () => {
+    const fixture = hostFixture()
+    const tool = createRunTool(fixture.host, config())
+    const autonomous = { maxTurns: 6, maxTokens: 80000, gate: 'test -f done.json' }
+    await tool.execute({ task: 'Finish the selected task', cwd: '/tmp/workspace', maxModelRequests: 8, maxWallTimeMs: 30000, autonomous }, exec())
+    expect(fixture.start.mock.calls[0]?.[0]).toMatchObject({ autonomous })
+    expect(fixture.start.mock.calls[0]?.[1]).toMatchObject({ route: { provider: 'provider-a', model: 'model-a', reasoningEffort: 'high', maxTokens: 512 } })
+    for (const invalid of [{ maxTurns: 0, maxTokens: 80000 }, { maxTurns: 3, maxTokens: 0 }, { maxTurns: 3, maxTokens: 80, gate: '  ' }, { maxTurns: 3, maxTokens: 80, injected: true }]) {
+      await expect(tool.execute({ task: 'task', cwd: '/tmp/workspace', maxModelRequests: 8, maxWallTimeMs: 30000, autonomous: invalid }, exec())).rejects.toThrow()
+    }
+    expect(fixture.start).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the pinned Prime native gate defaults in the public config', () => {
     expect(Config()).toMatchObject({ factoryEnabled: false, harnessRefinements: true })
   })

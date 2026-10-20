@@ -1,0 +1,47 @@
+# Prime ARC protocol alignment and next experiment boundary
+
+Date: 2026-10-20, Asia/Shanghai. This is a preparation and acceptance contract, not a reported ARC score or an efficacy result. The closed earlier experiment charged 138 requests under its then-146 cap. The user later approved the [fixed four-game panel](prime-rlm-arc-pilot-plan.json), up to 384 new requests and cumulative cap 522. Preparation and scripted acceptance use zero real model requests.
+
+## What the published ARC result tests
+
+The fixed reference is [PrimeIntellect-ai/arc-agi-3-prime-agent@398d4dd63cf01d00adbea41c13437ba0b8ad40fc](https://github.com/PrimeIntellect-ai/arc-agi-3-prime-agent/tree/398d4dd63cf01d00adbea41c13437ba0b8ad40fc), MIT. Its [game guidance](https://github.com/PrimeIntellect-ai/arc-agi-3-prime-agent/blob/398d4dd63cf01d00adbea41c13437ba0b8ad40fc/AGENTS.md) and initial prompt explicitly prohibit RLM/subagent calls. The workflow uses one persistent top-level Python session to inspect frames, maintain hypotheses and operate the game through a fixed broker. It therefore supports a claim about the complete Prime game harness; it cannot isolate the contribution of recursive children or Continual Harness refinement.
+
+| Protocol input | Published reference | Current Solar boundary |
+|---|---|---|
+| Prime | CLI v0.3.3 | Original, unmodified CLI 0.10.0 at `7cbffa77b38facd7c87277fa3c82bcadbe816880`; upgrading/downgrading is not implicit |
+| Mode | `--mode rpc --autonomous` | `--mode acp`, with explicit optional original autonomous configuration |
+| Reported repository model | Claude Opus 5 / xhigh | Only Codex gpt-6.1-sol / high is authorized; this is a different-model extension, not exact reproduction |
+| Game engine | `arc-agi==0.9.9`, `arcengine==0.9.3`, Python >=3.12 | Separate pinned preparation environment; never added to or substituted for the Prime capsule |
+| Cases | 25 public games, fresh independent session/workspace per game, seed 0 | Freeze exact game versions and record every unavailable case; do not silently select newer games |
+| Actions | 500 environment actions/game, at most 20 per batch; initial observe then single non-RESET actions; reset after GAME_OVER consumes an action | Preserve the original broker/client behavior; model calls are counted separately |
+| Termination | WIN or ACTION_CAP | Record model/tree/time/native-limit failures separately; none is a game success |
+| Isolation | Published guard uses Linux root ownership, `/proc` and `SO_PEERCRED` | macOS preparation cannot certify this guard; client protocol checks alone are not equivalent OS isolation |
+
+The [run script](https://github.com/PrimeIntellect-ai/arc-agi-3-prime-agent/blob/398d4dd63cf01d00adbea41c13437ba0b8ad40fc/run.sh) does not specify a separate model-request or monetary budget. Its 500-action cap must never be relabeled as 500 model calls. The earlier four text-label counting windows did not reproduce this protocol and cannot explain or refute its headline result.
+
+## Repair and acceptance before another real-model panel
+
+The plugin previously omitted native autonomous flags. It also interpreted the ACP `remainingAutonomousContinuations` counter as pending work. The fixed [Prime producer](https://github.com/PrimeIntellect-ai/prime-agent/blob/7cbffa77b38facd7c87277fa3c82bcadbe816880/crates/pa-daemon/src/acp/daemon.rs#L1763) defines it as unused continuation capacity. Solar now admits explicit native autonomous settings, snapshots them immutably, and accepts capacity only after the native causal terminal barrier and zero outstanding children. Non-end-turn stops and malformed or missing evidence still fail or fence the run.
+
+Required evidence is split into three lanes:
+
+1. Built-package local acceptance: an initial textual early stop fails a native gate, the original engine continues, original Python writes a checked artifact, and the gate passes. Explicit cold resume must restore the same configuration while retaining Solar's cumulative whole-tree request count. Prime's own autonomous counters restart on a cold resume.
+2. Original-versus-plugin scripted differential: the same binary, task, model metadata and autonomous limits run directly and through Solar. Compare model-visible instructions, tool definitions/history and actual Python/gate results. Normalize only documented run-specific paths, identities and timing. This is adapter evidence, not reasoning-quality evidence or provider-private protocol certification.
+3. Real game preparation: pin the author source and dependency versions outside the plugin; acquire only officially available game environments through the documented anonymous toolkit route; record exact availability and hashes. Load an actual offline game, observe and exercise the real broker without a model. Anonymous access to all 25 historical versions must be observed, not assumed.
+
+The tools refuse to equate a scripted gate with a quality improvement. No game corpus, model reasoning, account data, credentials or generated interpreter is published with these source changes.
+
+## Next real-model panel
+
+The new user-approved panel has a 384-request maximum; its real launch still requires the frozen runner and isolation gates. Before any new panel, freeze: exact cases and seed; model/provider revision and high reasoning; full prompts; comparator implementation; original mode and capability settings; per-tree and cumulative request/time/token caps; action accounting; isolation probes; independent scoring; and a stopping rule. All earlier outcomes remain retained and charged.
+
+An ARC panel must first establish that original Prime and Solar preserve the same permitted single-root game behavior. Any comparison with another scaffold is a full-harness comparison. A recursion-specific quality claim instead requires the separate S/S0 long-context contrast from the [evaluation specification](prime-rlm-evaluation.md), with a verified no-subcall control and enough budget for actual children. These two questions must not share a favorable result label.
+
+A revised experimental request cap, another model/effort, paid API fallback or extra credits requires explicit user authorization. No merge, release, market publication, recurring task, Jev restoration or app rebuild is authorized by this experiment preparation.
+
+
+## Test-only ARC SDK compatibility deviation
+
+The exact author broker calls `LocalEnvironmentWrapper.action1()` and related methods, while its pinned `arc-agi==0.9.9` exposes `step(GameAction, data=...)`. This was reproduced on a real offline game after successful observation. `tools/fixtures/rlm-arc-prepare/sdk-step-adapter.py` is an explicit facade around that environment object; the original broker still owns action counts, batches, reset and terminal handling. The author checkout, Toolkit and Prime remain unmodified. Preparation records the unadapted failure separately; `--compat-step` is opt-in and every resulting report marks `exactAuthorReproduction=false`.
+
+Run a read-only preflight with `node tools/rlm-arc-prepare.mjs`. Explicit `--prepare --output <new-private-tmpdir>` stages the pinned source, dependencies and public corpus. To reuse a verified acquisition without repeating network or installation effects, run `--smoke-existing <existing-private-tmpdir> --compat-step`; this creates a new smoke receipt and retains the original report. The observed compatible smoke completed initial observation, two single actions and status with independent frame/action receipts; it is environment acceptance, not a model score.

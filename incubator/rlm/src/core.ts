@@ -17,6 +17,7 @@ import { RunStore, type RunRecord } from './store.js'
 import { runPrimeSelfTest } from './selftest.js'
 import type { RunSummary, RlmUiStatus, SelfTestReport } from './ui-contract.js'
 import { z } from 'zod'
+import { executionArguments, loadExecution, saveExecution, type NativeAutonomous } from './execution.js'
 
 const exec = promisify(execFile)
 const META = 'ai.primeintellect.prime-agent'
@@ -31,7 +32,7 @@ function cleanEnvironment(): NodeJS.ProcessEnv {
   }
   return { ...env, PI_OFFLINE: '1', DO_NOT_TRACK: '1', PRIME_AGENT_TELEMETRY_DISABLED: '1', UV_OFFLINE: '1', PYTHONNOUSERSITE: '1' }
 }
-export interface StartInput { task: string; cwd: string; label?: string; inputs?: string[]; maxModelRequests: number; maxWallTimeMs: number }
+export interface StartInput { task: string; cwd: string; label?: string; inputs?: string[]; maxModelRequests: number; maxWallTimeMs: number; autonomous?: NativeAutonomous }
 export interface Owner { sessionId: string; route: ModelRoute; signal?: AbortSignal }
 export interface NativeSettings { factoryEnabled: boolean; harnessRefinements: boolean }
 export class RlmStoppedReceiptError extends Error {
@@ -148,6 +149,8 @@ export class RlmHost {
     let total = 0
     let server: Server | undefined
     try {
+      const autonomous = resumeRecord ? await loadExecution(directory) : input.autonomous ?? null
+      if (!resumeRecord) await saveExecution(directory, input.autonomous)
       if (!resumeRecord) await mkdir(join(directory, 'inputs'), { mode: 0o700 })
       for (const [index, name] of (input.inputs ?? []).entries()) {
         const source = await realpath(resolve(cwd, name)), rel = relative(cwd, source)
@@ -175,7 +178,7 @@ export class RlmHost {
       await writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { 'solar-dsh': { baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'SOLAR_RLM_TOKEN', api: 'openai-completions', authHeader: true, models: [{ id: 'selected', name: model.name, contextWindow: model.context.contextWindow, maxTokens, reasoning: !!model.reasoning, input: model.inputModalities?.includes('image') ? ['text', 'image'] : ['text'] }] } } }), { mode: 0o600 })
       const args = ['--mode', 'acp', '--offline', '--provider', 'solar-dsh', '--model', 'selected', '--cwd', cwd, '--daemon-socket', socket]
       if (resumeRecord?.sessionFile) args.push('--resume', resumeRecord.sessionFile)
-      args.push('--thinking', nativeThinking)
+      args.push('--thinking', nativeThinking, ...executionArguments(autonomous, record.maxWallTimeMs))
       await this.store.append(record.runId, { type: 'native-launch', runtimeFingerprint: runtime.fingerprint, args, route: record.route, nativeReasoningEffort: nativeThinking })
       const replay = new ReplayRegistry()
       if (resumeRecord) {
@@ -262,7 +265,7 @@ export class RlmHost {
     } catch (error) {
       if (live.record.state !== 'cancelling' && live.record.state !== 'cancelled') {
         const nativeOutcome = live.evidence.terminal?.outcome ?? live.evidence.boundary?.outcome
-        const knownFailure = nativeOutcome === 'error' || (nativeOutcome === 'result' && errorText(error).startsWith('RLM_NATIVE_LIMIT'))
+        const knownFailure = nativeOutcome === 'error' || (nativeOutcome === 'result' && (errorText(error).startsWith('RLM_NATIVE_LIMIT') || errorText(error).startsWith('RLM_NATIVE_GATE_FAILED')))
         live.record.state = knownFailure ? 'failed' : 'indeterminate'; live.record.message = errorText(error); await this.save(live)
       }
     } finally {

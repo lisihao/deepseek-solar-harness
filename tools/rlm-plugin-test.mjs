@@ -191,11 +191,20 @@ async function readMarker(path) {
     if (marker.checks?.bridge !== 'passed') throw new Error(`RLM bridge check did not pass: ${JSON.stringify(marker)}`)
     if (marker.selftest.bridge?.status !== 'passed') throw new Error(`RLM bridge acceptance did not pass: ${JSON.stringify(marker)}`)
     if (!(marker.selftest.bridge.modelRequests > 0) || marker.selftest.bridge.paidProviderCalls !== 0) throw new Error(`RLM bridge request accounting is invalid: ${JSON.stringify(marker)}`)
+    const autonomous = marker.selftest.autonomous
+    if (marker.checks?.autonomous !== 'passed' || autonomous?.status !== 'passed') throw new Error(`RLM native autonomous acceptance did not pass: ${JSON.stringify(marker)}`)
+    if (autonomous.initialModelRequests !== 3 || autonomous.modelRequests !== 4 || autonomous.paidProviderCalls !== 0 || autonomous.modelErrors !== 0) throw new Error(`RLM autonomous request accounting is invalid: ${JSON.stringify(marker)}`)
+    if (autonomous.nativeContinuation !== true || autonomous.gateFile !== '42' || autonomous.nativeLaunches !== 2 || autonomous.resumedFromCancelled !== true || autonomous.snapshot?.formatVersion !== 1) throw new Error(`RLM autonomous continuation/resume evidence is incomplete: ${JSON.stringify(marker)}`)
+    const gateFailure = marker.selftest.autonomousFailure
+    if (marker.checks?.autonomousFailure !== 'passed' || gateFailure?.status !== 'passed') throw new Error(`RLM negative autonomous gate acceptance did not pass: ${JSON.stringify(marker)}`)
+    if (!(gateFailure.localRequests >= 1 && gateFailure.localRequests <= 8) || gateFailure.modelErrors !== 0 || gateFailure.paidProviderCalls !== 0 || gateFailure.gateFailedMarker !== true || gateFailure.state !== 'failed' || !['end_turn', 'max_turn_requests'].includes(gateFailure.stopReason) || typeof gateFailure.gateFailure !== 'string') throw new Error(`RLM native gate-failure evidence is incomplete: ${JSON.stringify(marker)}`)
   } else if (marker.selftest.bridge?.status !== 'notrun') {
     throw new Error(`RLM bridge notrun marker is invalid: ${JSON.stringify(marker)}`)
   } else if (marker.checks?.bridge !== 'notrun') {
     throw new Error(`RLM bridge check notrun marker is invalid: ${JSON.stringify(marker)}`)
   }
+  if (marker.selftest.status === 'notrun' && (marker.selftest.autonomous?.status !== 'notrun' || marker.checks?.autonomous !== 'notrun')) throw new Error(`RLM autonomous notrun marker is invalid: ${JSON.stringify(marker)}`)
+  if (marker.selftest.status === 'notrun' && (marker.selftest.autonomousFailure?.status !== 'notrun' || marker.checks?.autonomousFailure !== 'notrun')) throw new Error(`RLM autonomous gate-failure notrun marker is invalid: ${JSON.stringify(marker)}`)
   return marker
 }
 

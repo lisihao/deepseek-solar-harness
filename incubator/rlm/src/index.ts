@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { RlmHost, type Owner, type StartInput } from './core.js'
 import type { ModelRoute } from './model-wire.js'
+import { nativeAutonomousSchema } from './execution.js'
 import type { CancelInput, InspectInput, RlmUiStatus, SelfTestInput, SelfTestReport, RunSummary } from './ui-contract.js'
 
 export const name = 'rlm'
@@ -57,6 +58,7 @@ export const startInputSchema = zod.strictObject({
   cwd: workspacePath,
   label: labelText.optional(),
   inputs: zod.array(inputName).max(MAX_INPUT_FILES).optional(),
+  autonomous: nativeAutonomousSchema.optional(),
   maxModelRequests: zod.number().int().min(1).max(MAX_MODEL_REQUESTS),
   maxWallTimeMs: zod.number().int().min(1_000).max(MAX_WALL_TIME_MS),
 })
@@ -149,7 +151,7 @@ const runSummaryOutput = {
 }
 
 function runToolDescription(): string {
-  return 'Start one bounded Prime RLM task using the current Agent provider, model, reasoning effort and max output tokens exactly as selected. The tool returns an asynchronous receipt; inspect it for progress and terminal state. The Prime process reads the admitted cwd with its normal file permissions. A completed receipt is not a quality proof.'
+  return 'Start one bounded Prime RLM task using the current Agent provider, model, reasoning effort and max output tokens exactly as selected. Optional autonomous settings enable the original Prime bounded continuation and completion gate. The tool returns an asynchronous receipt; inspect it for progress and terminal state. The Prime process reads the admitted cwd with its normal file permissions. A completed receipt is not a quality proof.'
 }
 
 export function createRunTool(host: RlmHost, config: Config): ToolDefinition {
@@ -165,6 +167,16 @@ export function createRunTool(host: RlmHost, config: Config): ToolDefinition {
       cwd: { type: 'string', required: true, description: '已选择的工作目录。Prime 会按正常文件权限读取它。' },
       label: { type: 'string', description: '任务显示名称。' },
       inputs: { type: 'array', items: { type: 'string' }, description: '工作目录内的相对输入文件路径。' },
+      autonomous: {
+        type: 'object',
+        additionalProperties: false,
+        description: '显式启用 Prime 原生自主续轮；省略时保持普通原生模式。原生计数在冷恢复时重新开始，任务树请求总额不重置。',
+        properties: {
+          maxTurns: { type: 'integer', required: true, description: '原生 assistant turn 上限（1-1000）。' },
+          maxTokens: { type: 'integer', required: true, description: '原生 autonomous token 上限（1-1000000000），不是单次输出上限。' },
+          gate: { type: 'string', description: '可选原生完成检查命令；在任务工作目录按 Prime 原始机制执行。' },
+        },
+      },
       maxModelRequests: { type: 'integer', required: true, description: `整个任务树的逻辑模型请求上限（1-${MAX_MODEL_REQUESTS}）。` },
       maxWallTimeMs: { type: 'integer', required: true, description: `每轮原生执行的时间上限（1000-${MAX_WALL_TIME_MS} 毫秒）。` },
     },

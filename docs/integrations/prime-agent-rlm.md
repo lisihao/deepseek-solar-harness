@@ -1,6 +1,6 @@
 # Prime Agent RLM and Continual Harness integration
 
-Status: implementation and existing-app installation authorized by 昊哥 on 2026-10-20; validation in progress. Paid experiments remain paused. This supersedes the earlier proposal to replace Prime's Rust host with DSH child Agents. The implementation runs Prime's original native host.
+Status: implementation and existing-app installation authorized by 昊哥 on 2026-10-20; source and earlier keyless installed-app acceptance are recorded separately. A later isolated Codex subscription experiment is authorized at `gpt-6.1-sol / high`, initially up to 146 cumulative requests; 138 were charged. A subsequent four-game ARC panel is approved for up to 384 new requests, cumulative cap 522; its runner acceptance is pending. Paid API fallback and extra-credit purchases remain unauthorized. This supersedes the earlier proposal to replace Prime's Rust host with DSH child Agents. The implementation runs Prime's original native host.
 
 This is a separately commissioned RLM plugin. It does not change the scope, ownership or runtime of native-collaboration or native-resident. OpenHuman, TinyJuice and Jev are not dependencies.
 
@@ -21,6 +21,7 @@ The DSH baseline is published `@deepseek-ai/dsh@0.2.1-rc.2`, Cordis 4.0.5, upstr
 | Harness objects, prompts, skills and declarative machine definitions | Original `rlm.harness` and Prime persistence |
 | Factory admission, execution, status and stop | Original `rlm.factory`, behind Prime's opt-in setting |
 | `refine.run`, turn-boundary planning, application, history and rollback | Original Prime Continual Harness engine |
+| Optional autonomous continuation, native shell gates and native turn/token/time limits | Original Prime autonomous engine; explicitly admitted per task |
 | DSH tool admission, owned inputs, model route, loopback transport, evidence and UI | Solar adapter |
 
 ## Composition
@@ -44,6 +45,10 @@ The original ACP interface is the supported process boundary:
 3. Send admitted text through `session/prompt`; send original `/refine` commands unchanged through that same native path.
 4. Record namespaced Prime metadata and wait for the original terminal quiescence envelope. `end_turn` alone is not completion evidence.
 5. Keep the native connection/kernel after a settled round for explicit follow-up. Explicit stop and plugin disposal use Prime's own shutdown command scoped to that run's state root.
+
+The optional `autonomous` task object enables the original CLI's `--autonomous` mode with explicit `maxTurns`, accumulated `maxTokens`, optional shell `gate`, and the admitted wall timeout. Omission preserves ordinary native mode. `execution.json` captures this choice immutably and is strictly validated before cold resume. Prime's native counters restart on cold resume; Solar's durable complete-tree request count remains cumulative. Missing legacy configuration is accepted only with journal proof of non-autonomous native launches.
+
+Prime's `terminalQuiescence` barrier already drains queued native work. Its `remainingAutonomousContinuations` field reports unused continuation capacity, not queued continuations; positive capacity therefore does not invalidate an otherwise complete terminal. Outstanding children, invalid metadata, missing current causal envelopes and non-`end_turn` stops remain fenced or failed.
 
 `session/cancel` is a notification. Native shutdown is `prime-agent shutdown --force --json`, targeted by both `PRIME_AGENT_DAEMON_SOCKET` and `PRIME_AGENT_CODING_AGENT_DIR`; it is never a machine-wide unscoped kill command.
 
@@ -113,7 +118,7 @@ Required implementation evidence includes:
 - The built plugin installed and booted under plain Node in a disposable published-baseline profile, including the full DSH model bridge and native resume/stop path.
 - Existing-app installation from a stable artifact, enabled state and normal explicit local check, disable/enable cleanup, default/narrow UI inspection and preserved unrelated profile state.
 
-Actual results belong in [the verification record](../testing/prime-rlm-verification.md); planned checks are not passing evidence. Comparative quality, matched-cost evaluation, independent grading, original-paper reproduction and held-out Continual Harness effects are **not run** while paid experiments are paused. Nothing in implementation, a green CI check, installation or the paper itself proves that this plugin improves a model's reasoning.
+Actual results belong in [the verification record](../testing/prime-rlm-verification.md); planned checks are not passing evidence. The bounded subscription pilot and four-corpus follow-up were run with independent grading and retained adverse outcomes; they did not establish quality improvement. Original-paper reproduction and held-out Continual Harness effects remain **not run**. The [ARC protocol alignment](../testing/prime-rlm-arc-protocol.md) separates the published single-root game workflow from recursion-specific evaluation. Nothing in implementation, a green CI check, installation or the paper itself proves that this plugin improves a model's reasoning.
 
 ## Primary source map
 

@@ -109,6 +109,7 @@ export class PrimeEvidence {
       || terminal.promptTurnId !== this.#expectedPrompt
       || boundary.phase !== 'responseBoundary'
       || terminal.phase !== 'terminalQuiescence'
+      || boundary.terminalQuiescenceExpected !== true
       || boundary.outcome !== 'result'
       || terminal.outcome !== 'result'
       || boundarySequence === undefined
@@ -117,11 +118,35 @@ export class PrimeEvidence {
       throw indeterminate('Prime 当前 turn 的 boundary/terminal 因果证据不完整或已过期。')
     }
 
+    // Prime's ACP terminal barrier has already drained queued native work.
+    // remainingAutonomousContinuations is unused continuation capacity, not
+    // pending work (pa-daemon/src/acp/daemon.rs::quiescence_meta at our pin).
     const quiescence = terminal.quiescence
     if (!isObject(quiescence)
       || quiescence.outstandingSubagents !== 0
-      || quiescence.remainingAutonomousContinuations !== 0) {
-      throw indeterminate('Prime 当前 turn 仍有未静止的子 agent 或 autonomous continuation。')
+      || typeof quiescence.remainingAutonomousContinuations !== 'number'
+      || !Number.isSafeInteger(quiescence.remainingAutonomousContinuations)
+      || quiescence.remainingAutonomousContinuations < 0) {
+      throw indeterminate('Prime 当前 turn 仍有未静止的子 agent，或原生剩余额度元数据无效。')
+    }
+
+    const autonomous = terminal.autonomous
+    if (autonomous !== undefined) {
+      if (!isObject(autonomous) || autonomous.enabled !== true
+        || !['continuationsUsed', 'turnsUsed', 'tokensUsed'].every(field =>
+          typeof autonomous[field] === 'number' && Number.isSafeInteger(autonomous[field]) && (autonomous[field] as number) >= 0)) {
+        throw indeterminate('Prime 原生 autonomous 终态证据无效。')
+      }
+      if (autonomous.limitReason !== undefined) {
+        if (typeof autonomous.limitReason !== 'string') throw indeterminate('Prime 原生 limitReason 无效。')
+        throw limit(`Prime 原生自主运行达到限制：${autonomous.limitReason}`)
+      }
+      if (autonomous.gateFailure !== undefined) {
+        if (typeof autonomous.gateFailure !== 'string') throw indeterminate('Prime 原生 gateFailure 无效。')
+        throw new Error(`RLM_NATIVE_GATE_FAILED: Prime 原生完成检查未通过：${autonomous.gateFailure.slice(0, 2_000)}`)
+      }
+    } else if (quiescence.remainingAutonomousContinuations > 0) {
+      throw indeterminate('Prime 剩余自主续轮额度缺少已启用的原生自主模式证据。')
     }
 
     if (stopReason !== 'end_turn') throw limit(`Prime 本轮停止原因 ${String(stopReason)}；未视为答案完成。`)

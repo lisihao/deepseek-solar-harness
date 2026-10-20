@@ -10,7 +10,7 @@ The conversation tools are:
 
 | Tool | Purpose |
 |---|---|
-| `solar_rlm_run` | Start a task with explicit `task`, `cwd`, `maxModelRequests`, `maxWallTimeMs`, and optional `label` / relative `inputs`. Returns an asynchronous receipt. |
+| `solar_rlm_run` | Start a task with explicit `task`, `cwd`, `maxModelRequests`, `maxWallTimeMs`, and optional `label` / relative `inputs` / `autonomous`. Returns an asynchronous receipt. |
 | `solar_rlm_inspect` | Read the current session's task state and bounded result preview. |
 | `solar_rlm_control` | Send one new text turn (`continue`), pass an original `/refine` command (`refine`), or stop the native process (`cancel`). |
 
@@ -31,6 +31,10 @@ Normal tasks use the calling DSH Agent's actual provider/model and supported rea
 | `harnessRefinements` | `true` | Prime's original Continual Harness gate. |
 
 Each run must supply request and time limits within the configured maxima. These are bounded admission defaults, not measured optimal settings. Original native settings are captured in a new run's private agent directory; resume preserves that run's state.
+
+`solar_rlm_run` optionally accepts `autonomous: { maxTurns, maxTokens, gate? }`. This explicitly enables Prime's original `--autonomous` engine; omitting it retains the ordinary native mode. `maxTurns` bounds original assistant turns (including tool continuations), and `maxTokens` is Prime's accumulated native token budget, not a per-response output limit. The existing `maxWallTimeMs` is also passed as the native autonomous timeout. An optional `gate` is an original Prime shell acceptance command executed in the selected working directory. Native continuation and gate-retry defaults are unchanged. Autonomous mode can continue after an early textual answer when its native completion/gate checks require more work; it does not guarantee a correct answer.
+
+The immutable versioned `runs/<run-id>/execution.json` records this choice. Cold `--resume` restores the same configuration. Prime itself starts fresh autonomous counters on a cold resume; the plugin's durable complete-tree `maxModelRequests` count does **not** reset. A legacy run without this snapshot resumes in ordinary mode only when its existing versioned journal proves every native launch omitted autonomous flags; missing or ambiguous evidence fences resume.
 
 The logical request count includes children and refinement. DSH adapter-internal retries remain provider-owned, so this count is not a hard billable-attempt or monetary cap. Usage/cache fields and errors are retained without inventing missing billing values.
 

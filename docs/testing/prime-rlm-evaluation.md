@@ -2,7 +2,7 @@
 
 Status: **evaluation contract; no model-quality experiment or paper reproduction is certified**. Prepared for 昊哥, 2026-10-20 (Asia/Shanghai). The [current integration](../integrations/prime-agent-rlm.md) runs the original native Prime host; the earlier host-substitution proposal was superseded. Actual keyless implementation and installation results are tracked in the [verification record](prime-rlm-verification.md).
 
-The observable deliverable of this documentation task is a falsifiable case catalogue, a frozen-comparison protocol, independent grading, a statistical decision rule and an evidence manifest. A local scripted mechanism runner is now implemented. The benchmark fixture generator, independent grader and paid experiments remain a later stage; this specification does not authorize launching them.
+The observable deliverable of this documentation task is a falsifiable case catalogue, a frozen-comparison protocol, independent grading, a statistical decision rule and an evidence manifest. A local scripted mechanism runner is now implemented. A later bounded Codex subscription pilot and four-corpus follow-up with independent grading are recorded separately; neither established quality improvement. This specification does not itself authorize further model calls or increase the user's cumulative cap. [ARC protocol alignment](prime-rlm-arc-protocol.md) defines the distinct single-root game track.
 
 ## 1. Three separate questions and decision gates
 
