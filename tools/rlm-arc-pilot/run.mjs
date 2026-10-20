@@ -5,11 +5,12 @@
  *
  * This file deliberately has four separate modes.  `prepare`, `keyless`, and
  * `analyze` never import the private provider module and never read a
- * credential.  `run` has the only provider-loading code path, and refuses to
- * begin until the prepared/keyless fingerprints and an explicit independent
- * acceptance receipt are present.  This separation is intentional: a local
- * test must not become a billable model experiment merely because a credential
- * happens to exist on the machine.
+ * credential.  `run` and the explicitly accepted `resume-unstarted` mode are
+ * the only provider-loading code paths.  Both refuse to begin until their
+ * prepared/keyless fingerprints and independent acceptance evidence are
+ * present.  This separation is intentional: a local test must not become a
+ * billable model experiment merely because a credential happens to exist on
+ * the machine.
  */
 
 import { execFile as execFileCallback, spawn } from 'node:child_process'
@@ -69,6 +70,10 @@ const PREPARED_MANIFEST = 'arc-pilot-manifest.json'
 const KEYLESS_RECEIPT = 'keyless-acceptance.json'
 const RUN_START_MARKER = 'real-run-started.json'
 const RESULTS_DIRECTORY = 'results'
+const CONTINUATION_KIND = 'prime-rlm-arc-unstarted-continuation-acceptance'
+const CONTINUATION_MARKER_PREFIX = 'resume-unstarted-started-'
+const CONTINUATION_RECEIPT_PREFIX = 'resume-unstarted-receipt-'
+const RUNNER_EXECUTION_FILE = 'tools/rlm-arc-pilot/run.mjs'
 const SHA256 = /^[a-f0-9]{64}$/i
 
 function failure(code, detail, options = {}) {
@@ -686,13 +691,54 @@ async function readPreparedManifest(output) {
   return { root, path, manifest }
 }
 
-async function assertPreparedFingerprint(manifest) {
+function requireSha256(value, label, code = 'ARC_CONTINUATION_ARTIFACT') {
+  if (typeof value !== 'string' || !SHA256.test(value)) fail(code, `${label} must be a SHA-256 digest`)
+  return value.toLowerCase()
+}
+
+function requireExactHashMap(value, label) {
+  if (!isRecord(value)) fail('ARC_CONTINUATION_ARTIFACT', `${label} must be an object`)
+  const expected = [...EXECUTION_FILES].sort()
+  const actual = Object.keys(value).sort()
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) fail('ARC_CONTINUATION_ARTIFACT', `${label} must name exactly the frozen execution files`)
+  return Object.fromEntries(expected.map(name => [name, requireSha256(value[name], `${label}.${name}`)]))
+}
+
+function assertRunnerOnlyContinuation(manifest, continuation, currentExecution, currentRunnerHash) {
+  if (!continuation) fail('ARC_FINGERPRINT_EXECUTION', 'executed helpers or dependency pins changed since prepare')
+  const originalExecution = manifest.execution?.files
+  const acceptedExecution = continuation.currentExecutionHashes
+  if (!isRecord(originalExecution) || !isRecord(acceptedExecution)) fail('ARC_CONTINUATION_ARTIFACT', 'continuation does not bind execution hashes')
+  if (continuation.originalFingerprint !== manifest.fingerprint
+    || continuation.originalRunnerSha256 !== manifest.runner?.sha256
+    || originalExecution[RUNNER_EXECUTION_FILE] !== manifest.runner?.sha256
+    || continuation.currentRunnerSha256 !== currentRunnerHash
+    || acceptedExecution[RUNNER_EXECUTION_FILE] !== currentRunnerHash
+    || currentRunnerHash === manifest.runner?.sha256) {
+    fail('ARC_CONTINUATION_RUNNER', 'continuation does not bind the exact old and current runner bytes')
+  }
+  for (const name of EXECUTION_FILES) {
+    if (name === RUNNER_EXECUTION_FILE) continue
+    if (currentExecution[name] !== originalExecution[name] || acceptedExecution[name] !== originalExecution[name]) {
+      fail('ARC_CONTINUATION_EXECUTION', `${name} changed; only ${RUNNER_EXECUTION_FILE} may differ for an unstarted continuation`)
+    }
+  }
+  if (canonicalHash(currentExecution) !== canonicalHash(acceptedExecution)) {
+    fail('ARC_CONTINUATION_EXECUTION', 'continuation current execution hashes do not match the local files')
+  }
+}
+
+export async function assertPreparedFingerprint(manifest, { continuation } = {}) {
   const { hash: planHash } = await loadPlan(manifest.plan.path)
   if (planHash !== manifest.plan.hash) fail('ARC_FINGERPRINT_PLAN', 'approved plan bytes have changed since prepare')
-  if (canonicalHash(await executionHashes(manifest.runner.sourceRoot)) !== canonicalHash(manifest.execution?.files)) fail('ARC_FINGERPRINT_EXECUTION', 'executed helpers or dependency pins changed since prepare')
-  if (manifest.execution.node !== process.version || manifest.execution.platform !== process.platform || manifest.execution.arch !== process.arch) fail('ARC_FINGERPRINT_ENVIRONMENT', 'Node/platform differs from preparation')
+  const currentExecution = await executionHashes(manifest.runner.sourceRoot)
   const runnerHash = await sha256File(manifest.runner.path)
-  if (runnerHash !== manifest.runner.sha256) fail('ARC_FINGERPRINT_RUNNER', 'runner bytes have changed since prepare')
+  if (canonicalHash(currentExecution) !== canonicalHash(manifest.execution?.files)) {
+    assertRunnerOnlyContinuation(manifest, continuation, currentExecution, runnerHash)
+  }
+  if (manifest.execution.node !== process.version || manifest.execution.platform !== process.platform || manifest.execution.arch !== process.arch) fail('ARC_FINGERPRINT_ENVIRONMENT', 'Node/platform differs from preparation')
+  if (runnerHash !== manifest.runner.sha256 && !continuation) fail('ARC_FINGERPRINT_RUNNER', 'runner bytes have changed since prepare')
+  if (runnerHash !== manifest.runner.sha256 && continuation) assertRunnerOnlyContinuation(manifest, continuation, currentExecution, runnerHash)
   const outputs = {}
   for (const [name, expected] of Object.entries(manifest.shared.compiled.outputs ?? {})) {
     const path = join(manifest.shared.compiled.path, name)
@@ -948,6 +994,251 @@ async function loadExternalAcceptance({ artifact, sha256, manifest }) {
   return { path, hash: actualHash, value }
 }
 
+function normalizeConditionHashMap(value, label, manifest) {
+  if (!isRecord(value)) fail('ARC_CONTINUATION_ARTIFACT', `${label} must be an object`)
+  const known = new Set(manifest.conditions.map(condition => condition.id))
+  const result = {}
+  for (const [id, hash] of Object.entries(value)) {
+    if (!known.has(id)) fail('ARC_CONTINUATION_ARTIFACT', `${label} names an unknown condition: ${id}`)
+    result[id] = requireSha256(hash, `${label}.${id}`)
+  }
+  return result
+}
+
+function normalizeClosedUnknownRun(value) {
+  if (!isRecord(value)) fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun must be an object')
+  if (typeof value.runId !== 'string' || value.runId.length === 0) fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.runId is required')
+  if (!Array.isArray(value.unknownCalls) || value.unknownCalls.length === 0 || value.unknownCalls.some(call => typeof call !== 'string')) {
+    fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.unknownCalls must be a non-empty string array')
+  }
+  if (value.cause !== 'native_budget_closed') fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.cause must be native_budget_closed')
+  if (!isRecord(value.evidenceHash) || value.evidenceHash.algorithm !== 'sha256') fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.evidenceHash must be a sha256 object')
+  return {
+    run: value.runId,
+    unknownCalls: [...value.unknownCalls],
+    cause: value.cause,
+    evidenceHash: { algorithm: 'sha256', digest: requireSha256(value.evidenceHash.digest, 'closedUnknownRun.evidenceHash.digest') },
+  }
+}
+
+function normalizeContinuationAcceptance(value, manifest) {
+  if (!isRecord(value) || value.formatVersion !== FORMAT_VERSION || value.kind !== CONTINUATION_KIND || value.accepted !== true) {
+    fail('ARC_CONTINUATION_ARTIFACT', 'continuation artifact is not an accepted unstarted-continuation receipt')
+  }
+  const originalFingerprint = requireSha256(value.originalFingerprint, 'originalFingerprint')
+  const originalRunnerSha256 = requireSha256(value.originalRunnerSha256, 'originalRunnerSha256')
+  const currentRunnerSha256 = requireSha256(value.currentRunnerSha256, 'currentRunnerSha256')
+  const currentExecutionHashes = requireExactHashMap(value.currentExecutionHashes, 'currentExecutionHashes')
+  if (originalFingerprint !== manifest.fingerprint || originalRunnerSha256 !== manifest.runner.sha256) {
+    fail('ARC_CONTINUATION_ARTIFACT', 'continuation artifact does not bind this original prepared manifest')
+  }
+  const previous = value.previous
+  if (!isRecord(previous)) fail('ARC_CONTINUATION_ARTIFACT', 'previous immutable evidence is required')
+  return {
+    originalFingerprint,
+    originalRunnerSha256,
+    currentRunnerSha256,
+    currentExecutionHashes,
+    previous: {
+      runReceiptSha256: requireSha256(previous.runReceiptSha256, 'previous.runReceiptSha256'),
+      panelStartMarkerSha256: requireSha256(previous.panelStartMarkerSha256, 'previous.panelStartMarkerSha256'),
+      resultSha256: normalizeConditionHashMap(previous.resultSha256, 'previous.resultSha256', manifest),
+      startedMarkerSha256: normalizeConditionHashMap(previous.startedMarkerSha256, 'previous.startedMarkerSha256', manifest),
+    },
+    closedUnknownRun: normalizeClosedUnknownRun(value.closedUnknownRun),
+  }
+}
+
+async function loadContinuationAcceptance({ artifact, sha256, manifest }) {
+  const path = await assertRegularFile(artifact, 'continuation artifact')
+  const expectedHash = requireSha256(sha256, '--continuation-sha256', 'ARC_CONTINUATION_HASH')
+  const hash = await sha256File(path)
+  if (hash !== expectedHash) fail('ARC_CONTINUATION_HASH', 'continuation artifact SHA-256 does not match')
+  let value
+  try { value = JSON.parse(await readFile(path, 'utf8')) } catch (error) { fail('ARC_CONTINUATION_ARTIFACT', 'continuation artifact is not JSON', { cause: error }) }
+  return { path, hash, ...normalizeContinuationAcceptance(value, manifest) }
+}
+
+async function readJson(path, label) {
+  try { return JSON.parse(await readFile(path, 'utf8')) } catch (error) { fail('ARC_CONTINUATION_JSON', `${label} is not JSON`, { cause: error }) }
+}
+
+async function conditionEvidence(root, manifest) {
+  const resultRoot = join(root, RESULTS_DIRECTORY)
+  const knownResultNames = new Set(manifest.conditions.map(condition => `${condition.id}.json`))
+  if (await exists(resultRoot)) {
+    const info = await lstat(resultRoot)
+    if (!info.isDirectory() || info.isSymbolicLink()) fail('ARC_CONTINUATION_RESULTS', 'results directory is not a real directory')
+    for (const entry of await readdir(resultRoot)) {
+      if (!knownResultNames.has(entry)) fail('ARC_CONTINUATION_RESULTS', `unexpected result file: ${entry}`)
+    }
+  }
+  const resultSha256 = {}
+  const startedMarkerSha256 = {}
+  const recorded = []
+  const unstarted = []
+  for (const condition of manifest.conditions) {
+    const resultPath = join(resultRoot, `${condition.id}.json`)
+    const markerPath = join(condition.directory, 'real-condition-started.json')
+    const hasResult = await exists(resultPath)
+    const hasMarker = await exists(markerPath)
+    if (hasMarker !== hasResult) fail('ARC_CONTINUATION_STARTED_STATE', `${condition.id} has ${hasMarker ? 'a start marker without a result' : 'a result without a start marker'}`)
+    if (!hasResult) {
+      unstarted.push(condition)
+      continue
+    }
+    await assertRegularFile(resultPath, `result for ${condition.id}`)
+    await assertRegularFile(markerPath, `start marker for ${condition.id}`)
+    const result = await readJson(resultPath, `result for ${condition.id}`)
+    const marker = await readJson(markerPath, `start marker for ${condition.id}`)
+    if (result?.condition?.id !== condition.id || result?.condition?.arm !== condition.arm || result?.condition?.gameId !== condition.gameId) {
+      fail('ARC_CONTINUATION_RESULT', `${condition.id} result does not bind its frozen condition`)
+    }
+    if (result.cleanupComplete !== true) fail('ARC_CONTINUATION_CLEANUP', `${condition.id} did not complete cleanup`)
+    if (marker?.fingerprint !== manifest.fingerprint || marker?.id !== condition.id) fail('ARC_CONTINUATION_MARKER', `${condition.id} start marker does not bind the prepared fingerprint`)
+    resultSha256[condition.id] = await sha256File(resultPath)
+    startedMarkerSha256[condition.id] = await sha256File(markerPath)
+    recorded.push({ condition, resultPath, markerPath, result })
+  }
+  return { resultSha256, startedMarkerSha256, recorded, unstarted }
+}
+
+function sameHashMap(left, right) {
+  return canonicalHash(left) === canonicalHash(right)
+}
+
+async function verifyPriorRun(root, manifest, continuation, evidence) {
+  const runReceiptPath = join(root, 'run-receipt.json')
+  const panelMarkerPath = join(root, RUN_START_MARKER)
+  await Promise.all([assertRegularFile(runReceiptPath, 'previous run receipt'), assertRegularFile(panelMarkerPath, 'previous panel start marker')])
+  const [receipt, marker, runReceiptSha256, panelStartMarkerSha256] = await Promise.all([
+    readJson(runReceiptPath, 'previous run receipt'),
+    readJson(panelMarkerPath, 'previous panel start marker'),
+    sha256File(runReceiptPath),
+    sha256File(panelMarkerPath),
+  ])
+  if (runReceiptSha256 !== continuation.previous.runReceiptSha256 || panelStartMarkerSha256 !== continuation.previous.panelStartMarkerSha256
+    || !sameHashMap(evidence.resultSha256, continuation.previous.resultSha256)
+    || !sameHashMap(evidence.startedMarkerSha256, continuation.previous.startedMarkerSha256)) {
+    fail('ARC_CONTINUATION_IMMUTABLE', 'previous run receipt, result, or start-marker bytes differ from the accepted continuation evidence')
+  }
+  if (marker?.fingerprint !== manifest.fingerprint || receipt?.kind !== 'prime-rlm-arc-pilot-run' || receipt?.fingerprint !== manifest.fingerprint
+    || typeof receipt?.completedAt !== 'string' || !Array.isArray(receipt.results)) {
+    fail('ARC_CONTINUATION_PRIOR_RUN', 'previous run receipt or panel marker is not a completed run for this fingerprint')
+  }
+  const recordedIds = new Set(evidence.recorded.map(entry => entry.condition.id))
+  const receiptIds = new Set()
+  for (const entry of receipt.results) {
+    const id = entry?.condition?.id
+    if (typeof id !== 'string' || receiptIds.has(id) || !recordedIds.has(id) || entry.cleanupComplete !== true) {
+      fail('ARC_CONTINUATION_PRIOR_CLEANUP', 'previous run receipt does not prove cleanup for every recorded condition')
+    }
+    receiptIds.add(id)
+  }
+  if (receiptIds.size === 0) fail('ARC_CONTINUATION_PRIOR_CLEANUP', 'previous run receipt has no completed cleanup evidence')
+  return { runReceiptPath, panelMarkerPath, runReceiptSha256, panelStartMarkerSha256, receipt }
+}
+
+function sameClosure(left, right) {
+  return left?.run === right.run
+    && JSON.stringify(left?.unknownCalls) === JSON.stringify(right.unknownCalls)
+    && left?.cause === right.cause
+    && left?.evidenceHash?.algorithm === right.evidenceHash.algorithm
+    && left?.evidenceHash?.digest === right.evidenceHash.digest
+}
+
+function orderedUnknownCalls(ledger, runId) {
+  return [...ledger.calls.entries()]
+    .filter(([, call]) => call.run === runId && !call.prior && call.state === 'unknown')
+    .sort(([left], [right]) => Number(left.slice('request-'.length)) - Number(right.slice('request-'.length)))
+    .map(([id]) => id)
+}
+
+function validateClosureBeforeMarker(ledger, closure) {
+  const existing = ledger.closedRuns.get(closure.run)
+  if (existing) {
+    if (!sameClosure(existing, closure)) fail('ARC_CONTINUATION_CLOSURE', 'the ledger already has different closure evidence for this run')
+    if (ledger.stopped) fail('ARC_CONTINUATION_LEDGER', 'ledger remains stopped after an existing closure')
+    return existing
+  }
+  if (!ledger.stopped) fail('ARC_CONTINUATION_CLOSURE', 'the ledger is not stopped on the accepted unknown run')
+  const calls = [...ledger.calls.entries()].filter(([, call]) => call.run === closure.run && !call.prior)
+  if (calls.some(([, call]) => call.state === 'admitted')) fail('ARC_CONTINUATION_CLOSURE', 'closed unknown run still has an admitted request')
+  const unknownCalls = orderedUnknownCalls(ledger, closure.run)
+  if (JSON.stringify(unknownCalls) !== JSON.stringify(closure.unknownCalls)) {
+    fail('ARC_CONTINUATION_CLOSURE', 'closed unknown run does not exactly cover the ledger unknown calls')
+  }
+  const unresolvedElsewhere = [...ledger.calls.entries()].some(([id, call]) => !call.prior && call.state === 'unknown' && call.run !== closure.run && ![...ledger.closedRuns.values()].some(known => known.unknownCalls.includes(id)))
+  if (unresolvedElsewhere) fail('ARC_CONTINUATION_CLOSURE', 'ledger has another unresolved unknown run')
+  return null
+}
+
+async function nextContinuationPaths(root) {
+  const slots = new Map()
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const match = /^(resume-unstarted-(started|receipt)-(\d+)\.json)$/.exec(entry.name)
+    if (!match) continue
+    if (!entry.isFile()) fail('ARC_CONTINUATION_HISTORY', `${entry.name} is not a regular file`)
+    const number = Number(match[3])
+    if (!Number.isSafeInteger(number) || number < 1) fail('ARC_CONTINUATION_HISTORY', `${entry.name} has an invalid continuation number`)
+    const state = slots.get(number) ?? {}
+    state[match[2]] = entry.name
+    slots.set(number, state)
+  }
+  const numbers = [...slots.keys()].sort((left, right) => left - right)
+  for (let index = 0; index < numbers.length; index += 1) {
+    const number = numbers[index]
+    const state = slots.get(number)
+    if (number !== index + 1 || !state.started || !state.receipt) {
+      fail('ARC_CONTINUATION_IN_PROGRESS', 'a prior continuation marker or receipt is incomplete; do not start another continuation')
+    }
+  }
+  const number = numbers.length + 1
+  const suffix = String(number).padStart(2, '0')
+  return {
+    number,
+    markerPath: join(root, `${CONTINUATION_MARKER_PREFIX}${suffix}.json`),
+    receiptPath: join(root, `${CONTINUATION_RECEIPT_PREFIX}${suffix}.json`),
+  }
+}
+
+/**
+ * Perform the non-provider continuation gate and durably close exactly one
+ * accepted unknown run before selecting conditions which have never started.
+ */
+export async function prepareUnstartedContinuation({ output, continuationArtifact, continuationSha256 } = {}) {
+  const { root, manifest } = await readPreparedManifest(output)
+  const continuation = await loadContinuationAcceptance({ artifact: continuationArtifact, sha256: continuationSha256, manifest })
+  await assertPreparedFingerprint(manifest, { continuation })
+  const keyless = await loadKeylessGate(root, manifest)
+  const evidence = await conditionEvidence(root, manifest)
+  const previous = await verifyPriorRun(root, manifest, continuation, evidence)
+  if (evidence.unstarted.length === 0) fail('ARC_CONTINUATION_EMPTY', 'every frozen condition already has a verified result')
+  if (!Object.hasOwn(continuation.previous.resultSha256, continuation.closedUnknownRun.run)) {
+    fail('ARC_CONTINUATION_CLOSURE', 'closed unknown run must have an immutable recorded result')
+  }
+  const ledger = await Ledger.open(manifest.ledger.path, { total: FIXED_LIMITS.total, perRun: FIXED_LIMITS.requestLimit })
+  const existingClosure = validateClosureBeforeMarker(ledger, continuation.closedUnknownRun)
+  const beforeAccounting = await ledger.receipt()
+  const maxModelRequests = FIXED_LIMITS.newPanel - beforeAccounting.newAdmitted
+  if (!Number.isSafeInteger(maxModelRequests) || maxModelRequests < 1) fail('ARC_CONTINUATION_BUDGET', 'no authorized new-panel requests remain')
+  const paths = await nextContinuationPaths(root)
+  await writeExclusiveJson(paths.markerPath, {
+    formatVersion: FORMAT_VERSION,
+    kind: 'prime-rlm-arc-unstarted-continuation-started',
+    startedAt: new Date().toISOString(),
+    number: paths.number,
+    originalFingerprint: manifest.fingerprint,
+    continuationArtifact: { path: continuation.path, sha256: continuation.hash },
+    previous: { runReceiptSha256: previous.runReceiptSha256, panelStartMarkerSha256: previous.panelStartMarkerSha256, resultSha256: evidence.resultSha256, startedMarkerSha256: evidence.startedMarkerSha256 },
+    selectedConditions: evidence.unstarted.map(condition => condition.id),
+  })
+  if (!existingClosure) ledger.acknowledgeClosedRun(continuation.closedUnknownRun)
+  const accounting = await ledger.receipt()
+  if (accounting.stopped) fail('ARC_CONTINUATION_LEDGER', 'ledger remains stopped after the accepted closure')
+  return { root, manifest, continuation, keyless, evidence, previous, ledger, paths, accounting, maxModelRequests }
+}
+
 export function assertFixedModelOptions(options) {
   if (!isRecord(options) || options.provider !== FIXED_ROUTE.provider || options.model !== FIXED_ROUTE.model
     || options.reasoningEffort !== FIXED_ROUTE.reasoningEffort || options.maxTokens !== FIXED_ROUTE.maxOutputTokens) {
@@ -1191,7 +1482,12 @@ async function runNativeCondition({ condition, manifest, modelInfo, provider, re
     try { brokerReceipt = await broker.stop() } catch (error) { brokerReceipt = { error: redact(errorText(error)) } }
     await reservation.close()
   }
-  const grade = gradeGame({ observation: brokerObservation, error: brokerError, stopReason: workerResult?.nativeStopReason })
+  const workerFault = workerResult?.fault
+  const workerFaultText = workerFault === undefined || workerFault === null
+    ? null
+    : redact(typeof workerFault?.message === 'string' ? workerFault.message : errorText(workerFault))
+  const gradeError = [brokerError, workerFaultText, worker?.error].filter(value => typeof value === 'string' && value.length > 0).join(' | ') || null
+  const grade = gradeGame({ observation: brokerObservation, error: gradeError, stopReason: workerResult?.nativeStopReason })
   const executionCompleted = workerResult?.state === 'completed' && workerResult?.physicalCleanup === true
   return {
     worker: worker ? { result: workerResult ?? null, exit: worker.exit, stderr: worker.stderr, error: worker.error } : null,
@@ -1281,11 +1577,61 @@ async function loadRealProvider({ providerModule, providerSha256, providerPackag
   }
 }
 
+async function runSelectedConditions({ root, manifest, plan, provider, relay, ledger, conditions }) {
+  const results = []
+  for (const condition of conditions) {
+    if (ledger.stopped) break
+    const resultPath = join(root, RESULTS_DIRECTORY, `${condition.id}.json`)
+    await mkdir(dirname(resultPath), { recursive: true, mode: 0o700 })
+    if (await exists(resultPath)) fail('ARC_RESULT_EXISTS', `condition already has a result: ${condition.id}`)
+    const invoke = condition.arm === 'B'
+      ? () => runBaselineCondition({ condition, manifest, plan, provider, relay, ledger })
+      : () => runNativeCondition({ condition, manifest, modelInfo: provider.modelInfo, provider, relay, ledger })
+    const conditionStarted = Date.now()
+    await writeExclusiveJson(join(condition.directory, 'real-condition-started.json'), { formatVersion: 1, startedAt: new Date(conditionStarted).toISOString(), fingerprint: manifest.fingerprint, id: condition.id })
+    process.stdout.write(`${JSON.stringify({ event: 'condition-start', arm: condition.arm, gameId: condition.gameId })}\n`)
+    let conditionResult
+    try {
+      conditionResult = await invoke()
+    } catch (error) {
+      conditionResult = {
+        fatal: redact(errorText(error)),
+        grade: gradeGame({ observation: null, error: redact(errorText(error)), stopReason: 'PARENT_ERROR' }),
+        executionCompleted: false,
+        cleanupComplete: false,
+      }
+    }
+    // Preserve independent WIN facts even when native/provider cleanup later
+    // fails.  A failed cleanup blocks the next condition but cannot rewrite
+    // the already observed terminal game state.
+    const safeResult = {
+      formatVersion: FORMAT_VERSION,
+      condition: { id: condition.id, arm: condition.arm, gameId: condition.gameId, orderKey: condition.orderKey },
+      completedAt: new Date().toISOString(),
+      resources: summarizeConditionResources(await ledger.receipt(), condition.id, Date.now() - conditionStarted),
+      grade: conditionResult.grade,
+      executionCompleted: conditionResult.executionCompleted === true,
+      cleanupComplete: conditionResult.cleanupComplete === true,
+      details: conditionResult,
+    }
+    await writeExclusiveJson(resultPath, safeResult)
+    results.push({ path: resultPath, ...safeResult })
+    const liveAccounting = await ledger.receipt()
+    process.stdout.write(`${JSON.stringify({ event: 'condition-result', arm: condition.arm, gameId: condition.gameId, terminal: safeResult.grade?.terminal, levels: safeResult.grade?.levelsCompleted, actions: safeResult.grade?.actionsTaken, cleanup: safeResult.cleanupComplete, cumulativeRequests: liveAccounting.admitted })}\n`)
+    if (!safeResult.cleanupComplete || ledger.stopped) break
+  }
+  return results
+}
+
 /**
  * Execute the real panel.  This is intentionally untested here: callers must
  * satisfy the file-bound acceptance gates, and this function is the sole
  * location that dynamically imports a provider module or reads a credential.
  */
+export async function assertPanelNotStarted(root) {
+  if (await exists(join(root, RUN_START_MARKER))) fail('ARC_RUN_ALREADY_STARTED', 'real panel already has a durable start marker; never replay a failed condition')
+}
+
 export async function runPilot({
   output,
   providerModule,
@@ -1296,10 +1642,10 @@ export async function runPilot({
   acceptanceSha256,
 } = {}) {
   const { root, manifest } = await readPreparedManifest(output)
+  await assertPanelNotStarted(root)
   await assertPreparedFingerprint(manifest)
   const keyless = await loadKeylessGate(root, manifest)
   const external = await loadExternalAcceptance({ artifact: acceptanceArtifact, sha256: acceptanceSha256, manifest })
-  if (await exists(join(root, RUN_START_MARKER))) fail('ARC_RUN_ALREADY_STARTED', 'real panel already has a durable start marker; never replay a failed condition')
   const { plan } = await loadPlan(manifest.plan.path)
   await writeExclusiveJson(join(root, RUN_START_MARKER), {
     formatVersion: FORMAT_VERSION,
@@ -1313,7 +1659,7 @@ export async function runPilot({
   let provider
   let relay
   let ledger
-  const results = []
+  let results = []
   let panelError
   try {
     ledger = await Ledger.open(manifest.ledger.path, { total: FIXED_LIMITS.total, perRun: FIXED_LIMITS.requestLimit })
@@ -1336,47 +1682,7 @@ export async function runPilot({
       },
       onTransportEvent: event => ledger.appendSync({ type: 'transport-event', event }),
     })
-    for (const condition of manifest.conditions) {
-      if (ledger.stopped) break
-      const resultPath = join(root, RESULTS_DIRECTORY, `${condition.id}.json`)
-      await mkdir(dirname(resultPath), { recursive: true, mode: 0o700 })
-      if (await exists(resultPath)) fail('ARC_RESULT_EXISTS', `condition already has a result: ${condition.id}`)
-      const invoke = condition.arm === 'B'
-        ? () => runBaselineCondition({ condition, manifest, plan, provider, relay, ledger })
-        : () => runNativeCondition({ condition, manifest, modelInfo: provider.modelInfo, provider, relay, ledger })
-      const conditionStarted = Date.now()
-      await writeExclusiveJson(join(condition.directory, 'real-condition-started.json'), { formatVersion: 1, startedAt: new Date(conditionStarted).toISOString(), fingerprint: manifest.fingerprint, id: condition.id })
-      process.stdout.write(`${JSON.stringify({ event: 'condition-start', arm: condition.arm, gameId: condition.gameId })}\n`)
-      let conditionResult
-      try {
-        conditionResult = await invoke()
-      } catch (error) {
-        conditionResult = {
-          fatal: redact(errorText(error)),
-          grade: gradeGame({ observation: null, error: redact(errorText(error)), stopReason: 'PARENT_ERROR' }),
-          executionCompleted: false,
-          cleanupComplete: false,
-        }
-      }
-      // Preserve independent WIN facts even when native/provider cleanup later
-      // fails.  A failed cleanup blocks the next condition but cannot rewrite
-      // the already observed terminal game state.
-      const safeResult = {
-        formatVersion: FORMAT_VERSION,
-        condition: { id: condition.id, arm: condition.arm, gameId: condition.gameId, orderKey: condition.orderKey },
-        completedAt: new Date().toISOString(),
-        resources: summarizeConditionResources(await ledger.receipt(), condition.id, Date.now() - conditionStarted),
-        grade: conditionResult.grade,
-        executionCompleted: conditionResult.executionCompleted === true,
-        cleanupComplete: conditionResult.cleanupComplete === true,
-        details: conditionResult,
-      }
-      await writeExclusiveJson(resultPath, safeResult)
-      results.push({ path: resultPath, ...safeResult })
-      const liveAccounting = await ledger.receipt()
-      process.stdout.write(`${JSON.stringify({ event: 'condition-result', arm: condition.arm, gameId: condition.gameId, terminal: safeResult.grade?.terminal, levels: safeResult.grade?.levelsCompleted, actions: safeResult.grade?.actionsTaken, cleanup: safeResult.cleanupComplete, cumulativeRequests: liveAccounting.admitted })}\n`)
-      if (!safeResult.cleanupComplete || ledger.stopped) break
-    }
+    results = await runSelectedConditions({ root, manifest, plan, provider, relay, ledger, conditions: manifest.conditions })
   } catch (error) {
     panelError = redact(errorText(error))
   } finally {
@@ -1396,6 +1702,74 @@ export async function runPilot({
   await writeExclusiveJson(join(root, 'run-receipt.json'), runReceipt)
   if (panelError) throw failure('ARC_RUN_STOPPED', panelError)
   return runReceipt
+}
+
+/**
+ * Continue only conditions which have never acquired a durable start marker.
+ * This has the same provider boundary as --run, but its preflight is bound to
+ * an independently accepted closure for the previous charged unknown call.
+ */
+export async function resumeUnstartedPilot({
+  output,
+  providerModule,
+  providerSha256,
+  providerPackage,
+  credentialFile,
+  continuationArtifact,
+  continuationSha256,
+} = {}) {
+  let prepared
+  let provider
+  let relay
+  let results = []
+  let panelError
+  try {
+    prepared = await prepareUnstartedContinuation({ output, continuationArtifact, continuationSha256 })
+    const { root, manifest, ledger, evidence, paths, maxModelRequests } = prepared
+    const { plan } = await loadPlan(manifest.plan.path)
+    const relayModule = await import('./attachment-relay.mjs')
+    relay = await relayModule.createAttachmentRelay({ sourceRoot: manifest.runner.sourceRoot, dataRoot: join(root, 'attachments', `resume-unstarted-${String(paths.number).padStart(2, '0')}`) })
+    let physicalScope = null
+    provider = await loadRealProvider({
+      providerModule,
+      providerSha256,
+      providerPackage,
+      credentialFile,
+      dataRoot: join(root, 'provider-private', `resume-unstarted-${String(paths.number).padStart(2, '0')}`),
+      sourceRoot: manifest.runner.sourceRoot,
+      maxModelRequests,
+      attachments: relay.store,
+      onPhysical: event => {
+        if (!physicalScope) fail('ARC_PHYSICAL_SCOPE', 'provider physical request has no active condition')
+        return physicalScope(event)
+      },
+      onTransportEvent: event => ledger.appendSync({ type: 'transport-event', event }),
+    })
+    results = await runSelectedConditions({ root, manifest, plan, provider, relay, ledger, conditions: evidence.unstarted })
+  } catch (error) {
+    panelError = redact(errorText(error))
+  } finally {
+    await Promise.allSettled([relay?.close?.(), provider?.close?.()])
+  }
+  if (!prepared) throw failure('ARC_CONTINUATION_STOPPED', panelError ?? 'continuation preflight did not complete')
+  const ledgerReceipt = await prepared.ledger.receipt()
+  const continuationReceipt = {
+    formatVersion: FORMAT_VERSION,
+    kind: 'prime-rlm-arc-unstarted-continuation-run',
+    completedAt: new Date().toISOString(),
+    number: prepared.paths.number,
+    originalFingerprint: prepared.manifest.fingerprint,
+    continuationArtifact: { path: prepared.continuation.path, sha256: prepared.continuation.hash },
+    closedUnknownRun: prepared.continuation.closedUnknownRun,
+    selectedConditions: prepared.evidence.unstarted.map(condition => condition.id),
+    providerLoaded: provider !== undefined,
+    results: results.map(result => ({ path: result.path, condition: result.condition, grade: result.grade, executionCompleted: result.executionCompleted, cleanupComplete: result.cleanupComplete })),
+    accounting: { admitted: ledgerReceipt.admitted, newAdmitted: ledgerReceipt.newAdmitted, settled: ledgerReceipt.settled, unknown: ledgerReceipt.unknown, physicalAdmitted: ledgerReceipt.physicalAdmitted, stopped: ledgerReceipt.stopped },
+    error: panelError ?? null,
+  }
+  await writeExclusiveJson(prepared.paths.receiptPath, continuationReceipt)
+  if (panelError) throw failure('ARC_CONTINUATION_STOPPED', panelError)
+  return continuationReceipt
 }
 
 export function summarizeConditionResources(receipt, runId, elapsedMs) {
@@ -1509,13 +1883,17 @@ export async function analyzePilot({ output } = {}) {
   return report
 }
 
+export { EXECUTION_FILES, assertRunnerOnlyContinuation, conditionEvidence, verifyPriorRun, validateClosureBeforeMarker, nextContinuationPaths }
+
 export function parseArgs(argv) {
   const result = { mode: undefined, output: undefined, planPath: DEFAULT_PLAN, sourceRoot: REPOSITORY_ROOT, packageRoot: undefined, authorPreparation: undefined, priorLedgerPath: DEFAULT_PRIOR_LEDGER }
-  const provider = { providerModule: undefined, providerSha256: undefined, providerPackage: undefined, credentialFile: undefined, acceptanceArtifact: undefined, acceptanceSha256: undefined }
+  const provider = { providerModule: undefined, providerSha256: undefined, providerPackage: undefined, credentialFile: undefined }
+  const runAcceptance = { acceptanceArtifact: undefined, acceptanceSha256: undefined }
+  const continuation = { continuationArtifact: undefined, continuationSha256: undefined }
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index]
     if (item === '--help' || item === '-h') return { help: true }
-    if (['--prepare', '--keyless', '--run', '--analyze'].includes(item)) {
+    if (['--prepare', '--keyless', '--run', '--resume-unstarted', '--analyze'].includes(item)) {
       const mode = item.slice(2)
       if (result.mode !== undefined) fail('ARC_ARGS', 'exactly one mode is required')
       result.mode = mode
@@ -1523,25 +1901,38 @@ export function parseArgs(argv) {
     }
     const mapping = {
       '--output': 'output', '--plan': 'planPath', '--source-root': 'sourceRoot', '--package-root': 'packageRoot', '--author-preparation': 'authorPreparation', '--prior-ledger': 'priorLedgerPath',
-      '--provider-module': 'providerModule', '--provider-sha256': 'providerSha256', '--provider-package': 'providerPackage', '--credential-file': 'credentialFile', '--acceptance-artifact': 'acceptanceArtifact', '--acceptance-sha256': 'acceptanceSha256',
+      '--provider-module': 'providerModule', '--provider-sha256': 'providerSha256', '--provider-package': 'providerPackage', '--credential-file': 'credentialFile',
+      '--acceptance-artifact': 'acceptanceArtifact', '--acceptance-sha256': 'acceptanceSha256',
+      '--continuation-artifact': 'continuationArtifact', '--continuation-sha256': 'continuationSha256',
     }
     const key = mapping[item]
     if (!key) fail('ARC_ARGS', `unknown option ${item}`)
     const value = argv[index + 1]
     if (!value || value.startsWith('--')) fail('ARC_ARGS', `${item} requires a value`)
     if (own(result, key)) result[key] = value
-    else provider[key] = value
+    else if (own(provider, key)) provider[key] = value
+    else if (own(runAcceptance, key)) runAcceptance[key] = value
+    else continuation[key] = value
     index += 1
   }
-  if (!result.mode) fail('ARC_ARGS', 'one of --prepare, --keyless, --run, --analyze is required')
+  if (!result.mode) fail('ARC_ARGS', 'one of --prepare, --keyless, --run, --resume-unstarted, --analyze is required')
   if (!result.output) fail('ARC_ARGS', '--output is required')
   const providerValues = Object.values(provider).filter(value => value !== undefined)
-  if (result.mode !== 'run' && providerValues.length > 0) fail('ARC_ARGS', 'provider and credential options are valid only with --run')
-  if (result.mode === 'run' && providerValues.length !== Object.keys(provider).length) fail('ARC_ARGS', '--run requires the provider module/hash/package, credential file, and acceptance artifact/hash')
+  const runAcceptanceValues = Object.values(runAcceptance).filter(value => value !== undefined)
+  const continuationValues = Object.values(continuation).filter(value => value !== undefined)
+  if (!['run', 'resume-unstarted'].includes(result.mode) && (providerValues.length > 0 || runAcceptanceValues.length > 0 || continuationValues.length > 0)) {
+    fail('ARC_ARGS', 'provider and credential options are valid only with --run or --resume-unstarted')
+  }
+  if (result.mode === 'run' && (providerValues.length !== Object.keys(provider).length || runAcceptanceValues.length !== Object.keys(runAcceptance).length || continuationValues.length !== 0)) {
+    fail('ARC_ARGS', '--run requires the provider module/hash/package, credential file, and acceptance artifact/hash')
+  }
+  if (result.mode === 'resume-unstarted' && (providerValues.length !== Object.keys(provider).length || continuationValues.length !== Object.keys(continuation).length || runAcceptanceValues.length !== 0)) {
+    fail('ARC_ARGS', '--resume-unstarted requires the provider module/hash/package, credential file, and continuation artifact/hash')
+  }
   if (result.mode !== 'prepare' && (result.authorPreparation !== undefined || result.priorLedgerPath !== DEFAULT_PRIOR_LEDGER || result.sourceRoot !== REPOSITORY_ROOT || result.packageRoot !== undefined || result.planPath !== DEFAULT_PLAN)) {
     fail('ARC_ARGS', 'prepare-only inputs are not accepted by this mode')
   }
-  return { ...result, ...provider, packageRoot: result.packageRoot ?? join(result.sourceRoot, 'incubator/rlm') }
+  return { ...result, ...provider, ...runAcceptance, ...continuation, packageRoot: result.packageRoot ?? join(result.sourceRoot, 'incubator/rlm') }
 }
 
 function usage() {
@@ -1551,6 +1942,7 @@ function usage() {
     '  /opt/homebrew/opt/node@22/bin/node tools/rlm-arc-pilot/run.mjs --keyless --output /private/tmp/rac-...',
     '  /opt/homebrew/opt/node@22/bin/node tools/rlm-arc-pilot/run.mjs --analyze --output /private/tmp/rac-...',
     '  /opt/homebrew/opt/node@22/bin/node tools/rlm-arc-pilot/run.mjs --run --output /private/tmp/rac-... --provider-module <private-path> --provider-sha256 <sha256> --provider-package <package> --credential-file <private-path> --acceptance-artifact <accepted-json> --acceptance-sha256 <sha256>',
+    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-arc-pilot/run.mjs --resume-unstarted --output /private/tmp/rac-... --provider-module <private-path> --provider-sha256 <sha256> --provider-package <package> --credential-file <private-path> --continuation-artifact <accepted-json> --continuation-sha256 <sha256>',
   ].join('\n')
 }
 
@@ -1565,8 +1957,9 @@ async function main() {
   if (args.mode === 'prepare') result = await preparePilot(args)
   else if (args.mode === 'keyless') result = await keylessPilot(args)
   else if (args.mode === 'analyze') result = await analyzePilot(args)
-  else result = await runPilot(args)
-  process.stdout.write(`${JSON.stringify({ mode: args.mode, output: args.output, fingerprint: result.fingerprint ?? null, accepted: result.accepted ?? null, modelCalls: args.mode === 'run' ? 'see ledger' : 0 }, null, 2)}\n`)
+  else if (args.mode === 'run') result = await runPilot(args)
+  else result = await resumeUnstartedPilot(args)
+  process.stdout.write(`${JSON.stringify({ mode: args.mode, output: args.output, fingerprint: result.fingerprint ?? result.originalFingerprint ?? null, accepted: result.accepted ?? null, modelCalls: ['run', 'resume-unstarted'].includes(args.mode) ? 'see ledger' : 0 }, null, 2)}\n`)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

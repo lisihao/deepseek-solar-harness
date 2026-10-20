@@ -27,7 +27,7 @@ These are examples; both paths must refer to the intended local preparation. `pr
 
 ## Real execution boundary
 
-Only `--run` loads the explicitly supplied private provider module and credential file. It requires the module SHA-256, existing provider-package path, and a separate accepted receipt bound to the complete prepared fingerprint. Before accepting that receipt, the operator must inspect actual original-Prime and plugin runs with a persistent Python cell, the guarded game endpoint, inherited file/network denial and owned-process cleanup. A pure Node socket probe or a fixture WIN is insufficient.
+Only `--run` and the explicit `--resume-unstarted` mode load the supplied private provider module and credential file. `--run` remains one-shot: an existing `real-run-started.json` always rejects replay. Before accepting either receipt, the operator must inspect actual original-Prime and plugin runs with a persistent Python cell, the guarded game endpoint, inherited file/network denial and owned-process cleanup. A pure Node socket probe or a fixture WIN is insufficient.
 
 ```sh
 node tools/rlm-arc-pilot/run.mjs --run --output /private/tmp/rac-example \
@@ -37,6 +37,42 @@ node tools/rlm-arc-pilot/run.mjs --run --output /private/tmp/rac-example \
 ```
 
 The private provider adapter is deliberately not distributed here. Its separately verified route must preserve Codex `gpt-6.1-sol / high / 16384`, disable provider/SDK retries, expose synchronous physical admission before every model POST, and use the supplied official attachment store. The runner records full model intents/chunks locally, counts requests before dispatch and stops on unresolved effects or failed cleanup. A durable panel start marker prevents automatic replay.
+
+## Accepted unstarted continuation
+
+`--resume-unstarted` is only for a stopped panel whose earlier conditions have a durable result and completed cleanup, while the remaining conditions have no `real-condition-started.json`. It never resets the ledger, reruns a started condition, overwrites `run-receipt.json`, or refunds an unknown request. It first appends the accepted closure with `Ledger.acknowledgeClosedRun`, then uses `384 - ledger.newAdmitted` as the private provider's maximum new request count; the 522 cumulative and 32-per-condition limits remain unchanged.
+
+```sh
+node tools/rlm-arc-pilot/run.mjs --resume-unstarted --output /private/tmp/rac-example \
+  --provider-module /private/tmp/private-provider.mjs --provider-sha256 VERIFIED_SHA256 \
+  --provider-package /absolute/path/to/existing-provider --credential-file /absolute/path/to/existing-credentials \
+  --continuation-artifact /private/tmp/accepted-continuation.json --continuation-sha256 VERIFIED_SHA256
+```
+
+The separately accepted JSON has `formatVersion: 1`, kind `prime-rlm-arc-unstarted-continuation-acceptance`, and `accepted: true`. It must bind these fields exactly:
+
+```json
+{
+  "originalFingerprint": "prepared manifest fingerprint",
+  "originalRunnerSha256": "runner SHA in the original manifest",
+  "currentRunnerSha256": "current run.mjs SHA",
+  "currentExecutionHashes": { "every frozen execution file": "current SHA-256" },
+  "previous": {
+    "runReceiptSha256": "original run-receipt.json SHA-256",
+    "panelStartMarkerSha256": "real-run-started.json SHA-256",
+    "resultSha256": { "condition id with result": "result SHA-256" },
+    "startedMarkerSha256": { "condition id with result": "real-condition-started.json SHA-256" }
+  },
+  "closedUnknownRun": {
+    "runId": "condition id",
+    "unknownCalls": ["request-N"],
+    "cause": "native_budget_closed",
+    "evidenceHash": { "algorithm": "sha256", "digest": "closure evidence SHA-256" }
+  }
+}
+```
+
+Only `tools/rlm-arc-pilot/run.mjs` may differ from the original execution hashes, and only when the artifact binds both runner hashes and the actual complete current hash map. The runner validates the original manifest fingerprint, all immutable receipt/result/start-marker hashes, completed cleanup, the exact charged unknown call, and that no started condition lacks a result. It writes numbered exclusive markers and receipts such as `resume-unstarted-started-01.json` and `resume-unstarted-receipt-01.json`; a missing pair blocks another continuation.
 
 R/S execute inside a per-condition macOS sandbox. Only the assigned `guard.sock`, native IPC and a fixed local model-relay port are available. The parent holds the corresponding IPv6 port with a rejecting listener. Game implementation files, other conditions, private provider state, credentials and the trusted engine socket remain outside the worker's readable namespace. Prime, Python, the author source and the ARC SDK are not patched. The explicit SDK `step` facade is an evaluation-only compatibility adaptation documented in the [protocol record](../../docs/testing/prime-rlm-arc-protocol.md).
 
