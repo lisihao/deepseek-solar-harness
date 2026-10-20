@@ -211,12 +211,13 @@ describe('EgoWebAdapter', () => {
     await expect(futureAdapter.prepare(resource, request({ modelLabel: 'Medium' }))).resolves.toMatchObject({ modelLabel: 'Medium' })
   })
 
-  it('selects one exact visible enabled model radio, or names unavailable selection', async () => {
-    const makeScenario = (availableModels: readonly string[]) => {
+  it('selects one exact visible enabled model radio from an allowed fresh page, or names unavailable selection', async () => {
+    const makeScenario = (availableModels: readonly string[], initialUrl = 'about:blank') => {
       let currentModel = 'GPT-5.6 Sol'
       let requestedModel = 'GPT-6'
       let view: 'simple' | 'advanced' = 'simple'
-      let currentUrl = 'about:blank'
+      let currentUrl = initialUrl
+      let gotoCalls = 0
       let modelControlReady = false
       let modelRadioReady = false
       let menuOpen = false
@@ -225,7 +226,7 @@ describe('EgoWebAdapter', () => {
       const clicks: string[] = []
       const page = {
         async url() { return currentUrl },
-        async goto() { currentUrl = 'https://chatgpt.com/' },
+        async goto() { gotoCalls += 1; currentUrl = 'https://chatgpt.com/' },
         async waitForSelector() {},
         async waitForFunction(_fn: unknown, argument?: unknown) {
           waitForFunctionCalls += 1
@@ -283,17 +284,19 @@ describe('EgoWebAdapter', () => {
       return {
         adapter,
         clicks,
+        gotoCalls: () => gotoCalls,
         waitForFunctionCalls: () => waitForFunctionCalls,
         setRequestedModel: (value: string) => { requestedModel = value },
       }
     }
 
-    const selected = makeScenario(['GPT-6'])
+    const selected = makeScenario(['GPT-6'], 'chrome://new-tab-page/')
     selected.setRequestedModel('GPT-6')
     await expect(selected.adapter.prepare(resource, request({ modelLabel: 'GPT-6' }))).resolves.toMatchObject({ modelLabel: 'GPT-6' })
     expect(selected.clicks).toContain('div.model-target')
     expect(selected.clicks.filter((selector) => selector === 'div.model-target')).toHaveLength(1)
     expect(selected.clicks.filter((selector) => selector === '[data-model-picker-view-toggle="true"][role="menuitem"]')).toHaveLength(4)
+    expect(selected.gotoCalls()).toBe(1)
     expect(selected.waitForFunctionCalls()).toBeGreaterThan(0)
 
     const unavailable = makeScenario([])
@@ -365,13 +368,16 @@ describe('EgoWebAdapter', () => {
     expect(restoreFailed.currentIndex()).toBe(2)
   })
 
-  it('executes catalog discovery against the target page, restores the original selection, and never fills or submits', async () => {
+  it('restores a duplicate-raw-id Pro selection by index and never fills or submits during catalog discovery', async () => {
     const originalModel = 'Current Browser Model'
     const targetModel = 'Future Medium'
     const effortChoices = {
       [originalModel]: [
-        { label: 'Calm focus', id: 'calm-v9' },
-        { label: 'Deep weave', id: 'weave-v9' },
+        { label: 'Low focus', id: 'low' },
+        { label: '中', id: 'medium' },
+        { label: 'High focus', id: 'high' },
+        { label: 'Max focus', id: 'max' },
+        { label: 'Pro', id: 'medium' },
       ],
       [targetModel]: [
         { label: 'Speculative field', id: 'field-v17' },
@@ -381,13 +387,16 @@ describe('EgoWebAdapter', () => {
     const makeScenario = ({
       blockOriginalEffortRestore = false,
       failTargetEnumeration = false,
+      initialUrl = 'about:blank',
     }: {
       readonly blockOriginalEffortRestore?: boolean
       readonly failTargetEnumeration?: boolean
+      readonly initialUrl?: string
     } = {}) => {
-      let currentUrl = 'about:blank'
+      let currentUrl = initialUrl
+      let gotoCalls = 0
       let selectedModel = originalModel
-      const selectedIndex: Record<string, number> = { [originalModel]: 1, [targetModel]: 1 }
+      const selectedIndex: Record<string, number> = { [originalModel]: 4, [targetModel]: 1 }
       let menuOpen = false
       let view: 'simple' | 'advanced' = 'simple'
       const clicks: string[] = []
@@ -401,7 +410,7 @@ describe('EgoWebAdapter', () => {
           async insertText(value: string) { inserts.push(value); throw new Error('catalog must not insert text') },
         },
         async url() { return currentUrl },
-        async goto() { currentUrl = 'https://chatgpt.com/' },
+        async goto() { gotoCalls += 1; currentUrl = 'https://chatgpt.com/' },
         async waitForSelector() {},
         async waitForFunction(_fn: unknown, argument?: { readonly expectedIndex?: number } | string) {
           if (typeof argument === 'string' && String(_fn).includes('aria-checked="true"')) {
@@ -421,7 +430,7 @@ describe('EgoWebAdapter', () => {
               ...observation,
               url: currentUrl,
               modelLabel: selectedModel,
-              effortLabel: effort.label,
+              ...(menuOpen && view === 'advanced' ? {} : { effortLabel: effort.label }),
               effortId: effort.id,
             }
           }
@@ -444,7 +453,7 @@ describe('EgoWebAdapter', () => {
             const effort = effortFor()
             return {
               sliderSelector: 'div.reasoning-slider', min: 0, max: choicesFor().length - 1,
-              now: selectedIndex[selectedModel], rawId: effort.id, displayLabel: effort.label,
+              now: selectedIndex[selectedModel], rawId: effort.id,
             }
           }
           throw new Error(`unexpected catalog evaluate callback: ${source.slice(0, 100)}`)
@@ -481,6 +490,7 @@ describe('EgoWebAdapter', () => {
       return {
         adapter: new EgoWebAdapter(options, run),
         current: () => ({ model: selectedModel, index: selectedIndex[selectedModel] }),
+        gotoCalls: () => gotoCalls,
         clicks,
         presses,
         fills,
@@ -502,20 +512,33 @@ describe('EgoWebAdapter', () => {
         { label: 'Speculative field', id: 'field-v17', index: 0, available: true, selected: true },
         { label: 'Novel horizon', id: 'horizon-v17', index: 1, available: true, selected: false },
       ],
-      selected: { modelLabel: originalModel, effortLabel: 'Deep weave', effortId: 'weave-v9' },
+      selected: { modelLabel: originalModel, effortLabel: 'Pro', effortId: 'medium' },
     })
-    expect(success.current()).toEqual({ model: originalModel, index: 1 })
+    expect(success.current()).toEqual({ model: originalModel, index: 4 })
     expect(success.clicks).toContain(`model:${targetModel}`)
     expect(success.clicks).toContain(`model:${originalModel}`)
     expect(success.presses.some(({ key }) => key === 'ArrowRight')).toBe(true)
     expect(success.fills).toEqual([])
     expect(success.inserts).toEqual([])
     expect(success.clicks).not.toContain('button[data-testid="send-button"]')
+    await expect(success.adapter.prepare(resource, request({ modelLabel: originalModel, effortLabel: 'Pro' })))
+      .resolves.toMatchObject({ modelLabel: originalModel, effortLabel: 'Pro', effortId: 'medium' })
+    expect(success.current()).toEqual({ model: originalModel, index: 4 })
+
+    const fromObservedEgoNewTab = makeScenario({ initialUrl: 'chrome://new-tab-page/' })
+    await expect(fromObservedEgoNewTab.adapter.catalog(resource, { modelLabel: targetModel })).resolves.toMatchObject({
+      effortModelLabel: targetModel,
+      selected: { modelLabel: originalModel },
+    })
+    expect(fromObservedEgoNewTab.gotoCalls()).toBe(1)
+    expect(fromObservedEgoNewTab.fills).toEqual([])
+    expect(fromObservedEgoNewTab.inserts).toEqual([])
+    expect(fromObservedEgoNewTab.clicks).not.toContain('button[data-testid="send-button"]')
 
     const failedDiscovery = makeScenario({ failTargetEnumeration: true })
     await expect(failedDiscovery.adapter.catalog(resource, { modelLabel: targetModel }))
       .rejects.toMatchObject({ code: 'WEB_EFFORT_SELECTION_UNAVAILABLE' })
-    expect(failedDiscovery.current()).toEqual({ model: originalModel, index: 1 })
+    expect(failedDiscovery.current()).toEqual({ model: originalModel, index: 4 })
     expect(failedDiscovery.fills).toEqual([])
     expect(failedDiscovery.inserts).toEqual([])
 
@@ -562,6 +585,8 @@ describe('EgoWebAdapter', () => {
     expect((existingRoute as Error).message).not.toContain('private-route')
 
     await expect(new EgoWebAdapter(options, runFor('https://example.test/')).catalog(resource, {}))
+      .rejects.toMatchObject({ code: 'WEB_RESOURCE_CHANGED', message: 'ChatGPT catalog initial page is not blank or ChatGPT' })
+    await expect(new EgoWebAdapter(options, runFor('chrome://settings/')).catalog(resource, {}))
       .rejects.toMatchObject({ code: 'WEB_RESOURCE_CHANGED', message: 'ChatGPT catalog initial page is not blank or ChatGPT' })
     await expect(new EgoWebAdapter(options, runFor('about:blank', 'https://chatgpt.com/c/after-navigation')).catalog(resource, {}))
       .rejects.toMatchObject({ code: 'WEB_RESOURCE_CHANGED', message: 'ChatGPT catalog navigation did not reach the root page' })

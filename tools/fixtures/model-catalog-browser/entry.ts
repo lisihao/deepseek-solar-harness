@@ -38,8 +38,9 @@ let savedCatalog: WebModelCatalog = {
   efforts: [
     { label: 'medium', id: 'medium', index: 0, available: true, selected: true },
     { label: 'high', id: 'high', index: 1, available: true, selected: false },
+    { label: 'Pro', id: 'pro', index: 2, available: true, selected: true },
   ],
-  selected: { modelLabel: 'GPT-6', effortLabel: 'medium', effortId: 'medium' },
+  selected: { modelLabel: 'GPT-6', effortLabel: 'Pro', effortId: 'pro' },
 }
 
 function App(): ReturnType<typeof createElement> {
@@ -75,9 +76,9 @@ function App(): ReturnType<typeof createElement> {
           ? observedModels
           : [...observedModels, { label: modelLabel, available: true, selected: false }],
         efforts: [
-          { label: 'medium', id: 'medium', index: 0, available: true, selected: true },
-          { label: 'high', id: 'high', index: 1, available: true, selected: false },
-          { label: 'Pro', id: 'pro', index: 2, available: true, selected: false },
+          { label: 'medium', id: 'medium', index: 0, available: true, selected: originalSelection.effortLabel === 'medium' },
+          { label: 'high', id: 'high', index: 1, available: true, selected: originalSelection.effortLabel === 'high' },
+          { label: 'Pro', id: 'pro', index: 2, available: true, selected: originalSelection.effortLabel === 'Pro' },
         ],
         // The fake adapter restores the browser's original selection after
         // inspecting the requested model; only the effort catalogue scope
@@ -90,10 +91,10 @@ function App(): ReturnType<typeof createElement> {
   }), [])
 
   return createElement('div', {}, [
-    createElement('aside', { key: 'fixture', style: { margin: 12, padding: 12, border: '1px dashed #777', borderRadius: 8, background: 'Canvas', color: 'CanvasText' } }, [
-      createElement('strong', { key: 'title' }, '假浏览器夹具：不访问真实 Ego Lite 或模型'),
-      createElement('p', { key: 'copy', style: { margin: '6px 0' } }, '初始缓存只有 GPT-6；点击显式刷新后加入 GPT-6.1 Future 和 Pro；普通 Web 初始字段为空；洞察核验阶段保留未匹配的 GPT-6 Astra Pro / Pro。'),
-      createElement('code', { key: 'counts' }, `preferences.read=${counts.preferenceReads} preferences.save=${counts.preferenceSaves} catalog.read=${counts.catalogReads} catalog.refresh=${counts.catalogRefreshes}`),
+    createElement('details', { key: 'fixture', style: { margin: 12, padding: '8px 12px', border: '1px dashed #777', borderRadius: 8, background: 'Canvas', color: 'CanvasText' } }, [
+      createElement('summary', { key: 'title', style: { cursor: 'pointer', fontWeight: 700 } }, '假浏览器夹具（不访问真实 Ego Lite 或模型）'),
+      createElement('p', { key: 'copy', style: { margin: '8px 0', fontSize: '0.82rem' } }, '初始缓存只有 GPT-6，当前网页思考档假设为 Pro；显式刷新后加入 GPT-6.1 Future。普通 Web 初始字段为空，洞察核验保留未匹配的 GPT-6 Astra Pro / Pro。'),
+      createElement('code', { key: 'counts', style: { fontSize: '0.78rem' } }, `reads ${counts.preferenceReads}/${counts.catalogReads} · saves ${counts.preferenceSaves} · refreshes ${counts.catalogRefreshes}`),
     ]),
     createElement(PreferencesPanel, { key: 'panel', api: preferences, modelCatalog }),
   ])

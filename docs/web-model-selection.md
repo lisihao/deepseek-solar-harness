@@ -12,7 +12,7 @@ The plugin currently executes through Ego Lite. Chrome screenshots can identify 
 
 - An empty ordinary Web model or effort field means follow that target page's current choice. New preference files use this policy; existing saved values are preserved exactly.
 - A nonempty value pins an explicit model/effort. It is never silently replaced with another browser's default, a cheaper tier, a guessed alias, or a supposedly latest model.
-- A newly offered choice appears after **刷新目标浏览器模型目录**. Selecting it and saving preferences changes future runs only; immutable prepared requests and past run snapshots retain their selections.
+- A newly offered choice appears after **刷新可用模型**. Selecting it and saving preferences changes future runs only; immutable prepared requests and past run snapshots retain their selections.
 - Refreshing for a selected model reads that model's supported efforts. A previously saved value not present in the fresh snapshot remains visible and editable; discovery does not rewrite it.
 - The human-requested role `GPT-6 Astra Pro` is not automatically equated with any menu family label. Exact website model and reasoning selections can be configured separately while preserving the requested role in the workflow's context. Unknown backend identity remains unknown.
 - No automatic ranking by menu order/version text is claimed. Following the browser's current selection and pinning an exact choice are explicit, different policies.
@@ -44,4 +44,25 @@ This amendment is an unreleased source candidate in PR #281. It does not update 
 | Installed application | Not installed or tested for this amendment. Earlier installed text-only evidence is not evidence for this new catalogue path. |
 | Real models and Insight | No prompt was filled or sent. No fresh Codex, Claude Code, ChatGPT or Gemini model call was made. The user's quota hold and exact Astra Pro requirement remain in force. |
 
-The reproducible [browser fixture](../tools/fixtures/model-catalog-browser/README.md) uses fake APIs and shows separate cache-read/refresh/save counters. Local private receipts and screenshots remain outside the repository. Live Ego catalogue compatibility has **not** passed and must be reconciled from an observed page in a later appropriately bounded browser run; successful synthetic discovery does not remove that gap.
+The reproducible [browser fixture](../tools/fixtures/model-catalog-browser/README.md) uses fake APIs and shows separate cache-read/refresh/save counters. Local private receipts and screenshots remain outside the repository. At that earlier boundary, live Ego catalogue compatibility had **not** passed. The resumed acceptance below supersedes that gap for costless catalogue reading and Pro preparation; it does not accept real answer generation or the full Insight workflow.
+
+## Resumed acceptance — Pro and settings
+
+The user resumed implementation on 2026-10-20, asked for a redesigned settings UI and stated that Ego Lite had been set to Pro. Fresh model calls remained out of scope.
+
+Observed defects and changes:
+
+1. The fresh Ego page used `chrome://new-tab-page/`. The old built adapter rejected that exact route before navigation. The repaired adapter accepts that observed empty start and retains foreign-page/non-root ChatGPT rejection.
+2. ChatGPT's empty editor contained only the semantic webpage-search pill and a trailing space. The observer now recognizes that structure as empty; it preserves ordinary whitespace drafts and any real text.
+3. The live reasoning menu had distinct visible positions sharing a raw identifier: Pro and 中 both exposed `medium`. An intermediate catalogue read restored the first matching identifier and changed Pro to 中. That error is retained as adverse evidence. The original Pro position was restored in the same page before continuing. The final adapter captures and restores the slider range/index, visible label and raw id; it reads the visible simple-menu selection and the settled closed-menu label independently of that id.
+
+| Acceptance | Result |
+|---|---|
+| Final real catalogue | Passed on the same retained page. Observed model choices were GPT-6 and GPT-5.6 Sol; GPT-6 efforts were 即时, 中, 高, 极高 and Pro. The captured and restored choice was visibly Pro at its original final slider position. This observation is time/account/browser-specific, not a global model availability claim. |
+| Explicit Pro preparation | Passed with an empty preparation input and requested effort Pro. Observed model GPT-6, visible effort Pro, raw effort id medium, empty composer text, zero user/assistant messages and no generation. No submit call, prompt fill, attachment or model request occurred. |
+| Settings behavior | Actual component rendered in Chrome with fake APIs. One visible tabpanel; keyboard End/ArrowLeft switching; collapsed stage editing; explicit refresh adding a future fake model; model-scoped effort refresh; explicit Pro save; unsaved pinned-value preservation; invalid JSON error without saving; and reload passed. Cache/tab reads caused no refresh or execution. |
+| Responsive layout | Normal CSS viewport 1374 px and actual narrow CSS viewport 391 px both had no horizontal page overflow. Both settings tabs were checked narrow; the save button remained within the 818 px viewport. The temporary viewport override, fixture tab/server and the single Ego task space were cleaned up. |
+| Stable source gate | `pnpm check` passed: build, strict types, 384 tests in 45 files, both built plain-Node scratch-profile rc.2 CLI probes and homepage check. `pnpm homepage` regenerated unchanged published output. |
+| Installed application | Not updated by this amendment. The shared official App is reserved by an active separate model-handoff update/acceptance; its pending user interaction must be preserved. No quit, restart, install or desktop-profile write was performed here. |
+
+The [settings design guideline](design-guideline.md) records the component hierarchy and behavior. Fixtures demonstrate the real client component with fake data; the live menu/preparation rows above are separate real-browser observations. Full Insight execution, real answer generation and installed acceptance remain unrun for this amendment.

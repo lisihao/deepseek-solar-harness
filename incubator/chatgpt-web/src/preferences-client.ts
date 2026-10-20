@@ -8,6 +8,7 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type FormEvent,
+  type KeyboardEvent,
   type ReactElement,
 } from 'react'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
@@ -24,7 +25,6 @@ export interface PreferencesClientApi {
   read(): Promise<WebPreferences>
   save(input: WebPreferencesSaveInput): Promise<WebPreferences>
 }
-
 export interface PreferencesPanelApis {
   readonly api?: PreferencesClientApi
   readonly modelCatalog?: WebModelCatalogApi
@@ -49,61 +49,252 @@ export function createPreferencesApi(wire: PreferencesWire): PreferencesClientAp
 
 const panelStyle: CSSProperties = {
   display: 'grid',
-  gap: 16,
+  gap: 22,
   minWidth: 0,
   width: '100%',
+  maxWidth: 920,
+  margin: '0 auto',
   boxSizing: 'border-box',
-  padding: 16,
+  padding: '28px clamp(16px, 4vw, 42px) 32px',
   color: 'var(--dsw-alias-label-primary)',
   background: 'var(--dsw-alias-bg-base)',
+  fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 }
 
-const sectionStyle: CSSProperties = {
+const heroStyle: CSSProperties = {
   display: 'grid',
-  gap: 10,
+  gap: 8,
   minWidth: 0,
-  padding: 14,
-  border: '1px solid var(--dsw-alias-settings-card-stroke)',
-  borderRadius: 10,
-  background: 'var(--dsw-alias-settings-card-fill)',
 }
 
-const fieldStyle: CSSProperties = { display: 'grid', gap: 6, minWidth: 0 }
+const eyebrowStyle: CSSProperties = {
+  margin: 0,
+  color: '#b9a8ff',
+  fontSize: '0.72rem',
+  fontWeight: 700,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+}
+
+const titleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 'clamp(1.45rem, 3vw, 2rem)',
+  lineHeight: 1.1,
+  letterSpacing: '-0.025em',
+  overflowWrap: 'anywhere',
+}
+
+const leadStyle: CSSProperties = {
+  margin: 0,
+  maxWidth: 680,
+  color: 'var(--dsw-alias-label-secondary)',
+  fontSize: '0.95rem',
+  lineHeight: 1.55,
+  overflowWrap: 'anywhere',
+}
+
+const surfaceStyle: CSSProperties = {
+  display: 'grid',
+  gap: 18,
+  minWidth: 0,
+  padding: '20px clamp(16px, 3vw, 26px)',
+  border: '1px solid var(--dsw-alias-settings-card-stroke)',
+  borderRadius: 16,
+  background: 'var(--dsw-alias-settings-card-fill)',
+  boxShadow: '0 16px 42px rgba(0, 0, 0, 0.14)',
+}
+
+const surfaceHeaderStyle: CSSProperties = {
+  display: 'grid',
+  gap: 5,
+  minWidth: 0,
+}
+
+const headingStyle: CSSProperties = {
+  margin: 0,
+  fontSize: '1.05rem',
+  lineHeight: 1.25,
+  letterSpacing: '-0.01em',
+  overflowWrap: 'anywhere',
+}
+
+const fieldGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+  gap: 14,
+  minWidth: 0,
+}
+
+const fieldStyle: CSSProperties = { display: 'grid', gap: 7, minWidth: 0 }
+const labelStyle: CSSProperties = { fontSize: '0.82rem', fontWeight: 650, overflowWrap: 'anywhere' }
+
 const inputStyle: CSSProperties = {
   boxSizing: 'border-box',
   width: '100%',
   minWidth: 0,
   maxWidth: '100%',
-  padding: '8px 10px',
+  padding: '10px 11px',
   border: '1px solid var(--dsw-alias-settings-card-stroke)',
-  borderRadius: 6,
+  borderRadius: 9,
   background: 'var(--dsw-alias-bg-module-platform)',
   color: 'inherit',
   font: 'inherit',
+  lineHeight: 1.35,
+  outlineColor: '#a78bfa',
 }
-const actionRowStyle: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', minWidth: 0 }
+
+const actionRowStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 9,
+  alignItems: 'center',
+  minWidth: 0,
+}
+
 const buttonStyle: CSSProperties = {
-  minHeight: 32,
+  minHeight: 36,
   maxWidth: '100%',
-  padding: '6px 10px',
+  padding: '8px 13px',
   border: '1px solid var(--dsw-alias-settings-card-stroke)',
-  borderRadius: 6,
+  borderRadius: 9,
   background: 'var(--dsw-alias-bg-module-platform)',
   color: 'inherit',
   cursor: 'pointer',
+  font: 'inherit',
+  fontSize: '0.84rem',
+  fontWeight: 650,
   overflowWrap: 'anywhere',
 }
-const mutedStyle: CSSProperties = { margin: 0, color: 'var(--dsw-alias-label-secondary)', overflowWrap: 'anywhere' }
+
+const primaryButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  borderColor: '#8b5cf6',
+  background: '#7c3aed',
+  color: '#fff',
+  boxShadow: '0 7px 18px rgba(124, 58, 237, 0.25)',
+}
+
+const secondaryButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  color: '#d6ccff',
+  borderColor: '#5c4c96',
+}
+
+const mutedStyle: CSSProperties = {
+  margin: 0,
+  color: 'var(--dsw-alias-label-secondary)',
+  fontSize: '0.82rem',
+  lineHeight: 1.5,
+  overflowWrap: 'anywhere',
+}
+
+const noticeStyle: CSSProperties = {
+  margin: 0,
+  padding: '11px 13px',
+  borderRadius: 10,
+  border: '1px solid var(--dsw-alias-settings-card-stroke)',
+  background: 'var(--dsw-alias-bg-module-platform)',
+  fontSize: '0.84rem',
+  lineHeight: 1.45,
+  overflowWrap: 'anywhere',
+}
+
+const tabListStyle: CSSProperties = {
+  display: 'flex',
+  gap: 5,
+  width: 'fit-content',
+  maxWidth: '100%',
+  padding: 4,
+  border: '1px solid var(--dsw-alias-settings-card-stroke)',
+  borderRadius: 12,
+  background: 'var(--dsw-alias-bg-module-platform)',
+}
+
+const tabStyle: CSSProperties = {
+  minHeight: 36,
+  padding: '8px 15px',
+  border: 0,
+  borderRadius: 9,
+  background: 'transparent',
+  color: 'var(--dsw-alias-label-secondary)',
+  cursor: 'pointer',
+  font: 'inherit',
+  fontSize: '0.86rem',
+  fontWeight: 700,
+}
+
+const activeTabStyle: CSSProperties = {
+  ...tabStyle,
+  background: '#6d4bd8',
+  color: '#fff',
+  boxShadow: '0 4px 12px rgba(109, 75, 216, 0.28)',
+}
+
+const detailStyle: CSSProperties = {
+  minWidth: 0,
+  borderTop: '1px solid var(--dsw-alias-settings-card-stroke)',
+}
+
+const detailSummaryStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  minWidth: 0,
+  padding: '14px 0',
+  cursor: 'pointer',
+  listStyle: 'none',
+  overflowWrap: 'anywhere',
+}
+
+const stageListStyle: CSSProperties = {
+  display: 'grid',
+  minWidth: 0,
+}
+
+const stageNumberStyle: CSSProperties = {
+  display: 'inline-grid',
+  placeItems: 'center',
+  flex: '0 0 auto',
+  width: 27,
+  height: 27,
+  borderRadius: '50%',
+  background: '#33245f',
+  color: '#d9ceff',
+  fontSize: '0.75rem',
+  fontWeight: 800,
+}
+
+const summaryTextStyle: CSSProperties = {
+  display: 'grid',
+  gap: 3,
+  minWidth: 0,
+}
+
+const footerStyle: CSSProperties = {
+  position: 'sticky',
+  bottom: 0,
+  zIndex: 2,
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 10,
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  minWidth: 0,
+  padding: '13px 0 4px',
+  borderTop: '1px solid var(--dsw-alias-settings-card-stroke)',
+  background: 'var(--dsw-alias-bg-base)',
+}
 
 type ConfigStageKey = 'clarification' | 'plan' | 'research' | 'fallbackResearch' | 'critique' | 'polish' | 'fallbackPolish'
 
-const STAGES: readonly { readonly id: Exclude<ConfigStageKey, 'clarification'>; readonly label: string; readonly mode: boolean }[] = [
-  { id: 'plan', label: 'Gemini 研究计划', mode: true },
-  { id: 'research', label: 'Gemini 研究', mode: true },
+const STAGES: readonly { readonly id: ConfigStageKey; readonly label: string; readonly mode: boolean }[] = [
+  { id: 'clarification', label: '澄清问题', mode: false },
+  { id: 'plan', label: '研究计划', mode: true },
+  { id: 'research', label: '深度研究', mode: true },
   { id: 'critique', label: 'ChatGPT 核验', mode: true },
-  { id: 'polish', label: 'Gemini 润色', mode: true },
-  { id: 'fallbackResearch', label: 'GPT 回落研究', mode: true },
-  { id: 'fallbackPolish', label: 'GPT 回落润色', mode: true },
+  { id: 'polish', label: '研究润色', mode: true },
+  { id: 'fallbackResearch', label: '回落研究', mode: true },
+  { id: 'fallbackPolish', label: '回落润色', mode: true },
 ]
 
 function errorText(error: unknown): string {
@@ -151,16 +342,60 @@ function updateNumber(value: WebPreferences, field: 'maxRounds' | 'maxQuestionsP
   return { ...next, insight: config as unknown as InsightConfigV1 }
 }
 
+function providerLabel(provider: InsightModelSelection['provider']): string {
+  switch (provider) {
+    case 'codex': return 'Codex'
+    case 'gemini': return 'Gemini'
+    case 'chatgpt': return 'ChatGPT 网页'
+  }
+}
+
+function stageRequested(config: InsightConfigV1, stage: ConfigStageKey): InsightModelSelection {
+  return (config as unknown as Record<ConfigStageKey, { requested: InsightModelSelection }>)[stage].requested
+}
+
+function stageTemplate(config: InsightConfigV1, stage: ConfigStageKey): string {
+  return (config as unknown as Record<ConfigStageKey, { template: { text: string } }>)[stage].template.text
+}
+
+function summaryValue(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim() ?? ''
+  return trimmed.length === 0 ? fallback : trimmed
+}
+
+function stageSummary(requested: InsightModelSelection): string {
+  const selections = [requested.modelLabel, requested.effortLabel, requested.modeLabel]
+    .map(value => value?.trim() ?? '')
+    .filter(value => value.length > 0)
+  return `${providerLabel(requested.provider)} · ${selections.length === 0 ? '未填写精确选择' : selections.join(' · ')}`
+}
+
 function InputField(props: {
   readonly id: string
   readonly label: string
   readonly value: string
   readonly onChange: (event: ChangeEvent<HTMLInputElement>) => void
   readonly type?: 'text' | 'number'
+  readonly placeholder?: string
 }): ReactElement {
   return createElement('div', { style: fieldStyle }, [
-    createElement('label', { key: 'label', htmlFor: props.id }, props.label),
-    createElement('input', { key: 'input', id: props.id, type: props.type ?? 'text', value: props.value, onChange: props.onChange, style: inputStyle }),
+    createElement('label', { key: 'label', htmlFor: props.id, style: labelStyle }, props.label),
+    createElement('input', {
+      key: 'input',
+      id: props.id,
+      type: props.type ?? 'text',
+      value: props.value,
+      placeholder: props.placeholder,
+      onChange: props.onChange,
+      style: inputStyle,
+    }),
+  ])
+}
+
+function TemplateField(props: { readonly id: string; readonly label: string; readonly value: string; readonly onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void }): ReactElement {
+  return createElement('div', { style: fieldStyle }, [
+    createElement('label', { key: 'label', htmlFor: props.id, style: labelStyle }, props.label),
+    createElement('textarea', { key: 'input', id: props.id, value: props.value, onChange: props.onChange, rows: 5, style: { ...inputStyle, resize: 'vertical' } }),
   ])
 }
 
@@ -169,11 +404,7 @@ export function availableCatalogModels(catalog: WebModelCatalog | undefined): re
   return catalog?.models.filter(choice => choice.available) ?? []
 }
 
-/**
- * Effort choices are scoped to the model used for the explicit catalogue
- * observation.  An effort observed for another model is never presented as a
- * universal option.
- */
+/** Effort choices stay scoped to the model used for the explicit observation. */
 export function availableCatalogEfforts(catalog: WebModelCatalog | undefined, modelLabel: string): readonly WebEffortChoice[] {
   if (catalog === undefined || modelLabel !== catalog.effortModelLabel) return []
   return catalog.efforts.filter(choice => choice.available)
@@ -208,18 +439,18 @@ function CatalogChoiceField(props: {
   readonly emptyLabel?: string
   readonly onChange: (value: string) => void
 }): ReactElement | null {
-  if (props.choices.length === 0) {
+  if (props.choices.length === 0 && props.allowEmpty !== true) {
     if (props.catalogObserved !== true || props.value.length === 0) return null
-    return createElement('p', { style: mutedStyle }, '当前保存的精确标签在这次目标浏览器目录中没有可用项，仍会保留；不会自动替换。')
+    return createElement('p', { style: mutedStyle }, '当前保存的精确标签在这次目录中没有可用项，仍会保留；不会自动替换。')
   }
   const unmatched = catalogValueIsUnmatched(props.value, props.choices)
   const options = [
-    props.allowEmpty === true ? createElement('option', { key: 'empty', value: '' }, props.emptyLabel ?? '留空：跟随目标浏览器当前选择') : null,
-    unmatched ? createElement('option', { key: 'unmatched', value: props.value }, `当前保存的“${props.value}”（目录未匹配）`) : null,
+    props.allowEmpty === true ? createElement('option', { key: 'empty', value: '' }, props.emptyLabel ?? '跟随目标浏览器当前选择') : null,
+    unmatched ? createElement('option', { key: 'unmatched', value: props.value }, `当前保存：${props.value}（目录未匹配）`) : null,
     ...props.choices.map(choice => createElement('option', { key: choice.label, value: choice.label }, choice.label)),
   ]
   return createElement('div', { style: fieldStyle }, [
-    createElement('label', { key: 'label', htmlFor: props.id }, props.label),
+    createElement('label', { key: 'label', htmlFor: props.id, style: labelStyle }, props.label),
     createElement('select', {
       key: 'select',
       id: props.id,
@@ -228,35 +459,67 @@ function CatalogChoiceField(props: {
       style: inputStyle,
     }, options),
     unmatched
-      ? createElement('p', { key: 'note', style: mutedStyle }, '当前保存的精确标签不在这次目标浏览器目录中，仍会保留；不会自动替换。')
+      ? createElement('p', { key: 'note', style: { ...mutedStyle, color: '#f5c7a9' } }, '保留当前精确标签；这次目录没有匹配项，不会自动替换。')
       : null,
   ])
 }
 
-function CatalogTargetSummary({ catalog }: { readonly catalog: WebModelCatalog }): ReactElement {
-  const selectedEffort = catalog.selected.effortLabel ?? catalog.selected.effortId ?? '未观测到思考档'
-  return createElement('section', { key: 'catalog-summary', style: sectionStyle }, [
-    createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '目标浏览器模型目录'),
-    createElement('p', { key: 'target', style: mutedStyle }, '插件目标浏览器：Ego Lite；目录只来自该插件目标，不是用户的 Chrome。'),
-    createElement('p', { key: 'observed', style: mutedStyle }, `目录观测时间（浏览器本地）：${formatCatalogObservedAt(catalog.observedAt)}`),
-    createElement('p', { key: 'selected', style: mutedStyle }, `目标浏览器当前选择：${catalog.selected.modelLabel} / ${selectedEffort}`),
-    createElement('p', { key: 'scope', style: mutedStyle }, `本次思考档目录属于模型：${catalog.effortModelLabel}；模型和思考档的可用项均来自这次显式观测。`),
+function CatalogTargetSummary(props: {
+  readonly catalog: WebModelCatalog | undefined
+  readonly onRefresh: () => void
+  readonly refreshing: boolean
+}): ReactElement {
+  const selected = props.catalog?.selected
+  const selectedEffort = selected?.effortLabel ?? selected?.effortId ?? '未观测到思考档'
+  return createElement('div', { style: { display: 'grid', gap: 14, minWidth: 0 } }, [
+    createElement('div', { key: 'summary', style: { display: 'grid', gap: 5, minWidth: 0 } }, [
+      createElement('p', { key: 'eyebrow', style: eyebrowStyle }, '插件目标浏览器'),
+      createElement('div', { key: 'line', style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'baseline', minWidth: 0 } }, [
+        createElement('strong', { key: 'browser', style: { fontSize: '1rem' } }, 'Ego Lite'),
+        createElement('span', { key: 'current', style: mutedStyle }, props.catalog === undefined
+          ? '尚未读取缓存目录'
+          : `当前选择：${summaryValue(selected?.modelLabel, '未观测')} · ${selectedEffort}`),
+      ]),
+      props.catalog === undefined
+        ? createElement('p', { key: 'hint', style: mutedStyle }, '目录读取只使用缓存；点击刷新后才会检查目标浏览器。')
+        : createElement('p', { key: 'observed', style: mutedStyle }, '可用模型来自最近一次显式观测。'),
+    ]),
+    createElement('div', { key: 'actions', style: actionRowStyle }, [
+      createElement('button', { key: 'refresh', type: 'button', disabled: props.refreshing, onClick: props.onRefresh, style: secondaryButtonStyle }, props.refreshing ? '正在刷新…' : '刷新可用模型'),
+    ]),
   ])
 }
 
-function TemplateField(props: { readonly id: string; readonly label: string; readonly value: string; readonly onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void }): ReactElement {
-  return createElement('div', { style: fieldStyle }, [
-    createElement('label', { key: 'label', htmlFor: props.id }, props.label),
-    createElement('textarea', { key: 'input', id: props.id, value: props.value, onChange: props.onChange, rows: 4, style: inputStyle }),
-  ])
-}
-
-function stageRequested(config: InsightConfigV1, stage: Exclude<ConfigStageKey, 'clarification'>): InsightModelSelection {
-  return (config as unknown as Record<ConfigStageKey, { requested: InsightModelSelection }>)[stage].requested
-}
-
-function stageTemplate(config: InsightConfigV1, stage: Exclude<ConfigStageKey, 'clarification'>): string {
-  return (config as unknown as Record<ConfigStageKey, { template: { text: string } }>)[stage].template.text
+function stageFields(
+  current: WebPreferences,
+  stage: ConfigStageKey,
+  requested: InsightModelSelection,
+  catalog: WebModelCatalog | undefined,
+  fieldId: string,
+  update: (next: WebPreferences) => void,
+): ReactElement[] {
+  const useCatalog = shouldOfferCatalogChoices(requested)
+  const efforts = useCatalog ? availableCatalogEfforts(catalog, requested.modelLabel) : []
+  const fields: ReactElement[] = []
+  if (stage === 'clarification') {
+    fields.push(createElement(InputField, { key: 'query', id: `${fieldId}-clarification-query`, label: '精确查询标识（可选）', value: requested.modelId ?? '', onChange: event => update(updateRequested(current, stage, 'modelId', event.target.value)), placeholder: '留空使用模型标签' }))
+  }
+  if (useCatalog) {
+    fields.push(createElement(CatalogChoiceField, { key: 'model-choice', id: `${fieldId}-${stage}-model-choice`, label: '已观测模型', value: requested.modelLabel, choices: availableCatalogModels(catalog), catalogObserved: catalog !== undefined, onChange: value => update(updateRequested(current, stage, 'modelLabel', value)) }))
+  }
+  fields.push(createElement(InputField, { key: 'model', id: `${fieldId}-${stage}-model`, label: '模型标签', value: requested.modelLabel, onChange: event => update(updateRequested(current, stage, 'modelLabel', event.target.value)) }))
+  if (useCatalog) {
+    fields.push(createElement(CatalogChoiceField, { key: 'effort-choice', id: `${fieldId}-${stage}-effort-choice`, label: `已观测思考档${catalog === undefined ? '' : ` · ${catalog.effortModelLabel}`}`, value: requested.effortLabel ?? '', choices: efforts, catalogObserved: catalog !== undefined, allowEmpty: true, onChange: value => update(updateRequested(current, stage, 'effortLabel', value)) }))
+  }
+  fields.push(createElement(InputField, { key: 'effort', id: `${fieldId}-${stage}-effort`, label: '思考档标签', value: requested.effortLabel ?? '', onChange: event => update(updateRequested(current, stage, 'effortLabel', event.target.value)), placeholder: '可留空' }))
+  if (stage !== 'clarification') {
+    fields.push(createElement(InputField, { key: 'mode', id: `${fieldId}-${stage}-mode`, label: '模式标签', value: requested.modeLabel ?? '', onChange: event => update(updateRequested(current, stage, 'modeLabel', event.target.value)), placeholder: '可留空' }))
+  } else {
+    fields.push(createElement(InputField, { key: 'rounds', id: `${fieldId}-clarification-rounds`, label: '最多轮数', type: 'number', value: String(current.insight.clarification.maxRounds), onChange: event => update(updateNumber(current, 'maxRounds', event.target.value)) }))
+    fields.push(createElement(InputField, { key: 'questions', id: `${fieldId}-clarification-questions`, label: '每轮最多问题数', type: 'number', value: String(current.insight.clarification.maxQuestionsPerRound), onChange: event => update(updateNumber(current, 'maxQuestionsPerRound', event.target.value)) }))
+  }
+  fields.push(createElement(TemplateField, { key: 'template', id: `${fieldId}-${stage}-template`, label: '提示模板', value: stageTemplate(current.insight, stage), onChange: event => update(updateTemplate(current, stage, event.target.value)) }))
+  return fields
 }
 
 export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): ReactElement {
@@ -271,6 +534,7 @@ export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): R
   const [geminiDirty, setGeminiDirty] = useState(false)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState<'web' | 'insight'>('web')
   const [notice, setNotice] = useState<{ readonly tone: 'info' | 'error'; readonly message: string } | undefined>()
   const readLock = useRef(false)
 
@@ -298,8 +562,7 @@ export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): R
     void read()
   }, [read])
 
-  // Reading a cached snapshot is safe during mount.  Refresh is deliberately
-  // separate and is only started by the explicit button below.
+  // Reading a cached snapshot is safe during mount. Refresh is only explicit.
   useEffect(() => {
     if (modelCatalog === undefined) {
       setCatalog(undefined)
@@ -340,10 +603,10 @@ export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): R
     if (geminiDirty) {
       try {
         const parsed: unknown = JSON.parse(geminiJson)
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Gemini 语义选择器 JSON 必须是对象。')
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Gemini 选择器必须是对象。')
         next = { ...next, geminiSemantics: parsed as WebPreferences['geminiSemantics'] }
       } catch (error) {
-        setNotice({ tone: 'error', message: `Gemini 语义选择器 JSON 无法保存：${errorText(error)}` })
+        setNotice({ tone: 'error', message: `Gemini 选择器无法保存：${errorText(error)}` })
         return
       }
     }
@@ -351,7 +614,7 @@ export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): R
     try {
       const saved = await api.save({ expectedRevision: preferences.revision, value: next })
       update(saved)
-      setNotice({ tone: 'info', message: '设置已保存；只影响新运行，已经开始的运行保留原设置快照。' })
+      setNotice({ tone: 'info', message: '设置已保存；只影响新运行。' })
     } catch (error) {
       setNotice({ tone: 'error', message: `设置保存未完成：${errorText(error)}。请重新读取后再保存。` })
     } finally {
@@ -363,8 +626,9 @@ export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): R
     if (modelCatalog === undefined || catalogRefreshing) return
     setCatalogRefreshing(true)
     try {
+      const targetModel = catalogTargetModel.trim() || preferences?.web.modelLabel.trim()
       const value = await modelCatalog.refresh({
-        ...(catalogTargetModel.trim().length === 0 ? {} : { modelLabel: catalogTargetModel }),
+        ...(targetModel ? { modelLabel: targetModel } : {}),
       })
       setCatalog(value)
       setNotice({ tone: 'info', message: '已读取目标浏览器模型目录；没有提交模型请求。' })
@@ -373,154 +637,127 @@ export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): R
     } finally {
       setCatalogRefreshing(false)
     }
-  }, [catalogRefreshing, catalogTargetModel, modelCatalog])
+  }, [catalogRefreshing, catalogTargetModel, modelCatalog, preferences?.web.modelLabel])
 
   if (api === undefined) {
     return createElement('main', { style: panelStyle }, [
-      createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem' } }, '网页和洞察设置'),
-      createElement('p', { key: 'message', role: 'status', style: mutedStyle }, '本机设置控制通道尚未连接。'),
+      createElement('header', { key: 'hero', style: heroStyle }, [
+        createElement('p', { key: 'eyebrow', style: eyebrowStyle }, 'Solar Web'),
+        createElement('h1', { key: 'title', style: titleStyle }, '网页和洞察设置'),
+        createElement('p', { key: 'message', role: 'status', style: leadStyle }, '本机设置控制通道尚未连接。'),
+      ]),
     ])
   }
   if (preferences === undefined) {
     return createElement('main', { style: panelStyle }, [
-      createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem' } }, '网页和洞察设置'),
-      createElement('p', { key: 'message', role: notice?.tone === 'error' ? 'alert' : 'status', style: mutedStyle }, loading ? '正在读取设置…' : notice?.message ?? '尚未读取设置。'),
+      createElement('header', { key: 'hero', style: heroStyle }, [
+        createElement('p', { key: 'eyebrow', style: eyebrowStyle }, 'Solar Web'),
+        createElement('h1', { key: 'title', style: titleStyle }, '网页和洞察设置'),
+        createElement('p', { key: 'message', role: notice?.tone === 'error' ? 'alert' : 'status', style: leadStyle }, loading ? '正在读取设置…' : notice?.message ?? '尚未读取设置。'),
+      ]),
     ])
   }
 
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    const next = event.key === 'Home' ? 'web'
+      : event.key === 'End' ? 'insight'
+        : event.key === 'ArrowLeft' || event.key === 'ArrowRight'
+          ? activeTab === 'web' ? 'insight' : 'web'
+          : undefined
+    if (next === undefined) return
+    event.preventDefault()
+    setActiveTab(next)
+    document.getElementById(`${fieldId}-tab-${next}`)?.focus()
+  }
+
   const current = preferences
-  const modelNotice = createElement('p', { key: 'model-notice', style: mutedStyle }, '请求模型、档位和模式只是配置标签，不代表网站当前已提供对应选项；不会自动别名，也不会把不可用选择静默回落到其他配额。')
-  const hasGeminiSemantics = current.geminiSemantics !== undefined && Object.keys(current.geminiSemantics).length > 0
-  const geminiNotice = createElement('p', { key: 'gemini-notice', style: mutedStyle }, !hasGeminiSemantics
-    ? 'Gemini Deep Research 的语义选择器尚未在实时界面中核实；当前未配置选择器，不能声称该流程可用。若取得新的界面证据，请在高级 JSON 中填写并保存，实际运行仍需单独核对。'
-    : 'Gemini Deep Research 的语义选择器来自显式配置，实时界面可用性仍未核实；保存配置不会声称该流程已经可用。')
   const catalogModels = availableCatalogModels(catalog)
-  const catalogWebEfforts = availableCatalogEfforts(catalog, current.web.modelLabel.trim() || catalog?.effortModelLabel || '')
-  const catalogSection = modelCatalog === undefined
-    ? createElement('section', { key: 'catalog', style: sectionStyle }, [
-      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '目标浏览器模型目录'),
-      createElement('p', { key: 'hint', style: mutedStyle }, '目录控制通道尚未连接；手工填写的模型和思考档标签仍会按原样保留。'),
-    ])
-    : createElement('section', { key: 'catalog', style: sectionStyle }, [
-      catalog === undefined
-        ? createElement('p', { key: 'empty', style: mutedStyle }, '尚未读取到缓存目录。点击“刷新目标浏览器模型目录”后才会进行一次显式目标浏览器观测。')
-        : createElement(CatalogTargetSummary, { key: 'summary', catalog }),
-      createElement(CatalogChoiceField, {
-        key: 'target-model',
-        id: `${fieldId}-catalog-target-model`,
-        label: '刷新时选择模型（可选）',
-        value: catalogTargetModel,
-        choices: catalogModels,
-        catalogObserved: catalog !== undefined,
-        allowEmpty: true,
-        onChange: setCatalogTargetModel,
-      }),
-      createElement('div', { key: 'actions', style: actionRowStyle }, [
-        createElement('button', {
-          key: 'refresh',
-          type: 'button',
-          disabled: catalogRefreshing,
-          onClick: () => { void refreshModelCatalog() },
-          style: buttonStyle,
-        }, catalogRefreshing ? '正在读取目标浏览器模型目录…' : '刷新目标浏览器模型目录'),
+  const effectiveWebModel = current.web.modelLabel.trim() || catalog?.selected.modelLabel || ''
+  const catalogWebEfforts = availableCatalogEfforts(catalog, effectiveWebModel)
+
+  const webPanel = createElement('section', { key: 'web-panel', id: `${fieldId}-panel-web`, role: 'tabpanel', 'aria-labelledby': `${fieldId}-tab-web`, style: { ...surfaceStyle, display: activeTab === 'web' ? 'grid' : 'none' }, hidden: activeTab !== 'web' }, [
+    createElement('div', { key: 'header', style: surfaceHeaderStyle }, [
+      createElement('h2', { key: 'title', style: headingStyle }, 'ChatGPT 网页回答'),
+      createElement('p', { key: 'hint', style: mutedStyle }, '模型和思考档留空时，跟随目标浏览器当前选择。选择目录项后才会固定该标签。'),
+    ]),
+    createElement(CatalogTargetSummary, { key: 'catalog', catalog, onRefresh: () => { void refreshModelCatalog() }, refreshing: catalogRefreshing }),
+    createElement('div', { key: 'choices', style: fieldGridStyle }, [
+      createElement(CatalogChoiceField, { key: 'model', id: `${fieldId}-web-model-choice`, label: '模型', value: current.web.modelLabel, choices: catalogModels, catalogObserved: catalog !== undefined, allowEmpty: true, onChange: value => setPreferences({ ...current, web: { ...current.web, modelLabel: value } }) }),
+      createElement(CatalogChoiceField, { key: 'effort', id: `${fieldId}-web-effort-choice`, label: `思考档${effectiveWebModel ? ` · ${effectiveWebModel}` : ''}`, value: current.web.effortLabel, choices: catalogWebEfforts, catalogObserved: catalog !== undefined, allowEmpty: true, onChange: value => setPreferences({ ...current, web: { ...current.web, effortLabel: value } }) }),
+    ]),
+    createElement('details', { key: 'manual', style: detailStyle }, [
+      createElement('summary', { key: 'summary', style: detailSummaryStyle }, '精确标签与查询选项'),
+      createElement('p', { key: 'hint', style: mutedStyle }, '适合固定一个目录尚未匹配的精确标签；保存时会原样保留。'),
+      createElement('div', { key: 'catalog-query', style: { ...fieldGridStyle, padding: '0 0 14px' } }, [
+        createElement(CatalogChoiceField, { key: 'target-model', id: `${fieldId}-catalog-target-model`, label: '刷新时检查模型', value: catalogTargetModel, choices: catalogModels, catalogObserved: catalog !== undefined, allowEmpty: true, emptyLabel: '使用上方模型；未固定时跟随网页', onChange: setCatalogTargetModel }),
+        catalog === undefined
+          ? null
+          : createElement('div', { key: 'observation', style: { ...fieldStyle, alignContent: 'end' } }, [
+            createElement('span', { key: 'label', style: labelStyle }, '最近观测'),
+            createElement('p', { key: 'value', style: mutedStyle }, `本地时间：${formatCatalogObservedAt(catalog.observedAt)} · 档位属于：${catalog.effortModelLabel}`),
+          ]),
       ]),
-    ])
-  const webSection = createElement('section', { key: 'web', style: sectionStyle }, [
-    createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '普通 ChatGPT 网页请求'),
-    createElement('p', { key: 'hint', style: mutedStyle }, '模型和思考档留空表示跟随目标浏览器当前选择；填写或选择精确标签后才会请求该标签。'),
-    createElement(CatalogChoiceField, {
-      key: 'model-choice',
-      id: `${fieldId}-web-model-choice`,
-      label: '已观测模型（可选）',
-      value: current.web.modelLabel,
-      choices: catalogModels,
-      catalogObserved: catalog !== undefined,
-      allowEmpty: true,
-      onChange: value => setPreferences({ ...current, web: { ...current.web, modelLabel: value } }),
-    }),
-    createElement(InputField, { key: 'model', id: `${fieldId}-web-model`, label: '模型标签（可手工填写精确值）', value: current.web.modelLabel, onChange: (event: ChangeEvent<HTMLInputElement>) => setPreferences({ ...current, web: { ...current.web, modelLabel: event.target.value } }) }),
-    createElement(CatalogChoiceField, {
-      key: 'effort-choice',
-      id: `${fieldId}-web-effort-choice`,
-      label: `已观测思考档（${catalog?.effortModelLabel ?? '尚未确定所属模型'}）`,
-      value: current.web.effortLabel,
-      choices: catalogWebEfforts,
-      catalogObserved: catalog !== undefined,
-      allowEmpty: true,
-      onChange: value => setPreferences({ ...current, web: { ...current.web, effortLabel: value } }),
-    }),
-    createElement(InputField, { key: 'effort', id: `${fieldId}-web-effort`, label: '思考档标签（可手工填写精确值）', value: current.web.effortLabel, onChange: (event: ChangeEvent<HTMLInputElement>) => setPreferences({ ...current, web: { ...current.web, effortLabel: event.target.value } }) }),
+      createElement('div', { key: 'fields', style: { ...fieldGridStyle, padding: '0 0 14px' } }, [
+        createElement(InputField, { key: 'model', id: `${fieldId}-web-model-manual`, label: '模型标签', value: current.web.modelLabel, onChange: event => setPreferences({ ...current, web: { ...current.web, modelLabel: event.target.value } }) }),
+        createElement(InputField, { key: 'effort', id: `${fieldId}-web-effort-manual`, label: '思考档标签', value: current.web.effortLabel, onChange: event => setPreferences({ ...current, web: { ...current.web, effortLabel: event.target.value } }) }),
+      ]),
+    ]),
   ])
 
-  const clarification = current.insight.clarification
-  const clarificationSection = createElement('section', { key: 'clarification', style: sectionStyle }, [
-    createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '澄清阶段'),
-    createElement(InputField, { key: 'model-id', id: `${fieldId}-clarify-model-id`, label: '精确 modelId', value: clarification.requested.modelId ?? '', onChange: event => update(updateRequested(current, 'clarification', 'modelId', event.target.value)) }),
-    createElement(InputField, { key: 'model-label', id: `${fieldId}-clarify-model-label`, label: '模型标签', value: clarification.requested.modelLabel, onChange: event => update(updateRequested(current, 'clarification', 'modelLabel', event.target.value)) }),
-    createElement(InputField, { key: 'effort', id: `${fieldId}-clarify-effort`, label: '思考档标签', value: clarification.requested.effortLabel ?? '', onChange: event => update(updateRequested(current, 'clarification', 'effortLabel', event.target.value)) }),
-    createElement(InputField, { key: 'rounds', id: `${fieldId}-clarify-rounds`, label: '最多轮数', type: 'number', value: String(clarification.maxRounds), onChange: event => update(updateNumber(current, 'maxRounds', event.target.value)) }),
-    createElement(InputField, { key: 'questions', id: `${fieldId}-clarify-questions`, label: '每轮最多问题数', type: 'number', value: String(clarification.maxQuestionsPerRound), onChange: event => update(updateNumber(current, 'maxQuestionsPerRound', event.target.value)) }),
-    createElement(TemplateField, { key: 'template', id: `${fieldId}-clarify-template`, label: '澄清 prompt 模板', value: clarification.template.text, onChange: event => update(updateTemplate(current, 'clarification', event.target.value)) }),
-  ])
-
-  const stageSections = STAGES.map(stage => {
+  const stageRows = STAGES.map((stage, index) => {
     const requested = stageRequested(current.insight, stage.id)
-    const useCatalog = shouldOfferCatalogChoices(requested)
-    const stageEfforts = useCatalog ? availableCatalogEfforts(catalog, requested.modelLabel) : []
-    return createElement('section', { key: stage.id, style: sectionStyle }, [
-      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, stage.label),
-      useCatalog
-        ? createElement(CatalogChoiceField, {
-          key: 'model-choice',
-          id: `${fieldId}-${stage.id}-model-choice`,
-          label: '已观测模型',
-          value: requested.modelLabel,
-          choices: catalogModels,
-          catalogObserved: catalog !== undefined,
-          onChange: value => update(updateRequested(current, stage.id, 'modelLabel', value)),
-        })
-        : null,
-      createElement(InputField, { key: 'model', id: `${fieldId}-${stage.id}-model`, label: '模型标签', value: requested.modelLabel, onChange: event => update(updateRequested(current, stage.id, 'modelLabel', event.target.value)) }),
-      useCatalog
-        ? createElement(CatalogChoiceField, {
-          key: 'effort-choice',
-          id: `${fieldId}-${stage.id}-effort-choice`,
-          label: `已观测思考档（${catalog?.effortModelLabel ?? '尚未确定所属模型'}）`,
-          value: requested.effortLabel ?? '',
-          choices: stageEfforts,
-          catalogObserved: catalog !== undefined,
-          allowEmpty: true,
-          onChange: value => update(updateRequested(current, stage.id, 'effortLabel', value)),
-        })
-        : null,
-      createElement(InputField, { key: 'effort', id: `${fieldId}-${stage.id}-effort`, label: '思考档标签', value: requested.effortLabel ?? '', onChange: event => update(updateRequested(current, stage.id, 'effortLabel', event.target.value)) }),
-      stage.mode ? createElement(InputField, { key: 'mode', id: `${fieldId}-${stage.id}-mode`, label: '模式标签', value: requested.modeLabel ?? '', onChange: event => update(updateRequested(current, stage.id, 'modeLabel', event.target.value)) }) : null,
-      createElement(TemplateField, { key: 'template', id: `${fieldId}-${stage.id}-template`, label: 'prompt 模板', value: stageTemplate(current.insight, stage.id), onChange: event => update(updateTemplate(current, stage.id, event.target.value)) }),
+    return createElement('details', { key: stage.id, style: detailStyle }, [
+      createElement('summary', { key: 'summary', style: detailSummaryStyle, 'aria-label': `编辑第 ${index + 1} 阶段：${stage.label}` }, [
+        createElement('span', { key: 'number', style: stageNumberStyle, 'aria-hidden': true }, String(index + 1)),
+        createElement('span', { key: 'text', style: summaryTextStyle }, [
+          createElement('strong', { key: 'label', style: { overflowWrap: 'anywhere' } }, stage.label),
+          createElement('span', { key: 'summary', style: mutedStyle }, stageSummary(requested)),
+        ]),
+      ]),
+      createElement('div', { key: 'fields', style: { ...fieldGridStyle, padding: '0 0 18px' } }, stageFields(current, stage.id, requested, catalog, fieldId, update)),
     ])
   })
 
-  const delivery = current.insight.delivery
-  const advanced = createElement('section', { key: 'advanced', style: sectionStyle }, [
-    createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '高级 Insight JSON'),
-    createElement('p', { key: 'hint', style: mutedStyle }, '这里保留完整配置字段。保存时服务端会重新计算每个模板 hash，并拒绝未知字段、非 JSON 数值和超长文本。'),
-    createElement('textarea', { key: 'json', value: advancedJson, rows: 18, onChange: (event: ChangeEvent<HTMLTextAreaElement>) => { setAdvancedJson(event.target.value); setAdvancedDirty(true) }, style: { ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }),
-    createElement('label', { key: 'gemini-label', htmlFor: `${fieldId}-gemini-semantics` }, 'Gemini 语义选择器 JSON（可选，未核实的 Deep Research 选择器不要自行填写）'),
-    createElement('textarea', { key: 'gemini-json', id: `${fieldId}-gemini-semantics`, value: geminiJson, rows: 10, onChange: (event: ChangeEvent<HTMLTextAreaElement>) => { setGeminiJson(event.target.value); setGeminiDirty(true) }, style: { ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }),
-    createElement(TemplateField, { key: 'delivery-template', id: `${fieldId}-delivery-template`, label: '交付 prompt 模板', value: delivery.template.text, onChange: event => update(updateTemplate(current, 'delivery', event.target.value)) }),
-    createElement(InputField, { key: 'wait', id: `${fieldId}-research-wait`, label: '研究等待毫秒数', type: 'number', value: String(current.insight.researchWaitMs), onChange: event => update(updateNumber(current, 'researchWaitMs', event.target.value)) }),
+  const advanced = createElement('details', { key: 'advanced', style: { ...detailStyle, marginTop: 8 } }, [
+    createElement('summary', { key: 'summary', style: detailSummaryStyle }, '高级配置与 Gemini 选择器'),
+    createElement('div', { key: 'fields', style: { display: 'grid', gap: 14, padding: '0 0 16px' } }, [
+      createElement('p', { key: 'hint', style: mutedStyle }, '按需编辑完整 JSON；保存仍使用同一版本校验。'),
+      createElement('label', { key: 'json-label', htmlFor: `${fieldId}-insight-json`, style: labelStyle }, 'Insight JSON'),
+      createElement('textarea', { key: 'json', id: `${fieldId}-insight-json`, 'aria-label': 'Insight JSON', value: advancedJson, rows: 14, onChange: (event: ChangeEvent<HTMLTextAreaElement>) => { setAdvancedJson(event.target.value); setAdvancedDirty(true) }, style: { ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.78rem' } }),
+      createElement('label', { key: 'gemini-label', htmlFor: `${fieldId}-gemini-semantics`, style: labelStyle }, 'Gemini 选择器 JSON'),
+      createElement('textarea', { key: 'gemini-json', id: `${fieldId}-gemini-semantics`, 'aria-label': 'Gemini 选择器 JSON', value: geminiJson, rows: 8, onChange: (event: ChangeEvent<HTMLTextAreaElement>) => { setGeminiJson(event.target.value); setGeminiDirty(true) }, style: { ...inputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.78rem' } }),
+      createElement(InputField, { key: 'wait', id: `${fieldId}-research-wait`, label: '研究等待毫秒数', type: 'number', value: String(current.insight.researchWaitMs), onChange: event => update(updateNumber(current, 'researchWaitMs', event.target.value)) }),
+      createElement(TemplateField, { key: 'delivery-template', id: `${fieldId}-delivery-template`, label: '交付提示模板', value: current.insight.delivery.template.text, onChange: event => update(updateTemplate(current, 'delivery', event.target.value)) }),
+    ]),
+  ])
+
+  const insightPanel = createElement('section', { key: 'insight-panel', id: `${fieldId}-panel-insight`, role: 'tabpanel', 'aria-labelledby': `${fieldId}-tab-insight`, style: { ...surfaceStyle, display: activeTab === 'insight' ? 'grid' : 'none' }, hidden: activeTab !== 'insight' }, [
+    createElement('div', { key: 'header', style: surfaceHeaderStyle }, [
+      createElement('p', { key: 'eyebrow', style: eyebrowStyle }, '洞察分析'),
+      createElement('h2', { key: 'title', style: headingStyle }, '阶段配置'),
+      createElement('p', { key: 'hint', style: mutedStyle }, '按阶段查看当前模型；目录选择只提供给 ChatGPT 网页阶段，Codex 与 Gemini 保持手工配置。'),
+    ]),
+    createElement('div', { key: 'stages', style: stageListStyle }, stageRows),
+    advanced,
   ])
 
   return createElement('main', { style: panelStyle }, [
-    createElement('header', { key: 'header', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
-      createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem', overflowWrap: 'anywhere' } }, '网页和洞察设置'),
-      modelNotice,
-      geminiNotice,
-      createElement('p', { key: 'snapshot', style: mutedStyle }, '这些设置只影响新运行；已经开始的运行继续使用各自保存的配置快照。'),
+    createElement('header', { key: 'hero', style: heroStyle }, [
+      createElement('p', { key: 'eyebrow', style: eyebrowStyle }, 'Solar Web'),
+      createElement('h1', { key: 'title', style: titleStyle }, '网页和洞察设置'),
+      createElement('p', { key: 'lead', style: leadStyle }, '选择网页回答方式，按需配置研究流程。'),
     ]),
-    notice === undefined ? null : createElement('p', { key: 'notice', role: notice.tone === 'error' ? 'alert' : 'status', style: { ...sectionStyle, color: notice.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'inherit' } }, notice.message),
-    createElement('form', { key: 'form', onSubmit: save }, [catalogSection, webSection, clarificationSection, ...stageSections, advanced, createElement('div', { key: 'actions', style: actionRowStyle }, [
-      createElement('button', { key: 'save', type: 'submit', disabled: saving || loading, style: buttonStyle }, saving ? '正在保存…' : '保存设置'),
-      createElement('button', { key: 'reload', type: 'button', disabled: saving || loading, onClick: () => { void read() }, style: buttonStyle }, '重新读取'),
+    createElement('nav', { key: 'tabs', role: 'tablist', 'aria-label': '设置分类', style: tabListStyle }, [
+      createElement('button', { key: 'web', id: `${fieldId}-tab-web`, type: 'button', role: 'tab', 'aria-selected': activeTab === 'web', 'aria-controls': `${fieldId}-panel-web`, tabIndex: activeTab === 'web' ? 0 : -1, onKeyDown: handleTabKeyDown, onClick: () => setActiveTab('web'), style: activeTab === 'web' ? activeTabStyle : tabStyle }, '网页回答'),
+      createElement('button', { key: 'insight', id: `${fieldId}-tab-insight`, type: 'button', role: 'tab', 'aria-selected': activeTab === 'insight', 'aria-controls': `${fieldId}-panel-insight`, tabIndex: activeTab === 'insight' ? 0 : -1, onKeyDown: handleTabKeyDown, onClick: () => setActiveTab('insight'), style: activeTab === 'insight' ? activeTabStyle : tabStyle }, '洞察分析'),
+    ]),
+    notice === undefined ? null : createElement('p', { key: 'notice', role: notice.tone === 'error' ? 'alert' : 'status', style: { ...noticeStyle, borderColor: notice.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : '#5c4c96', color: notice.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'inherit' } }, notice.message),
+    createElement('form', { key: 'form', onSubmit: save, style: { display: 'grid', gap: 20, minWidth: 0, paddingBottom: 72 } }, [webPanel, insightPanel, createElement('footer', { key: 'footer', style: footerStyle }, [
+      createElement('span', { key: 'status', style: mutedStyle }, saving ? '正在保存…' : loading ? '正在读取…' : '更改不会自动保存'),
+      createElement('div', { key: 'actions', style: actionRowStyle }, [
+        createElement('button', { key: 'reload', type: 'button', disabled: saving || loading, onClick: () => { void read() }, style: buttonStyle }, '重新读取'),
+        createElement('button', { key: 'save', type: 'submit', disabled: saving || loading, style: primaryButtonStyle }, saving ? '保存中…' : '保存设置'),
+      ]),
     ])]),
   ])
 }

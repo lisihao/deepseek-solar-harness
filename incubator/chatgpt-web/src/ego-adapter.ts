@@ -13,6 +13,8 @@ import type { WebRunRequest, WebRunResource } from './store.js'
 export const EGO_FRAME_MARKER = '__DSH_SOLAR_CHATGPT_WEB_FRAME__:'
 
 const CHATGPT_ORIGINS = new Set(['chatgpt.com', 'chat.openai.com'])
+/** Exact fresh-page URL observed from an Ego-created TaskSpace page. */
+const EGO_EMPTY_NEW_TAB_URL = 'chrome://new-tab-page/'
 const MODEL_BUTTON_SELECTOR = 'button[aria-label="选择 ChatGPT 模型"]'
 const MODEL_MENU_SELECTOR = '[role="menu"]'
 const MODEL_VIEW_TOGGLE_SELECTOR = '[data-model-picker-view-toggle="true"][role="menuitem"]'
@@ -638,17 +640,20 @@ const __openModelMenu = async (requestedView, __reopened = false) => {
 };
 
 const __observeModelMenu = async () => {
+  let __menuObservation;
   try {
     await __openModelMenu("advanced");
     await __waitForCheckedModel();
-    const __menuObservation = await __page.evaluate(__inspect);
+    __menuObservation = await __page.evaluate(__inspect);
     if (!__menuObservation || typeof __menuObservation.modelLabel !== "string" || __menuObservation.modelLabel.trim().length === 0) {
       __throw("WEB_MODEL_UNKNOWN", "ChatGPT model menu has no checked model");
     }
-    return __menuObservation;
   } finally {
     await __closeModelMenu();
   }
+  const __settledObservation = await __page.evaluate(__inspect);
+  if (!__settledObservation) __throw("WEB_MODEL_UNKNOWN", "ChatGPT settled page could not be observed");
+  return { ...__settledObservation, modelLabel: __menuObservation.modelLabel };
 };
 
 const __observeEffortMenu = async () => {
@@ -683,6 +688,7 @@ const __cssPath = (element) => {
 };
 
 const __selectRequestedModel = async (requestedLabel) => {
+  let __selectedObservation;
   try {
     await __openModelMenu("advanced");
     await __waitForCheckedModel();
@@ -736,10 +742,15 @@ const __selectRequestedModel = async (requestedLabel) => {
     await __waitForModelSelectionSettled();
     await __openModelMenu("advanced");
     await __waitForRequestedModel(requestedLabel);
-    return await __page.evaluate(__inspect);
+    __selectedObservation = await __page.evaluate(__inspect);
   } finally {
     await __closeModelMenu();
   }
+  const __settledObservation = await __page.evaluate(__inspect);
+  if (!__selectedObservation || !__settledObservation) {
+    __throw("WEB_MODEL_SELECTION_UNAVAILABLE", "Requested ChatGPT model selection could not be observed");
+  }
+  return { ...__settledObservation, modelLabel: __selectedObservation.modelLabel };
 };
 
 const __readModelChoices = async () => __page.evaluate(() => {
@@ -996,6 +1007,26 @@ const __captureSelectedEffort = async () => {
   }
 };
 
+const __restoreCapturedEffort = async (captured) => {
+  if (!captured) return true;
+  let restored = false;
+  try {
+    await __openModelMenu("simple");
+    await __waitForEffortControl();
+    let state = await __readEffortState();
+    if (state && state.min === captured.state.min && state.max === captured.state.max
+      && await __restoreEffortIndex(state.sliderSelector, captured.state.now)) {
+      state = await __readEffortState();
+      if (state && state.min === captured.state.min && state.max === captured.state.max && state.now === captured.state.now) {
+        const reading = await __readEffortReading(state);
+        restored = reading.label === captured.reading.label && reading.id === captured.reading.id;
+      }
+    }
+  } catch { /* report false below */ }
+  try { await __closeModelMenu(); } catch { return false; }
+  return restored;
+};
+
 const __catalogEfforts = async () => {
   let originalState;
   try {
@@ -1175,6 +1206,9 @@ const __isChatGptUrl = (value) => {
 const __isChatGptRoot = (value) => {
   try { return __isChatGptUrl(value) && new URL(value).pathname === "/"; } catch { return false; }
 };
+const __isEmptyStartingPage = (value) => value === "about:blank"
+  || String(value).startsWith("about:blank#")
+  || value === ${JSON.stringify(EGO_EMPTY_NEW_TAB_URL)};
 const __isEmptyChat = (value) => value.composerText === ""
   && !value.hasAttachments
   && value.userMessageCount === 0
@@ -1184,7 +1218,7 @@ const __isEmptyChat = (value) => value.composerText === ""
 let __currentUrl = await __page.url();
 if (__isChatGptUrl(__currentUrl)) {
   if (!__isChatGptRoot(__currentUrl)) __throw("WEB_RESOURCE_CHANGED", "ChatGPT catalog initial route is not the root page");
-} else if (__currentUrl !== "about:blank" && !String(__currentUrl).startsWith("about:blank#")) {
+} else if (!__isEmptyStartingPage(__currentUrl)) {
   __throw("WEB_RESOURCE_CHANGED", "ChatGPT catalog initial page is not blank or ChatGPT");
 } else {
   await __page.goto("https://chatgpt.com/", { waitUntil: "domcontentloaded", timeout: __input.timeoutMs });
@@ -1236,12 +1270,15 @@ try {
   let __restored = false;
   try {
     if (__effortModelLabel !== __originalModel.label) await __selectRequestedModel(__originalModel.label);
-    const __originalEffortKey = __originalEffort?.reading.id ?? __originalEffort?.reading.label;
-    if (__originalEffort && !__originalEffortKey) __throw("WEB_SELECTION_RESTORE_FAILED", "ChatGPT original reasoning effort is not observable");
-    if (__originalEffortKey) await __selectRequestedEffort(__originalEffortKey);
+    if (!await __restoreCapturedEffort(__originalEffort)) {
+      __throw("WEB_SELECTION_RESTORE_FAILED", "ChatGPT original reasoning effort restoration could not be confirmed");
+    }
     const __restoredObservation = await __observeModelMenu();
     __restored = __restoredObservation?.modelLabel === __originalModel.label
-      && (!__originalEffortKey || __matchesRequestedEffort(__restoredObservation, __originalEffortKey));
+      && (__originalEffort === undefined || (
+        __restoredObservation?.effortLabel === __originalEffort.reading.label
+        && __restoredObservation?.effortId === __originalEffort.reading.id
+      ));
   } catch { /* report below */ }
   try { await __closeModelMenu(); } catch { /* restoration status is authoritative */ }
   if (!__restored) __throw("WEB_SELECTION_RESTORE_FAILED", "ChatGPT model or reasoning effort restoration could not be confirmed");
@@ -1270,6 +1307,9 @@ const __isChatGptUrl = (value) => {
 const __isChatGptRoot = (value) => {
   try { return __isChatGptUrl(value) && new URL(value).pathname === "/"; } catch { return false; }
 };
+const __isEmptyStartingPage = (value) => value === "about:blank"
+  || String(value).startsWith("about:blank#")
+  || value === ${JSON.stringify(EGO_EMPTY_NEW_TAB_URL)};
 const __isEmptyChat = (value) => value.composerText === ""
   && !value.hasAttachments
   && value.userMessageCount === 0
@@ -1282,7 +1322,7 @@ if (__isChatGptUrl(__currentUrl)) {
   if (__current.visibleError) __throw("WEB_PAGE_ERROR", "ChatGPT page reported a visible error");
   if (!__isEmptyChat(__current)) __throw("WEB_CONVERSATION_NOT_EMPTY", "ChatGPT conversation is not empty");
   if (!__isChatGptRoot(__currentUrl)) __throw("WEB_RESOURCE_CHANGED", "ChatGPT resource URL changed");
-} else if (__currentUrl !== "about:blank" && !String(__currentUrl).startsWith("about:blank#")) {
+} else if (!__isEmptyStartingPage(__currentUrl)) {
   __throw("WEB_RESOURCE_CHANGED", "ChatGPT resource URL changed");
 } else {
   await __page.goto("https://chatgpt.com/", { waitUntil: "domcontentloaded", timeout: __input.timeoutMs });

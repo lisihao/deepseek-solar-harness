@@ -371,10 +371,13 @@ export function inspectChatGptPage(): ChatGptPageObservation {
   }
 
   const observedEffort = (): { readonly label?: string; readonly id?: string } => {
-    // The known picker trigger is the primary source for its visible effort
-    // label. A separate stale generic marker must not override that rendered
-    // value. The raw identifier is retained independently for exact matching.
+    // The closed picker trigger is normally the primary label source. While
+    // the simple picker is open it becomes a generic heading, so use that
+    // view's visible toggle text instead. Its aria-label describes navigation,
+    // not the selected effort.
     const primaryControls = fromSelectors(['button[aria-label="选择 ChatGPT 模型"]'])
+    const simpleToggleControls = fromSelectors(['[data-model-picker-view-toggle="true"][role="menuitem"]'])
+      .filter((element) => element.closest('[data-model-picker-view="simple"]') !== null)
     const fallbackControls = fromSelectors([
       '[data-effort-label]',
       '[data-reasoning-effort-label]',
@@ -386,11 +389,18 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     const primaryLabels = primaryControls
       .map((element) => controlLabel(element, ['data-effort-label', 'data-reasoning-effort-label'], true))
       .filter((value): value is string => value !== undefined)
+    const simpleToggleLabels = simpleToggleControls
+      .map((element) => controlLabel(element, [], true))
+      .filter((value): value is string => value !== undefined)
     const fallbackLabels = fallbackControls
       .map((element) => controlLabel(element, ['aria-valuetext', 'data-effort-label', 'data-reasoning-effort-label'], true))
       .filter((value): value is string => value !== undefined)
     const primaryLabel = uniqueLabel(primaryLabels)
-    const label = primaryLabel ?? (primaryLabels.length === 0 ? uniqueLabel(fallbackLabels) : undefined)
+    const simpleToggleLabel = uniqueLabel(simpleToggleLabels)
+    const label = simpleToggleLabel
+      ?? (simpleToggleLabels.length === 0
+        ? primaryLabel ?? (primaryLabels.length === 0 ? uniqueLabel(fallbackLabels) : undefined)
+        : undefined)
     const ids = Array.from(new Set([...primaryControls, ...fallbackControls]
       .map((element) => normalizedLabel(element.getAttribute('data-selected-reasoning-effort')))
       .filter(Boolean)))
@@ -442,11 +452,16 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     return [{ text: visibleText(body).trim(), markdown: messageMarkdown(body) }]
   })
   const url = location.href
-  const observedComposerText = composerCandidates.length === 1 ? composerText(composerCandidates[0] as BrowserElement) : ''
   const searchPills = composerCandidates.length === 1
     ? Array.from((composerCandidates[0] as BrowserElement).querySelectorAll<BrowserElement>('span[data-inline-selection-pill][data-system-hint-type="search"]'))
       .filter((element) => visible(element) && isSemanticWebSearchPill(element))
     : []
+  const rawComposerText = composerCandidates.length === 1 ? composerText(composerCandidates[0] as BrowserElement) : ''
+  // ChatGPT's editor leaves a whitespace text node after its own semantic
+  // search pill. It is editor structure rather than a draft only when the
+  // exact pill is the sole non-whitespace composer content. Do not trim any
+  // actual prompt text or ordinary whitespace-only drafts.
+  const observedComposerText = searchPills.length === 1 && /^\s*$/u.test(rawComposerText) ? '' : rawComposerText
   const webSearchActive = searchPills.length === 1 ? true : undefined
   const attachmentsPresent = composerCandidates.some(hasAttachments)
   const modelLabel = observedModelLabel()

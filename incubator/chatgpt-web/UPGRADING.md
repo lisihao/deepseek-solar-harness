@@ -8,6 +8,8 @@ The `./operator` export is for trusted JavaScript callers and trusted external a
 
 `src/model-catalog-control.ts` owns explicit no-prompt discovery and its volatile owner-only cache. Model/effort options are runtime observations, not pinned versions in source. `src/model-catalog.ts` defines their target-browser scope. Website control protocol changes can still require adapter maintenance; ordinary model additions do not.
 
+The observed new TaskSpace URL is exactly `chrome://new-tab-page/`; it is accepted alongside the existing blank-page forms without allowing arbitrary Chrome pages. A semantic search pill plus its editor whitespace is treated as an empty composer; ordinary whitespace drafts and real text remain unchanged. Open-menu effort text comes from the visible simple-view toggle, while closed-menu observations retain the visible trigger label. Catalogue restoration verifies the saved slider range/index and label/id because distinct positions may reuse a raw id. These are observable DOM adapter rules, not a fixed model or effort mapping.
+
 New format-one Web/Insight records can contain optional observed `effortId`, separate from the visible `effortLabel`. New readers accept old records without rewriting them. Older strict readers may reject the additional key.
 
 ## Upgrade procedure

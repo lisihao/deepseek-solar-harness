@@ -281,6 +281,28 @@ describe('inspectChatGptPage', () => {
     expect(result.effortId).toBe('medium')
   })
 
+  it('uses the simple-menu toggle text when the open trigger is only a generic heading', () => {
+    const result = inspect(element('main', {},
+      element('form', {}, composer()),
+      element('button', {
+        'aria-label': '选择 ChatGPT 模型',
+        'data-selected-reasoning-effort': 'medium',
+      }, '思考强度'),
+      element('div', { role: 'menu' },
+        element('div', { 'data-model-picker-view': 'simple' },
+          element('div', {
+            'data-model-picker-view-toggle': 'true',
+            role: 'menuitem',
+            'aria-label': '选择模型',
+          }, 'Pro'),
+        ),
+      ),
+    ))
+
+    expect(result.effortLabel).toBe('Pro')
+    expect(result.effortId).toBe('medium')
+  })
+
   it('does not select a composer when more than one visible input is present', () => {
     const result = inspect(element('main', {},
       element('form', {}, composer('first')),
@@ -311,6 +333,29 @@ describe('inspectChatGptPage', () => {
     expect(result.webSearchActive).toBe(true)
     expect(result.composerText).toBe(prompt)
     expect(result.userMessages).toEqual([prompt])
+  })
+
+  it('normalizes the editor whitespace left after its sole semantic webpage-search pill', () => {
+    const result = inspect(element('main', {},
+      element('form', {}, composer(element('p', {}, webSearchPill(), ' '))),
+    ))
+
+    expect(result.webSearchActive).toBe(true)
+    expect(result.composerText).toBe('')
+  })
+
+  it('preserves text around a semantic webpage-search pill and ordinary whitespace-only drafts', () => {
+    const withPrompt = inspect(element('main', {},
+      element('form', {}, composer(element('p', {}, webSearchPill(), '  keep this exact text  '))),
+    ))
+    const whitespaceOnly = inspect(element('main', {},
+      element('form', {}, composer(element('p', {}, ' '))),
+    ))
+
+    expect(withPrompt.webSearchActive).toBe(true)
+    expect(withPrompt.composerText).toBe('  keep this exact text  ')
+    expect(whitespaceOnly.webSearchActive).toBeUndefined()
+    expect(whitespaceOnly.composerText).toBe(' ')
   })
 
   it('uses a visible stop control as the generation observation', () => {
