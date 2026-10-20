@@ -13,7 +13,7 @@
     "build": "node tools/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:plugin": "node tools/plugin-test.mjs",
+    "test:plugin": "node tools/plugin-test.mjs && node tools/chatgpt-web-plugin-test.mjs",
     "homepage": "node tools/homepage.mjs",
     "homepage:check": "node tools/homepage.mjs --check",
     "check": "pnpm build && pnpm typecheck && pnpm test && pnpm test:plugin && pnpm homepage:check"

@@ -1,0 +1,52 @@
+import { appendFile, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+
+const input = await new Promise((resolve) => {
+  const chunks = []
+  process.stdin.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+  process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+})
+
+if (input.startsWith('echo:')) {
+  process.stdout.write(input.slice('echo:'.length))
+} else if (input.startsWith('stderr:')) {
+  process.stderr.write(input.slice('stderr:'.length))
+} else if (input.startsWith('fail:')) {
+  process.stderr.write(input.slice('fail:'.length))
+  process.exitCode = 7
+} else if (input.startsWith('large:')) {
+  const [, sizeText, character = 'x'] = input.split(':')
+  process.stdout.write(character.repeat(Number(sizeText)))
+} else if (input.startsWith('env:')) {
+  const path = input.slice('env:'.length)
+  await writeFile(path, JSON.stringify({
+    home: process.env.HOME,
+    ego: process.env.EGO_TASK_SPACE,
+    openai: process.env.OPENAI_API_KEY,
+    anthropic: process.env.ANTHROPIC_API_KEY,
+    deepseek: process.env.DEEPSEEK_API_KEY,
+  }))
+} else if (input.startsWith('count:')) {
+  await appendFile(input.slice('count:'.length), '1\n')
+} else if (input.startsWith('count-sleep:')) {
+  await appendFile(input.slice('count-sleep:'.length), '1\n')
+  setInterval(() => {}, 1000)
+} else if (input.startsWith('descendant:')) {
+  const path = input.slice('descendant:'.length)
+  const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    detached: false,
+    stdio: 'ignore',
+  })
+  await writeFile(path, String(descendant.pid))
+  setInterval(() => {}, 1000)
+} else if (input.startsWith('escaped:')) {
+  const path = input.slice('escaped:'.length)
+  const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    detached: true,
+    stdio: 'inherit',
+  })
+  await writeFile(path, String(descendant.pid))
+  setInterval(() => {}, 1000)
+} else if (input.startsWith('sleep:')) {
+  setInterval(() => {}, Number(input.slice('sleep:'.length)))
+}

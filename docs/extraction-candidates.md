@@ -15,7 +15,7 @@ Status values: `unassessed`, `use-upstream`, `use-existing` (reuse an existing t
 | Other workers/model allocation | `model-worker`, `model-worker-deepseek`, `llm/model-catalog-local` | varies | unassessed |
 | Scheduling evidence | `orchestration/scheduling-evidence(-rpc)`, `client/ui-settings-scheduling-evidence` | — | unassessed |
 | Continual harness | `orchestration/continual-harness(-local)` | — | unassessed |
-| Physical operator (ChatGPT Web, resident, subagent) | `physical-operator/*`, `bundle/chatgpt-web-operator`, `bundle/resident-operators` | `browser-use`, `experimental/browser-use-*` | unassessed |
+| ChatGPT Web text operator | `physical-operator/physical-operator-chatgpt-web`, `bundle/chatgpt-web-operator` | Public browser-use exists, but the V3 private browser/physical-operator seams do not | porting: [chatgpt-web](integrations/chatgpt-web.md); installed live acceptance pending |
 | Native Resident, session lanes and tool bridging | `resident-operator*`, native Drivers and model-tool bridge | official external providers are one-shot | porting: native-resident |
 | Codex subscription model in the main DSH conversation | Native-model menu/routing in `tool-physical-operator`, `ui-physical-operator`, and Resident integration | Existing third-party `dsh-codex-subscription`; see the plan for the search-boundary correction and non-equivalent native-session behavior | use-existing |
 | Browser (ego-lite) | `browser/browser`, `browser-ego-lite`, `tool-browser`, `bundle/ego-lite-browser` | `browser-use`, `experimental/browser-use-stagehand-native` | unassessed |

@@ -1,0 +1,598 @@
+import { describe, expect, it, vi } from 'vitest'
+
+import { EgoWebAdapter, EGO_FRAME_MARKER, type EgoProcessRunner } from '../src/ego-adapter.js'
+import { EgoProcessError } from '../src/process-contract.js'
+import type { ChatGptPageObservation } from '../src/page-observation.js'
+import type { WebRunRequest, WebRunResource } from '../src/store.js'
+
+const options = {
+  executable: '/usr/local/bin/ego-browser',
+  cwd: '/tmp/dsh-chatgpt-web',
+  commandTimeoutMs: 1_000,
+  stdoutMaxBytes: 128 * 1024,
+}
+
+const resource: WebRunResource = {
+  spaceId: 3,
+  pageLabel: 'p1',
+  conversationUrl: 'https://chatgpt.com/c/fixed-resource',
+}
+
+type AdapterObservation = ChatGptPageObservation & { readonly userMessages: readonly string[] }
+
+const observation: AdapterObservation = {
+  url: resource.conversationUrl!,
+  loginRequired: false,
+  composerCount: 1,
+  composerText: '',
+  hasAttachments: false,
+  userMessages: [],
+  userMessageCount: 0,
+  assistantMessages: [],
+  generating: false,
+  modelLabel: 'GPT-5',
+  effortLabel: 'Medium',
+}
+
+function success(value: unknown) {
+  return {
+    stdout: `${EGO_FRAME_MARKER}${JSON.stringify({ ok: true, value })}\n`,
+    stderr: '',
+    exitCode: 0 as const,
+    executionStopped: true as const,
+  }
+}
+
+function failure(code: string, message = 'fixture failure') {
+  return {
+    stdout: `${EGO_FRAME_MARKER}${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+    stderr: '',
+    exitCode: 0 as const,
+    executionStopped: true as const,
+  }
+}
+
+function runnerReturning(value: unknown): { readonly run: EgoProcessRunner; readonly calls: ReturnType<typeof vi.fn> } {
+  const calls = vi.fn(async () => success(value))
+  return { run: calls as unknown as EgoProcessRunner, calls }
+}
+
+function request(overrides: Partial<WebRunRequest> = {}): WebRunRequest {
+  return {
+    prompt: 'read "quoted"\nline `code` ${value}',
+    modelLabel: 'GPT-5',
+    effortLabel: 'Medium',
+    ...overrides,
+  }
+}
+
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (...args: string[]) => (...args: unknown[]) => Promise<unknown>
+
+async function executeGeneratedSource(source: string, taskSpace: (...args: unknown[]) => unknown) {
+  let stdout = ''
+  const originalWrite = process.stdout.write
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8')
+    return true
+  }) as typeof process.stdout.write
+  try {
+    await new AsyncFunction('taskSpace', source)(taskSpace)
+  } finally {
+    process.stdout.write = originalWrite
+  }
+  return { stdout, stderr: '', exitCode: 0 as const, executionStopped: true as const }
+}
+
+describe('EgoWebAdapter', () => {
+  it('creates one agent TaskSpace and reuses the resource without a second call', async () => {
+    const fixture = runnerReturning({ spaceId: 3, pageLabel: 'p1' })
+    const adapter = new EgoWebAdapter(options, fixture.run)
+
+    await expect(adapter.create('run "quoted"')).resolves.toEqual({ spaceId: 3, pageLabel: 'p1' })
+    await expect(adapter.create('run "quoted"')).resolves.toEqual({ spaceId: 3, pageLabel: 'p1' })
+    expect(fixture.calls).toHaveBeenCalledOnce()
+    const source = fixture.calls.mock.calls[0]?.[0].source ?? ''
+    expect(source).toContain('taskSpace(__input.spaceId === undefined ? "ChatGPT Web " + __input.runId : __input.spaceId)')
+    expect(source).toContain(JSON.stringify('run "quoted"'))
+    expect(source).not.toContain('claimTaskSpace')
+  })
+
+  it('resumes a configured existing agent TaskSpace without creating another one', async () => {
+    const fixture = runnerReturning({ spaceId: 3, pageLabel: 'p1' })
+    const adapter = new EgoWebAdapter({ ...options, spaceId: 3 }, fixture.run)
+
+    await expect(adapter.create('run-existing')).resolves.toEqual({ spaceId: 3, pageLabel: 'p1' })
+    expect(fixture.calls).toHaveBeenCalledOnce()
+    const input = fixture.calls.mock.calls[0]?.[0]
+    expect(input?.source).toContain('taskSpace(__input.spaceId === undefined ?')
+    expect(input?.source).not.toContain('claimTaskSpace')
+    expect(input?.source).toContain(JSON.stringify({ runId: 'run-existing', spaceId: 3 }))
+  })
+
+  it('prepares a fresh ChatGPT page and verifies exact observed labels without changing them', async () => {
+    const fixture = runnerReturning(observation)
+    const adapter = new EgoWebAdapter(options, fixture.run)
+    const output = await adapter.prepare(resource, request())
+
+    expect(output).toEqual(observation)
+    const source = fixture.calls.mock.calls[0]?.[0].source ?? ''
+    expect(source).toContain('https://chatgpt.com/')
+    expect(source).toContain('waitForSelector')
+    expect(source).toContain('button[aria-label=\\"选择 ChatGPT 模型\\"]')
+    expect(source).toContain('[role=\\"menu\\"]')
+    expect(source).toContain('data-model-picker-view=\\"advanced\\"')
+    expect(source).toContain('data-model-picker-view-toggle=\\"true\\"')
+    expect(source).toContain('WEB_MODEL_SELECTION_UNAVAILABLE')
+    expect(source).toContain('WEB_EFFORT_SELECTION_UNAVAILABLE')
+    expect(source).toContain('WEB_SELECTION_RESTORE_FAILED')
+    expect(source).toContain('waitForFunction')
+    expect(source).toContain('__publicError = Symbol')
+    expect(source).toContain('Ego browser command failed')
+    expect(source).toContain('state: "visible"')
+    expect(source).toContain('"Escape"')
+    expect(source).toContain('messageMarkdown')
+    expect(source).toContain(JSON.stringify(request().prompt))
+    expect(source).not.toContain('\u0008')
+    const arrowLeft = source.match(/\/(\\bArrowLeft\\b)\/\.test\(shortcuts\)/)?.[1]
+    const arrowRight = source.match(/\/(\\bArrowRight\\b)\/\.test\(shortcuts\)/)?.[1]
+    expect(arrowLeft).toBe('\\bArrowLeft\\b')
+    expect(arrowRight).toBe('\\bArrowRight\\b')
+    expect(new RegExp(arrowLeft!).test('ArrowLeft ArrowRight')).toBe(true)
+    expect(new RegExp(arrowRight!).test('ArrowLeft ArrowRight')).toBe(true)
+  })
+
+  it('rejects an unknown model or an effort label used as a model', async () => {
+    const missing = runnerReturning({ ...observation, modelLabel: undefined })
+    const missingAdapter = new EgoWebAdapter(options, missing.run)
+    await expect(missingAdapter.prepare(resource, request({ modelLabel: 'GPT-5' }))).rejects.toMatchObject({ code: 'WEB_MODEL_UNKNOWN' })
+
+    const medium = runnerReturning({ ...observation, modelLabel: 'Medium' })
+    const mediumAdapter = new EgoWebAdapter(options, medium.run)
+    await expect(mediumAdapter.prepare(resource, request({ modelLabel: 'Medium' }))).rejects.toMatchObject({ code: 'WEB_MODEL_MISMATCH' })
+  })
+
+  it('selects one exact visible enabled model radio, or names unavailable selection', async () => {
+    const makeScenario = (availableModels: readonly string[]) => {
+      let currentModel = 'GPT-5.6 Sol'
+      let requestedModel = 'GPT-6'
+      let view: 'simple' | 'advanced' = 'simple'
+      let currentUrl = 'about:blank'
+      let modelControlReady = false
+      let modelRadioReady = false
+      let menuOpen = false
+      let toggleReady = false
+      let waitForFunctionCalls = 0
+      const clicks: string[] = []
+      const page = {
+        async url() { return currentUrl },
+        async goto() { currentUrl = 'https://chatgpt.com/' },
+        async waitForSelector() {},
+        async waitForFunction(_fn: unknown, argument?: unknown) {
+          waitForFunctionCalls += 1
+          modelControlReady = true
+          if (argument !== 'button[aria-label="选择 ChatGPT 模型"]' && !menuOpen && waitForFunctionCalls >= 4) {
+            throw new Error('model radio remains hidden until the picker reopens')
+          }
+          if (String(_fn).includes('data-model-picker-view-toggle')) toggleReady = true
+          if (menuOpen && String(_fn).includes('aria-checked="true"')) {
+            if (view !== 'advanced') throw new Error('model radio remains hidden outside advanced view')
+            modelRadioReady = true
+          }
+        },
+        async evaluate(fn: unknown, argument?: unknown) {
+          const source = String(fn)
+          if (argument === 'button[aria-label="选择 ChatGPT 模型"]') {
+            return modelControlReady ? { expanded: menuOpen ? 'true' : 'false' } : null
+          }
+          if (argument === '[role="menu"]') return menuOpen
+          if (source.includes('function inspectChatGptPage')) return { ...observation, modelLabel: currentModel }
+          if (source.includes('menuitemradio')) {
+            if (!modelRadioReady) return null
+            return availableModels.includes(String(argument)) ? 'div.model-target' : null
+          }
+          if (source.includes('data-model-picker-view')) {
+            return { advanced: view === 'advanced', simple: view === 'simple', toggle: toggleReady }
+          }
+          throw new Error('unexpected model-selection evaluate callback')
+        },
+        async click(selector: string) {
+          clicks.push(selector)
+          if (selector === 'button[aria-label="选择 ChatGPT 模型"]') {
+            menuOpen = true
+            view = 'simple'
+            toggleReady = false
+            modelRadioReady = false
+          }
+          else if (selector === '[data-model-picker-view-toggle="true"][role="menuitem"]') view = view === 'simple' ? 'advanced' : 'simple'
+          else if (selector === 'div.model-target') {
+            currentModel = requestedModel
+            // The live picker switches to the simple effort view while the
+            // selected radio remains on a hidden track.
+            menuOpen = true
+            view = 'simple'
+            modelRadioReady = false
+          }
+        },
+        async press(_selector: string, key: string) {
+          if (key === 'Escape') menuOpen = false
+        },
+      }
+      const taskSpace = async () => ({ ownership: 'agent', spaceId: resource.spaceId, page: () => page })
+      const run: EgoProcessRunner = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => executeGeneratedSource(input.source, taskSpace))
+      const adapter = new EgoWebAdapter(options, run)
+      return {
+        adapter,
+        clicks,
+        waitForFunctionCalls: () => waitForFunctionCalls,
+        setRequestedModel: (value: string) => { requestedModel = value },
+      }
+    }
+
+    const selected = makeScenario(['GPT-6'])
+    selected.setRequestedModel('GPT-6')
+    await expect(selected.adapter.prepare(resource, request({ modelLabel: 'GPT-6' }))).resolves.toMatchObject({ modelLabel: 'GPT-6' })
+    expect(selected.clicks).toContain('div.model-target')
+    expect(selected.clicks.filter((selector) => selector === 'div.model-target')).toHaveLength(1)
+    expect(selected.clicks.filter((selector) => selector === '[data-model-picker-view-toggle="true"][role="menuitem"]')).toHaveLength(3)
+    expect(selected.waitForFunctionCalls()).toBeGreaterThan(0)
+
+    const unavailable = makeScenario([])
+    unavailable.setRequestedModel('GPT-6')
+    await expect(unavailable.adapter.prepare(resource, request({ modelLabel: 'GPT-6' }))).rejects.toMatchObject({ code: 'WEB_MODEL_SELECTION_UNAVAILABLE' })
+    expect(unavailable.clicks).not.toContain('div.model-target')
+  })
+
+  it('walks the bounded effort slider by raw ids and restores its original index when unmatched', async () => {
+    const makeScenario = (requestedEffort: string, blockRestore = false) => {
+      let index = 1
+      let view: 'simple' | 'advanced' = 'simple'
+      let currentUrl = 'about:blank'
+      const rawIds = ['low', 'medium', 'high']
+      let effortControlReady = false
+      let waitForFunctionCalls = 0
+      const presses: Array<{ readonly selector: string; readonly key: string }> = []
+      const page = {
+        async url() { return currentUrl },
+        async goto() { currentUrl = 'https://chatgpt.com/' },
+        async waitForSelector() {},
+        async waitForFunction(_fn: unknown, input?: { readonly expectedIndex?: number }) {
+          waitForFunctionCalls += 1
+          if (String(_fn).includes('data-reasoning-slider')) effortControlReady = true
+          if (input?.expectedIndex !== undefined && index !== input.expectedIndex) throw new Error('slider transition not observed')
+        },
+        async evaluate(fn: unknown, argument?: unknown) {
+          const source = String(fn)
+          if (argument === 'button[aria-label="选择 ChatGPT 模型"]') return { expanded: 'false' }
+          if (argument === '[role="menu"]') return true
+          if (source.includes('function inspectChatGptPage')) return { ...observation, effortLabel: rawIds[index] }
+          if (source.includes('data-reasoning-slider')) {
+            if (!effortControlReady) return null
+            return { sliderSelector: 'div.slider-wrapper', min: 0, max: 2, now: index, rawId: rawIds[index] }
+          }
+          if (source.includes('data-model-picker-view')) return { advanced: view === 'advanced', simple: view === 'simple', toggle: true }
+          throw new Error('unexpected effort-selection evaluate callback')
+        },
+        async click(selector: string) {
+          if (selector === 'button[aria-label="选择 ChatGPT 模型"]') view = 'simple'
+          else if (selector === '[data-model-picker-view-toggle="true"][role="menuitem"]') view = view === 'simple' ? 'advanced' : 'simple'
+        },
+        async press(selector: string, key: string) {
+          presses.push({ selector, key })
+          if (blockRestore && index === 2 && key === 'ArrowLeft') return
+          if (key === 'ArrowLeft') index = Math.max(0, index - 1)
+          if (key === 'ArrowRight') index = Math.min(2, index + 1)
+        },
+      }
+      const taskSpace = async () => ({ ownership: 'agent', spaceId: resource.spaceId, page: () => page })
+      const run: EgoProcessRunner = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => executeGeneratedSource(input.source, taskSpace))
+      const adapter = new EgoWebAdapter(options, run)
+      return { adapter, presses, currentIndex: () => index, requestedEffort, waitForFunctionCalls: () => waitForFunctionCalls }
+    }
+
+    const matched = makeScenario('high')
+    await expect(matched.adapter.prepare(resource, request({ effortLabel: matched.requestedEffort }))).resolves.toMatchObject({ effortLabel: 'high' })
+    expect(matched.currentIndex()).toBe(2)
+    expect(matched.presses.filter(({ selector }) => selector === 'div.slider-wrapper').length).toBeGreaterThan(0)
+    expect(matched.waitForFunctionCalls()).toBeGreaterThan(0)
+
+    const unmatched = makeScenario('missing')
+    await expect(unmatched.adapter.prepare(resource, request({ effortLabel: unmatched.requestedEffort }))).rejects.toMatchObject({ code: 'WEB_EFFORT_SELECTION_UNAVAILABLE' })
+    expect(unmatched.currentIndex()).toBe(1)
+    expect(unmatched.presses.every(({ selector }) => selector === 'div.slider-wrapper' || selector.includes('选择 ChatGPT 模型'))).toBe(true)
+
+    const restoreFailed = makeScenario('missing', true)
+    await expect(restoreFailed.adapter.prepare(resource, request({ effortLabel: restoreFailed.requestedEffort }))).rejects.toMatchObject({ code: 'WEB_SELECTION_RESTORE_FAILED' })
+    expect(restoreFailed.currentIndex()).toBe(2)
+  })
+
+  it('propagates user control without claiming or rebuilding the TaskSpace', async () => {
+    const fixture = {
+      calls: vi.fn(async (_input: Parameters<EgoProcessRunner>[0]) => failure('WEB_USER_CONTROL', 'ownership changed')),
+    }
+    const adapter = new EgoWebAdapter(options, fixture.calls as unknown as EgoProcessRunner)
+
+    await expect(adapter.observe(resource)).rejects.toMatchObject({ code: 'WEB_USER_CONTROL' })
+    const source = fixture.calls.mock.calls[0]?.[0].source ?? ''
+    expect(source).toContain('taskSpace(__input.resource.spaceId)')
+    expect(source).not.toContain('claimTaskSpace')
+  })
+
+  it('submits one exact prompt with one visible send click and does not retry', async () => {
+    const afterSubmit = { ...observation, userMessages: [request().prompt], userMessageCount: 1, generating: true }
+    const calls = vi.fn(async (_input: Parameters<EgoProcessRunner>[0]) => success(calls.mock.calls.length <= 1 ? observation : afterSubmit))
+    const fixture = { run: calls as unknown as EgoProcessRunner, calls }
+    const adapter = new EgoWebAdapter(options, fixture.run)
+    await adapter.prepare(resource, request())
+    const submitted = await adapter.submit(resource, request())
+
+    expect(submitted).toEqual(afterSubmit)
+    expect(fixture.calls).toHaveBeenCalledTimes(2)
+    const source = fixture.calls.mock.calls[1]?.[0].source ?? ''
+    expect(source.match(/__page\.click\(__sendSelector/g)).toHaveLength(1)
+    expect(source.match(/__page\.click\(/g)?.length).toBe(4)
+    expect(source).toContain('waitForSelector')
+    expect(source).toContain('"Escape"')
+    expect(source).toContain(JSON.stringify(request().prompt))
+    expect(source).toContain('clearFirst: true')
+    await expect(adapter.submit(resource, request())).rejects.toMatchObject({ code: 'WEB_SUBMISSION_ALREADY_ATTEMPTED' })
+    expect(fixture.calls).toHaveBeenCalledTimes(2)
+  })
+
+  it('executes the generated submit script through a keyless fake page roundtrip', async () => {
+    const prompt = request().prompt
+    const afterSubmit = { ...observation, modelLabel: undefined, effortLabel: undefined, userMessages: [prompt], userMessageCount: 1, generating: true }
+    const expectedSubmit = { ...afterSubmit, modelLabel: observation.modelLabel, effortLabel: observation.effortLabel }
+    const calls = {
+      evaluate: [] as Array<{ readonly source: string; readonly argument: unknown }>,
+      click: [] as string[],
+      fill: [] as Array<{ readonly selector: string; readonly value: string }>,
+      press: [] as Array<{ readonly selector: string; readonly key: string }>,
+      waitForSelector: [] as string[],
+    }
+    let filled = false
+    let modelView: 'simple' | 'advanced' = 'simple'
+    let currentUrl = 'about:blank'
+    const page = {
+      async url() { return currentUrl },
+      async goto() { currentUrl = 'https://chatgpt.com/' },
+      async waitForSelector(selector: string) { calls.waitForSelector.push(selector) },
+      async waitForFunction() {},
+      async evaluate(fn: unknown, argument?: unknown) {
+        expect(typeof fn).toBe('function')
+        const source = String(fn)
+        calls.evaluate.push({ source, argument })
+        if (argument === 'button[aria-label="选择 ChatGPT 模型"]') return { expanded: 'false' }
+        if (argument === '[role="menu"]') return true
+        if (source.includes('data-model-picker-view')) {
+          return { advanced: modelView === 'advanced', simple: modelView === 'simple', toggle: modelView === 'simple' }
+        }
+        if (source.includes('function inspectChatGptPage')) {
+          if (!filled) return observation
+          if (calls.click.includes('button[data-testid="send-button"]')) return afterSubmit
+          return { ...observation, composerText: prompt }
+        }
+        if (source.includes('div.ProseMirror') && source.includes('prompt-textarea')) return 'textarea#prompt-textarea'
+        if (source.includes('send-button')) return 'button[data-testid="send-button"]'
+        throw new Error(`unexpected evaluate callback: ${source.slice(0, 80)}`)
+      },
+      async click(selector: string) {
+        calls.click.push(selector)
+        if (selector === 'button[aria-label="选择 ChatGPT 模型"]') modelView = 'simple'
+        if (selector === '[data-model-picker-view-toggle="true"][role="menuitem"]') modelView = 'advanced'
+      },
+      async fill(selector: string, value: string) {
+        calls.fill.push({ selector, value })
+        filled = true
+      },
+      async press(selector: string, key: string) { calls.press.push({ selector, key }) },
+    }
+    const taskSpace = async () => ({
+      ownership: 'agent',
+      spaceId: resource.spaceId,
+      page: () => page,
+    })
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (...args: string[]) => (...args: unknown[]) => Promise<unknown>
+    const run: EgoProcessRunner = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => {
+      let stdout = ''
+      const originalWrite = process.stdout.write
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        stdout += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8')
+        return true
+      }) as typeof process.stdout.write
+      try {
+        await new AsyncFunction('taskSpace', input.source)(taskSpace)
+      } finally {
+        process.stdout.write = originalWrite
+      }
+      return {
+        stdout,
+        stderr: '',
+        exitCode: 0 as const,
+        executionStopped: true as const,
+      }
+    })
+    const adapter = new EgoWebAdapter(options, run)
+
+    await expect(adapter.prepare(resource, request())).resolves.toEqual(observation)
+    currentUrl = resource.conversationUrl!
+    calls.evaluate.length = 0
+    calls.click.length = 0
+    calls.fill.length = 0
+    calls.press.length = 0
+    calls.waitForSelector.length = 0
+    filled = false
+    modelView = 'simple'
+    await expect(adapter.submit(resource, request())).resolves.toEqual(expectedSubmit)
+    expect(calls.fill).toEqual([{ selector: 'textarea#prompt-textarea', value: prompt }])
+    expect(calls.click).toEqual([
+      'button[aria-label="选择 ChatGPT 模型"]',
+      '[data-model-picker-view-toggle="true"][role="menuitem"]',
+      'button[aria-label="选择 ChatGPT 模型"]',
+      '[data-model-picker-view-toggle="true"][role="menuitem"]',
+      'button[data-testid="send-button"]',
+    ])
+    expect(calls.press).toEqual([
+      { selector: 'button[aria-label="选择 ChatGPT 模型"]', key: 'Escape' },
+      { selector: 'button[aria-label="选择 ChatGPT 模型"]', key: 'Escape' },
+    ])
+    expect(calls.waitForSelector).toEqual([
+      '[role="menu"]',
+      '[data-model-picker-view="advanced"]',
+      '[role="menu"]',
+      '[data-model-picker-view="advanced"]',
+    ])
+    expect(calls.evaluate.every(({ source }) => !source.includes('function.toString()'))).toBe(true)
+  })
+
+  it('strictly rejects extra stdout and maps process failures without exposing stderr', async () => {
+    const noisy: EgoProcessRunner = vi.fn(async () => ({
+      ...success({ spaceId: 3, pageLabel: 'p1' }),
+      stdout: `${success({ spaceId: 3, pageLabel: 'p1' }).stdout}unexpected\n`,
+    }))
+    const noisyAdapter = new EgoWebAdapter(options, noisy)
+    await expect(noisyAdapter.create('noisy')).rejects.toMatchObject({ code: 'WEB_EGO_FRAME' })
+
+    const processFailure: EgoProcessRunner = vi.fn(async () => {
+      throw new EgoProcessError('EGO_TIMEOUT', 'contains no prompt', true, true, 'secret token')
+    })
+    const failedAdapter = new EgoWebAdapter(options, processFailure)
+    const thrown = await failedAdapter.create('timeout').catch((error: unknown) => error)
+    expect(thrown).toMatchObject({ code: 'EGO_TIMEOUT', message: 'Ego browser command failed' })
+    expect((thrown as Error).message).not.toContain('secret token')
+
+    const spawnFailure: EgoProcessRunner = vi.fn(async () => {
+      throw new EgoProcessError('EGO_SPAWN_FAILED', 'missing executable', true, false, 'secret token')
+    })
+    const spawnAdapter = new EgoWebAdapter(options, spawnFailure)
+    await expect(spawnAdapter.create('spawn-failure')).rejects.toMatchObject({
+      code: 'EGO_SPAWN_FAILED',
+      message: 'Ego browser command failed',
+      mayHaveLateEffects: false,
+    })
+  })
+
+  it('accepts one stderr frame with explicit Ego notices and rejects ambiguous/truncated transport output', async () => {
+    const value = { spaceId: 3, pageLabel: 'p1' }
+    const frame = success(value).stdout.trimEnd()
+    const withNoticeMock = vi.fn(async (_input: Parameters<EgoProcessRunner>[0]) => ({
+      ...success(value),
+      stdout: '',
+      stderr: `${frame}\n[ego-browser:notice] Ego Lite update is available (no automatic upgrade)\n`,
+      stderrTruncated: false as const,
+    }))
+    const withNotice = withNoticeMock as unknown as EgoProcessRunner
+    const adapter = new EgoWebAdapter(options, withNotice)
+    await expect(adapter.create('stderr-frame')).resolves.toEqual(value)
+    expect(withNoticeMock.mock.calls[0]?.[0].stderrMaxBytes).toBeGreaterThanOrEqual(options.stdoutMaxBytes + 64 * 1024)
+    expect(adapter.lastEgoNotices).toEqual(['Ego Lite update is available (no automatic upgrade)'])
+
+    const duplicate: EgoProcessRunner = vi.fn(async () => ({
+      ...success(value),
+      stdout: '',
+      stderr: `${frame}\n${frame}\n`,
+      stderrTruncated: false as const,
+    }))
+    await expect(new EgoWebAdapter(options, duplicate).create('duplicate-frame')).rejects.toMatchObject({ code: 'WEB_EGO_FRAME' })
+
+    const noisy: EgoProcessRunner = vi.fn(async () => ({
+      ...success(value),
+      stdout: '',
+      stderr: `${frame}\nwarning from Ego\n`,
+      stderrTruncated: false as const,
+    }))
+    await expect(new EgoWebAdapter(options, noisy).create('noisy-stderr')).rejects.toMatchObject({ code: 'WEB_EGO_FRAME' })
+
+    const truncated: EgoProcessRunner = vi.fn(async () => ({
+      ...success(value),
+      stdout: '',
+      stderr: frame,
+      stderrTruncated: true as const,
+    }))
+    await expect(new EgoWebAdapter(options, truncated).create('truncated-stderr')).rejects.toMatchObject({ code: 'EGO_OUTPUT_TOO_LARGE' })
+  })
+
+  it('keeps unknown Ego runtime errors generic while preserving only script-owned static errors', async () => {
+    const secret = 'page prompt must not escape'
+    const page = {
+      async url() { return 'about:blank' },
+      async goto() {},
+      async waitForSelector() {},
+      async waitForFunction() {},
+      async evaluate(fn: unknown, argument?: unknown) {
+        if (argument === 'button[aria-label="选择 ChatGPT 模型"]') return { expanded: 'false' }
+        if (argument === '[role="menu"]') return true
+        if (String(fn).includes('data-model-picker-view')) return { advanced: false, simple: true, toggle: true }
+        const error = new Error(secret) as Error & { code?: string }
+        error.code = 'WEB_MODEL_UNKNOWN'
+        throw error
+      },
+      async click() {},
+      async press() {},
+    }
+    const taskSpace = async () => ({ ownership: 'agent', spaceId: resource.spaceId, page: () => page })
+    const run: EgoProcessRunner = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => executeGeneratedSource(input.source, taskSpace))
+    const adapter = new EgoWebAdapter(options, run)
+
+    const thrown = await adapter.prepare(resource, request()).catch((error: unknown) => error)
+    expect(thrown).toMatchObject({ code: 'WEB_MODEL_UNKNOWN', message: 'Ego browser command failed' })
+    expect((thrown as Error).message).not.toContain(secret)
+  })
+
+  it('finishes exactly once while retaining the named p1 page', async () => {
+    const fixture = runnerReturning({ finished: true })
+    const adapter = new EgoWebAdapter(options, fixture.run)
+
+    await expect(adapter.finish(resource)).resolves.toBeUndefined()
+    await expect(adapter.finish(resource)).rejects.toMatchObject({ code: 'WEB_ALREADY_FINISHED' })
+    expect(fixture.calls).toHaveBeenCalledOnce()
+    const source = fixture.calls.mock.calls[0]?.[0].source ?? ''
+    expect(source).toContain('finish({ keep: [__input.resource.pageLabel] })')
+  })
+
+  it('refuses an unknown model frame from the keyless sequence', async () => {
+    const fixture = runnerReturning({ ...observation, modelLabel: undefined })
+    const adapter = new EgoWebAdapter(options, fixture.run)
+
+    await expect(adapter.prepare(resource, request())).rejects.toMatchObject({ code: 'WEB_MODEL_UNKNOWN' })
+    expect(fixture.calls).toHaveBeenCalledOnce()
+  })
+
+  it('stops on a changed resource without navigating or rebuilding it', async () => {
+    const fixture = runnerReturning(observation)
+    const adapter = new EgoWebAdapter(options, fixture.run)
+
+    await expect(adapter.observe(resource)).resolves.toEqual(observation)
+    const observeSource = fixture.calls.mock.calls[0]?.[0].source ?? ''
+    expect(observeSource).toContain('WEB_RESOURCE_CHANGED')
+    expect(observeSource).not.toContain('__page.goto(__input.resource.conversationUrl')
+
+    await expect(adapter.prepare(resource, request())).resolves.toEqual(observation)
+    await expect(adapter.submit(resource, request())).resolves.toEqual(observation)
+    const submitSource = fixture.calls.mock.calls[2]?.[0].source ?? ''
+    expect(submitSource).toContain('WEB_RESOURCE_CHANGED')
+    expect(submitSource).not.toContain('__page.goto(__input.resource.conversationUrl')
+  })
+
+  it('does not navigate an existing ChatGPT page with a draft or history', async () => {
+    for (const state of [
+      { composerText: 'existing draft', userMessages: [], userMessageCount: 0 },
+      { composerText: '', userMessages: ['existing message'], userMessageCount: 1 },
+    ] as const) {
+      let gotoCalls = 0
+      const page = {
+        async url() { return resource.conversationUrl! },
+        async goto() { gotoCalls += 1 },
+        async evaluate(fn: unknown) {
+          if (String(fn).includes('function inspectChatGptPage')) return { ...observation, ...state }
+          throw new Error('unexpected navigation-protection evaluate callback')
+        },
+      }
+      const taskSpace = async () => ({ ownership: 'agent', spaceId: resource.spaceId, page: () => page })
+      const run: EgoProcessRunner = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => executeGeneratedSource(input.source, taskSpace))
+      const adapter = new EgoWebAdapter(options, run)
+
+      await expect(adapter.prepare(resource, request())).rejects.toMatchObject({ code: 'WEB_CONVERSATION_NOT_EMPTY' })
+      expect(gotoCalls).toBe(0)
+    }
+  })
+})
