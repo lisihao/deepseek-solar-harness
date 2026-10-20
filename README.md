@@ -6,7 +6,7 @@ V4 is a personal project hosted publicly at `lisihao/deepseek-solar-harness`. Of
 
 ## Current state
 
-No Solar plugin has been published. No market index or installation URL exists. Native collaboration and native Resident are under authorized development. The separately commissioned Prime RLM and Continual Harness plugin is being implemented and installed under the 2026-10-20 authorization; paid experiments are paused. Build/test tooling is local; no recurring automation has been activated.
+No Solar plugin has been published. No market index or installation URL exists. Native collaboration and native Resident are under authorized development. The separately commissioned Prime RLM and Continual Harness candidate is implemented and locally installed with keyless app acceptance under the 2026-10-20 authorization; real-provider and paid efficacy experiments remain unrun. Build/test tooling is local; no recurring automation has been activated.
 
 The `v4` branch is the V4 repository entry point. It contains the V4 rules, documentation and pinned upstream identity. Native plugin development adds candidates under `incubator/`. GitHub readback confirmed `v4` as the default branch on 2026-10-19.
 

@@ -59,6 +59,6 @@ This candidate has no public release, tag, market index entry or general install
 
 ## Verification
 
-See the [verification record](../../docs/testing/prime-rlm-verification.md) for actual source, scratch-profile and installed-app results. The [evaluation specification](../../docs/testing/prime-rlm-evaluation.md) defines the separate fidelity, quality, paper and held-out Continual Harness gates.
+The official app has exercised the normal conversation and Settings panels, local native self-test, enable/disable behavior and wide/narrow rendering. This is zero-cost fixture acceptance, not real-provider or efficacy acceptance. See the [verification record](../../docs/testing/prime-rlm-verification.md) for actual source, scratch-profile and installed-app results. The [evaluation specification](../../docs/testing/prime-rlm-evaluation.md) defines the separate fidelity, quality, paper and held-out Continual Harness gates.
 
 Paid comparative runs, independent model-answer grading, paper reproduction and held-out adaptation-effect evaluation remain **not run**. Implementation and installation do not establish a reasoning-quality improvement.
