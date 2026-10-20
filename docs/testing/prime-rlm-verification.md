@@ -16,7 +16,7 @@ Implementation and installation are authorized. Paid experiments, merge, release
 | Python third-party lock SHA-256 | `a7c8ef7ef10f84cca2a788601b4e5f444448812a9ad855af2bd4e891904fa2c7` |
 | Host baseline | Published DSH 0.2.1-rc.2 / Cordis 4.0.5 |
 | Development environment | macOS arm64; plain Node 26.7; source packages share host peer modules |
-| Adapter/test/build input fingerprint | `a772a292bde9378666fd6f30bf128d45ff8aa3dbd692a3e9e960af6af5326077` (37 files; excludes generated `lib`, payload bytes and prose) |
+| Adapter/test/build input fingerprint | `149b6dc99064bdec51a75cc114d379c1a168e0a9f5b6af4d80a5dee11b32f907` (37 files; excludes generated `lib`, payload bytes and prose) |
 
 The manifest and provenance are in `incubator/rlm/runtime-lock/capsule.json`; large runtime assets are generated and ignored by Git. No Prime source or official Harness runtime was patched. Source identity does not alone certify every provider behavior or evaluation case.
 
@@ -59,6 +59,8 @@ The next-turn refinement assertion concerns Prime's provider context, **not** a 
 Adapter failure tests cover malformed ACP/framing, causal sequence and prompt mismatches, `end_turn` without native terminal evidence, outstanding descendants/continuations, unknown formats/effects, replay conflicts and restart recovery, full-tree request reservations, and cleanup despite persistence/transport faults. Confirmed native stop with an unsaved receipt is distinguished from an unconfirmed stop.
 
 ## Installation checkpoint
+
+The live owner UI subsequently exercised the normal conversation view and Settings → Prime RLM. Runtime status and all 14 native checks passed (18 local scripted responses, 0 real-provider requests). Disable removed the conversation contribution; re-enable restored the bundle and the Settings control channel. Default and 900-point-wide settings were visually inspected, including scrolling to the self-test and task controls. A transient stale screenshot was excluded from visual evidence; later live captures matched the current controls. The result view exposed internal refinement record identifiers, so a final display-only repair omits those and the runtime fingerprint while leaving the saved native reports unchanged. Final restart verification follows the final package below.
 
 The first installed artifact (`e02c8e7`, package SHA-256 `4874d751c92b623b8d7fb0cd60229701478ac396c7227ea3b5d1a2603340f730`) failed desktop web boot: `ReferenceError: module is not defined`. The client had been emitted as bare CommonJS, whereas the published baseline requires a `window.__ModuleLoader__.load` factory. The new browser-context probe reproduced that failure against the old built entry; the corrected wrapped entry passed registration, shared-React import, slot activation, remote mounting and disposal without Node globals. This probe now runs during both build and plugin checks. Earlier Node-only checks did not cover web activation. The corrected entry restored the official app main screen. Rendered acceptance then found that the Remote descriptor used the namespace as its Cordis service key (`solarRlmControl` rather than the registered `solarRlm`). A new active-service binding regression test reproduced the mismatch. The descriptor and Typert model now name the actual service while keeping the wire namespace stable. Installed self-test acceptance is pending the final corrected artifact below. Prime runtime bytes and host adapter behavior are unchanged by this repair.
 

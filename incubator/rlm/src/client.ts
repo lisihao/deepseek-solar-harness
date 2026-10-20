@@ -143,6 +143,14 @@ function displayMessage(value: string | undefined, fallback: string): string {
     .replace(/\b(?:rlm|run|command)[-_][A-Za-z0-9_-]+\b/gi, '该任务')
 }
 
+// Keep native diagnostic identities in the saved report, not the normal UI.
+function checkDetail(value: string): string {
+  return displayMessage(value, '未返回检查说明。')
+    .replace(/运行时指纹 [0-9a-f]{16,64}/gi, '运行时指纹')
+    .replace(/，refinement id 为 refine_[A-Za-z0-9_]+/g, '')
+    .replace(/rollback 记录 refine_[A-Za-z0-9_]+/g, 'rollback 记录')
+}
+
 function errorMessage(error: unknown): string {
   const message = displayMessage(error instanceof Error ? error.message : undefined, 'RLM 控制通道暂不可用。')
   return `${message} 连接可能正在重连，请稍后重试。`
@@ -445,7 +453,7 @@ function RlmPanel({ remoteStore }: { readonly remoteStore: RemoteAccessStore }):
         : createElement('div', { key: 'report', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
           createElement('strong', { key: 'status' }, reportStatusLabel(report)),
           createElement('p', { key: 'requests', style: mutedStyle }, `真实提供方请求：${report.modelRequests} 次；本地脚本响应：${report.localModelRequests ?? 0} 次。`),
-          ...report.checks.map((check, index) => createElement('p', { key: `${index}:${check.id}`, style: mutedStyle }, `检查项 ${index + 1}：${check.passed ? '通过' : '未通过'}。${displayMessage(check.detail, '未返回检查说明。')}`)),
+          ...report.checks.map((check, index) => createElement('p', { key: `${index}:${check.id}`, style: mutedStyle }, `检查项 ${index + 1}：${check.passed ? '通过' : '未通过'}。${checkDetail(check.detail)}`)),
         ]),
     ]),
     createElement('section', { key: 'runs', style: { display: 'grid', gap: 10, minWidth: 0 } }, [
