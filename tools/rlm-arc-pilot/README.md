@@ -57,6 +57,7 @@ The separately accepted JSON has `formatVersion: 1`, kind `prime-rlm-arc-unstart
   "originalRunnerSha256": "runner SHA in the original manifest",
   "currentRunnerSha256": "current run.mjs SHA",
   "currentExecutionHashes": { "every frozen execution file": "current SHA-256" },
+  "executionRepairFiles": ["tools/rlm-arc-pilot/run.mjs", "tools/rlm-arc-pilot/baseline.mjs", "tools/rlm-arc-pilot/ledger.mjs"],
   "previous": {
     "runReceiptSha256": "original run-receipt.json SHA-256",
     "panelStartMarkerSha256": "real-run-started.json SHA-256",
@@ -72,7 +73,7 @@ The separately accepted JSON has `formatVersion: 1`, kind `prime-rlm-arc-unstart
 }
 ```
 
-Only `tools/rlm-arc-pilot/run.mjs` may differ from the original execution hashes, and only when the artifact binds both runner hashes and the actual complete current hash map. The runner validates the original manifest fingerprint, all immutable receipt/result/start-marker hashes, completed cleanup, the exact charged unknown call, and that no started condition lacks a result. It writes numbered exclusive markers and receipts such as `resume-unstarted-started-01.json` and `resume-unstarted-receipt-01.json`; a missing pair blocks another continuation.
+The supplement must explicitly list the exact changed execution files. The permitted repair scope is the runner, the recorded baseline stream-drain fix and transport-closure accounting (`run.mjs`, `baseline.mjs`, `ledger.mjs`); all native execution, prompts, corpus and adapter bytes stay frozen. Without that explicit list only `run.mjs` may differ. Every change must bind both original/current runner hashes and the complete current hash map. The closure cause may be `native_budget_closed`, `http503_closed` or `transport_closed`, according to inspected evidence; none refunds an unknown request. The runner validates the original manifest fingerprint, all immutable receipt/result/start-marker hashes, completed cleanup, the exact charged unknown call, and that no started condition lacks a result. It writes numbered exclusive markers and receipts such as `resume-unstarted-started-01.json` and `resume-unstarted-receipt-01.json`; a missing pair blocks another continuation.
 
 R/S execute inside a per-condition macOS sandbox. Only the assigned `guard.sock`, native IPC and a fixed local model-relay port are available. The parent holds the corresponding IPv6 port with a rejecting listener. Game implementation files, other conditions, private provider state, credentials and the trusted engine socket remain outside the worker's readable namespace. Prime, Python, the author source and the ARC SDK are not patched. The explicit SDK `step` facade is an evaluation-only compatibility adaptation documented in the [protocol record](../../docs/testing/prime-rlm-arc-protocol.md).
 

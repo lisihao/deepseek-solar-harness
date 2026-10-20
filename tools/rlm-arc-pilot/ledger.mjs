@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, openSync, writeSync, fsyncSync, closeSync } from
 
 const REQUEST_ID = /^request-(\d+)$/
 const SHA256_HEX = /^[a-f0-9]{64}$/i
-const CLOSED_RUN_CAUSES = new Set(['http503_closed', 'native_budget_closed'])
+const CLOSED_RUN_CAUSES = new Set(['http503_closed', 'native_budget_closed', 'transport_closed'])
 
 function invalid(message) {
   return new Error(`EXPERIMENT_LEDGER_INVALID: ${message}`)

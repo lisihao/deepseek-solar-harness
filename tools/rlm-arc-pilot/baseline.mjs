@@ -486,6 +486,54 @@ export async function runBaseline({
       const rawChunks = []
       let settled
       let sseCount = 0
+      let modelIterator
+      let modelDone = false
+      let modelReturned = false
+      let streamCleanupError
+      const returnModelStream = async () => {
+        if (modelIterator === undefined || modelDone || modelReturned) return
+        modelReturned = true
+        if (typeof modelIterator.return === 'function') await modelIterator.return()
+      }
+      const pullModelChunk = async () => {
+        if (modelIterator === undefined) throw codedError('ARC_MODEL_STREAM', 'model stream iterator is unavailable')
+        if (modelDone || modelReturned) return { done: true, value: undefined }
+        const step = await modelIterator.next()
+        if (step.done) {
+          modelDone = true
+          return { done: true, value: undefined }
+        }
+        rawChunks.push(jsonClone(step.value))
+        return { done: false, value: step.value }
+      }
+      const recordedChunks = {
+        [Symbol.asyncIterator]() {
+          return {
+            next: pullModelChunk,
+            return: async () => {
+              // encodeChatStream returns immediately after emitting a
+              // successful finish.  Keep the provider iterator open until
+              // the caller explicitly confirms EOF below.
+              if (settled !== undefined) return { done: true, value: undefined }
+              try {
+                await returnModelStream()
+              } catch (error) {
+                streamCleanupError = error
+              }
+              return { done: true, value: undefined }
+            },
+            throw: async error => {
+              try {
+                await returnModelStream()
+              } catch (cleanupError) {
+                streamCleanupError = cleanupError
+              }
+              throw error
+            },
+          }
+        },
+      }
+      let streamError
       try {
         const modelOptions = isRecord(dshRequest)
           ? { ...dshRequest, signal: controller.signal }
@@ -494,13 +542,8 @@ export async function runBaseline({
         if (!modelStream || typeof modelStream[Symbol.asyncIterator] !== 'function') {
           throw codedError('ARC_MODEL_STREAM', 'callModel must return an AsyncIterable')
         }
-        async function* recordChunks() {
-          for await (const chunk of modelStream) {
-            rawChunks.push(jsonClone(chunk))
-            yield chunk
-          }
-        }
-        for await (const _line of wire.encodeChatStream(recordChunks(), {
+        modelIterator = modelStream[Symbol.asyncIterator]()
+        for await (const _line of wire.encodeChatStream(recordedChunks, {
           id: runId,
           model: MODEL_WIRE_ID,
           onFinish: value => {
@@ -511,13 +554,44 @@ export async function runBaseline({
         })) {
           sseCount += 1
         }
+
+        const streamAbort = stopClassification({ signal: controller.signal, abortKind })
+        if (streamAbort) {
+          await returnModelStream()
+          return finish(streamAbort === 'aborted' ? 'cancelled' : 'failed', streamAbort === 'aborted' ? 'ABORTED' : 'WALL_TIME')
+        }
+        if (settled === undefined || !isRecord(settled) || !isRecord(settled.message)) {
+          throw codedError('ARC_MODEL_STREAM', 'stream ended without a successful assistant finish')
+        }
+        // The encoder is allowed to stop consuming immediately after a
+        // successful finish.  Confirm that the provider stream itself reaches
+        // EOF before treating the assistant message as settled.
+        while (!modelDone) {
+          const step = await modelIterator.next()
+          if (step.done) {
+            modelDone = true
+            break
+          }
+          rawChunks.push(jsonClone(step.value))
+          const trailingType = isRecord(step.value) && typeof step.value.type === 'string' ? step.value.type : typeof step.value
+          throw codedError('ARC_MODEL_STREAM', `stream produced ${trailingType} after successful finish`)
+        }
+        const drainedAbort = stopClassification({ signal: controller.signal, abortKind })
+        if (drainedAbort) return finish(drainedAbort === 'aborted' ? 'cancelled' : 'failed', drainedAbort === 'aborted' ? 'ABORTED' : 'WALL_TIME')
+      } catch (error) {
+        streamError = error
+        throw error
       } finally {
-        await writeLine(evidenceDirectory, 'chunks.jsonl', { runId, ordinal, chunks: rawChunks, sseCount }).catch(() => {})
-      }
-      const streamAbort = stopClassification({ signal: controller.signal, abortKind })
-      if (streamAbort) return finish(streamAbort === 'aborted' ? 'cancelled' : 'failed', streamAbort === 'aborted' ? 'ABORTED' : 'WALL_TIME')
-      if (settled === undefined || !isRecord(settled) || !isRecord(settled.message)) {
-        throw codedError('ARC_MODEL_STREAM', 'stream ended without a successful assistant finish')
+        let cleanupError
+        try {
+          if (!modelDone && !modelReturned) await returnModelStream()
+        } catch (error) {
+          cleanupError = error
+        } finally {
+          await writeLine(evidenceDirectory, 'chunks.jsonl', { runId, ordinal, chunks: rawChunks, sseCount }).catch(() => {})
+        }
+        if (streamError === undefined && cleanupError !== undefined) throw cleanupError
+        if (streamError === undefined && cleanupError === undefined && streamCleanupError !== undefined) throw streamCleanupError
       }
       await writeLine(evidenceDirectory, 'settlements.jsonl', { runId, ordinal, settlement: jsonClone(settled) })
       await writeLine(evidenceDirectory, 'journal.jsonl', {

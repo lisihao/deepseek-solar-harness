@@ -87,15 +87,17 @@ function fakeWire({ decodeCalls }) {
 }
 
 class FakeBroker {
-  constructor({ terminalAfterActs = 0, inspectValues = [] } = {}) {
+  constructor({ terminalAfterActs = 0, inspectValues = [], beforeCall } = {}) {
     this.terminalAfterActs = terminalAfterActs
     this.inspectValues = [...inspectValues]
+    this.beforeCall = beforeCall
     this.calls = []
     this.inspectCalls = 0
     this.terminal = 'ACTIVE'
   }
 
   async call(op, args) {
+    this.beforeCall?.(op, args)
     this.calls.push({ op, args: clone(args) })
     if (op === 'act' && this.calls.filter(item => item.op === 'act').length >= this.terminalAfterActs && this.terminalAfterActs > 0) {
       this.terminal = 'WIN'
@@ -110,9 +112,80 @@ class FakeBroker {
   }
 }
 
-async function scenario({ responses, broker, requestLimit = 32 }) {
+function trackedStream({ chunks, failAt, failure, onYield, throwOnEarlyReturn = false }) {
+  const state = {
+    nextCalls: 0,
+    returnCalls: 0,
+    returnedBeforeEOF: false,
+    consumedAtEOF: false,
+  }
+  let index = 0
+  const iterator = {
+    async next() {
+      state.nextCalls += 1
+      if (failAt !== undefined && index === failAt) {
+        index += 1
+        throw failure ?? new Error('tracked model stream failed')
+      }
+      if (index < chunks.length) {
+        const chunk = chunks[index]
+        index += 1
+        onYield?.(chunk, state)
+        return { done: false, value: chunk }
+      }
+      state.consumedAtEOF = true
+      return { done: true, value: undefined }
+    },
+    async return() {
+      state.returnCalls += 1
+      if (!state.consumedAtEOF) {
+        state.returnedBeforeEOF = true
+        if (throwOnEarlyReturn) throw new Error('ARC_STREAM_ABANDONED: tracked stream closed before EOF')
+      }
+      return { done: true, value: undefined }
+    },
+    [Symbol.asyncIterator]() {
+      return this
+    },
+  }
+  return { stream: iterator, state }
+}
+
+function earlyFinishWire({ decodeCalls }) {
+  return {
+    ReplayRegistry: FakeReplayRegistry,
+    async decodeChatRequest(request, route, options) {
+      decodeCalls.push({ request: clone(request), route, options })
+      for (const message of request.messages) {
+        if (message.role === 'assistant') options.replayFor(message)
+      }
+      return { request: clone(request), route, signal: options.signal }
+    },
+    async *encodeChatStream(chunks, options) {
+      const iterator = chunks[Symbol.asyncIterator]()
+      try {
+        const first = await iterator.next()
+        if (first.done) throw new Error('early-finish fake stream has no finish')
+        if (first.value.type !== 'finish') throw new Error(`unexpected fake chunk ${String(first.value.type)}`)
+        options.onFinish({
+          message: clone(first.value.message),
+          replayState: clone(first.value.replayState),
+          finishReason: first.value.message.tool_calls ? 'tool_calls' : 'stop',
+        })
+        return
+      } finally {
+        // This mirrors the real encoder's for-await cleanup when it returns
+        // immediately after emitting the terminal [DONE] marker.
+        await iterator.return?.()
+      }
+    },
+  }
+}
+
+async function scenario({ responses, broker, requestLimit = 32, wire: suppliedWire, callModel: suppliedCallModel, signal }) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-baseline-test-'))
   const decodeCalls = []
+  const wire = suppliedWire ?? fakeWire({ decodeCalls })
   const calls = []
   try {
     const result = await runBaseline({
@@ -121,15 +194,16 @@ async function scenario({ responses, broker, requestLimit = 32 }) {
       gameId: 'ls20-test',
       broker,
       route: { provider: 'fake', model: 'configured' },
-      wire: fakeWire({ decodeCalls }),
-      callModel: async options => {
+      wire,
+      callModel: suppliedCallModel ?? (async options => {
         calls.push(options)
         const response = responses.shift()
         if (!response) throw new Error('fake response queue exhausted')
         return (async function* () {
           yield finishChunk(response.message, response.replayState)
         })()
-      },
+      }),
+      signal,
       wallTimeMs: 10_000,
       requestLimit,
     })
@@ -253,5 +327,122 @@ test('opaque replay state is supplied to the next decoded request', async () => 
   const registry = run.decodeCalls[1].options
   assert.equal(typeof registry.replayFor, 'function')
   assert.equal(run.decodeCalls[1].request.messages[2].content, 'first')
+  await rm(run.directory, { recursive: true, force: true })
+})
+
+test('drains a provider stream after an early successful encoder return before broker actions', async () => {
+  const decodeCalls = []
+  const wire = earlyFinishWire({ decodeCalls })
+  const response = assistant(null, [toolCall('act-1', 'act', { actions: [{ name: 'ACTION1', data: {} }] })])
+  const tracked = trackedStream({
+    chunks: [finishChunk(response)],
+    // The regression must not invoke return() before the explicit EOF drain.
+    throwOnEarlyReturn: true,
+  })
+  const brokerSeenEOF = []
+  const broker = new FakeBroker({
+    terminalAfterActs: 1,
+    beforeCall: () => brokerSeenEOF.push(tracked.state.consumedAtEOF),
+  })
+  const run = await scenario({
+    broker,
+    wire,
+    responses: [],
+    callModel: async () => tracked.stream,
+  })
+
+  assert.equal(run.result.state, 'completed')
+  assert.equal(run.result.stopReason, 'WIN')
+  assert.deepEqual(brokerSeenEOF, [true])
+  assert.equal(tracked.state.consumedAtEOF, true)
+  assert.equal(tracked.state.returnCalls, 0)
+  assert.equal(tracked.state.returnedBeforeEOF, false)
+  assert.deepEqual(broker.calls.map(item => item.op), ['act'])
+  await rm(run.directory, { recursive: true, force: true })
+})
+
+test('returns an errored provider stream before EOF without executing broker tools', async () => {
+  const tracked = trackedStream({
+    chunks: [],
+    failAt: 0,
+    failure: new Error('provider stream failed before finish'),
+  })
+  const broker = new FakeBroker()
+  const run = await scenario({
+    broker,
+    responses: [],
+    callModel: async () => tracked.stream,
+  })
+
+  assert.equal(run.result.state, 'failed')
+  assert.equal(run.result.stopReason, 'MODEL_ERROR')
+  assert.match(run.result.error, /provider stream failed before finish/)
+  assert.equal(broker.calls.length, 0)
+  assert.equal(tracked.state.returnCalls, 1)
+  assert.equal(tracked.state.returnedBeforeEOF, true)
+  assert.equal(tracked.state.consumedAtEOF, false)
+  await rm(run.directory, { recursive: true, force: true })
+})
+
+test('returns an aborted provider stream before EOF without executing broker tools', async () => {
+  const controller = new AbortController()
+  const response = assistant(null, [toolCall('act-1', 'act', { actions: [{ name: 'ACTION1', data: {} }] })])
+  const tracked = trackedStream({
+    chunks: [finishChunk(response)],
+    onYield: () => controller.abort(new Error('caller aborted during model stream')),
+  })
+  const decodeCalls = []
+  const broker = new FakeBroker()
+  const run = await scenario({
+    broker,
+    signal: controller.signal,
+    wire: earlyFinishWire({ decodeCalls }),
+    responses: [],
+    callModel: async () => tracked.stream,
+  })
+
+  assert.equal(run.result.state, 'cancelled')
+  assert.equal(run.result.stopReason, 'ABORTED')
+  assert.equal(broker.calls.length, 0)
+  assert.equal(tracked.state.returnCalls, 1)
+  assert.equal(tracked.state.returnedBeforeEOF, true)
+  assert.equal(tracked.state.consumedAtEOF, false)
+  await rm(run.directory, { recursive: true, force: true })
+})
+
+test('reports unexpected content after finish instead of treating it as a successful stream', async () => {
+  const decodeCalls = []
+  const wire = earlyFinishWire({ decodeCalls })
+  const response = assistant(null, [toolCall('act-1', 'act', { actions: [{ name: 'ACTION1', data: {} }] })])
+  const tracked = trackedStream({
+    chunks: [finishChunk(response), { type: 'usage' }],
+    throwOnEarlyReturn: true,
+  })
+  const broker = new FakeBroker()
+  const run = await scenario({
+    broker,
+    wire,
+    responses: [],
+    callModel: async () => tracked.stream,
+  })
+
+  assert.equal(run.result.state, 'failed')
+  assert.equal(run.result.stopReason, 'MODEL_ERROR')
+  assert.match(run.result.error, /stream produced usage after successful finish/)
+  assert.equal(broker.calls.length, 0)
+  assert.equal(tracked.state.returnCalls, 1)
+  assert.equal(tracked.state.returnedBeforeEOF, true)
+  await rm(run.directory, { recursive: true, force: true })
+})
+
+test('a failure after successful finish but before EOF prevents broker execution', async () => {
+  const response = assistant(null, [toolCall('act-1', 'act', { actions: [{ name: 'ACTION1', data: {} }] })])
+  const tracked = trackedStream({ chunks: [finishChunk(response)], failAt: 1, failure: new Error('EOF confirmation failed') })
+  const broker = new FakeBroker({ terminalAfterActs: 1 })
+  const run = await scenario({ broker, responses: [], wire: earlyFinishWire({ decodeCalls: [] }), callModel: async () => tracked.stream })
+  assert.equal(run.result.state, 'failed')
+  assert.match(run.result.error, /EOF confirmation failed/)
+  assert.equal(broker.calls.length, 0)
+  assert.equal(tracked.state.returnCalls, 1)
   await rm(run.directory, { recursive: true, force: true })
 })

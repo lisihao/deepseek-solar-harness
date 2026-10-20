@@ -74,6 +74,7 @@ const CONTINUATION_KIND = 'prime-rlm-arc-unstarted-continuation-acceptance'
 const CONTINUATION_MARKER_PREFIX = 'resume-unstarted-started-'
 const CONTINUATION_RECEIPT_PREFIX = 'resume-unstarted-receipt-'
 const RUNNER_EXECUTION_FILE = 'tools/rlm-arc-pilot/run.mjs'
+const RECORDED_RUNNER_REPAIRS = new Set([RUNNER_EXECUTION_FILE, 'tools/rlm-arc-pilot/baseline.mjs', 'tools/rlm-arc-pilot/ledger.mjs'])
 const SHA256 = /^[a-f0-9]{64}$/i
 
 function failure(code, detail, options = {}) {
@@ -708,6 +709,10 @@ function assertRunnerOnlyContinuation(manifest, continuation, currentExecution, 
   if (!continuation) fail('ARC_FINGERPRINT_EXECUTION', 'executed helpers or dependency pins changed since prepare')
   const originalExecution = manifest.execution?.files
   const acceptedExecution = continuation.currentExecutionHashes
+  const repairFiles = continuation.executionRepairFiles ?? [RUNNER_EXECUTION_FILE]
+  if (!Array.isArray(repairFiles) || !repairFiles.includes(RUNNER_EXECUTION_FILE) || new Set(repairFiles).size !== repairFiles.length || repairFiles.some(name => !RECORDED_RUNNER_REPAIRS.has(name))) fail('ARC_CONTINUATION_EXECUTION', 'continuation may bind only recorded runner, stream-drain and closed-transport accounting repairs')
+  const changed = EXECUTION_FILES.filter(name => currentExecution[name] !== originalExecution?.[name]).sort()
+  if (JSON.stringify([...repairFiles].sort()) !== JSON.stringify(changed)) fail('ARC_CONTINUATION_EXECUTION', 'accepted repair files must exactly cover changed execution bytes')
   if (!isRecord(originalExecution) || !isRecord(acceptedExecution)) fail('ARC_CONTINUATION_ARTIFACT', 'continuation does not bind execution hashes')
   if (continuation.originalFingerprint !== manifest.fingerprint
     || continuation.originalRunnerSha256 !== manifest.runner?.sha256
@@ -718,9 +723,9 @@ function assertRunnerOnlyContinuation(manifest, continuation, currentExecution, 
     fail('ARC_CONTINUATION_RUNNER', 'continuation does not bind the exact old and current runner bytes')
   }
   for (const name of EXECUTION_FILES) {
-    if (name === RUNNER_EXECUTION_FILE) continue
+    if (repairFiles.includes(name)) continue
     if (currentExecution[name] !== originalExecution[name] || acceptedExecution[name] !== originalExecution[name]) {
-      fail('ARC_CONTINUATION_EXECUTION', `${name} changed; only ${RUNNER_EXECUTION_FILE} may differ for an unstarted continuation`)
+      fail('ARC_CONTINUATION_EXECUTION', `${name} changed outside the accepted recorded runner repairs`)
     }
   }
   if (canonicalHash(currentExecution) !== canonicalHash(acceptedExecution)) {
@@ -1011,7 +1016,7 @@ function normalizeClosedUnknownRun(value) {
   if (!Array.isArray(value.unknownCalls) || value.unknownCalls.length === 0 || value.unknownCalls.some(call => typeof call !== 'string')) {
     fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.unknownCalls must be a non-empty string array')
   }
-  if (value.cause !== 'native_budget_closed') fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.cause must be native_budget_closed')
+  if (!['native_budget_closed', 'http503_closed', 'transport_closed'].includes(value.cause)) fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.cause must name a supported, evidenced local closure')
   if (!isRecord(value.evidenceHash) || value.evidenceHash.algorithm !== 'sha256') fail('ARC_CONTINUATION_ARTIFACT', 'closedUnknownRun.evidenceHash must be a sha256 object')
   return {
     run: value.runId,
@@ -1039,6 +1044,7 @@ function normalizeContinuationAcceptance(value, manifest) {
     originalRunnerSha256,
     currentRunnerSha256,
     currentExecutionHashes,
+    executionRepairFiles: value.executionRepairFiles ?? [RUNNER_EXECUTION_FILE],
     previous: {
       runReceiptSha256: requireSha256(previous.runReceiptSha256, 'previous.runReceiptSha256'),
       panelStartMarkerSha256: requireSha256(previous.panelStartMarkerSha256, 'previous.panelStartMarkerSha256'),
@@ -1540,7 +1546,8 @@ async function runBaselineCondition({ condition, manifest, plan, provider, relay
   } finally {
     try { cleanup = await broker.stop() } catch (error) { cleanup = { error: redact(errorText(error)) } }
   }
-  const grade = gradeGame({ observation, error: inspectError, stopReason: result?.stopReason })
+  const baselineError = [inspectError, result?.error].filter(value => typeof value === 'string' && value.length > 0).join(' | ') || null
+  const grade = gradeGame({ observation, error: baselineError, stopReason: result?.stopReason })
   return {
     baseline: result ?? null,
     broker: { observation: observation ?? null, error: inspectError ?? null, cleanup: cleanup ?? null },

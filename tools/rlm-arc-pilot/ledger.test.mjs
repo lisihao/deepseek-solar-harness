@@ -140,3 +140,22 @@ test('a newly unknown request remains charged and cannot be replayed without an 
     assert.equal(later, 'request-140')
   })
 })
+
+test('evidenced transport closure retains unknown charges across restore and forbids replay', async () => {
+  await withLedger('arc-ledger-transport-close', async path => {
+    const ledger = await Ledger.open(path, { total: TOTAL, perRun: PER_RUN })
+    const id = await ledger.admit('failed-control', { synthetic: true })
+    ledger.admitPhysical({ runId: 'failed-control', logicalRequest: id, event: { synthetic: true } })
+    await ledger.settle(id, finishedChunks(), new Error('consumer ended before stream EOF'))
+    assert.equal((await ledger.receipt()).unknown, 1)
+    ledger.acknowledgeClosedRun({ run: 'failed-control', unknownCalls: [id], cause: 'transport_closed', evidenceHash: { algorithm: 'sha256', digest: 'd'.repeat(64) } })
+    const restored = await Ledger.open(path, { total: TOTAL, perRun: PER_RUN })
+    const receipt = await restored.receipt()
+    assert.equal(receipt.admitted, 1)
+    assert.equal(receipt.physicalAdmitted, 1)
+    assert.equal(receipt.unknown, 1)
+    assert.equal(receipt.stopped, false)
+    await assert.rejects(restored.admit('failed-control', {}), /EXPERIMENT_CLOSED_RUN/)
+    assert.equal(await restored.admit('untouched-control', {}), 'request-2')
+  })
+})

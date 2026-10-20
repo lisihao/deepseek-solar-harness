@@ -480,3 +480,17 @@ test('the original run gate allows a fresh panel and rejects a real-run-started 
     await assert.rejects(() => assertPanelNotStarted(output), /ARC_RUN_ALREADY_STARTED/)
   })
 })
+
+test('recorded baseline-drain and ledger repairs require an exact explicit hash supplement', () => {
+  const old = 'a'.repeat(64), next = 'b'.repeat(64)
+  const files = ['tools/rlm-arc-pilot/run.mjs', 'tools/rlm-arc-pilot/baseline.mjs', 'tools/rlm-arc-pilot/ledger.mjs']
+  const original = Object.fromEntries(EXECUTION_FILES.map(name => [name, old]))
+  const current = { ...original, ...Object.fromEntries(files.map(name => [name, next])) }
+  const manifest = { fingerprint: 'c'.repeat(64), runner: { sha256: old }, execution: { files: original } }
+  const continuation = { originalFingerprint: manifest.fingerprint, originalRunnerSha256: old, currentRunnerSha256: next, currentExecutionHashes: current, executionRepairFiles: files }
+  assert.doesNotThrow(() => assertRunnerOnlyContinuation(manifest, continuation, current, next))
+  assert.throws(() => assertRunnerOnlyContinuation(manifest, { ...continuation, executionRepairFiles: files.slice(0, 1) }, current, next), /ARC_CONTINUATION_EXECUTION/)
+  const nativeFile = 'tools/rlm-arc-pilot/native-worker.mjs'
+  const changedNative = { ...current, [nativeFile]: 'd'.repeat(64) }
+  assert.throws(() => assertRunnerOnlyContinuation(manifest, { ...continuation, executionRepairFiles: [...files, nativeFile], currentExecutionHashes: changedNative }, changedNative, next), /ARC_CONTINUATION_EXECUTION/)
+})
