@@ -1,0 +1,3 @@
+- insert:
+    - id: solar-handoff-probe
+      name: '@lisihao/dsh-solar-handoff-probe'

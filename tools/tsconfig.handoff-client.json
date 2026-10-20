@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "react"
+    ]
+  },
+  "include": [
+    "../incubator/model-handoff/src/client.ts"
+  ],
+  "exclude": []
+}

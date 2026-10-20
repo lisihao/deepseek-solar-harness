@@ -7,13 +7,26 @@
     "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node", "vitest/globals"],
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
     "baseUrl": ".",
     "paths": {
-      "@lisihao/dsh-solar-native-resident/contracts": ["incubator/native-resident/src/contracts.ts"]
+      "@lisihao/dsh-solar-native-resident/contracts": [
+        "incubator/native-resident/src/contracts.ts"
+      ]
     },
     "noEmit": true
   },
-  "include": ["incubator/*/src/**/*.ts", "incubator/*/tests/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["**/lib/**", "**/node_modules/**"]
+  "include": [
+    "incubator/*/src/**/*.ts",
+    "incubator/*/tests/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "**/lib/**",
+    "**/node_modules/**",
+    "incubator/model-handoff/src/client.ts"
+  ]
 }
