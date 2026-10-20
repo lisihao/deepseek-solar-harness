@@ -1,6 +1,6 @@
 # AGENTS.md — DeepSeek Solar Harness V4
 
-> **Status: D1–D8 and Q1–Q3 confirmed; two plugins authorized for development.** On 2026-10-19 昊哥 authorized parallel development of `dsh-solar-native-collaboration` and `dsh-solar-native-resident`, including persistent TaskGraph, scheduling, native sessions/lanes, tool bridging and model allocation. RLM is explicitly excluded and will be commissioned separately. See [implementation scope and acceptance](docs/native-plugins-contract.md). Existing-app installation, paid probes, Pages, releases, merges, market publication and recurring automation remain separately authorized actions.
+> **Status: D1–D8 and Q1–Q3 confirmed; two plugins authorized for development.** On 2026-10-19 昊哥 authorized parallel development of `dsh-solar-native-collaboration` and `dsh-solar-native-resident`, including persistent TaskGraph, scheduling, native sessions/lanes, tool bridging and model allocation. RLM was separately commissioned on 2026-10-20: implement and install a plugin preserving Prime Agent's original RLM and Continual Harness mechanisms, with necessary keyless verification. Paid experiments remain paused. This does not authorize merges, releases or market publication. See [implementation scope and acceptance](docs/native-plugins-contract.md). Existing-app installation, paid probes, Pages, releases, merges, market publication and recurring automation remain separately authorized actions.
 
 ## Confirmed decisions (2026-10-19)
 
@@ -135,7 +135,7 @@ The two named native plugins are authorized; unrelated extraction candidates rem
 ## Workflow and gates
 
 - Follow [Three-loop development workflow](docs/development-loops.md) for delivery, usage feedback, and maintenance/compatibility. 昊哥 selected one coordinating chat plus three separate loop chats. Each loop chat first reads this file and the workflow, confirms its role, and then waits for an assigned task.
-- **Current activation boundary:** the two native plugins and their necessary build/test tooling are authorized for development. The separate loop chats remain read-and-confirm only. Do not start automated tasks or periodic monitoring; creating a loop chat does not activate its loop.
+- **Current activation boundary:** the two native plugins and their necessary build/test tooling are authorized for development. Prime RLM was separately authorized for implementation and existing-app installation on 2026-10-20, with paid experiments paused. Loop onboarding alone remains read-and-confirm only; a direct bounded assignment from 昊哥 activates only that task. Do not start automated tasks or periodic monitoring; creating a loop chat does not activate its loop.
 - The global acceptance rules apply at delivery: a test or probe that fails without the change, a real run in the installed app, every check marked run or not run, merge only the reviewed head, one PR one goal.
 - Lessons already paid for in DSH 3.x, and the rule here that covers each:
   - Behavior fixes bundled into release PRs → a release PR holds only version, changelog, and the regenerated homepage section.

@@ -6,7 +6,7 @@ V4 is a personal project hosted publicly at `lisihao/deepseek-solar-harness`. Of
 
 ## Current state
 
-No Solar plugin has been published. No market index or installation URL exists. Native collaboration and native Resident are under authorized development; RLM will be a separate task. Build/test tooling is local; no recurring automation has been activated.
+No Solar plugin has been published. No market index or installation URL exists. Native collaboration and native Resident are under authorized development. The separately commissioned Prime RLM and Continual Harness plugin is being implemented and installed under the 2026-10-20 authorization; paid experiments are paused. Build/test tooling is local; no recurring automation has been activated.
 
 The `v4` branch is the V4 repository entry point. It contains the V4 rules, documentation and pinned upstream identity. Native plugin development adds candidates under `incubator/`. GitHub readback confirmed `v4` as the default branch on 2026-10-19.
 
@@ -96,6 +96,9 @@ V4 must not copy or move DSH 3.x source into this branch. A future plugin may as
 - [Native plugin source verification](docs/native-plugins-verification.md)
 - [Native collaboration development candidate](incubator/native-collaboration/README.md)
 - [Native Resident development candidate](incubator/native-resident/README.md)
+- [Prime RLM and Continual Harness candidate](incubator/rlm/README.md)
+- [Prime integration architecture](docs/integrations/prime-agent-rlm.md)
+- [Prime verification and evaluation boundaries](docs/testing/prime-rlm-verification.md)
 
 Unreleased plugin work belongs in `incubator/<name>/`; only an authorized first release moves it to `plugins/<name>/`. Root workspace globs exclude these candidates from the market. Run `pnpm install --ignore-scripts`, then `pnpm check` for local source verification; scratch-profile tests require package-registry access and never call a model.
 

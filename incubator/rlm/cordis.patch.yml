@@ -1,0 +1,3 @@
+- insert:
+    - id: solar-rlm
+      name: '@lisihao/dsh-solar-rlm'

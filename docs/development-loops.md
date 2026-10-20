@@ -2,6 +2,8 @@
 
 Status: the workflow was agreed with 昊哥 on 2026-10-19. Documentation and three separate chats for reading, role confirmation, and standby are authorized. Automated tasks, periodic monitoring, and implementation code are not authorized at this stage.
 
+Subsequent bounded task authorizations recorded in AGENTS.md take precedence over the initial onboarding-only status; they do not activate recurring monitoring.
+
 This workflow applies to developing DSH V4. It is not a V4 runtime feature or a new plugin. The product, data, dependency, installation, and release boundaries in [AGENTS.md](../AGENTS.md) remain authoritative. D1–D8 and Q1–Q3 are confirmed; D7 still defers the first plugin. Recording this workflow does not enable automated tasks, periodic monitoring, implementation code, or other repository-reorganization actions.
 
 ## Purpose
@@ -97,13 +99,13 @@ These are separate claims, not an instruction to perform every stage on every sc
 | Analyzed | Clear expected behavior and supporting evidence, or specifically identified missing information. A new feature has an accepted scope before implementation. A deferral or decline has a reason. |
 | Source ready for review | Identified commit and PR; relevant build and meaningful tests; built `lib/` exercised under plain Node against the published baseline in a scratch `DSH_HOME`; relevant plugin-contract checks; documentation and homepage guide synchronized. Every required check states whether it ran and its result. |
 | Reviewed for merge | Review applies to the current PR head; applicable CI and unresolved findings are recorded. Changes after review require the affected review and checks to be reconciled. Merge still requires 昊哥's authority. |
-| Usable in the installed app | The feature runs through its normal path in the official app with the isolated V4 home. Relevant enable/disable behavior is checked. UI changes are inspected at default and narrow widths. Source tests or an enabled-plugin listing alone are insufficient. |
+| Usable in the installed app | The feature runs through its normal path in the official app with the explicitly authorized Harness home (existing `~/.dsh` under the current D4 decision). Relevant enable/disable behavior is checked. UI changes are inspected at default and narrow widths. Source tests or an enabled-plugin listing alone are insufficient. |
 | Published | The authorized plugin version, tag, index entry, homepage, and installation channel agree. Release work follows the separate release-PR rules; a behavior fix does not enter through a release PR. |
 | Feedback addressed | The verified result is linked to its original observation. A public reply is sent only when authorized. Developer verification and confirmation from the original user are reported separately. |
 
 Each required check records **run or not run**, its actual result, and the relevant revision/baseline or artifact. Never convert a planned check, dispatched task, process, or receipt into proof of behavior.
 
-The GUI `DSH_HOME` isolation required by D4 remains unverified. Until resolved, do not launch `DeepSeek Harness.app` or claim installed acceptance. The first release must also resolve the documented git-subpackage installation and built-`lib/` distribution questions. These limits do not erase source evidence, but they prevent claims that exceed it.
+D4 now selects the existing official `~/.dsh` home. Installation still requires explicit authorization and a backup of affected configuration; development and plugin tests use disposable homes. The first release must also resolve the documented git-subpackage installation and built-`lib/` distribution questions. These limits do not erase source evidence, but they prevent claims that exceed it.
 
 Before a plugin-related commit, the implementing agent refreshes the generated homepage section and market guide and includes any changes in the same commit and PR. The homepage lists actual published versions; unreleased work must not hide an existing release or appear as published. Publication itself remains a separately authorized action.
 

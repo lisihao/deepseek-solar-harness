@@ -1,8 +1,8 @@
 # Prime RLM evaluation specification: fidelity, reasoning quality and paper claims
 
-Status: **test design only; no plugin, model experiment or benchmark execution is certified**. Prepared for 昊哥, 2026-10-20 (Asia/Shanghai). This specification accepts the clarified requirement to preserve Prime's RLM and Continual Harness mechanisms. It does not approve the host substitutions in the [integration draft](../integrations/prime-agent-rlm.md).
+Status: **evaluation contract; no model-quality experiment or paper reproduction is certified**. Prepared for 昊哥, 2026-10-20 (Asia/Shanghai). The [current integration](../integrations/prime-agent-rlm.md) runs the original native Prime host; the earlier host-substitution proposal was superseded. Actual keyless implementation and installation results are tracked in the [verification record](prime-rlm-verification.md).
 
-The observable deliverable of this documentation task is a falsifiable case catalogue, a frozen-comparison protocol, independent grading, a statistical decision rule and an evidence manifest. Implementation of the test runner, fixture generator, grader, plugin and paid experiments is a later stage. No test runner or paid experiment is created or launched here.
+The observable deliverable of this documentation task is a falsifiable case catalogue, a frozen-comparison protocol, independent grading, a statistical decision rule and an evidence manifest. A local scripted mechanism runner is now implemented. The benchmark fixture generator, independent grader and paid experiments remain a later stage; this specification does not authorize launching them.
 
 ## 1. Three separate questions and decision gates
 
@@ -15,7 +15,7 @@ The observable deliverable of this documentation task is a falsifiable case cata
 
 All four have independent `pass`, `fail`, `inconclusive` or `not_run` decisions. A status such as `completed` or a correct protocol response is not a quality score. Main RLM efficacy trials keep Continual Harness refinement and cross-task learning off. G4 is a separate experiment.
 
-The previous draft preserves Python files but replaces Rust host behavior. That is not evidence of G1. A missing original-host component or unresolved semantic deviation blocks a full-fidelity claim even if task scores are high. A compatible subset must be named and separately accepted before testing it as the requested full extraction.
+The superseded draft would have replaced Rust host behavior. Unchanged Python files alone are not evidence of G1; the current implementation uses the actual original binary and runtime. A missing original-host component or unresolved semantic deviation blocks a full-fidelity claim even if task scores are high. A compatible subset must be named and separately accepted before testing it as the requested full extraction.
 
 ## 2. Fixed references and scope of inference
 
@@ -40,7 +40,7 @@ The original RLM study concerns long-context processing and reasoning with exter
 
 D/E/S0/S form the proposed main within-window experiment. R is required for G1 and a reference-quality subset. M belongs to G3. The main S condition uses maximum child depth 1 and S0 permits no model subcalls; the original paper's child calls are ordinary LMs. S2 is supplementary and does not replace that shallow-recursion setting. G1 also tests the current Prime reference's supported deeper recursion separately. Freeze supplemental state and disable refinement/state learning equally during G2 through verified configuration; enable those capabilities only in the separately named G1/G4 conditions.
 
-Do not patch Prime to create S0/S2. First verify the reference's public depth/capability configuration and demonstrate that disabling/changing recursion changes only that capability. If unavailable, use the authors' no-subcall implementation for the paper track and mark the plugin ablation unavailable; do not silently call a different scaffold the same ablation. Record stubbed-provider mechanism tests separately from real-model runs. Depth here is relative to the RLM root; DSH's absolute delegation-depth field must be translated and its boundary checked rather than set to the same number blindly.
+Do not patch Prime to create S0/S2. First verify the reference's public depth/capability configuration and demonstrate that disabling/changing recursion changes only that capability. If unavailable, use the authors' no-subcall implementation for the paper track and mark the plugin ablation unavailable; do not silently call a different scaffold the same ablation. Record stubbed-provider mechanism tests separately from real-model runs. Depth here is relative to the native Prime RLM root; the enclosing DSH session delegation depth must not be confused with Prime recursion depth.
 
 The user task text, data bytes and requested answer schema match across arms. Necessary scaffold/tool instructions differ by arm; freeze and publish their full diffs and token sizes. Do not claim identical complete prompts. Match model/provider revision, reasoning effort, sampling settings, output limits, allowed data/tools, stopping criteria and budget rules. No stronger child model in the main causal study. A paper-matched heterogeneous root/child setup is reported separately.
 
