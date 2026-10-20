@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { createSystemMessage, createUserMessage, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createSystemMessage, createUserMessage, ReasoningEffortId, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -315,6 +315,40 @@ describe('model-handoff runtime boundary', () => {
     }
   })
 
+  it('projects reasoning effort out of the receipt target and performs one same-route handoff', async () => {
+    const fixture = await createFixture({ idle: true, extraHistory: true })
+    fixtures.push(fixture)
+    const removeAgents = fixture.ctx.provide('agents', {
+      get: (id: Agent['id']) => id === fixture.agent.id ? fixture.agent : undefined,
+      roots: () => [fixture.agent],
+    })
+    const removeCommands = fixture.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = fixture.root
+    const highEffort = { ...target, reasoningEffort: ReasoningEffortId('high') }
+    const lowEffort = { ...target, reasoningEffort: ReasoningEffortId('low') }
+    try {
+      await applyRuntime(fixture.ctx, config)
+      const highSelection = fixture.session.append('model/selection', highEffort)
+      fixture.ctx.emit('session/event', fixture.session, highSelection)
+      const lowSelection = fixture.session.append('model/selection', lowEffort)
+      fixture.ctx.emit('session/event', fixture.session, lowSelection)
+
+      const receiptStore = new HandoffStore(join(fixture.root, 'solar', 'model-handoff'))
+      await waitFor(async () => (await receiptStore.read(fixture.session.id))?.phase === 'committed')
+      expect(fixture.calls).toHaveLength(1)
+      expect(fixture.calls[0]?.provider).toBe(config.summaryProvider)
+      expect(fixture.targetRequests).toHaveLength(0)
+      const receipt = await receiptStore.read(fixture.session.id)
+      expect(receipt?.target).toEqual(target)
+      expect((receipt?.target as Record<string, unknown> | undefined)?.reasoningEffort).toBeUndefined()
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
   it('does not call Luna when the target returns to the original model while the receipt read is pending', async () => {
     const fixture = await createFixture()
     fixtures.push(fixture)
@@ -472,12 +506,61 @@ describe('model-handoff runtime boundary', () => {
     expect(fixture.asks[0]?.ids).toEqual(['handoff-budget'])
     const prompts = fixture.calls.map(call => call.messages.at(-1)?.content.map(block => block.type === 'text' ? block.text : '').join('') ?? '').join('\n')
     for (const text of historyTexts) expect(prompts).toContain(text)
+    const finalPrompt = fixture.calls.at(-1)?.messages.at(-1)?.content.map(block => block.type === 'text' ? block.text : '').join('') ?? ''
+    const orderedStart = finalPrompt.indexOf('{"orderedChunkDrafts"')
+    expect(orderedStart).toBeGreaterThanOrEqual(0)
+    const ordered = JSON.parse(finalPrompt.slice(orderedStart)) as {
+      orderedChunkDrafts: Array<{ chunkIndex: number; provenance: Record<string, unknown>; draft: string }>
+    }
+    expect(ordered.orderedChunkDrafts).toHaveLength(fixture.calls.length - 1)
+    ordered.orderedChunkDrafts.forEach((item, index) => {
+      expect(item.chunkIndex).toBe(index)
+      expect(item.provenance).toBeDefined()
+      expect(item.draft).toBe(draft)
+    })
     const summary = fixture.session.snapshotEvents().find(event => event.type === 'compaction/summary')
     expect(summary?.type).toBe('compaction/summary')
     if (summary?.type === 'compaction/summary') {
       expect(summary.data.llmStreamCall).toBeUndefined()
       expect(summary.data.rawOutput?.[0]).toMatchObject({ type: 'text', text: expect.stringContaining('solar-model-handoff') })
     }
+  })
+
+  it('streams an oversized record as attributed fragments and carries them into reduction', async () => {
+    const history = '更正预算为1800，原3000作废；先列离线测试。🧭'.repeat(120)
+    const fixture = await createFixture({ historyTexts: [history], contextWindow: 19_500, approveBudget: true })
+    fixtures.push(fixture)
+    fixture.engine.settings = { ...config, maxSummaryCalls: 8 }
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)!
+    await fixture.engine.compactRegion(user, user, fixture.agent)
+    const prompts = fixture.calls.map(call => call.messages.at(-1)!.content.map(block => block.type === 'text' ? block.text : '').join(''))
+    const fragments = prompts.flatMap(prompt => {
+      const start = prompt.indexOf('{"historyFragment"')
+      return start < 0 ? [] : [(JSON.parse(prompt.slice(start)) as { historyFragment: Record<string, any> }).historyFragment]
+    })
+    expect(fragments.length).toBeGreaterThan(1)
+    expect(fragments.every(fragment => fragment.role === 'user' && fragment.sourceKind === 'user')).toBe(true)
+    const restored = JSON.parse(fragments.map(fragment => fragment.text).join(''))
+    expect(restored.content).toEqual([{ type: 'text', text: history }])
+    const final = prompts.at(-1)!
+    const drafts = JSON.parse(final.slice(final.indexOf('{"orderedChunkDrafts"'))).orderedChunkDrafts as Array<{ provenance: Record<string, any> }>
+    expect(drafts.filter(item => item.provenance.sha256).map(item => item.provenance)).toEqual(fragments.map(({ text: _text, ...metadata }) => metadata))
+    expect(fixture.calls.length).toBeLessThanOrEqual(8)
+  })
+
+  it('rejects a history needing more than eight summary calls before any Luna stream', async () => {
+    const historyTexts = Array.from({ length: 12 }, (_, index) => `历史-${index}-` + '字'.repeat(700))
+    const fixture = await createFixture({ historyTexts, contextWindow: 18_000 })
+    fixtures.push(fixture)
+    fixture.engine.settings = { ...config, maxSummaryCalls: 8 }
+    fixture.engine.operations.set(fixture.session, { target, selectionSeq: 0 })
+    const user = fixture.session.surface.nodes.at(-1)
+    expect(user).toBeDefined()
+
+    await expect(fixture.engine.compactRegion(user!, user!, fixture.agent)).rejects.toThrow(/超出配置上限|maxSummaryCalls|summary calls/i)
+    expect(fixture.calls).toHaveLength(0)
+    expect(fixture.asks).toHaveLength(0)
   })
 
   it('persists completed malformed-call evidence and never retries it automatically', async () => {
