@@ -620,4 +620,3 @@ export async function runBaseline({
     }).catch(() => {})
   }
 }
-

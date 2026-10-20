@@ -255,4 +255,3 @@ test('opaque replay state is supplied to the next decoded request', async () => 
   assert.equal(run.decodeCalls[1].request.messages[2].content, 'first')
   await rm(run.directory, { recursive: true, force: true })
 })
-
