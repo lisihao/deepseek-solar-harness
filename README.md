@@ -6,7 +6,7 @@ V4 is a personal project hosted publicly at `lisihao/deepseek-solar-harness`. Of
 
 ## Current state
 
-No Solar plugin has been published. No market index or installation URL exists. Native collaboration and native Resident have installed development candidates; the separate ChatGPT Web operator extraction is in progress. RLM will be a separate task. Build/test tooling is local; no recurring automation has been activated.
+No Solar plugin has been published. No market index or installation URL exists. Native collaboration and native Resident have installed development candidates; the separate ChatGPT Web operator has an installed development candidate with one accepted synthetic GUI request (including manual reconciliation of an initially uncertain receipt). RLM will be a separate task. Build/test tooling is local; no recurring automation has been activated.
 
 The `v4` branch is the V4 repository entry point. It contains the V4 rules, documentation and pinned upstream identity. Native plugin development adds candidates under `incubator/`. GitHub readback confirmed `v4` as the default branch on 2026-10-19.
 
