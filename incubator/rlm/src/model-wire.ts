@@ -632,11 +632,10 @@ export async function* encodeChatStream(
         const block = ensureBlock(blocks, order, chunk.index, 'reasoning')
         if (block.block) break
         block.text += chunk.text
-        if (chunk.text !== '') {
-          const delta = addRole({ reasoning_content: chunk.text }, roleSent)
-          roleSent = true
-          yield sse(completionChunk(options, delta, null))
-        }
+        // Reasoning deltas are provisional: the assembler may normalize or
+        // revise the final block text (including trailing newlines). Buffer
+        // them until block-end so the wire value is authoritative and can be
+        // replayed byte-for-byte from onFinish.message.
         break
       }
       case 'tool-call-delta': {
@@ -685,14 +684,25 @@ export async function* encodeChatStream(
         if (block.block) break // The DSH assembler uses first-close-wins too.
         block.block = ended
 
-        if (ended.type === 'text' || ended.type === 'reasoning') {
+        if (ended.type === 'text') {
           const remainder = suffixAfter(ended.text, block.text, chunk.index, ended.type)
           block.text = ended.text
           if (remainder !== '') {
             const delta = addRole(
-              ended.type === 'text' ? { content: remainder } : { reasoning_content: remainder },
+              { content: remainder },
               roleSent,
             )
+            roleSent = true
+            yield sse(completionChunk(options, delta, null))
+          }
+          break
+        }
+        if (ended.type === 'reasoning') {
+          // The final reasoning block is authoritative even when it does not
+          // extend the provisional deltas emitted by the model adapter.
+          block.text = ended.text
+          if (ended.text !== '') {
+            const delta = addRole({ reasoning_content: ended.text }, roleSent)
             roleSent = true
             yield sse(completionChunk(options, delta, null))
           }
@@ -747,6 +757,18 @@ export async function* encodeChatStream(
       case 'finish': {
         const finishReason = terminalFinishReason(chunk)
         finished = true
+        // A well-formed stream closes every block, but preserve the existing
+        // completeBlock compatibility for a reasoning block that only emitted
+        // deltas before finish. Flush it once on successful completion. Error
+        // and abort finishes throw above, so they never receive this success
+        // frame or a synthetic reasoning delta.
+        for (const index of order) {
+          const block = blocks.get(index) as BlockAccumulator
+          if (block.blockType !== 'reasoning' || block.block !== undefined || block.text === '') continue
+          const delta = addRole({ reasoning_content: block.text }, roleSent)
+          roleSent = true
+          yield sse(completionChunk(options, delta, null))
+        }
         const content = order.map(index => completeBlock(blocks.get(index) as BlockAccumulator, index))
         // This is the raw assistant shape Prime sends back in its next
         // chat/completions request. Keeping it here makes the caller's replay

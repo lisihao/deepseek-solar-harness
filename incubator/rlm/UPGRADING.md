@@ -27,7 +27,7 @@ The main adapter call sites are:
 
 The adapter relies on Prime's native ACP session methods, native durable session files and `--resume`, the native `openai-completions` provider, and Prime's own Python REPL, recursive child calls, Factory, and `/refine` behavior. The loopback bridge changes only the model transport. It does not substitute DSH child agents or schedulers for Prime mechanisms. Prime's full native internal step trace is not recreated from `ctx.llm` records.
 
-Known transport limits include the current Chat Completions endpoint and explicitly supported message/tool/image fields in `src/model-wire.ts`; unsupported request fields error rather than being silently dropped. Images are accepted only as embedded data URLs and saved through DSH's attachment API; the adapter does not fetch arbitrary image URLs. DSH route reasoning-effort values without a Prime equivalent fail rather than being downgraded. Streaming, tool-call replay, reasoning, image, and usage parity still require keyless and route-specific verification.
+Known transport limits include the current Chat Completions endpoint and explicitly supported message/tool/image fields in `src/model-wire.ts`; unsupported request fields error rather than being silently dropped. Images are accepted only as embedded data URLs and saved through DSH's attachment API; the adapter does not fetch arbitrary image URLs. DSH route reasoning-effort values without a Prime equivalent fail rather than being downgraded. Streaming, tool-call replay, reasoning, image, and usage parity still require keyless and route-specific verification. The encoder buffers provisional reasoning deltas until the authoritative block closes, then forwards that final text exactly. This accommodates provider normalization without changing Prime or losing replay identity; ordinary text and tool arguments retain strict prefix checks. A successful finish without a closing reasoning block flushes its accumulated text; error and abort finishes do not fabricate successful completion. `tests/model-wire.test.ts` covers these boundaries.
 
 ## Upgrade procedure
 
@@ -47,4 +47,4 @@ The ACP process boundary, CPython capsule override, per-run private `agentDir`, 
 
 ## Current verification record
 
-See [the canonical verification record](../../docs/testing/prime-rlm-verification.md) for actual source, native, scratch-profile and installed-app evidence. Paid efficacy, paper reproduction and held-out continual improvement remain not run.
+See [the canonical verification record](../../docs/testing/prime-rlm-verification.md) for actual source, native, scratch-profile and installed-app evidence. A bounded isolated Codex subscription pilot is recorded there separately. General efficacy, paper reproduction and held-out continual improvement are not established by that pilot.

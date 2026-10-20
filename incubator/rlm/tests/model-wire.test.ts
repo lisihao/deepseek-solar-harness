@@ -231,14 +231,114 @@ describe('encodeChatStream', () => {
     })
   })
 
+  it('buffers reasoning until block-end and emits the authoritative final text exactly once', async () => {
+    let finished: { message: unknown } | undefined
+    const lines = await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'block-start', index: 0, blockType: 'reasoning' }
+      yield { type: 'reasoning-delta', index: 0, text: 'draft reasoning' }
+      yield { type: 'reasoning-delta', index: 0, text: ' with a provisional ending' }
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: { type: 'reasoning', text: 'authoritative reasoning\n\n' },
+      }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    })(), {
+      id: 'chatcmpl-authoritative-reasoning',
+      model: 'configured-model',
+      onFinish: value => { finished = value },
+    }))
+
+    const events = payloads(lines).filter((event): event is Record<string, unknown> => typeof event === 'object' && event !== null)
+    const deltas = events
+      .flatMap(event => (event.choices as Array<{ delta: Record<string, unknown> }> | undefined) ?? [])
+      .map(choice => choice.delta)
+    const reasoning = deltas.map(delta => delta.reasoning_content).filter((value): value is string => typeof value === 'string')
+
+    expect(reasoning).toEqual(['authoritative reasoning\n\n'])
+    expect(finished?.message).toEqual({
+      role: 'assistant',
+      content: null,
+      reasoning_content: 'authoritative reasoning\n\n',
+    })
+    expect(reasoning.join('')).toBe((finished?.message as { reasoning_content: string }).reasoning_content)
+  })
+
+  it('flushes buffered reasoning once when finish arrives without block-end', async () => {
+    let finished: { message: unknown } | undefined
+    const lines = await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'reasoning-delta', index: 0, text: 'buffered reasoning' }
+      yield { type: 'reasoning-delta', index: 0, text: ' with no close' }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    })(), {
+      id: 'chatcmpl-reasoning-flush',
+      model: 'configured-model',
+      onFinish: value => { finished = value },
+    }))
+
+    const events = payloads(lines).filter((event): event is Record<string, unknown> => typeof event === 'object' && event !== null)
+    const reasoning = events
+      .flatMap(event => (event.choices as Array<{ delta: Record<string, unknown> }> | undefined) ?? [])
+      .map(choice => choice.delta.reasoning_content)
+      .filter((value): value is string => typeof value === 'string')
+
+    expect(reasoning).toEqual(['buffered reasoning with no close'])
+    expect(finished?.message).toEqual({
+      role: 'assistant',
+      content: null,
+      reasoning_content: 'buffered reasoning with no close',
+    })
+  })
+
+  it('keeps the first reasoning block close and ignores duplicate closes', async () => {
+    let finished: { message: unknown } | undefined
+    const lines = await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'reasoning-delta', index: 0, text: 'draft' }
+      yield { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'first final\n' } }
+      yield { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'second final\n' } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    })(), {
+      id: 'chatcmpl-reasoning-close-once',
+      model: 'configured-model',
+      onFinish: value => { finished = value },
+    }))
+
+    const events = payloads(lines).filter((event): event is Record<string, unknown> => typeof event === 'object' && event !== null)
+    const reasoning = events
+      .flatMap(event => (event.choices as Array<{ delta: Record<string, unknown> }> | undefined) ?? [])
+      .map(choice => choice.delta.reasoning_content)
+      .filter((value): value is string => typeof value === 'string')
+
+    expect(reasoning).toEqual(['first final\n'])
+    expect(finished?.message).toMatchObject({ reasoning_content: 'first final\n' })
+  })
+
+  it('still rejects text and tool arguments that do not extend streamed deltas', async () => {
+    await expect(collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'text-delta', index: 0, text: 'draft text' }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: 'revised text' } }
+    })(), { id: 'chatcmpl-text-mismatch', model: 'configured-model' }))).rejects
+      .toThrow('does not extend its emitted delta')
+
+    await expect(collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+      yield { type: 'tool-call-delta', index: 0, id: ToolCallId('call-mismatch'), name: 'inspect', argumentsDelta: '{"id":' }
+      yield {
+        type: 'block-end',
+        index: 0,
+        block: { type: 'tool-call', id: ToolCallId('call-mismatch'), name: 'inspect', arguments: '{"name":"different"}' },
+      }
+    })(), { id: 'chatcmpl-tool-mismatch', model: 'configured-model' }))).rejects
+      .toThrow('does not extend its emitted delta')
+  })
+
   it('round-trips the final OpenAI assistant message into DSH replay state', async () => {
     let finished: { message: unknown; replayState?: unknown } | undefined
     const replayState = { response: { providerCursor: 'opaque' } }
-    await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
+    const lines = await collect(encodeChatStream((async function* (): AsyncIterable<StreamChunk> {
       yield { type: 'text-delta', index: 0, text: 'answer' }
       yield { type: 'block-end', index: 0, block: { type: 'text', text: 'answer' } }
-      yield { type: 'reasoning-delta', index: 1, text: 'because' }
-      yield { type: 'block-end', index: 1, block: { type: 'reasoning', text: 'because' } }
+      yield { type: 'reasoning-delta', index: 1, text: 'provisional reasoning' }
+      yield { type: 'block-end', index: 1, block: { type: 'reasoning', text: 'authoritative reasoning\n\n' } }
       yield { type: 'tool-call-delta', index: 2, id: ToolCallId('call-roundtrip'), name: 'inspect', argumentsDelta: '{"a":' }
       yield { type: 'tool-call-delta', index: 2, id: ToolCallId('call-roundtrip'), argumentsDelta: '1}' }
       yield {
@@ -254,6 +354,12 @@ describe('encodeChatStream', () => {
     }))
 
     expect(finished).toBeDefined()
+    const reasoning = payloads(lines)
+      .filter((event): event is Record<string, unknown> => typeof event === 'object' && event !== null)
+      .flatMap(event => (event.choices as Array<{ delta: Record<string, unknown> }> | undefined) ?? [])
+      .map(choice => choice.delta.reasoning_content)
+      .filter((value): value is string => typeof value === 'string')
+    expect(reasoning.join('')).toBe((finished!.message as { reasoning_content: string }).reasoning_content)
     const replayFor = vi.fn(() => replayState)
     const decoded = await decodeChatRequest({ model: 'selected', messages: [finished!.message] }, route(), { replayFor })
     expect(replayFor).toHaveBeenCalledWith(finished!.message)
@@ -262,7 +368,7 @@ describe('encodeChatStream', () => {
       source: { provider: 'configured-dsh', model: 'configured-model', replayState },
       content: [
         { type: 'text', text: 'answer' },
-        { type: 'reasoning', text: 'because' },
+        { type: 'reasoning', text: 'authoritative reasoning\n\n' },
         { type: 'tool-call', id: 'call-roundtrip', name: 'inspect', arguments: '{"a":1}' },
       ],
     })

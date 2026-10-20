@@ -2,9 +2,9 @@
 
 Date: 2026-10-20, Asia/Shanghai. PR: [#280](https://github.com/lisihao/deepseek-solar-harness/pull/280).
 
-Implementation and installation are authorized. Paid experiments, merge, release, tags, Pages and market publication are not authorized by this task. The package remains `@lisihao/dsh-solar-rlm@0.1.0-dev.0` under `incubator/rlm`.
+Implementation and the earlier local installation are authorized. Later instructions authorize an isolated Codex subscription pilot using `gpt-6.1-sol / high`, with at most 48 cumulative model requests including root, tool-return and descendant calls. They do not authorize paid API fallback, extra-credit purchase, merge, release, tags, Pages or market publication. The package remains `@lisihao/dsh-solar-rlm@0.1.0-dev.0` under `incubator/rlm`.
 
-The identified plugin is installed in the official app and has passed **local keyless installed-app acceptance**. Real-provider acceptance and efficacy evaluation remain unrun.
+The identified installed commit below passed **local keyless installed-app acceptance**. The later reasoning-stream repair is source-verified separately and has not been installed by this follow-up. Isolated subscription trials are separate from real-provider acceptance inside the installed app and from efficacy conclusions.
 
 ## Identity and execution boundary
 
@@ -42,7 +42,7 @@ The manifest and provenance are in `incubator/rlm/runtime-lock/capsule.json`; la
 | Existing-app installation and restart | Run: passed with the fixed artifact below, official desktop profile and unmodified app |
 | Normal conversation and Settings controls; default/narrow UI | Run: passed; runtime status, explicit self-test, long results and scrolling inspected |
 | Disable/re-enable and configuration preservation | Run: passed; contribution removed on disable, restored on enable; prior configuration and credentials unchanged |
-| Real-provider/model acceptance | Not run; this task does not launch paid model experiments |
+| Real-provider/model acceptance | An isolated subscription pilot is tracked below; real-provider acceptance inside the installed app is not run |
 
 The initial `pnpm check` reached the RLM integration lane and exposed a missing declared `llm` injection. It was repaired for both plugin and probe; the affected build/entrypoint/profile checks were rerun. A subsequent bridge failure came from the fixture selecting `off` for a model declaring no reasoning settings. The fixture now supplies the valid no-effort route; the Host preserves Prime's internal `--thinking off` without inventing a DSH provider effort. The final bridge passed. Passing unaffected native/unit evidence was reused; the failed aggregate command is not presented as a successful command.
 
@@ -95,6 +95,24 @@ Live UI acceptance then exposed a Remote descriptor using the namespace `solarRl
 
 ## Evaluation claims still unavailable
 
-The [evaluation contract](prime-rlm-evaluation.md) remains separate from these engineering checks. G1 has source identity and representative native mechanism evidence; its complete F01–F12 differential matrix and real-provider coverage are not certified by this report. G2 reasoning-quality benefit, G3 original-paper reproduction and G4 held-out Continual Harness improvement are **not run**.
+The [evaluation contract](prime-rlm-evaluation.md) remains separate from these engineering checks. G1 has source identity and representative native mechanism evidence; its complete F01–F12 differential matrix and real-provider coverage are not certified by this report. G2 has only a bounded single-task development pilot, not evidence of general reasoning-quality benefit. G3 original-paper reproduction and G4 held-out Continual Harness improvement are **not run**.
 
 No measured reasoning, cost or latency improvement is claimed. Forced scripted recursion is plumbing evidence. Installation, unit tests, a native self-test or a passing CI job does not replace matched real runs, independent grading, full-tree accounting and negative controls.
+
+
+## Bounded Codex subscription pilot follow-up
+
+The four conditions use one frozen synthetic Q02 task (16,512 input bytes), the same `gpt-6.1-sol / high` route, serialized model calls, independent grading and a cumulative cap of 48 requests. E receives the full input with Prime code tools at native depth 0; S receives external input at depth 1; P0 receives external input at depth 0; D receives the full input without tools. Prime permits a root `rlm.create_session` independently of the spawn-depth guard, so P0 is not a complete no-subcall ablation. Factory and Harness refinements are disabled only for these matched trials; their native implementation is unchanged.
+
+The original E trial passed. The first S trial was locally cancelled at its ten-minute deadline with no confirmed provider response; its reservation remains unknown and counted. Logs did not establish screen locking, display sleep, system sleep or a network outage as its cause. The original fetch-only HTTP hook missed the subscription provider's `node:https.request` proxy path, so its zero count is missing visibility, not zero inference. The runner now observes both paths before dispatch, fsyncs reservations, preserves unknown usage, restores the cumulative budget and explicitly cancels an unfinished native turn. A run-owned idle-sleep assertion does not change screen-lock settings.
+
+The next S attempt exposed a distinct adapter error after five confirmed model responses: provisional reasoning deltas ended in two newlines while the authoritative reasoning block omitted them. The encoder's prefix check aborted the native response. Buffering only reasoning until its authoritative close preserves the exact final text, wire/replay identity and opaque provider replay state. Text and tool arguments remain streamed and prefix-checked. Prime source, native binary, offline capsule, RLM and Continual Harness mechanisms are unchanged.
+
+The original captured response reproduces the old error and encodes completely with the repair without another model call. Eleven model-wire tests and strict TypeScript checking passed; the affected RLM suite passed 64 tests. Four native keyless conditions passed with the rebuilt host. The runner's separate budget/protocol/grader checks passed 25 tests, and its direct/proxy transport check passed one test. A local timeout fixture verified cancellation and unknown accounting. A full actual subscription-adapter/SSE decoder fixture was not covered by the fake transport test; the real pilot is the route-specific execution evidence. Private inputs, answers, model chunks, credentials and runtime artifacts are not committed.
+
+
+The post-repair S, P0 and D trials completed; the already accepted E trial was reused. All four conditions scored 1/1 on this one task. S used six model requests (77.922 seconds including cleanup), P0 three (31.121 seconds), D one (21.231 seconds), and the earlier E two (30.431 seconds). These are single-run observations, not latency estimates. The two earlier S attempts remain separate: one ten-minute unknown and one adapter failure after five confirmed model responses. Cumulative accounting is 18 reservations: 17 confirmed responses and one unknown, all within the original 48-request cap. New proxy dispatches were individually observed; the first three retain the original HTTP-observation limitation. Whole-experiment usage/cost remains unknown because the first timeout has no confirmed usage.
+
+All six successful S requests carried native depth-0 prompts. No descendant model request was observed in that trial, so it does not measure a recursive-child benefit. This small task also fits directly in model context. Equal exact scores therefore provide no quality-improvement evidence and cannot reproduce the original RLM paper's long-context conclusions. No further experimental calls were made to exhaust the budget.
+
+The rebuilt package passed the disposable published-baseline profile gate, including the original native 14-check/18-scripted-response self-test, the three-dispatch local bridge/follow-up/stop/resume check and bundle removal. These checks used zero real-provider requests. Build, browser-loader validation, the 64-test RLM suite, strict typecheck and homepage/market-guide generation passed for the source repair. The official app and its earlier installed artifact were not updated during this follow-up; that installed artifact does not include this later encoder repair. Merge and publication remain separately authorized.
