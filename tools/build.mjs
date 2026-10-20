@@ -31,7 +31,7 @@ for (const name of packages) {
 await build({
   entryPoints: ['src/client.ts'], absWorkingDir: join(root, 'incubator/model-handoff'),
   outfile: 'lib/client.js', bundle: true, packages: 'external', platform: 'browser', target: 'es2022', format: 'cjs', sourcemap: true,
-  banner: { js: 'window.__ModuleLoader__.load({id:"@lisihao/dsh-solar-model-handoff",factory(require,module,exports){' },
+  banner: { js: 'window.__ModuleLoader__.load({id:"@lisihao/dsh-solar-model-handoff",factory(require){const module={exports:{}};const exports=module.exports;' },
   footer: { js: 'return module.exports;}});' },
 })
 execFileSync(join(root, 'node_modules/.bin/tsc'), ['-p', join(root, 'tools/tsconfig.handoff-client.json')], { cwd: root, stdio: 'inherit' })
