@@ -20,3 +20,16 @@ jobs:
       - run: npm install --global pnpm@10.31.0
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm check
+      - name: Pack model-handoff candidate
+        run: |
+          mkdir -p "$RUNNER_TEMP/model-handoff-package"
+          pnpm --dir incubator/model-handoff pack --pack-destination "$RUNNER_TEMP/model-handoff-package"
+          cd "$RUNNER_TEMP/model-handoff-package"
+          sha256sum *.tgz > SHA256SUMS
+          printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT
+      - name: Upload model-handoff candidate
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: model-handoff-${{ github.sha }}
+          path: ${{ runner.temp }}/model-handoff-package/
+          if-no-files-found: error

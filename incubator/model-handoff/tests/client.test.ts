@@ -26,15 +26,14 @@ describe('built browser contribution', () => {
         }
       },
     }
-    let exported!: { apply: (ctx: unknown) => void }
+    let exported!: { apply: (ctx: unknown) => void; inject: readonly string[] }
     runInNewContext(readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8'), {
       window: { __ModuleLoader__: { load: ({ id, factory }: { id: string; factory: Function }) => {
         loadedId = id
-        const module = { exports: {} }
-        factory((specifier: string) => { expect(specifier).toBe('react'); return react }, module, module.exports)
-        exported = module.exports as typeof exported
+        exported = factory((specifier: string) => { expect(specifier).toBe('react'); return react }) as typeof exported
       } } },
     })
+    expect(exported.inject).toEqual(['sessions', 'conversation', 'slots'])
     const source = store<ProgressWindow>({ entries: [], revision: 0, change: { kind: 'replace' } })
     const block = store<{ reason: string } | undefined>(undefined)
     const binding = { eventSource: source }
