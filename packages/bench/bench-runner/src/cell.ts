@@ -34,8 +34,8 @@ export interface HomeTemplate {
 
 /**
  * Create a fresh run directory, replacing any partial one left by a crash.
- * Copies clone on filesystems that support it, so a profile's `node_modules`
- * costs little per run.
+ * Copies request copy-on-write clones, so a profile's `node_modules` costs
+ * little per run where the filesystem supports them.
  * @param dir - absolute run directory.
  * @param fixture - task fixture directory, if any.
  * @param template - home template.
@@ -52,6 +52,16 @@ export async function prepareCell(dir: string, fixture: string | undefined, temp
   await cp(join(template.home, 'profiles', profile), join(dirs.home, 'profiles', profile), copy)
   for (const file of template.files) await cp(join(template.home, file), join(dirs.home, file), copy)
   return dirs
+}
+
+/**
+ * Delete the template files copied into a run home, so finished runs, which
+ * are kept on disk, do not each hold a copy of the credentials.
+ * @param home - the run's `$DSH_HOME`.
+ * @param files - the home-relative template files.
+ */
+export async function scrubTemplateFiles(home: string, files: readonly string[]): Promise<void> {
+  for (const file of files) await rm(join(home, file), { force: true })
 }
 
 /**

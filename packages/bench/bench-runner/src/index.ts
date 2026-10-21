@@ -15,7 +15,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { BenchSuite, BenchTask, BenchTaskId } from '@deepseek-ai/dsh-bench'
 import z from '@deepseek-ai/schemastery'
-import { cellEnv, prepareCell, readRunSessions } from './cell.ts'
+import { cellEnv, prepareCell, readRunSessions, scrubTemplateFiles } from './cell.ts'
 import { cellKey, ExperimentLedger, LEDGER_FORMAT_VERSION } from './ledger.ts'
 import { foldRunMetrics } from './metrics.ts'
 import type { ModelPrice } from './metrics.ts'
@@ -38,7 +38,7 @@ export interface Config {
   command: string[]
   /** Absolute home whose `profiles/<profile>` seeds every run home. */
   templateHome: string
-  /** Home-relative files copied into every run home (credentials, settings). */
+  /** Home-relative files copied into every run home (credentials, settings) and deleted once its child exits. */
   templateFiles: string[]
   /** Absolute directory holding one ledger directory per experiment. */
   ledgerRoot: string
@@ -191,6 +191,7 @@ export class BenchRuntime extends Service {
       job.task.prompt,
     ]
     const exit = await this.spawnChild(argv, dirs.workspace, cellEnv(process.env, dirs, job.variant), signal)
+    await scrubTemplateFiles(dirs.home, this.config.templateFiles)
     const base = { formatVersion: LEDGER_FORMAT_VERSION as 1, cell: job.cell, exitCode: exit.code, suiteVersion: suite.version, startedAt }
     let sessions
     try {

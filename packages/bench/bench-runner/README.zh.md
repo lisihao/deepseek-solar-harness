@@ -31,7 +31,7 @@ variants:                    # the first is the baseline
 - `home/`：私有的 `$DSH_HOME`，内含 `<templateHome>/profiles/<profile>` 的副本和 `templateFiles`。会话、附件等由 home 派生的状态都留在其中。
 - `state/`：variant `env` 中 `{cell}` 指向的目录，用于存放 `$DSH_HOME` 之外的插件状态。
 
-文件系统支持时，复制使用克隆。崩溃的运行留下的目录会在下次尝试时被替换。子进程继承运行器的环境，外加 `DSH_HOME` 和展开后的 variant `env`，执行 `<command> --profile <profile> [--patch <p>]... <prompt>`。
+复制时请求写时复制克隆（`COPYFILE_FICLONE`）。子进程一退出，复制进运行 home 的 `templateFiles` 就会被删除。崩溃的运行留下的目录会在下次尝试时被替换。子进程继承运行器的环境，外加 `DSH_HOME` 和展开后的 variant `env`，执行 `<command> --profile <profile> [--patch <p>]... <prompt>`。
 
 ## 运行记录
 
@@ -51,7 +51,7 @@ variants:                    # the first is the baseline
 |---|---|---|
 | `command` | 必填 | 启动器 argv 前缀，例如 `[node, /abs/apps/cli/lib/bin.js]`。只能用构建产物，因为子进程以普通 Node 运行。 |
 | `templateHome` | 必填 | 用其 profile 为每个运行 home 播种的 home 目录。 |
-| `templateFiles` | 必填 | 复制进每个运行 home 的文件（相对 home），例如 `credentials.yaml`。 |
+| `templateFiles` | 必填 | 复制进每个运行 home 供子进程使用的文件（相对 home），例如 `credentials.yaml`；子进程退出时删除。 |
 | `ledgerRoot` | 必填 | 存放各实验账本的目录，每个实验一个账本。 |
 | `concurrency` | `1` | 同时进行的运行数。 |
 | `runTimeoutMs` | `600000` | 单次运行的墙钟时限。 |
@@ -69,5 +69,5 @@ variants:                    # the first is the baseline
 
 - **尚无分析** — 记录只保存每次运行的原始数据；相对基线的配对差值、置信区间和瓶颈排名随分析层提供。
 - **patch 内容未锁定** — `experiment.json` 锁定的是 patch 路径而非内容，因此在两次续跑之间修改 patch 文件，会让同一个 variant id 下混入两种组合。
-- **运行目录会保留** — 工作区和 home 留在磁盘上供检查，从不清理。
+- **运行目录会保留** — 工作区和 home 留在磁盘上供检查，从不清理。若运行器在子进程运行期间崩溃，该次运行复制进 home 的 `templateFiles` 会残留下来。
 - **`$DSH_HOME` 之外的插件状态需要 variant `env` 条目** — 若插件写入 `~` 且没有覆盖变量（例如 `MNEMON_DATA_DIR`），其状态会在各次运行之间共享。

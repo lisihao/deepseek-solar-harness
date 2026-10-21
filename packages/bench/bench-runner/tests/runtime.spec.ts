@@ -99,12 +99,13 @@ describe('BenchRuntime.run', () => {
       cwd: await realpathOf(join(cell('plus', 't1', 1), 'workspace')),
       home: join(cell('plus', 't1', 1), 'home'),
       extra: join(cell('plus', 't1', 1), 'state', 'mnemon'),
+      credentials: true,
     })
     const baseline = JSON.parse(await readFile(join(cell('baseline', 't1', 0), 'workspace', 'launch.json'), 'utf8')) as Record<string, unknown>
     expect(baseline.argv).toEqual(['--profile', 'headless', 'write:out.txt:yes'])
     expect(baseline.extra).toBeUndefined()
     expect(await readFile(join(cell('baseline', 't1', 0), 'workspace', 'seed.txt'), 'utf8')).toBe('seed')
-    expect(await readFile(join(cell('baseline', 't1', 0), 'home', 'credentials.yaml'), 'utf8')).toBe('secret: 1\n')
+    await expect(readFile(join(cell('baseline', 't1', 0), 'home', 'credentials.yaml'), 'utf8')).rejects.toThrow(/ENOENT/)
     const ledger = (await readFile(join(root, 'ledger', 'exp', 'runs.jsonl'), 'utf8')).trim().split('\n')
     expect(ledger).toHaveLength(8)
   })

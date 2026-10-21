@@ -6,7 +6,7 @@
 //   hang                 never exit (exercises the run timeout)
 //   persist-hang         persist the sessions, then never exit
 //   nosession            exit 1 without persisting a session
-import { cpSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const prompt = process.argv.at(-1)
@@ -15,6 +15,7 @@ writeFileSync(join(process.cwd(), 'launch.json'), JSON.stringify({
   cwd: process.cwd(),
   home: process.env.DSH_HOME,
   extra: process.env.FAKE_EXTRA,
+  credentials: existsSync(join(process.env.DSH_HOME, 'credentials.yaml')),
 }))
 if (prompt === 'hang') setInterval(() => {}, 1000)
 else if (prompt === 'persist-hang') {

@@ -31,7 +31,7 @@ Each run directory, `<ledgerRoot>/<experiment>/cells/<variant>/<task>/<rep>/`, h
 - `home/`: a private `$DSH_HOME` holding a copy of `<templateHome>/profiles/<profile>` and the `templateFiles`. Sessions, attachments, and other home-derived state stay inside it.
 - `state/`: the target of `{cell}` in variant `env`, for plugin state kept outside `$DSH_HOME`.
 
-Copies use filesystem clones where available. A crashed run's directory is replaced on the next attempt. The child gets the runner's environment plus `DSH_HOME` and the variant's expanded `env`, and runs `<command> --profile <profile> [--patch <p>]... <prompt>`.
+Copies request copy-on-write clones (`COPYFILE_FICLONE`). The `templateFiles` copies are deleted from the run home as soon as the child exits. A crashed run's directory is replaced on the next attempt. The child gets the runner's environment plus `DSH_HOME` and the variant's expanded `env`, and runs `<command> --profile <profile> [--patch <p>]... <prompt>`.
 
 ## Run records
 
@@ -51,7 +51,7 @@ Metrics come from sessions read through the JSONL persistence backend. Tokens an
 |---|---|---|
 | `command` | required | Launcher argv prefix, for example `[node, /abs/apps/cli/lib/bin.js]`. Built output only: the child runs under plain Node. |
 | `templateHome` | required | Home whose profile seeds every run home. |
-| `templateFiles` | required | Home-relative files copied into each run home, for example `credentials.yaml`. |
+| `templateFiles` | required | Home-relative files copied into each run home for the child, for example `credentials.yaml`; deleted when the child exits. |
 | `ledgerRoot` | required | Directory holding one ledger per experiment. |
 | `concurrency` | `1` | Runs at once. |
 | `runTimeoutMs` | `600000` | Wall-time limit per run. |
@@ -69,5 +69,5 @@ No direct invalidation; every run is an independent session in its own process, 
 
 - **No analysis yet** — records hold raw per-run data; paired deltas against the baseline, confidence intervals, and bottleneck ranking come with the analysis layer.
 - **Patch contents are not pinned** — `experiment.json` pins patch paths, not their content, so editing a patch file between resumed runs mixes two compositions under one variant id.
-- **Run directories are kept** — workspaces and homes stay on disk for inspection and are never pruned.
+- **Run directories are kept** — workspaces and homes stay on disk for inspection and are never pruned. A runner crash while a child runs leaves that run's copied `templateFiles` in its home.
 - **Plugin state outside `$DSH_HOME` needs a variant `env` entry** — a plugin that writes under `~` without an override (for example `MNEMON_DATA_DIR`) is shared across runs.
