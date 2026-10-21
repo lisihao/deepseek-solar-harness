@@ -14,12 +14,18 @@ describe('built browser contribution', () => {
     let loadedId: string | undefined
     let component!: (props: { sessionId: string }) => unknown
     let slot!: { name: string; id: string }
-    let state: unknown
+    const states: unknown[] = []
+    let stateIndex = 0
     let effectDeps: readonly unknown[] | undefined
     let cleanup: (() => void) | undefined
     const react = {
       createElement: (type: string, props: unknown, ...children: unknown[]) => ({ type, props, children }),
-      useState: () => [state, (next: unknown) => { state = next }],
+      useState: (initial?: unknown) => {
+        const index = stateIndex++
+        return [states[index] ?? initial, (next: unknown) => {
+          states[index] = typeof next === 'function' ? next(states[index] ?? initial) : next
+        }]
+      },
       useLayoutEffect: (effect: () => (() => void) | undefined, deps: readonly unknown[]) => {
         if (!effectDeps || deps.some((value, index) => value !== effectDeps![index])) {
           cleanup?.(); effectDeps = deps; cleanup = effect()
@@ -45,16 +51,34 @@ describe('built browser contribution', () => {
     })
     expect(loadedId).toBe('@lisihao/dsh-solar-model-handoff')
     expect(slot).toMatchObject({ name: 'conversation.input.dock', id: 'solar-model-handoff-preparation' })
-    expect(component({ sessionId: 'a' })).toBeNull()
+    const render = () => { stateIndex = 0; return component({ sessionId: 'a' }) }
+    expect(render()).toBeNull()
     const start = { type: 'event', event: { type: 'compaction/start', seq: 1, data: { compactionId: HANDOFF_COMPACTION_PREFIX + 'built' } } }
     source.set({ entries: [start], revision: 1, change: { kind: 'append', entries: [start] } })
     expect(block.getSnapshot()?.reason).toContain('暂不能输入或发送')
-    const rendered = component({ sessionId: 'a' })
+    const rendered = render() as any
     expect(JSON.stringify(rendered)).toContain('正在准备上下文')
     expect(JSON.stringify(rendered)).toContain('原草稿会保留')
-    const end = { type: 'event', event: { type: 'compaction/end', seq: 2, data: start.event.data } }
-    source.set({ entries: [start, end], revision: 2, change: { kind: 'append', entries: [end] } })
-    expect(component({ sessionId: 'a' })).toBeNull()
+    expect(rendered.props.style).toMatchObject({ display: 'flex', justifyContent: 'center', width: '100%' })
+    const closeButton = rendered.children[0].children[0].children[1]
+    expect(closeButton.props['aria-label']).toBe('关闭交接状态提示')
+    closeButton.props.onClick()
+    expect(render()).toBeNull()
+    expect(block.getSnapshot()?.reason).toContain('暂不能输入或发送')
+    const failed = { type: 'event', event: { type: 'compaction/end', seq: 2, data: { ...start.event.data, error: 'fixture failure' } } }
+    source.set({ entries: [start, failed], revision: 2, change: { kind: 'append', entries: [failed] } })
+    const failedNotice = render() as any
+    expect(JSON.stringify(failedNotice)).toContain('模型交接未完成')
+    failedNotice.children[0].children[0].children[1].props.onClick()
+    expect(render()).toBeNull()
+    source.set({ entries: [start, failed], revision: 3, change: { kind: 'replace' } })
+    expect(render()).toBeNull()
+    const nextStart = { ...start, event: { ...start.event, seq: 3, data: { compactionId: HANDOFF_COMPACTION_PREFIX + 'next' } } }
+    source.set({ entries: [start, failed, nextStart], revision: 4, change: { kind: 'append', entries: [nextStart] } })
+    expect(JSON.stringify(render())).toContain('正在准备上下文')
+    const end = { type: 'event', event: { type: 'compaction/end', seq: 4, data: nextStart.event.data } }
+    source.set({ entries: [start, failed, nextStart, end], revision: 5, change: { kind: 'append', entries: [end] } })
+    expect(render()).toBeNull()
     expect(block.getSnapshot()).toBeUndefined()
     cleanup?.()
     expect(source.listeners.size).toBe(0)
