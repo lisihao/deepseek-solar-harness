@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { createServer } from 'node:http'
+import { createServer as createTcpServer } from 'node:net'
 import test from 'node:test'
 
 import { createLongReadDispatcher, createLongReadProfile } from './long-read.mjs'
@@ -18,6 +19,31 @@ async function withSlowServer(operation) {
   const address = server.address()
   const url = `http://127.0.0.1:${address.port}/slow`
   try { return await operation({ url, requests: () => requests }) } finally { await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())) }
+}
+
+async function withTlsHandshakeHang(operation) {
+  let connections = 0
+  const sockets = new Set()
+  const server = createTcpServer(socket => {
+    connections += 1
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
+    socket.on('error', () => {})
+  })
+  let listening = false
+  try {
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    listening = true
+    const address = server.address()
+    const url = `https://127.0.0.1:${address.port}/backend-api/codex/responses`
+    return await operation({ url, connections: () => connections })
+  } finally {
+    for (const socket of sockets) socket.destroy()
+    if (listening) {
+      await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+    }
+  }
 }
 
 test('dispatcher replaces fetch-provided bodyTimeout and completes the same slow local response once', async () => {
@@ -89,4 +115,37 @@ test('dispatcher sends the configured timeout to its owned Agent', async () => {
     assert.equal(owned.dispatcher.dispatch({ path: '/', bodyTimeout: 300_000 }, {}), true)
     assert.equal(seen.bodyTimeout, 777)
   } finally { await owned.close() }
+})
+
+test('dispatcher passes a short connection timeout to its owned Agent and rejects invalid values', async () => {
+  let seen
+  const agent = { dispatch() {}, async close() {} }
+  const owned = createLongReadDispatcher({
+    bodyTimeoutMs: 777,
+    connectTimeoutMs: 123,
+    agentFactory: options => { seen = options; return agent },
+  })
+  try {
+    assert.deepEqual(seen, { connectTimeout: 123 })
+  } finally { await owned.close() }
+
+  for (const connectTimeoutMs of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, '123']) {
+    assert.throws(
+      () => createLongReadDispatcher({ connectTimeoutMs }),
+      /connectTimeoutMs must be a positive integer/,
+    )
+  }
+})
+
+test('real fetch reports connection timeout once when a local TLS socket never completes its handshake', async () => {
+  await withTlsHandshakeHang(async ({ url, connections }) => {
+    const owned = createLongReadDispatcher({ connectTimeoutMs: 50 })
+    try {
+      await assert.rejects(
+        () => globalThis.fetch(url, { method: 'POST', body: 'fixture', dispatcher: owned.dispatcher }),
+        error => error?.cause?.code === 'UND_ERR_CONNECT_TIMEOUT' || error?.code === 'UND_ERR_CONNECT_TIMEOUT',
+      )
+    } finally { await owned.close() }
+    assert.equal(connections(), 1, 'the connection timeout does not retry the POST')
+  })
 })

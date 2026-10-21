@@ -12,6 +12,7 @@ import {
   FIXED_LIMITS,
   REQUIRED_SOURCE_FILES,
   RUN_START_FILE,
+  PREFIX_ALLOCATION_FILE,
   manifestFingerprint,
   prepareThreeArm,
   runThreeArm,
@@ -129,19 +130,21 @@ async function withPrepared(name, operation) {
   try {
     const taskPath = join(base, 'private-task.json')
     const scorerPath = join(base, 'official-score.py')
-    const priorClosure = join(base, 'bare-q03-final-closure.json')
+    const priorClosure = join(base, 'connection-timeout-final-closure.json')
     const output = join(base, 'panel')
     await writeFile(taskPath, '{"fixture":true}\n', { mode: 0o600 })
     await writeFile(scorerPath, '# fixture scorer\n', { mode: 0o600 })
     await writeJson(priorClosure, {
       formatVersion: 1,
-      kind: 'bare-q03-supplement-final-closure-v1',
+      kind: 'quality-three-arm-connect-timeout-closure-v1',
+      nativeConditionStarted: false, modelResponseHeadersObserved: false,
+      connectTimeoutCode: 'UND_ERR_CONNECT_TIMEOUT', unknownChargeRetained: true, answersAvailable: false,
       providerClosed: true,
       relayClosed: true,
       networkProfileDisposed: true,
       longReadProfileClosed: true,
       ownedProcessesAbsent: true,
-      accounting: { cumulativeAdmitted: 523, cumulativeConfirmed: 510, cumulativeUnknown: 13 },
+      accounting: { cumulativeAdmitted: 524, cumulativeConfirmed: 510, cumulativeUnknown: 14 },
     })
     const context = 'The complete public TREC context.\nEvery record is present.'
     const question = 'How many records satisfy the original numeric question?'
@@ -222,7 +225,7 @@ test('D1 reuses the bare executor with exactly one full user input and no tools'
   const root = await mkdtemp(join(BASE, 'three-arm-direct-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: 65, perRun: 32 })
-  const ledger = threeArmBudgetView(base, [{ id: 'D1' }, { id: 'R32' }, { id: 'S32' }], { admitted: 523, confirmed: 510, unknown: 13 })
+  const ledger = threeArmBudgetView(base, [{ id: 'D1' }, { id: 'R32' }, { id: 'S32' }], { admitted: 524, confirmed: 510, unknown: 14 })
   let physicalAdmission
   let receivedOptions
   let eof = false
@@ -318,7 +321,7 @@ test('run gives R32 and S32 the same frozen native task and keeps their JSON-str
     assert.equal(nativeSeen[0].condition.autonomous.gate, 'test -s answer.json')
     assert.deepEqual(graded, ['Answer: [7]', '[7]', '[7]'])
     assert.deepEqual(receipt.results.map(result => result.status), ['completed', 'completed', 'completed'])
-    assert.equal(receipt.accounting.cumulative.admitted, 526)
+    assert.equal(receipt.accounting.cumulative.admitted, 527)
     assert.equal(await readFile(join(manifest.parentPrivate, 'answers', 'R32.json'), 'utf8'), JSON.stringify('[7]'))
     assert.equal(await readFile(join(manifest.parentPrivate, 'answers', 'S32.json'), 'utf8'), JSON.stringify('[7]'))
     assert.equal(JSON.stringify(receipt).includes('[not-in-manifest]'), false, 'sanitized receipt must not expose private gold')
@@ -364,7 +367,7 @@ test('an unknown R32 request is retained and fences S32 while completed, unknown
     assert.deepEqual(nativeCalls, ['R32'])
     assert.deepEqual(receipt.results.map(result => result.status), ['completed', 'unknown', 'not-run'])
     assert.equal(receipt.accounting.new.unknown, 1)
-    assert.equal(receipt.accounting.cumulative.unknown, 14)
+    assert.equal(receipt.accounting.cumulative.unknown, 15)
     assert.equal(receipt.accounting.stopped, true)
     assert.equal(await readFile(join(manifest.parentPrivate, 'answers', 'R32.json'), 'utf8'), JSON.stringify('[7]'))
     assert.equal(await readFile(join(manifest.conditions[2].markerDirectory, 'result.json'), 'utf8').then(JSON.parse).then(value => value.status), 'not-run')
@@ -377,26 +380,26 @@ test('65 new requests stay below the 600 hard cap, D1 has one slot, and unknown 
   t.after(() => rm(root, { recursive: true, force: true }))
   const conditions = [{ id: 'D1' }, { id: 'R32' }, { id: 'S32' }]
   const base = await Ledger.open(join(root, 'settled.jsonl'), { total: 65, perRun: 32 })
-  const view = threeArmBudgetView(base, conditions, { admitted: 523, confirmed: 510, unknown: 13 })
+  const view = threeArmBudgetView(base, conditions, { admitted: 524, confirmed: 510, unknown: 14 })
   for (const runId of ['D1', ...Array(32).fill('R32'), ...Array(32).fill('S32')]) await settleKnown(view, runId)
   const full = await view.receipt()
   assert.equal(full.newAdmitted, 65)
   assert.equal(full.physicalAdmitted, 65)
-  assert.equal(full.cumulativeAdmitted, 588)
+  assert.equal(full.cumulativeAdmitted, 589)
   assert.equal(full.cumulativeAdmitted <= 600, true)
   assert.equal(full.cumulativeAdmitted, full.cumulativeConfirmed + full.cumulativeUnknown)
   await assert.rejects(view.admit('D1', { forbidden: true }), /T3_ARM_LIMIT/)
   await assert.rejects(view.admit('R32', { forbidden: true }), /T3_ARM_LIMIT/)
 
   const unknownBase = await Ledger.open(join(root, 'unknown.jsonl'), { total: 65, perRun: 32 })
-  const unknownView = threeArmBudgetView(unknownBase, conditions, { admitted: 523, confirmed: 510, unknown: 13 })
+  const unknownView = threeArmBudgetView(unknownBase, conditions, { admitted: 524, confirmed: 510, unknown: 14 })
   const request = await unknownView.admit('D1', { fixture: 'unknown' })
   unknownView.admitPhysical({ runId: 'D1', logicalRequest: request, event: { fixture: true } })
   await unknownView.settle(request, [], new Error('lost response'))
   const retained = await unknownView.receipt()
-  assert.equal(retained.cumulativeAdmitted, 524)
+  assert.equal(retained.cumulativeAdmitted, 525)
   assert.equal(retained.cumulativeConfirmed, 510)
-  assert.equal(retained.cumulativeUnknown, 14)
+  assert.equal(retained.cumulativeUnknown, 15)
   assert.equal(retained.stopped, true)
   await assert.rejects(unknownView.admit('R32', { forbiddenReplay: true }), /EXPERIMENT_STOPPED/)
 })
@@ -427,5 +430,23 @@ test('bad native arm proof or changed prepared source rejects before the provide
     await writeJson(preparedPath, altered)
     await assert.rejects(() => runThreeArm({ ...common, acceptance: goodAcceptance }), /T3_FINGERPRINT_SOURCE/)
     assert.equal(providerLoaded, false)
+  })
+})
+
+
+test('a different output namespace cannot reuse an allocated cumulative prefix', async () => {
+  await withPrepared('prefix-claim', async ({ base, output, taskLoader, manifest }) => {
+    const acceptance = await acceptanceFor({ base, manifest })
+    await writeJson(join(dirname(manifest.prior.path), PREFIX_ALLOCATION_FILE), {
+      output: join(base, 'another-panel'), fingerprint: 'a'.repeat(64),
+    })
+    let providerLoaded = false
+    await assert.rejects(() => runThreeArm({ output, acceptance, taskLoader,
+      providerModule: '/private/tmp/fixture-provider.mjs', providerSha256: 'c'.repeat(64),
+      providerPackage: 'fixture-provider', credentialFile: '/private/tmp/fixture-credential.json',
+      ...runtimeDeps(), providerLoader: async () => { providerLoaded = true },
+    }), /T3_PREFIX_ALREADY_ALLOCATED/)
+    assert.equal(providerLoaded, false)
+    await assert.rejects(readFile(join(output, RUN_START_FILE)), /ENOENT/)
   })
 })

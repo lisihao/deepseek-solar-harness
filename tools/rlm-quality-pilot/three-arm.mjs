@@ -50,6 +50,7 @@ const REPOSITORY_ROOT = resolve(TOOL_DIRECTORY, '../..')
 const PREPARED_FILE = 'prepared.json'
 const RUN_START_FILE = 'real-run-started.json'
 const RUN_RECEIPT_FILE = 'final-receipt.json'
+const PREFIX_ALLOCATION_FILE = 'quality-three-arm-v2-allocation.json'
 const FORMAT_VERSION = 1
 const SHA256 = /^[a-f0-9]{64}$/i
 const TEMP_BASE = process.platform === 'darwin' ? '/private/tmp' : resolve(tmpdir())
@@ -64,7 +65,7 @@ export const FIXED_ROUTE = Object.freeze({
 })
 
 export const FIXED_LIMITS = Object.freeze({
-  prefixAdmitted: 523,
+  prefixAdmitted: 524,
   cumulativeCap: 600,
   newPhaseRequests: 65,
   directRequests: 1,
@@ -315,17 +316,20 @@ async function validatePriorClosure(path) {
   const closurePath = await assertRegularFile(path, 'prior final closure')
   const sha256 = await sha256File(closurePath)
   const closure = await readJson(closurePath, 'prior final closure')
-  if (!isRecord(closure) || closure.formatVersion !== 1 || closure.kind !== 'bare-q03-supplement-final-closure-v1'
+  if (!isRecord(closure) || closure.formatVersion !== 1 || closure.kind !== 'quality-three-arm-connect-timeout-closure-v1'
     || closure.providerClosed !== true || closure.relayClosed !== true
     || closure.networkProfileDisposed !== true || closure.longReadProfileClosed !== true
-    || closure.ownedProcessesAbsent !== true || !isRecord(closure.accounting)) {
-    fail('T3_PRIOR_CLOSURE', 'prior final closure does not prove a closed bare-Q03 supplement')
+    || closure.ownedProcessesAbsent !== true || !isRecord(closure.accounting)
+    || closure.nativeConditionStarted !== false || closure.modelResponseHeadersObserved !== false
+    || closure.connectTimeoutCode !== 'UND_ERR_CONNECT_TIMEOUT' || closure.unknownChargeRetained !== true
+    || closure.answersAvailable !== false) {
+    fail('T3_PRIOR_CLOSURE', 'prior final closure does not prove the closed connection-timeout attempt')
   }
   const admitted = safeInteger(closure.accounting.cumulativeAdmitted, 'prior cumulativeAdmitted')
   const confirmed = safeInteger(closure.accounting.cumulativeConfirmed, 'prior cumulativeConfirmed')
   const unknown = safeInteger(closure.accounting.cumulativeUnknown, 'prior cumulativeUnknown')
   if (admitted !== FIXED_LIMITS.prefixAdmitted || confirmed + unknown !== admitted) {
-    fail('T3_PRIOR_ACCOUNTING', 'prior closure must retain 523 cumulative admissions with confirmed plus unknown equal to 523')
+    fail('T3_PRIOR_ACCOUNTING', 'prior closure must retain 524 cumulative admissions with confirmed plus unknown equal to 524')
   }
   return { path: closurePath, sha256, accounting: { admitted, confirmed, unknown } }
 }
@@ -468,7 +472,7 @@ export function threeArmBudgetView(base, conditions, priorAccounting) {
     unknown: safeInteger(priorAccounting?.unknown, 'prior unknown'),
   }
   if (prior.confirmed + prior.unknown !== prior.admitted || prior.admitted !== FIXED_LIMITS.prefixAdmitted) {
-    fail('T3_LEDGER', 'Ledger prefix must be the retained 523 aggregate')
+    fail('T3_LEDGER', 'Ledger prefix must be the retained 524 aggregate')
   }
   const limits = new Map((conditions ?? []).map(condition => [condition.id, condition.id === 'D1' ? FIXED_LIMITS.directRequests : FIXED_LIMITS.nativeTreeRequests]))
   const assertRun = runId => {
@@ -731,6 +735,9 @@ export async function assertPreparedFingerprint(manifest, { taskLoader = loadTas
 }
 
 async function assertPanelNotStarted(root, manifest) {
+  if (await exists(join(dirname(manifest.prior.path), PREFIX_ALLOCATION_FILE))) {
+    fail('T3_PREFIX_ALREADY_ALLOCATED', 'this closed spending prefix already funds a panel; another output directory cannot reuse it')
+  }
   for (const path of [join(root, RUN_START_FILE), join(root, RUN_RECEIPT_FILE)]) {
     if (await exists(path)) fail('T3_RUN_ALREADY_STARTED', 'real panel has durable execution state; never replay it')
   }
@@ -1004,6 +1011,12 @@ export async function runThreeArm({
   assertRunArguments({ providerModule, providerSha256, providerPackage, credentialFile, acceptance })
   runtimeAssert()
   const { root, manifest, task, nativeAcceptance } = preflight
+  // An exclusive claim on the prior receipt prevents a different output
+  // directory from resetting the same cumulative spending prefix.
+  await writeExclusiveJson(join(dirname(manifest.prior.path), PREFIX_ALLOCATION_FILE), {
+    formatVersion: FORMAT_VERSION, output: root, fingerprint: manifest.fingerprint,
+    priorSha256: manifest.prior.sha256, cumulativeCap: FIXED_LIMITS.cumulativeCap,
+  })
   await writeExclusiveJson(join(root, RUN_START_FILE), {
     formatVersion: FORMAT_VERSION,
     startedAt: new Date().toISOString(),
@@ -1157,7 +1170,7 @@ export function parseArgs(argv) {
 function usage() {
   return [
     'Usage:',
-    '  node tools/rlm-quality-pilot/three-arm.mjs --prepare --output <new-output> --tmp-root <new-short-tmp-root> --task <task-json> --prior-closure <bare-q03-final-closure>',
+    '  node tools/rlm-quality-pilot/three-arm.mjs --prepare --output <new-output> --tmp-root <new-short-tmp-root> --task <task-json> --prior-closure <connection-timeout-final-closure>',
     '  node tools/rlm-quality-pilot/three-arm.mjs --run --output <prepared-output> --acceptance <quality-native-acceptance-json> --provider-module <private-module> --provider-sha256 <sha256> --provider-package <name> --credential-file <private-file>',
   ].join('\n')
 }
@@ -1184,4 +1197,4 @@ if (isDirectEntrypoint()) {
   })
 }
 
-export { PREPARED_FILE, RUN_START_FILE, RUN_RECEIPT_FILE, manifestFingerprint, validatePriorClosure }
+export { PREPARED_FILE, RUN_START_FILE, RUN_RECEIPT_FILE, PREFIX_ALLOCATION_FILE, manifestFingerprint, validatePriorClosure }
