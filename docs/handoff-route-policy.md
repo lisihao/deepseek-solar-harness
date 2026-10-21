@@ -1,6 +1,6 @@
 # Operator routes and model handoff
 
-User-authorized amendment: 2026-10-21 (Asia/Shanghai). Implementation and local integration checks passed; installation and actual route UI acceptance remain pending. This amendment permits no live model test, automatic replay, merge, release, market publication or official-App modification.
+User-authorized amendment: 2026-10-21 (Asia/Shanghai). Implementation, local integration checks and installation passed; actual route UI acceptance remains pending. This amendment permits no live model test, automatic replay, merge, release, market publication or official-App modification.
 
 ## Observable boundary
 
@@ -25,3 +25,5 @@ An explicit retry creates a new return-attempt identity before preparing its rec
 Implementation scope: `incubator/model-handoff/src/` and its tests/README, this policy and `docs/model-handoff.md`; existing PR #283. Verification must cover both operator routes, idle selection and first-request preset entry, all four return-choice combinations, no previous successful Web request, restart recovery, new input retention, excluded-history non-resurrection, source attribution, zero fake-provider dispatch before a choice and zero summary calls on fresh/short entry. Reuse unchanged checks; run the stable persistence/integration gate once, then affected regressions only. Installed UI evidence and fake-service tests remain separate from unrun real model execution.
 
 The stable local `pnpm check` passed on 2026-10-21: build/declarations, strict types, 171 source tests, 39 built-runtime tests, both official CLI scratch-profile probes and the generated homepage check. The AgentLoop fake-provider probe observed operator Insight entry without Luna and exactly one copy of the first submitted question. Independent source review covered the current-transaction checkpoint, native-route tracking, preview recovery, projected stream content and failed/unknown retry archive regressions. These checks used no live model.
+
+Runtime `73e92a6bc19df25f269e13c3378b48f8002db839` passed [exact-head CI](https://github.com/lisihao/deepseek-solar-harness/actions/runs/39558952013) and was installed through the official bundled CLI after normal App/Host exit, an idle Resident check and a fresh backup. All 17 packed files matched; tar SHA-256 `5ddcbb9a1014b9cd73c57c1cfa9ef1071913365cb47331ec20e01e13ba09439e`. The official App reopened. Its current accessibility capture exposes the window shell rather than page controls, so the two no-model route checks have been requested from the user; they are not marked passed. Original logs, unrelated plugin state and prior repair packages were retained.
