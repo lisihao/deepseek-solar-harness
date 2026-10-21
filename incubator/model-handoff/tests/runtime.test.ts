@@ -1,13 +1,14 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { createSystemMessage, createUserMessage, ReasoningEffortId, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { createAssistantMessage, createSystemMessage, createUserMessage, ReasoningEffortId, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { HandoffEngine as HandoffEngineType } from '../src/index.js'
-import { HandoffStore } from '../src/store.js'
+import { HandoffRouteStore, HandoffStore } from '../src/store.js'
 
 const fsReadGate = vi.hoisted(() => ({
   wait: undefined as ((path: string) => Promise<void>) | undefined,
@@ -77,6 +78,28 @@ const draft = JSON.stringify({
 })
 
 const target = { provider: 'target-provider', model: 'target-model' }
+const webRoute = { provider: 'solar-chatgpt-web', model: 'chatgpt-web' }
+const insightRoute = { provider: 'solar-chatgpt-web', model: 'insight-analysis' }
+
+function captureHandoffCommand(ctx: Context): {
+  readonly remove: () => void
+  invoke(agent: Agent, rawInput: string): Promise<unknown>
+} {
+  let handler: CommandDefinition['handler'] | undefined
+  const remove = ctx.provide('commands', {
+    register: (definition: CommandDefinition) => {
+      if (definition.name === 'handoff') handler = definition.handler
+      return () => undefined
+    },
+  })
+  return {
+    remove,
+    async invoke(agent: Agent, rawInput: string): Promise<unknown> {
+      if (!handler) throw new Error('测试夹具未注册 handoff 命令。')
+      return handler({ agent, rawInput } as Parameters<CommandDefinition['handler']>[0])
+    },
+  }
+}
 
 describe('model-handoff runtime boundary', () => {
   const fixtures: RuntimeFixture[] = []
@@ -515,6 +538,530 @@ describe('model-handoff runtime boundary', () => {
     }
   })
 
+  it('enters both operator routes from an idle picker without questions or Luna', async () => {
+    for (const operator of [webRoute, insightRoute]) {
+      const f = await createFixture({ idle: true, ...(operator.model === insightRoute.model ? { noHeader: true } : {}) })
+      fixtures.push(f)
+      const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+      const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+      const previousHome = process.env.DSH_HOME
+      process.env.DSH_HOME = f.root
+      try {
+        await applyRuntime(f.ctx, config)
+        const selection = f.session.append('model/selection', operator)
+        f.ctx.emit('session/event', f.session, selection)
+        const routeState = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+        await waitFor(async () => (await routeState.read(f.session.id))?.operatorEntry?.phase === 'operator')
+        const saved = await routeState.read(f.session.id)
+        expect(saved?.currentRoute).toEqual(operator)
+        expect(saved?.operatorEntry?.preOperator.recordSeqs.length).toBeGreaterThan(0)
+        expect(f.calls).toHaveLength(0)
+        expect(f.asks).toEqual([])
+      } finally {
+        removeCommands(); removeAgents()
+        if (previousHome === undefined) delete process.env.DSH_HOME
+        else process.env.DSH_HOME = previousHome
+      }
+    }
+  })
+
+  it('admits the first Insight request after a fresh boundary without cancelling its new prompt', async () => {
+    const f = await createFixture({ noHeader: true })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => insightRoute)).resolves.toEqual(insightRoute)
+      expect(f.calls).toHaveLength(0)
+      expect(f.asks).toEqual([])
+      expect(JSON.stringify(f.session.deriveMessages())).not.toContain('旧会话中的原始任务')
+      f.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'INSIGHT_FIRST_PROMPT_ONCE' }], source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      const prepared = await f.ctx.llm.prepareCall(insightRoute)
+      for await (const _chunk of prepared.stream({ ...prepared.config, messages: f.session.deriveMessages(), signal: new AbortController().signal, sessionId: SessionId(`${f.session.id}:insight`) })) { /* fake target request */ }
+      expect(f.targetRequests).toHaveLength(1)
+      const firstRequest = f.targetRequests[0] ?? ''
+      expect(firstRequest).toContain('INSIGHT_FIRST_PROMPT_ONCE')
+      expect(firstRequest.match(/INSIGHT_FIRST_PROMPT_ONCE/g) ?? []).toHaveLength(1)
+      expect(firstRequest).not.toContain('旧会话中的原始任务')
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('replaces an abandoned prepared native receipt on operator entry without replaying or overwriting it', async () => {
+    const f = await createFixture()
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    const oldId = 'c4681ad8-6ee7-4b4c-8e69-55d9b8d6401f'
+    try {
+      const receipts = new HandoffStore(join(f.root, 'solar', 'model-handoff'))
+      await receipts.write({ formatVersion: 1, id: oldId, sessionId: f.session.id, target,
+        fingerprint: (await f.engine.source(f.session)).fingerprint, phase: 'prepared', calls: [] })
+      await applyRuntime(f.ctx, config)
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)).resolves.toEqual(webRoute)
+      const current = await receipts.read(f.session.id)
+      expect(current).toMatchObject({ target: webRoute, mode: 'fresh', phase: 'committed' })
+      expect(current?.id).not.toBe(oldId)
+      expect(f.calls).toHaveLength(0)
+      const archived = JSON.parse(await readFile(join(f.root, 'solar', 'model-handoff', 'receipts', `${oldId}.json`), 'utf8')) as Record<string, unknown>
+      expect(archived).toMatchObject({ id: oldId, target, phase: 'prepared', calls: [] })
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('returns from an operator segment with each independently frozen source choice', async () => {
+    const combinations = [
+      { results: false, context: false },
+      { results: true, context: false },
+      { results: false, context: true },
+      { results: true, context: true },
+    ] as const
+    for (const choices of combinations) {
+      const f = await createFixture({ operatorChoices: choices })
+      fixtures.push(f)
+      const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+      const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+      const previousHome = process.env.DSH_HOME
+      process.env.DSH_HOME = f.root
+      try {
+        await applyRuntime(f.ctx, config)
+        await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)).resolves.toEqual(webRoute)
+        f.session.append('user/message', createUserMessage({
+          content: [{ type: 'text', text: 'WEB_TASK_QUESTION' }], source: { kind: 'user' },
+        }), { surfaceOp: 'append' })
+        f.session.append('assistant/message', {
+          turn: 1,
+          step: 1,
+          message: createAssistantMessage({ content: [{ type: 'text', text: 'WEB_RECORDED_RESULT' }], source: webRoute }),
+          stream: [],
+        }, { surfaceOp: 'append' })
+
+        await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => target)).resolves.toEqual(target)
+        expect(f.asks.slice(0, 2).map(ask => ask.ids)).toEqual([['operator-results'], ['operator-context']])
+        expect(f.asks.flatMap(ask => ask.ids)).not.toContain('handoff-mode')
+        const summaries = f.calls.filter(call => call.provider === config.summaryProvider)
+        if (!choices.results && !choices.context) {
+          expect(summaries).toHaveLength(0)
+          const visible = JSON.stringify(f.session.deriveMessages())
+          expect(visible).not.toContain('WEB_TASK_QUESTION')
+          expect(visible).not.toContain('旧会话中的原始任务')
+          f.session.append('user/message', createUserMessage({
+            content: [{ type: 'text', text: 'POST_RETURN_NEW_TASK' }], source: { kind: 'user' },
+          }), { surfaceOp: 'append' })
+          const nextSource = await f.engine.source(f.session)
+          expect(nextSource.text).toContain('POST_RETURN_NEW_TASK')
+          expect(nextSource.text).not.toContain('WEB_TASK_QUESTION')
+          expect(nextSource.text).not.toContain('旧会话中的原始任务')
+        } else {
+          expect(summaries).toHaveLength(1)
+          const source = JSON.stringify(summaries[0]?.messages)
+          expect(source.includes('WEB_TASK_QUESTION')).toBe(choices.results)
+          expect(source.includes('WEB_RECORDED_RESULT')).toBe(choices.results)
+          expect(source.includes('旧会话中的原始任务')).toBe(choices.context)
+        }
+      } finally {
+        removeCommands(); removeAgents()
+        if (previousHome === undefined) delete process.env.DSH_HOME
+        else process.env.DSH_HOME = previousHome
+      }
+    }
+  })
+
+  it('keeps the original pre-Web scope across a Web-to-Insight route change', async () => {
+    const f = await createFixture()
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      const routes = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+      const before = await routes.read(f.session.id)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => insightRoute)
+      const after = await routes.read(f.session.id)
+      expect(after?.currentRoute).toEqual(insightRoute)
+      expect(after?.operatorEntry?.entryRoute).toEqual(webRoute)
+      expect(after?.operatorEntry?.preOperator).toEqual(before?.operatorEntry?.preOperator)
+      expect(f.calls).toHaveLength(0)
+      expect(f.asks).toEqual([])
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('reconciles a completed operator return checkpoint without a second summary', async () => {
+    const f = await createFixture({ operatorChoices: { results: true, context: true } })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'WEB_RESTART_TASK' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      f.session.append('assistant/message', {
+        turn: 1,
+        step: 1,
+        message: createAssistantMessage({ content: [{ type: 'text', text: 'WEB_RESTART_RESULT' }], source: webRoute }),
+        stream: [],
+      }, { surfaceOp: 'append' })
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => target)
+      const summariesBefore = f.calls.filter(call => call.provider === config.summaryProvider).length
+      const checkpointsBefore = f.session.snapshotEvents().filter(event => event.type === 'compaction/summary').length
+      const routes = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+      const completed = await routes.read(f.session.id)
+      expect(completed?.return?.selected).toBeDefined()
+      await routes.write({
+        ...completed!,
+        currentRoute: webRoute,
+        operatorEntry: { ...completed!.operatorEntry!, currentRoute: webRoute, phase: 'operator' },
+        return: { ...completed!.return!, phase: 'chosen' },
+      })
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 3, signal: new AbortController().signal }, async () => target)).resolves.toEqual(target)
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(summariesBefore)
+      expect(f.session.snapshotEvents().filter(event => event.type === 'compaction/summary')).toHaveLength(checkpointsBefore)
+      expect((await routes.read(f.session.id))?.return?.phase).toBe('committed')
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('does not reuse an older native fresh checkpoint for a later neither-choice operator return', async () => {
+    const f = await createFixture({ cancelAt: 'handoff-mode', operatorChoices: { results: false, context: false } })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+      const oldRange = f.session.surface.nodes.at(-1)!
+      await f.engine.compactRegion(oldRange, oldRange, f.agent)
+      const oldReceipt = await f.engine.store.read(f.session.id)
+      expect(oldReceipt?.mode).toBe('fresh')
+      const receipts = new HandoffStore(join(f.root, 'solar', 'model-handoff'))
+      await receipts.write(oldReceipt!)
+
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'WEB_AFTER_OLD_FRESH' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      f.session.append('assistant/message', {
+        turn: 1,
+        step: 1,
+        message: createAssistantMessage({ content: [{ type: 'text', text: 'WEB_AFTER_OLD_FRESH_RESULT' }], source: webRoute }),
+        stream: [],
+      }, { surfaceOp: 'append' })
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => target)
+      const routes = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+      const returned = await routes.read(f.session.id)
+      const current = await receipts.read(f.session.id)
+      expect(current?.id).not.toBe(oldReceipt?.id)
+      expect(current?.id).toBe(returned?.return?.receiptId)
+      expect(JSON.stringify(f.session.deriveMessages())).not.toContain('WEB_AFTER_OLD_FRESH')
+      expect(JSON.stringify(f.session.snapshotEvents())).toContain('WEB_AFTER_OLD_FRESH')
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'AFTER_FRESH_RETURN_NATIVE_PROMPT' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      const prepared = await f.ctx.llm.prepareCall(target)
+      for await (const _chunk of prepared.stream({ ...prepared.config, messages: f.session.deriveMessages(), signal: new AbortController().signal, sessionId: SessionId(`${f.session.id}:after-fresh-return`) })) { /* fake target request */ }
+      const request = f.targetRequests.at(-1) ?? ''
+      expect(request).toContain('AFTER_FRESH_RETURN_NATIVE_PROMPT')
+      expect(request).not.toContain('WEB_AFTER_OLD_FRESH')
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('keeps native route facts through Web-to-A-to-B-to-A after persisted route reload', async () => {
+    const f = await createFixture({ operatorChoices: { results: false, context: false } })
+    fixtures.push(f)
+    const nativeB = { provider: 'native-provider-b', model: 'native-model-b' }
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'WEB_FOR_NATIVE_CHAIN' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      f.session.append('assistant/message', {
+        turn: 1, step: 1,
+        message: createAssistantMessage({ content: [{ type: 'text', text: 'WEB_FOR_NATIVE_CHAIN_RESULT' }], source: webRoute }), stream: [],
+      }, { surfaceOp: 'append' })
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => target)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 3, signal: new AbortController().signal }, async () => nativeB)
+      const routes = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+      expect((await routes.read(f.session.id))?.currentRoute).toEqual(nativeB)
+      // Re-read the private route receipt as a reload would, then require the
+      // B -> A transition to make a new native checkpoint rather than bypass.
+      const reloaded = await new HandoffRouteStore(join(f.root, 'solar', 'model-handoff')).read(f.session.id)
+      expect(reloaded?.currentRoute).toEqual(nativeB)
+      const summariesBefore = f.session.snapshotEvents().filter(event => event.type === 'compaction/summary').length
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 4, signal: new AbortController().signal }, async () => target)
+      expect(f.session.snapshotEvents().filter(event => event.type === 'compaction/summary')).toHaveLength(summariesBefore + 1)
+      expect((await routes.read(f.session.id))?.currentRoute).toEqual(target)
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('resumes a saved operator-return preview without a second Luna call or dropping the next request', async () => {
+    const f = await createFixture({ operatorChoices: { results: true, context: true }, blockQuestionId: 'handoff-confirm' })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'WEB_PREVIEW_TASK' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      f.session.append('assistant/message', {
+        turn: 1, step: 1,
+        message: createAssistantMessage({ content: [{ type: 'text', text: 'WEB_PREVIEW_RESULT' }], source: webRoute }), stream: [],
+      }, { surfaceOp: 'append' })
+      const controller = new AbortController()
+      const pending = f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: controller.signal }, async () => target)
+      await waitFor(() => f.asks.some(ask => ask.ids[0] === 'handoff-confirm'))
+      const callsBefore = f.calls.filter(call => call.provider === config.summaryProvider).length
+      controller.abort(new Error('preview interrupted'))
+      await expect(pending).rejects.toThrow('preview interrupted')
+      const receipt = await new HandoffStore(join(f.root, 'solar', 'model-handoff')).read(f.session.id)
+      expect(receipt?.phase).toBe('answered')
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 3, signal: new AbortController().signal }, async () => target)).resolves.toEqual(target)
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(callsBefore)
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'POST_PREVIEW_RESUME_PROMPT' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      const prepared = await f.ctx.llm.prepareCall(target)
+      for await (const _chunk of prepared.stream({ ...prepared.config, messages: f.session.deriveMessages(), signal: new AbortController().signal, sessionId: SessionId(`${f.session.id}:preview-resume`) })) { /* fake target request */ }
+      expect(f.targetRequests.at(-1) ?? '').toContain('POST_PREVIEW_RESUME_PROMPT')
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('moves a failed operator-return retry to a new receipt without overwriting the failed archive', async () => {
+    const f = await createFixture({ failureLuna: true, operatorChoices: { results: true, context: true } })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const command = captureHandoffCommand(f.ctx)
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'WEB_FAILED_RETRY_TASK' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      f.session.append('assistant/message', {
+        turn: 1, step: 1,
+        message: createAssistantMessage({ content: [{ type: 'text', text: 'WEB_FAILED_RETRY_RESULT' }], source: webRoute }), stream: [],
+      }, { surfaceOp: 'append' })
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => target)).rejects.toThrow('FIXTURE_STREAM_ERROR')
+
+      const store = new HandoffStore(join(f.root, 'solar', 'model-handoff'))
+      const routes = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+      const failed = await store.read(f.session.id)
+      expect(failed?.phase).toBe('failed')
+      const failedId = failed!.id
+      const failedArchive = join(f.root, 'solar', 'model-handoff', 'receipts', `${failedId}.json`)
+      const failedBytes = await readFile(failedArchive, 'utf8')
+      expect((await routes.read(f.session.id))?.return).toMatchObject({ receiptId: failedId, phase: 'chosen' })
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(1)
+
+      await expect(command.invoke(f.agent, 'retry')).resolves.toMatchObject({ kind: 'success' })
+      const retry = await store.read(f.session.id)
+      expect(retry).toMatchObject({ phase: 'prepared', target })
+      expect(retry?.id).not.toBe(failedId)
+      expect((await routes.read(f.session.id))?.return?.receiptId).toBe(retry?.id)
+      expect(await readFile(failedArchive, 'utf8')).toBe(failedBytes)
+      // Retrying authorizes no call by itself; the next target request owns it.
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(1)
+
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 3, signal: new AbortController().signal }, async () => target)).rejects.toThrow('FIXTURE_STREAM_ERROR')
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(2)
+      expect((await store.read(f.session.id))).toMatchObject({ id: retry!.id, phase: 'failed' })
+      expect(await readFile(failedArchive, 'utf8')).toBe(failedBytes)
+    } finally {
+      command.remove(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('moves an unknown operator-return retry to a new receipt without replaying it', async () => {
+    const f = await createFixture({ blockLuna: true, operatorChoices: { results: true, context: true } })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const command = captureHandoffCommand(f.ctx)
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'WEB_UNKNOWN_RETRY_TASK' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      f.session.append('assistant/message', {
+        turn: 1, step: 1,
+        message: createAssistantMessage({ content: [{ type: 'text', text: 'WEB_UNKNOWN_RETRY_RESULT' }], source: webRoute }), stream: [],
+      }, { surfaceOp: 'append' })
+      const firstController = new AbortController()
+      const first = f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: firstController.signal }, async () => target)
+      await waitFor(() => f.calls.filter(call => call.provider === config.summaryProvider).length === 1)
+      firstController.abort(new Error('unknown operator return'))
+      await expect(first).rejects.toThrow('unknown operator return')
+
+      const store = new HandoffStore(join(f.root, 'solar', 'model-handoff'))
+      const routes = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+      const unknown = await store.read(f.session.id)
+      expect(unknown?.phase).toBe('calling')
+      const unknownId = unknown!.id
+      const unknownArchive = join(f.root, 'solar', 'model-handoff', 'receipts', `${unknownId}.json`)
+      const unknownBytes = await readFile(unknownArchive, 'utf8')
+
+      await expect(command.invoke(f.agent, 'retry')).resolves.toMatchObject({ kind: 'success' })
+      const retry = await store.read(f.session.id)
+      expect(retry).toMatchObject({ phase: 'prepared', target })
+      expect(retry?.id).not.toBe(unknownId)
+      expect((await routes.read(f.session.id))?.return?.receiptId).toBe(retry?.id)
+      expect(await readFile(unknownArchive, 'utf8')).toBe(unknownBytes)
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(1)
+
+      const secondController = new AbortController()
+      const second = f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 3, signal: secondController.signal }, async () => target)
+      await waitFor(() => f.calls.filter(call => call.provider === config.summaryProvider).length === 2)
+      secondController.abort(new Error('second unknown operator return'))
+      await expect(second).rejects.toThrow('second unknown operator return')
+      expect((await store.read(f.session.id))).toMatchObject({ id: retry!.id, phase: 'calling' })
+      expect(await readFile(unknownArchive, 'utf8')).toBe(unknownBytes)
+    } finally {
+      command.remove(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('keeps ordinary native retry and fresh commands compatible', async () => {
+    const f = await createFixture()
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const command = captureHandoffCommand(f.ctx)
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      const store = new HandoffStore(join(f.root, 'solar', 'model-handoff'))
+      const nativeFailureId = 'ecf47e81-1cf1-4601-a1cf-4d7f5a63de37'
+      await store.write({ formatVersion: 1, id: nativeFailureId, sessionId: f.session.id, target,
+        fingerprint: (await f.engine.source(f.session)).fingerprint, phase: 'failed', error: 'native fixture failure', calls: [] })
+      await applyRuntime(f.ctx, config)
+
+      await expect(command.invoke(f.agent, 'retry')).resolves.toMatchObject({ kind: 'success' })
+      const retried = await store.read(f.session.id)
+      expect(retried).toMatchObject({ phase: 'prepared', target })
+      expect(retried?.id).not.toBe(nativeFailureId)
+      expect(await new HandoffRouteStore(join(f.root, 'solar', 'model-handoff')).read(f.session.id)).toBeUndefined()
+      expect(f.calls).toHaveLength(0)
+
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => target)).resolves.toEqual(target)
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(1)
+      await expect(command.invoke(f.agent, 'fresh')).resolves.toMatchObject({ kind: 'success' })
+      expect((await store.read(f.session.id))).toMatchObject({ phase: 'committed', mode: 'fresh' })
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(1)
+    } finally {
+      command.remove(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('does not manufacture a Web result when no recorded result exists', async () => {
+    const f = await createFixture({ operatorChoices: { results: true, context: false } })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'UNANSWERED_WEB_TASK' }], source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => target)
+      expect(f.calls.filter(call => call.provider === config.summaryProvider)).toHaveLength(0)
+      expect(JSON.stringify(f.session.deriveMessages())).not.toContain('UNANSWERED_WEB_TASK')
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('carries a recorded unknown operator attempt without claiming a successful Web result', async () => {
+    const f = await createFixture({ operatorChoices: { results: true, context: false } })
+    fixtures.push(f)
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => webRoute)
+      f.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'UNKNOWN_WEB_TASK' }], source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      f.session.append('assistant/attempt', { turn: 1, step: 1, stream: [
+        { type: 'reasoning-chunks', time0: 1, index: 0, dt: [], texts: ['PRIVATE_REASONING_CHUNKS'] },
+        { type: 'chunk', time: 2, chunk: { type: 'block-start', index: 1, blockType: 'reasoning' } },
+        { type: 'chunk', time: 3, chunk: { type: 'reasoning-delta', index: 1, text: 'PRIVATE_REASONING_DELTA' } },
+        { type: 'chunk', time: 4, chunk: { type: 'block-end', index: 1, block: { type: 'reasoning', text: 'PRIVATE_REASONING_BLOCK' } } },
+        { type: 'text-chunks', time0: 5, index: 2, dt: [], texts: ['VISIBLE_OPERATOR_ATTEMPT'] },
+        { type: 'tool-call-chunks', time0: 6, index: 3, dt: [], id: 'operator-tool', name: 'check', args: ['{"scope":"current"}'] },
+        { type: 'chunk', time: 7, chunk: { type: 'usage', usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3, reasoningTokens: 99 } } },
+        { type: 'chunk', time: 8, chunk: { type: 'finish', reason: { kind: 'error', failure: { code: 'WEB_ATTEMPT_ERROR', message: 'operator unavailable', status: 503 } }, replayState: { private: 'REPLAY_SECRET' } } },
+      ] as any })
+      await f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => target)
+      const summary = f.calls.find(call => call.provider === config.summaryProvider)
+      const source = JSON.stringify(summary?.messages)
+      expect(source).toContain('UNKNOWN_WEB_TASK')
+      expect(source).toContain('operator-attempt')
+      expect(source).toContain('VISIBLE_OPERATOR_ATTEMPT')
+      expect(source).toContain('operator-tool')
+      expect(source).toContain('WEB_ATTEMPT_ERROR')
+      expect(source).toContain('operator unavailable')
+      expect(source).not.toContain('PRIVATE_REASONING_CHUNKS')
+      expect(source).not.toContain('PRIVATE_REASONING_DELTA')
+      expect(source).not.toContain('PRIVATE_REASONING_BLOCK')
+      expect(source).not.toContain('REPLAY_SECRET')
+      expect(source).not.toContain('reasoningTokens')
+      expect(source).not.toContain('WEB_RECORDED_RESULT')
+    } finally {
+      removeCommands(); removeAgents()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
   it('includes first human answers in the source of a later handoff', async () => {
     const fixture = await createFixture()
     fixtures.push(fixture)
@@ -755,6 +1302,8 @@ type FixtureOptions = {
   readonly includeUsage?: boolean
   readonly chooseCandidates?: boolean
   readonly blockQuestionId?: string
+  readonly operatorChoices?: { readonly results: boolean; readonly context: boolean }
+  readonly noHeader?: boolean
 }
 
 async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixture & {
@@ -781,7 +1330,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
     events.push(event)
     return event
   }
-  append('request/header', {
+  if (!options.noHeader) append('request/header', {
     header: { config: { provider: 'old-provider', model: 'old-model' } },
     reason: 'initial',
   })
@@ -870,6 +1419,8 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
       }
       if (request.questions[0]?.id === 'handoff-budget' && options.approveBudget) return { answers: [{ id: 'handoff-budget', selected: ['按此上限继续'] }] }
       if (request.questions[0]?.id === options.cancelAt) return { answers: [{ id: options.cancelAt, selected: ['取消交接，空白开始'] }] }
+      if (request.questions[0]?.id === 'operator-results') return { answers: [{ id: 'operator-results', selected: [options.operatorChoices?.results ? '携带已记录的 Web/Insight 结果及对应任务问题' : '不携带 Web/Insight 结果'] }] }
+      if (request.questions[0]?.id === 'operator-context') return { answers: [{ id: 'operator-context', selected: [options.operatorChoices?.context ? '携带进入 Web/Insight 前的有效任务上下文' : '不携带进入 Web/Insight 前的任务上下文'] }] }
       if (request.questions[0]?.id === 'handoff-mode') return { answers: [{ id: 'handoff-mode', selected: ['携带当前任务上下文'] }] }
       if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
       if (options.chooseCandidates) return { answers: request.questions.map(question => ({ id: question.id, selected: [question.options![0]!.label] })) }
@@ -881,6 +1432,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
     session,
     status: options.idle ? 'idle' : 'running',
     ctx,
+    cancel: () => undefined,
     runMaintenance: async (operation: (signal: AbortSignal) => Promise<unknown>) => operation(new AbortController().signal),
   } as unknown as Agent
   const engine = new HandoffEngineCtor(ctx)

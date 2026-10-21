@@ -21,7 +21,7 @@ export function apply(ctx) {
             yield { type: 'finish', reason: { kind: 'stop' } }
           }
         }
-        const registration = ctx.llm.registerAdapter(['fixture-old', 'fixture-target', 'openai-codex'], new FixtureAdapter())
+        const registration = ctx.llm.registerAdapter(['fixture-old', 'fixture-target', 'solar-chatgpt-web', 'openai-codex'], new FixtureAdapter())
         const selection = { current: { provider: 'fixture-old', model: 'old' }, assembled: undefined }
         const handle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: process.env.DSH_HOME }, agentOptions: selection.current,
           setup: agentCtx => { installModelSelection(agentCtx, selection) } })
@@ -133,6 +133,34 @@ export function apply(ctx) {
         if (!checks.activeFreshNoDispatch || !checks.activeFreshCommitted || !checks.activeFreshNextInput) throw new Error('Active cancellation dispatched a request or blocked the next fresh task.')
         disposeActive()
         await activeHandle.dispose()
+
+        // The operator route is entered by a real AgentLoop request. At this
+        // point the new human prompt is still the loop's local decision input,
+        // so a fresh boundary must not cancel it or require a second Send.
+        const insightSelection = { current: { provider: 'fixture-old', model: 'old' }, assembled: undefined }
+        const insightHandle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: process.env.DSH_HOME }, agentOptions: insightSelection.current,
+          setup: agentCtx => { installModelSelection(agentCtx, insightSelection) } })
+        const insightAgent = insightHandle.agent
+        const insightOld = 'INSIGHT_OLD_TASK_MUST_NOT_REACH_OPERATOR'
+        insightAgent.followup(createUserMessage({ content: [{ type: 'text', text: insightOld }], source: { kind: 'user' } }))
+        await insightAgent.whenIdle()
+        const lunaBeforeInsight = calls.filter(call => call.model === 'gpt-6-luna').length
+        const disposeInsight = ctx.on('user-questions/request', async (request, next) => {
+          if (request.agent?.id !== insightAgent.id) return next()
+          throw new Error(`Operator first request unexpectedly asked ${request.questions[0]?.id ?? 'a handoff question'}.`)
+        })
+        insightSelection.current = { provider: 'solar-chatgpt-web', model: 'insight-analysis' }
+        const insightPrompt = 'INSIGHT_FIRST_REQUEST_MUST_REACH_OPERATOR_ONCE'
+        insightAgent.followup(createUserMessage({ content: [{ type: 'text', text: insightPrompt }], source: { kind: 'user' } }))
+        await insightAgent.whenIdle()
+        const insightCalls = calls.filter(call => call.model === 'insight-analysis')
+        const insightText = JSON.stringify(insightCalls.at(-1)?.messages)
+        checks.operatorInsightNoLuna = calls.filter(call => call.model === 'gpt-6-luna').length === lunaBeforeInsight
+        checks.operatorInsightPromptOnce = insightCalls.length === 1 && (insightText.match(new RegExp(insightPrompt, 'g')) ?? []).length === 1
+          && !insightText.includes(insightOld)
+        if (!checks.operatorInsightNoLuna || !checks.operatorInsightPromptOnce) throw new Error('Operator first request dropped, duplicated, or summarized the current prompt.')
+        disposeInsight()
+        await insightHandle.dispose()
         registration()
       } catch (caught) { error = caught instanceof Error ? caught.stack : String(caught) }
       await writeFile(process.env.SOLAR_HANDOFF_MARKER, JSON.stringify({ ok: error === undefined, checks, error }))
