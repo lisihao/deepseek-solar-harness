@@ -267,6 +267,16 @@
         "tests/**/*.ts"
       ]
     },
+    "packages/bench/bench-runner": {
+      "entry": [
+        "tests/**/*.spec.ts",
+        "tests/**/*.e2e.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
     "packages/physical-operator/physical-operator-subagent": {
       "entry": [
         "tests/**/*.spec.ts",

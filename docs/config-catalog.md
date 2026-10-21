@@ -400,7 +400,7 @@ export interface Config {
   command: string[]
   /** Absolute home whose `profiles/<profile>` seeds every run home. */
   templateHome: string
-  /** Home-relative files copied into every run home (credentials, settings). */
+  /** Home-relative files copied into every run home (credentials, settings) and deleted once its child exits. */
   templateFiles: string[]
   /** Absolute directory holding one ledger directory per experiment. */
   ledgerRoot: string

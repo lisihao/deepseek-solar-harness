@@ -1074,6 +1074,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm-mock-server':
+        specifier: workspace:^
+        version: link:../../test-support/llm-mock-server
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
