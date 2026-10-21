@@ -6,6 +6,7 @@ import {
   SolarRlmControl,
   createControlTool,
   createInspectTool,
+  createOperatorTool,
   createRunTool,
 } from '../src/index.js'
 import { RPC_REMOTE } from '../src/remote.js'
@@ -13,7 +14,7 @@ import { TYPERT } from '../src/typert.js'
 import type { RlmHost } from '../src/core.js'
 import type { RunSummary } from '../src/ui-contract.js'
 
-function summary(state = 'running'): RunSummary {
+function summary(state = 'running', overrides: Partial<RunSummary> = {}): RunSummary {
   return {
     runId: '00000000-0000-4000-8000-000000000001',
     label: 'test run',
@@ -22,6 +23,7 @@ function summary(state = 'running'): RunSummary {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     modelRequests: 0,
+    ...overrides,
   }
 }
 
@@ -58,6 +60,7 @@ function config(overrides: Partial<Config> = {}): Config {
 function hostFixture(): {
   host: RlmHost
   start: ReturnType<typeof vi.fn>
+  waitForResult: ReturnType<typeof vi.fn>
   continueRun: ReturnType<typeof vi.fn>
   inspect: ReturnType<typeof vi.fn>
   cancel: ReturnType<typeof vi.fn>
@@ -66,6 +69,7 @@ function hostFixture(): {
   dispose: ReturnType<typeof vi.fn>
 } {
   const start = vi.fn(async () => summary())
+  const waitForResult = vi.fn(async () => summary('idle', { result: 'operator fixture result' }))
   const continueRun = vi.fn(async () => summary('idle'))
   const inspect = vi.fn(async () => summary())
   const cancel = vi.fn(async () => summary('cancelled'))
@@ -73,8 +77,9 @@ function hostFixture(): {
   const check = vi.fn(async () => ({ formatVersion: 1 as const, kind: 'local-keyless' as const, status: 'passed' as const, checks: [], modelRequests: 0, resultDirectory: '/tmp/check' }))
   const dispose = vi.fn(async () => undefined)
   return {
-    host: { start, continue: continueRun, inspect, cancel, status, check, dispose } as unknown as RlmHost,
+    host: { start, waitForResult, continue: continueRun, inspect, cancel, status, check, dispose } as unknown as RlmHost,
     start,
+    waitForResult,
     continueRun,
     inspect,
     cancel,
@@ -109,6 +114,63 @@ describe('RLM tools and owner service', () => {
       route: { provider: 'provider-a', model: 'model-a', reasoningEffort: 'high', maxTokens: 512 },
     })
     expect(fixture.start.mock.calls[0]?.[1].signal).toBeUndefined()
+  })
+
+  it('runs the normal session tool through the current route, caller signal, and native result barrier', async () => {
+    const fixture = hostFixture()
+    const operatorConfig = config({ maxWallTimeMs: 30_000 })
+    const tool = createOperatorTool(fixture.host, operatorConfig)
+    const controller = new AbortController()
+    const input = {
+      task: 'finish the selected workspace task',
+      cwd: '/tmp/workspace',
+      inputs: ['input.json'],
+      maxModelRequests: 3,
+      maxWallTimeMs: 30_000,
+    }
+
+    await expect(tool.execute(input, exec({ name: 'solar_rlm', signal: controller.signal }))).resolves.toMatchObject({
+      runId: '00000000-0000-4000-8000-000000000001',
+      state: 'idle',
+      result: 'operator fixture result',
+    })
+    expect(fixture.start).toHaveBeenCalledWith(input, {
+      sessionId: 'session-1',
+      route: { provider: 'provider-a', model: 'model-a', reasoningEffort: 'high', maxTokens: 512 },
+      signal: controller.signal,
+    })
+    expect(fixture.waitForResult).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001', 'session-1')
+    expect(tool.timeoutMs).toBe(operatorConfig.maxWallTimeMs + 90_000)
+  })
+
+  it('keeps a normal session tool terminal failure as an error with its state, reference, and original message', async () => {
+    const fixture = hostFixture()
+    fixture.waitForResult.mockResolvedValueOnce(summary('failed', { message: 'original Prime failure marker' }))
+    const tool = createOperatorTool(fixture.host, config())
+    const error = await tool.execute({
+      task: 'fail visibly', cwd: '/tmp/workspace', maxModelRequests: 3, maxWallTimeMs: 30_000,
+    }, exec({ name: 'solar_rlm' })).then(() => undefined, reason => reason)
+
+    expect(error).toBeInstanceOf(Error)
+    if (!(error instanceof Error)) throw error
+    expect(error.message).toContain('failed')
+    expect(error.message).toContain('00000000-0000-4000-8000-000000000001')
+    expect(error.message).toContain('original Prime failure marker')
+    expect(fixture.waitForResult).toHaveBeenCalledOnce()
+  })
+
+  it('enforces normal session tool configured request and time limits before native start', async () => {
+    const fixture = hostFixture()
+    const tool = createOperatorTool(fixture.host, config({ maxModelRequests: 2, maxWallTimeMs: 10_000 }))
+
+    await expect(tool.execute({
+      task: 'task', cwd: '/tmp/workspace', maxModelRequests: 3, maxWallTimeMs: 10_000,
+    }, exec({ name: 'solar_rlm' }))).rejects.toThrow('RLM_BUDGET_LIMIT')
+    await expect(tool.execute({
+      task: 'task', cwd: '/tmp/workspace', maxModelRequests: 2, maxWallTimeMs: 10_001,
+    }, exec({ name: 'solar_rlm' }))).rejects.toThrow('RLM_TIME_LIMIT')
+    expect(fixture.start).not.toHaveBeenCalled()
+    expect(fixture.waitForResult).not.toHaveBeenCalled()
   })
 
   it('admits explicit bounded native autonomous settings without changing the route', async () => {
@@ -196,7 +258,7 @@ describe('RLM tools and owner service', () => {
     expect(fixture.status).toHaveBeenCalledOnce()
   })
 
-  it('registers all RLM tools with the real ToolRuntime schema validator', async () => {
+  it('registers four RLM tools with a model-visible normal-session schema and cleans them up', async () => {
     const fixture = hostFixture()
     const ctx = new Context()
     const removePrompt = ctx.provide('systemPrompt', {
@@ -206,15 +268,34 @@ describe('RLM tools and owner service', () => {
     })
     const runtime = new ToolRuntime(ctx)
     const unregister = [
+      runtime.register(createOperatorTool(fixture.host, config())),
       runtime.register(createRunTool(fixture.host, config())),
       runtime.register(createInspectTool(fixture.host)),
       runtime.register(createControlTool(fixture.host)),
     ]
 
-    expect(runtime.get('solar_rlm_run')).toBeDefined()
-    expect(runtime.get('solar_rlm_inspect')).toBeDefined()
-    expect(runtime.get('solar_rlm_control')).toBeDefined()
-    unregister.forEach(dispose => dispose())
-    await removePrompt()
+    try {
+      expect(runtime.get('solar_rlm')).toBeDefined()
+      expect(runtime.get('solar_rlm_run')).toBeDefined()
+      expect(runtime.get('solar_rlm_inspect')).toBeDefined()
+      expect(runtime.get('solar_rlm_control')).toBeDefined()
+      expect(runtime.schemas()).toContainEqual(expect.objectContaining({
+        name: 'solar_rlm',
+        parameters: expect.objectContaining({
+          type: 'object',
+          required: expect.arrayContaining(['task', 'cwd', 'maxModelRequests', 'maxWallTimeMs']),
+          properties: expect.objectContaining({
+            task: expect.objectContaining({ type: 'string' }),
+            cwd: expect.objectContaining({ type: 'string' }),
+            maxModelRequests: expect.objectContaining({ type: 'integer' }),
+            maxWallTimeMs: expect.objectContaining({ type: 'integer' }),
+          }),
+        }),
+      }))
+    } finally {
+      unregister.forEach(dispose => dispose())
+      await removePrompt()
+    }
+    expect(runtime.schemas().map(schema => schema.name)).not.toContain('solar_rlm')
   })
 })

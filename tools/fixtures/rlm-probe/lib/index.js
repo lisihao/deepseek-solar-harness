@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, createUserMessage } from '@deepseek-ai/dsh-llm'
 
 const SERVICE_NAMES = ['solarRlm', 'solarRlmControl']
-const TOOL_NAMES = ['solar_rlm_run', 'solar_rlm_inspect', 'solar_rlm_control']
+const TOOL_NAMES = ['solar_rlm', 'solar_rlm_run', 'solar_rlm_inspect', 'solar_rlm_control']
 const FIXTURE_PROVIDER = 'solar-rlm-fixture'
 const FIXTURE_MODEL = 'fixture'
 const AUTONOMOUS_FIXTURE_PROVIDER = 'solar-rlm-autonomous-fixture'
@@ -57,6 +57,16 @@ class FixtureAdapter extends LlmAdapter {
     super()
     this.requests = []
     this.resolutions = []
+    this.parentRequests = []
+    this.auxiliaryRequests = []
+    this.parentSessionId = undefined
+    this.operatorInput = undefined
+    this.operatorResult = undefined
+  }
+
+  configureOperator(sessionId, input) {
+    this.parentSessionId = sessionId
+    this.operatorInput = input
   }
 
   providerInfo(provider) {
@@ -84,6 +94,53 @@ class FixtureAdapter extends LlmAdapter {
   async *stream(options) {
     if (options.provider !== FIXTURE_PROVIDER || options.model !== FIXTURE_MODEL) throw new Error('fixture adapter received an unexpected route')
     options.signal?.throwIfAborted()
+    if (options.sessionId === this.parentSessionId && options.purpose !== undefined) {
+      this.auxiliaryRequests.push(options)
+      const text = 'RLM operator local fixture'
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+      return
+    }
+    if (options.sessionId === this.parentSessionId) {
+      this.parentRequests.push(options)
+      const ordinal = this.parentRequests.length
+      if (ordinal === 1) {
+        const schema = options.tools?.find(tool => tool.name === 'solar_rlm')
+        assert(schema !== undefined, 'actual parent Agent did not receive the solar_rlm model schema')
+        const required = schema.parameters?.required
+        const properties = schema.parameters?.properties
+        assert(Array.isArray(required) && ['task', 'cwd', 'maxModelRequests', 'maxWallTimeMs'].every(name => required.includes(name)) && properties?.task?.type === 'string' && properties?.cwd?.type === 'string' && properties?.maxModelRequests?.type === 'integer' && properties?.maxWallTimeMs?.type === 'integer', 'actual parent Agent received an invalid solar_rlm model schema')
+        assert(this.operatorInput !== undefined, 'operator fixture input was not configured')
+        const argumentsText = JSON.stringify(this.operatorInput)
+        yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+        yield { type: 'tool-call-delta', index: 0, id: 'fixture-solar-rlm', name: 'solar_rlm', argumentsDelta: argumentsText }
+        yield { type: 'block-end', index: 0, block: { type: 'tool-call', id: 'fixture-solar-rlm', name: 'solar_rlm', arguments: argumentsText } }
+        yield { type: 'usage', usage: { inputTokens: 8, outputTokens: 2 } }
+        yield { type: 'finish', reason: { kind: 'tool-calls' } }
+        return
+      }
+      if (ordinal === 2) {
+        try {
+        const toolMessage = options.messages.find(message => message.role === 'tool' && JSON.stringify(message.content).includes('RLM_BRIDGE_FIRST_MARKER'))
+        assert(toolMessage !== undefined, 'actual parent Agent did not receive the solar_rlm result')
+        const resultText = toolMessage.content.find(block => block.type === 'text')?.text
+        assert(typeof resultText === 'string', 'solar_rlm result did not include a text payload for the parent Agent')
+        const result = object(JSON.parse(resultText))
+        assert(result.state === 'idle' && typeof result.runId === 'string' && typeof result.result === 'string' && result.result.includes('RLM_BRIDGE_FIRST_MARKER'), 'solar_rlm did not return the settled native result to the parent Agent')
+        this.operatorResult = result
+        const text = 'RLM_OPERATOR_PARENT_DONE'
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+        yield { type: 'usage', usage: { inputTokens: 8, outputTokens: 2 } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+        return
+        } catch (error) { this.parentFailure = { message: error.message, toolMessages: options.messages.filter(message => message.role === 'tool') }; throw error }
+      }
+      throw new Error(`operator fixture received unexpected parent Agent request ${String(ordinal)}`)
+    }
     this.requests.push(options)
     const ordinal = this.requests.length
     if (ordinal === 1) {
@@ -296,6 +353,12 @@ async function runBridgeAcceptance(ctx, service, status) {
     sessionId: `rlm-probe-owner-${process.pid}`,
     route: { provider: FIXTURE_PROVIDER, model: FIXTURE_MODEL, maxTokens: 512 },
   }
+  const tools = ctx.get('tools')
+  const sessions = ctx.get('sessions')
+  const agents = ctx.get('agents')
+  assert(tools !== undefined && typeof tools.schemas === 'function', 'tools service cannot expose the normal Prime RLM tool schema')
+  assert(sessions !== undefined && typeof sessions.get === 'function' && typeof sessions.flush === 'function', 'session store cannot create a durable normal-tool owner')
+  assert(agents !== undefined && typeof agents.create === 'function' && typeof agents.get === 'function', 'agent registry cannot create a durable normal-tool owner')
   const input = {
     task: 'Execute the supplied Python tool call, then reply with the fixture marker.',
     cwd: requiredEnv('SOLAR_RLM_PROBE_WORKSPACE'),
@@ -304,12 +367,47 @@ async function runBridgeAcceptance(ctx, service, status) {
     maxWallTimeMs: 120_000,
   }
   let runId
+  let agentHandle
   try {
-    const firstReceipt = await host.start(input, owner)
-    runId = firstReceipt.runId
-    const first = await waitForIdle(host, runId, owner.sessionId)
+    // AgentRegistry.create owns a published, persistent Session together with
+    // the Agent loop. A session-shaped fixture cannot enter the ToolRuntime's
+    // durable tool/call and tool/result path.
+    const agentCreation = await agents.create({
+      sessionId: owner.sessionId,
+      meta: { cwd: input.cwd },
+      agentOptions: owner.route,
+    })
+    agentHandle = agentCreation
+    const agent = agentCreation.agent
+    assert(agent.session?.id === owner.sessionId && sessions.get(owner.sessionId) === agent.session, 'operator fixture Agent is not backed by the live session-store instance')
+    assert(agents.get(owner.sessionId) === agent, 'operator fixture Agent is not live in the agent registry')
+    adapter.configureOperator(owner.sessionId, input)
+    const operatorSchema = tools.schemas(agent).find(schema => schema.name === 'solar_rlm')
+    assert(operatorSchema !== undefined, 'solar_rlm is not visible in the fixture Agent model schema')
+    const operatorRequired = operatorSchema.parameters?.required
+    const operatorProperties = operatorSchema.parameters?.properties
+    assert(Array.isArray(operatorRequired) && ['task', 'cwd', 'maxModelRequests', 'maxWallTimeMs'].every(name => operatorRequired.includes(name)) && operatorProperties?.task?.type === 'string' && operatorProperties?.cwd?.type === 'string' && operatorProperties?.maxModelRequests?.type === 'integer' && operatorProperties?.maxWallTimeMs?.type === 'integer', 'solar_rlm model schema does not expose its required bounded input')
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Use the declared solar_rlm tool for the fixture task, then report its result.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+    const first = object(adapter.operatorResult)
+    assert(typeof first.runId === 'string', `solar_rlm normal tool call did not return its run reference: ${JSON.stringify({parentRequests: adapter.parentRequests.length, parentFailure: adapter.parentFailure, events: agent.session.snapshotEvents().slice(-8)})}`)
+    runId = first.runId
+    assert(first.state === 'idle', `solar_rlm normal tool call returned before native completion: ${String(first.state)}`)
     assert(first.modelRequests === 2, `first bridge turn modelRequests=${String(first.modelRequests)}`)
-    assert(first.result?.includes('RLM_BRIDGE_FIRST_MARKER'), 'first bridge marker was not persisted')
+    assert(typeof first.result === 'string' && first.result.includes('RLM_BRIDGE_FIRST_MARKER'), 'solar_rlm normal tool call did not return the native result to the parent Agent')
+    assert(adapter.parentRequests.length === 2, `operator fixture parent Agent request count=${String(adapter.parentRequests.length)}`)
+    const flushed = await sessions.flush(agent.session)
+    assert(flushed === true, 'operator fixture session has no durable flush listener')
+    const parentEvents = agent.session.snapshotEvents()
+    const parentCall = parentEvents.find(event => event.type === 'tool/call' && object(event.data).name === 'solar_rlm')
+    assert(parentCall !== undefined, 'normal Agent path did not append the solar_rlm tool/call event')
+    const parentCallId = object(parentCall.data).callId
+    const parentResult = parentEvents.find(event => event.type === 'tool/result' && object(object(event.data).message).toolCallId === parentCallId)
+    assert(parentResult !== undefined && object(object(parentResult.data).message).isError !== true && JSON.stringify(object(parentResult.data).message).includes('RLM_BRIDGE_FIRST_MARKER'), 'normal Agent path did not append the settled solar_rlm tool/result event')
+    assert(JSON.stringify(parentEvents).includes('RLM_OPERATOR_PARENT_DONE'), 'scripted parent Agent did not complete after the normal tool result')
 
     const secondReceipt = await host.continue(runId, 'Continue once and return the second fixture marker.', owner)
     assert(secondReceipt.runId === runId, 'continue returned a different run id')
@@ -352,6 +450,18 @@ async function runBridgeAcceptance(ctx, service, status) {
       modelRequests: adapter.requests.length,
       paidProviderCalls: 0,
       authoritativeToolArgumentsExecuted: true,
+      normalToolSchemaVisible: true,
+      normalToolPath: true,
+      normalToolResultReturned: true,
+      normalToolParentAgentLive: true,
+      normalToolSessionFlushed: true,
+      normalToolDurableCallResult: true,
+      parentAgentRequests: adapter.parentRequests.length,
+      auxiliaryLocalRequests: adapter.auxiliaryRequests.length,
+      parentAgentReasoningSelection: {
+        status: 'notrun',
+        reason: 'fixture 创建了真实 Agent、live Session 和 durable tool/call、tool/result；但该 Agent 的 solar_rlm 选择由本地 scripted provider 固定生成，未运行真实父 Agent 推理，也未证明模型自主选择。',
+      },
       firstState: first.state,
       secondState: second.state,
       resumedState: resumed.state,
@@ -368,7 +478,18 @@ async function runBridgeAcceptance(ctx, service, status) {
         cleanupError = error
       }
     }
-    registration()
+    if (agentHandle !== undefined) {
+      try {
+        await agentHandle.dispose()
+      } catch (error) {
+        cleanupError ??= error
+      }
+    }
+    try {
+      registration()
+    } catch (error) {
+      cleanupError ??= error
+    }
     if (cleanupError !== undefined) throw new Error(`fixture bridge cleanup could not confirm stop: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`)
   }
 }

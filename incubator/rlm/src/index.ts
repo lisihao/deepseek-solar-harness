@@ -151,8 +151,29 @@ const runSummaryOutput = {
 }
 
 function runToolDescription(): string {
-  return 'Start one bounded Prime RLM task using the current Agent provider, model, reasoning effort and max output tokens exactly as selected. Optional autonomous settings enable the original Prime bounded continuation and completion gate. The tool returns an asynchronous receipt; inspect it for progress and terminal state. The Prime process reads the admitted cwd with its normal file permissions. A completed receipt is not a quality proof.'
+  return 'Start one bounded Prime RLM task using the current Agent provider/model, initializing Prime with the selected reasoning effort and output limit. Native per-request reasoning/output controls remain forwarded. Optional autonomous settings enable the original Prime bounded continuation and completion gate. The tool returns an asynchronous receipt; inspect it for progress and terminal state. The Prime process reads the admitted cwd with its normal file permissions. A completed receipt is not a quality proof.'
 }
+
+const runParameters = {
+  task: { type: 'string', required: true, description: '任务文本。' },
+  cwd: { type: 'string', required: true, description: '已选择的工作目录。Prime 会按正常文件权限读取它。' },
+  label: { type: 'string', description: '任务显示名称。' },
+  inputs: { type: 'array', items: { type: 'string' }, description: '工作目录内的相对输入文件路径。' },
+  autonomous: {
+    type: 'object',
+    additionalProperties: false,
+    description: '显式启用 Prime 原生自主续轮；省略时保持普通原生模式。原生计数在冷恢复时重新开始，任务树请求总额不重置。',
+    properties: {
+      maxTurns: { type: 'integer', required: true, description: '原生 assistant turn 上限（1-1000）。' },
+      maxTokens: { type: 'integer', required: true, description: '原生 autonomous token 上限（1-1000000000），不是单次输出上限。' },
+      gate: { type: 'string', description: '可选原生完成检查命令；在任务工作目录按 Prime 原始机制执行。' },
+      gateMaxRetries: { type: 'integer', description: '原生完成门禁重试上限（1-1000）；不增加整树模型请求预算。' },
+      maxContinuations: { type: 'integer', description: '原生自主续轮上限（1-1000）；省略时使用 Prime 默认值，不增加整树模型请求预算。' },
+    },
+  },
+  maxModelRequests: { type: 'integer', required: true, description: `整个任务树的逻辑模型请求上限（1-${MAX_MODEL_REQUESTS}）。` },
+  maxWallTimeMs: { type: 'integer', required: true, description: `每轮原生执行的时间上限（1000-${MAX_WALL_TIME_MS} 毫秒）。` },
+} as const satisfies ToolDefinition['parameters']
 
 export function createRunTool(host: RlmHost, config: Config): ToolDefinition {
   return defineTool({
@@ -162,31 +183,36 @@ export function createRunTool(host: RlmHost, config: Config): ToolDefinition {
     presentResult: (_args, result) => result.isError
       ? { card: 'generic', title: 'Prime RLM 未启动', content: result.content }
       : { card: 'generic', title: 'Prime RLM 已提交', content: [{ type: 'text', text: '任务已提交；请继续检查任务状态和原生记录。提交回执不代表答案已完成或通过质量验收。' }] },
-    parameters: {
-      task: { type: 'string', required: true, description: '任务文本。' },
-      cwd: { type: 'string', required: true, description: '已选择的工作目录。Prime 会按正常文件权限读取它。' },
-      label: { type: 'string', description: '任务显示名称。' },
-      inputs: { type: 'array', items: { type: 'string' }, description: '工作目录内的相对输入文件路径。' },
-      autonomous: {
-        type: 'object',
-        additionalProperties: false,
-        description: '显式启用 Prime 原生自主续轮；省略时保持普通原生模式。原生计数在冷恢复时重新开始，任务树请求总额不重置。',
-        properties: {
-          maxTurns: { type: 'integer', required: true, description: '原生 assistant turn 上限（1-1000）。' },
-          maxTokens: { type: 'integer', required: true, description: '原生 autonomous token 上限（1-1000000000），不是单次输出上限。' },
-          gate: { type: 'string', description: '可选原生完成检查命令；在任务工作目录按 Prime 原始机制执行。' },
-          gateMaxRetries: { type: 'integer', description: '原生完成门禁重试上限（1-1000）；不增加整树模型请求预算。' },
-          maxContinuations: { type: 'integer', description: '原生自主续轮上限（1-1000）；省略时使用 Prime 默认值，不增加整树模型请求预算。' },
-        },
-      },
-      maxModelRequests: { type: 'integer', required: true, description: `整个任务树的逻辑模型请求上限（1-${MAX_MODEL_REQUESTS}）。` },
-      maxWallTimeMs: { type: 'integer', required: true, description: `每轮原生执行的时间上限（1000-${MAX_WALL_TIME_MS} 毫秒）。` },
-    },
+    parameters: runParameters,
     output: runSummaryOutput,
     async execute(args, exec) {
       const input = startInputSchema.parse(args)
       enforceRunLimits(input, config)
       return host.start(input, ownerFromExec(exec))
+    },
+  })
+}
+
+/** Ordinary conversation entry: returns the settled answer in the same tool call. */
+export function createOperatorTool(host: RlmHost, config: Config): ToolDefinition {
+  return defineTool({
+    name: 'solar_rlm',
+    description: 'Delegate a difficult task to Prime RLM, which can programmatically inspect selected inputs and recursively delegate subproblems using its original persistent Python kernel. Use when extra bounded model work may help; improvement is not guaranteed. Uses the current Agent provider/model and initializes Prime with its reasoning effort and output limit; native per-request reasoning/output controls remain forwarded. Supply task, selected cwd and explicit whole-tree request/time limits within the configured caps. Waits and returns the native result preview (last 32000 characters) and trace reference in this tool result; use the linked journal for a longer answer. No separate page or polling is needed. Cancellation stops the owned native task. Optional autonomous settings use original Prime continuation/gates. Prime executes code with normal filesystem permissions in cwd.',
+    timeoutMs: config.maxWallTimeMs + 90_000,
+    presentCall: () => ({ card: 'generic', kind: 'execute', title: '使用 RLM 处理任务' }),
+    presentResult: (_args, result) => ({ card: 'generic', title: result.isError ? 'RLM 执行未完成' : 'RLM 结果', content: result.content }),
+    parameters: runParameters,
+    output: runSummaryOutput,
+    async execute(args, exec) {
+      const input = startInputSchema.parse(args)
+      enforceRunLimits(input, config)
+      const owner = { ...ownerFromExec(exec), signal: exec.signal }
+      const receipt = await host.start(input, owner)
+      const result = await host.waitForResult(receipt.runId, owner.sessionId)
+      if (result.state !== 'idle' || !result.result?.trim()) {
+        throw new Error(`RLM_RESULT_UNAVAILABLE: ${result.runId}; state=${result.state}; ${result.message}; trace=${result.traceRef ?? 'unavailable'}`)
+      }
+      return result
     },
   })
 }
@@ -290,6 +316,7 @@ export function apply(ctx: Context, config: Config): void {
   new SolarRlmControl(ctx, host)
 
   ctx.effect(() => {
+    const unregisterOperator = ctx.tools.register(createOperatorTool(host, config))
     const unregisterRun = ctx.tools.register(createRunTool(host, config))
     const unregisterInspect = ctx.tools.register(createInspectTool(host))
     const unregisterControl = ctx.tools.register(createControlTool(host))
@@ -297,6 +324,7 @@ export function apply(ctx: Context, config: Config): void {
       unregisterControl()
       unregisterInspect()
       unregisterRun()
+      unregisterOperator()
     }
   }, 'rlm: tools')
 

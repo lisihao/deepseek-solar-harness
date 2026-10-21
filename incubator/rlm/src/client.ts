@@ -10,7 +10,6 @@ import {
 } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { RPC_REMOTE } from './remote.js'
@@ -140,6 +139,7 @@ function displayMessage(value: string | undefined, fallback: string): string {
   if (!text) return fallback
   return text
     .replace(/^[A-Z][A-Z0-9_/-]+:\s*/, '')
+    .replace(/\bsolar[_-]rlm[_-][A-Za-z0-9_-]+\b/gi, '该任务')
     .replace(/\b(?:rlm|run|command)[-_][A-Za-z0-9_-]+\b/gi, '该任务')
 }
 
@@ -201,8 +201,8 @@ function canRequestCancel(run: RunSummary): boolean {
 }
 
 function runLabel(run: RunSummary): string {
-  const label = run.label.trim()
-  return label || '未命名 Prime RLM 任务'
+  const label = displayMessage(run.label, '').trim()
+  return label || '未命名 RLM 算子任务'
 }
 
 function upsertRun(runs: readonly RunSummary[], run: RunSummary): readonly RunSummary[] {
@@ -307,14 +307,14 @@ function RlmPanel({ remoteStore }: { readonly remoteStore: RemoteAccessStore }):
     try {
       const result = await api.status()
       if (!result.ok) {
-        setNotice({ tone: 'error', message: `无法读取 Prime RLM 运行时状态：${remoteFailureMessage(result)}` })
+        setNotice({ tone: 'error', message: `无法读取 RLM 算子运行时状态：${remoteFailureMessage(result)}` })
         return
       }
       setStatus(result.value)
       setSelfTest(current => result.value.selftest ?? current)
-      if (announce) setNotice({ tone: 'info', message: '已读取 Prime RLM 运行时和任务状态；未提交模型请求。' })
+      if (announce) setNotice({ tone: 'info', message: '已读取 RLM 算子运行时和任务状态；未提交模型请求。' })
     } catch (error) {
-      setNotice({ tone: 'error', message: `无法读取 Prime RLM 运行时状态：${errorMessage(error)}` })
+      setNotice({ tone: 'error', message: `无法读取 RLM 算子运行时状态：${errorMessage(error)}` })
     } finally {
       setLoadingStatus(false)
       unlock(key)
@@ -404,12 +404,12 @@ function RlmPanel({ remoteStore }: { readonly remoteStore: RemoteAccessStore }):
   const report = selfTest ?? status?.selftest
   return createElement('main', { style: panelStyle }, [
     createElement('header', { key: 'header', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
-      createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem' } }, 'Prime RLM'),
-      createElement('p', { key: 'summary', style: mutedStyle }, '这里显示 Prime RLM 运行时和任务状态。真实任务由会话中的 solar_rlm_run 工具启动；本页面不会自动自检、轮询或请求模型。'),
+      createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem' } }, 'RLM 算子'),
+      createElement('p', { key: 'summary', style: mutedStyle }, '在普通对话中，请让助手使用 RLM 算子处理任务；处理结果会回到原对话。这里用于查看运行时和任务记录，并执行刷新、检查、取消等维护操作；页面不会自动自检、轮询或请求模型。'),
     ]),
     remote.error === undefined
       ? null
-      : createElement('p', { key: 'mount-error', role: 'alert', style: { ...sectionStyle, color: 'var(--dsw-alias-state-error-primary)' } }, `无法连接 Prime RLM 控制通道：${remote.error}`),
+      : createElement('p', { key: 'mount-error', role: 'alert', style: { ...sectionStyle, color: 'var(--dsw-alias-state-error-primary)' } }, `无法连接 RLM 算子控制通道：${remote.error}`),
     notice === undefined
       ? null
       : createElement('p', {
@@ -436,30 +436,32 @@ function RlmPanel({ remoteStore }: { readonly remoteStore: RemoteAccessStore }):
           createElement('p', { key: 'commit', style: mutedStyle }, `Prime 机制版本记录：${status.runtime.primeCommit.trim() || '未提供'}`),
         ]),
     ]),
-    createElement('section', { key: 'selftest', style: sectionStyle }, [
-      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '本地自检'),
-      createElement('p', { key: 'copy', style: mutedStyle }, '只有点击下方按钮才会运行一次使用本地脚本替身的自检；页面加载和状态读取不会触发自检。'),
-      createElement('div', { key: 'actions', style: actionRowStyle }, [
-        createElement('button', {
-          key: 'check',
-          type: 'button',
-          disabled: remote.api === undefined || pending.has('check'),
-          onClick: () => { void runSelfTest() },
-          style: buttonStyle,
-        }, pending.has('check') ? '本地自检正在运行…' : '运行本地自检（不请求真实模型）'),
-      ]),
-      report === undefined
-        ? createElement('p', { key: 'empty', style: mutedStyle }, '尚未运行本地自检。')
-        : createElement('div', { key: 'report', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
-          createElement('strong', { key: 'status' }, reportStatusLabel(report)),
-          createElement('p', { key: 'requests', style: mutedStyle }, `真实提供方请求：${report.modelRequests} 次；本地脚本响应：${report.localModelRequests ?? 0} 次。`),
-          ...report.checks.map((check, index) => createElement('p', { key: `${index}:${check.id}`, style: mutedStyle }, `检查项 ${index + 1}：${check.passed ? '通过' : '未通过'}。${checkDetail(check.detail)}`)),
+    createElement('details', { key: 'selftest', style: sectionStyle }, [
+      createElement('summary', { key: 'title', style: { cursor: 'pointer', fontWeight: 600 } }, '本地自检'),
+      createElement('div', { key: 'body', style: { display: 'grid', gap: 10, minWidth: 0, paddingTop: 10 } }, [
+        createElement('p', { key: 'copy', style: mutedStyle }, '只有点击下方按钮才会运行一次使用本地脚本替身的自检；页面加载和状态读取不会触发自检。'),
+        createElement('div', { key: 'actions', style: actionRowStyle }, [
+          createElement('button', {
+            key: 'check',
+            type: 'button',
+            disabled: remote.api === undefined || pending.has('check'),
+            onClick: () => { void runSelfTest() },
+            style: buttonStyle,
+          }, pending.has('check') ? '本地自检正在运行…' : '运行本地自检（不调用真实模型）'),
         ]),
+        report === undefined
+          ? createElement('p', { key: 'empty', style: mutedStyle }, '尚未运行本地自检。')
+          : createElement('div', { key: 'report', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
+            createElement('strong', { key: 'status' }, reportStatusLabel(report)),
+            createElement('p', { key: 'requests', style: mutedStyle }, `真实提供方请求：${report.modelRequests} 次；本地脚本响应：${report.localModelRequests ?? 0} 次。`),
+            ...report.checks.map((check, index) => createElement('p', { key: `${index}:${check.id}`, style: mutedStyle }, `检查项 ${index + 1}：${check.passed ? '通过' : '未通过'}。${checkDetail(check.detail)}`)),
+          ]),
+      ]),
     ]),
     createElement('section', { key: 'runs', style: { display: 'grid', gap: 10, minWidth: 0 } }, [
       createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '任务状态'),
       status?.runs.length === 0 || status === undefined
-        ? createElement('p', { key: 'empty', style: mutedStyle }, status === undefined ? '尚未读取任务列表。' : '当前没有已记录的 Prime RLM 任务。')
+        ? createElement('p', { key: 'empty', style: mutedStyle }, status === undefined ? '尚未读取任务列表。' : '当前没有已记录的 RLM 算子任务。')
         : createElement('div', { key: 'list', style: { display: 'grid', gap: 10, minWidth: 0 } }, status.runs.map(run => createElement(RunCard, {
           key: run.runId,
           run,
@@ -472,7 +474,7 @@ function RlmPanel({ remoteStore }: { readonly remoteStore: RemoteAccessStore }):
   ])
 }
 
-/** Mount the owner-only Remote namespace once, then contribute the same view to both official slots. */
+/** Mount the owner-only Remote namespace once, then contribute the view to Settings. */
 export function apply(ctx: Context): void {
   const remoteStore = new RemoteAccessStore()
   let disposed = false
@@ -487,7 +489,7 @@ export function apply(ctx: Context): void {
       const api = ctx.get('remote.solarRlmControl') as unknown as RlmControlRemote | undefined
       if (api === undefined) {
         await disposer()
-        remoteStore.setError('本机没有提供 Prime RLM 控制服务。')
+        remoteStore.setError('本机没有提供 RLM 算子控制服务。')
         return
       }
       disposeRemote = disposer
@@ -503,16 +505,10 @@ export function apply(ctx: Context): void {
   }, 'solar-rlm: remote')
 
   const View = (): ReactElement => createElement(RlmPanel, { remoteStore })
-  ctx.slots.inject('conversation.view', () => ctx.slots.register({
-    name: 'conversation.view',
-    id: 'solar-rlm',
-    order: 45,
-    label: () => 'Prime RLM',
-  }, View))
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'solar-rlm',
     order: 45,
-    label: () => 'Prime RLM',
+    label: () => 'RLM 算子',
   }, View))
 }

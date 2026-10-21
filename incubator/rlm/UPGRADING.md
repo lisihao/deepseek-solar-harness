@@ -18,13 +18,13 @@ Prime Agent's source license is MIT. The bundled Python distributions include mu
 
 The main adapter call sites are:
 
-- `src/core.ts`: `RlmHost.start`, ACP lifecycle and run controls, per-run Prime environment/configuration, and loopback `/v1/chat/completions` handling through `ctx.llm.prepareCall`.
+- `src/core.ts`: `RlmHost.start`, promise-based `waitForResult`, ACP lifecycle and run controls, per-run Prime environment/configuration, and loopback `/v1/chat/completions` handling through `ctx.llm.prepareCall`.
 - `src/model-wire.ts`: `decodeChatRequest` and `encodeChatStream`, which translate supported Prime OpenAI Chat Completions requests to DSH LLM messages and stream results back.
 - `src/acp-client.ts`: JSON-RPC/JSONL transport to the native Prime ACP process.
 - `src/runtime.ts`: archive/manifest checks, bundled binary and Python paths, and the pinned Prime commit.
 - `src/store.ts`: versioned per-run manifest and append-only activity journal.
 - `src/execution.ts`: strict, immutable native autonomous configuration snapshot and exact CLI arguments; legacy mode recovery requires journal evidence.
-- `src/remote.ts`, `src/typert.ts`, and `src/client.ts`: current owner-only status/check/inspect/cancel remote surface and UI. `src/index.ts` registers ordinary conversation tools, validated plugin Config and the owner service.
+- `src/remote.ts`, `src/typert.ts`, and `src/client.ts`: current owner-only status/check/inspect/cancel remote surface and UI. `src/index.ts` registers the synchronous `solar_rlm` ordinary-conversation operator, the three compatible asynchronous control tools, validated plugin Config and the owner service. The browser contributes only a Settings section.
 
 The adapter relies on Prime's native ACP session methods, optional original `--autonomous` and gate/turn/token/timeout flags, native durable session files and `--resume`, the native `openai-completions` provider, and Prime's own Python REPL, recursive child calls, Factory, and `/refine` behavior. The loopback bridge changes only the model transport. It does not substitute DSH child agents or schedulers for Prime mechanisms. Prime's full native internal step trace is not recreated from `ctx.llm` records.
 
@@ -55,6 +55,8 @@ The internal evaluation host can explicitly forward the original nonnegative `rl
 3. **ARC benchmark SDK facade (evaluation tools only).** The fixed author ARC broker calls action methods absent from its pinned Toolkit 0.9.9. `tools/fixtures/rlm-arc-prepare/sdk-step-adapter.py` delegates those method calls to the same pinned SDK's `step(GameAction, data=...)`. Original broker counts/reset/terminal logic remains unmodified; the original API failure and explicit compatibility flag remain in reports. This does not ship with the plugin, modify Prime, or justify exact author-result reproduction. See the [ARC protocol boundary](../../docs/testing/prime-rlm-arc-protocol.md).
 
 4. **Optional native autonomous limits (adapter only).** `src/execution.ts` validates and persists positive `gateMaxRetries` and `maxContinuations`, emitting the original `--autonomous-gate-retries` and `--autonomous-max-continuations` flags only when explicitly provided. The pinned CLI requires positive integers for both flags. Omission retains Prime's default. It does not change Prime, increase Solar's complete-tree request budget, or accept a failed gate. `tests/execution.test.ts` verifies persistence, old snapshots, exact argv and bounds. Actual original/plugin native gate controls are recorded separately from unit checks and measured quality.
+
+5. **Ordinary-conversation operator (adapter only).** `src/index.ts::createOperatorTool` registers `solar_rlm` on the published ToolRuntime, using the current Agent's provider/model and native initialization settings. `RlmHost.waitForResult` follows the native turn and any owned cancellation/cleanup promise; it never polls or repeats a prompt. Failed, cancelled, indeterminate and empty-answer rounds become tool errors. Admission checks the owner signal after persistence, late ACP responses cannot overwrite cancellation, and plugin disposal waits for detached cancellation receipts. A settled successful tool detaches its scoped owner listener without stopping Prime's retained idle kernel. The three existing asynchronous tools keep their receipt behavior. The browser now contributes only Settings. No Prime source or algorithm changed. Lifecycle tests cover the cancellation windows; the built-package scripted Agent fixture checks model schema, native execution and durable parent tool call/result. Real parent-model selection remains a separate unrun check for this UI/operator change.
 
 ## Current verification record
 

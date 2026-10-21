@@ -96,7 +96,7 @@ V4 must not copy or move DSH 3.x source into this branch. A future plugin may as
 - [Native plugin source verification](docs/native-plugins-verification.md)
 - [Native collaboration development candidate](incubator/native-collaboration/README.md)
 - [Native Resident development candidate](incubator/native-resident/README.md)
-- [Prime RLM and Continual Harness candidate](incubator/rlm/README.md)
+- [Prime RLM and Continual Harness candidate](incubator/rlm/README.md) — ordinary-conversation operator; Settings contains diagnostics and task maintenance.
 - [Prime integration architecture](docs/integrations/prime-agent-rlm.md)
 - [Prime verification and evaluation boundaries](docs/testing/prime-rlm-verification.md)
 

@@ -36,7 +36,7 @@ export async function checkRlmClient(path) {
       inject(name, setup) { disposers.push(setup()); return () => {} },
       register(descriptor, view) {
         assert.equal(descriptor.id, 'solar-rlm')
-        assert.equal(descriptor.label(), 'Prime RLM')
+        assert.equal(descriptor.label(), 'RLM 算子')
         assert.equal(typeof view, 'function')
         slots.push(descriptor.name)
         return () => { slots.splice(slots.indexOf(descriptor.name), 1) }
@@ -45,7 +45,7 @@ export async function checkRlmClient(path) {
   })
   await Promise.resolve()
   assert.equal(mounts, 1)
-  assert.deepEqual(slots, ['conversation.view', 'settings.section'])
+  assert.deepEqual(slots, ['settings.section'])
   for (const dispose of disposers.reverse()) dispose?.()
   await Promise.resolve()
   assert.equal(unmounts, 1)

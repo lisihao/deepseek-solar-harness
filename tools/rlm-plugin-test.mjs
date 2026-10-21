@@ -183,7 +183,7 @@ async function readMarker(path) {
   if (marker.productStatus === 'nonproduct' && marker.selftest?.status !== 'notrun') {
     throw new Error(`RLM probe ran a native product check on an unsupported platform: ${JSON.stringify(marker)}`)
   }
-  for (const tool of ['solar_rlm_run', 'solar_rlm_inspect', 'solar_rlm_control']) {
+  for (const tool of ['solar_rlm', 'solar_rlm_run', 'solar_rlm_inspect', 'solar_rlm_control']) {
     if (!marker.checks?.tools?.includes(tool)) throw new Error(`RLM probe did not register ${tool}: ${JSON.stringify(marker)}`)
   }
   if (!['passed', 'notrun'].includes(marker.selftest?.status)) throw new Error(`RLM probe self-test outcome is invalid: ${JSON.stringify(marker)}`)
@@ -191,6 +191,8 @@ async function readMarker(path) {
     if (marker.checks?.bridge !== 'passed') throw new Error(`RLM bridge check did not pass: ${JSON.stringify(marker)}`)
     if (marker.selftest.bridge?.status !== 'passed') throw new Error(`RLM bridge acceptance did not pass: ${JSON.stringify(marker)}`)
     if (!(marker.selftest.bridge.modelRequests > 0) || marker.selftest.bridge.paidProviderCalls !== 0) throw new Error(`RLM bridge request accounting is invalid: ${JSON.stringify(marker)}`)
+    if (marker.selftest.bridge.normalToolSchemaVisible !== true || marker.selftest.bridge.normalToolPath !== true || marker.selftest.bridge.normalToolResultReturned !== true || marker.selftest.bridge.normalToolParentAgentLive !== true || marker.selftest.bridge.normalToolSessionFlushed !== true || marker.selftest.bridge.normalToolDurableCallResult !== true) throw new Error(`RLM normal session tool acceptance is incomplete: ${JSON.stringify(marker)}`)
+    if (marker.selftest.bridge.parentAgentReasoningSelection?.status !== 'notrun' || typeof marker.selftest.bridge.parentAgentReasoningSelection?.reason !== 'string') throw new Error(`RLM fixture must disclose that it did not run parent Agent reasoning selection: ${JSON.stringify(marker)}`)
     const autonomous = marker.selftest.autonomous
     if (marker.checks?.autonomous !== 'passed' || autonomous?.status !== 'passed') throw new Error(`RLM native autonomous acceptance did not pass: ${JSON.stringify(marker)}`)
     if (autonomous.initialModelRequests !== 3 || autonomous.modelRequests !== 4 || autonomous.paidProviderCalls !== 0 || autonomous.modelErrors !== 0) throw new Error(`RLM autonomous request accounting is invalid: ${JSON.stringify(marker)}`)

@@ -79,4 +79,114 @@ describe('owned native lifecycle', () => {
     expect(close).toHaveBeenCalledTimes(2)
     lives.clear(); await host.dispose()
   })
+
+  it('waits for native completion and releases only the tool-scoped owner listener', async () => {
+    const root = await directory(), host = new RlmHost({} as Context, root, '/unused', 100)
+    const record = await host.store.create({ ownerSessionId: 'owner', cwd: root, route: { provider: 'fixture', model: 'only' }, label: 'wait', maxModelRequests: 1, maxWallTimeMs: 1000 })
+    let finish!: () => void
+    const removeOwnerAbort = vi.fn()
+    const live = { record, removeOwnerAbort, turn: new Promise<void>(resolve => { finish = resolve }) }
+    const lives = Reflect.get(host, 'lives') as Map<string, unknown>; lives.set(record.runId, live)
+    let settled = false
+    const waiting = host.waitForResult(record.runId, 'owner').then(value => { settled = true; return value })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    await expect(host.waitForResult(record.runId, 'another-owner')).rejects.toThrow('RLM_OWNER_REQUIRED')
+    expect(removeOwnerAbort).not.toHaveBeenCalled()
+    record.state = 'idle'; record.result = 'native answer'; finish()
+    expect(await waiting).toMatchObject({ state: 'idle', result: 'native answer' })
+    expect(removeOwnerAbort).toHaveBeenCalledOnce()
+    expect(lives.has(record.runId)).toBe(true)
+    lives.clear(); await host.dispose()
+  })
+
+  it('keeps the result pending until in-flight cancellation has a durable receipt', async () => {
+    const root = await directory(), host = new RlmHost({} as Context, root, '/unused', 100)
+    const record = await host.store.create({ ownerSessionId: 'owner', cwd: root, route: { provider: 'fixture', model: 'only' }, label: 'cancel wait', maxModelRequests: 1, maxWallTimeMs: 1000 })
+    const live = { record, acpId: '', removeOwnerAbort: vi.fn(), turn: Promise.resolve() }
+    const lives = Reflect.get(host, 'lives') as Map<string, unknown>; lives.set(record.runId, live)
+    let finishClose!: () => void
+    const close = vi.spyOn(host as unknown as { close(value: unknown): Promise<void> }, 'close').mockImplementation(() => new Promise<void>(resolve => { finishClose = resolve }))
+    const stopped = host.cancel(record.runId, 'owner')
+    let settled = false
+    const waiting = host.waitForResult(record.runId, 'owner').then(value => { settled = true; return value })
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce())
+    expect(settled).toBe(false)
+    await expect(host.cancel(record.runId, 'another-owner')).rejects.toThrow('RLM_OWNER_REQUIRED')
+    finishClose()
+    expect((await stopped).state).toBe('cancelled')
+    expect((await waiting).state).toBe('cancelled')
+    expect((await host.store.get(record.runId)).state).toBe('cancelled')
+    lives.clear(); await host.dispose()
+  })
+
+
+  it('does not send a native prompt when the owner aborts during turn-intent persistence', async () => {
+    const root = await directory(), host = new RlmHost({} as Context, root, '/unused', 100)
+    const record = await host.store.create({ ownerSessionId: 'owner', cwd: root, route: { provider: 'fixture', model: 'only' }, label: 'admission abort', maxModelRequests: 1, maxWallTimeMs: 1000 })
+    let release!: () => void
+    vi.spyOn(host.store, 'append').mockImplementation(() => new Promise<void>(resolve => { release = resolve }))
+    const turn = vi.spyOn(host as unknown as { turn(value: unknown, text: string): Promise<void> }, 'turn').mockResolvedValue()
+    const controller = new AbortController()
+    const live = { record, controller: new AbortController(), evidence: { beginTurn: vi.fn() } }
+    const beginTurn = Reflect.get(host, 'beginTurn').bind(host) as (value: unknown, text: string, signal: AbortSignal) => Promise<void>
+    const starting = beginTurn(live, 'must not be sent', controller.signal)
+    controller.abort(); release()
+    await expect(starting).rejects.toThrow('RLM_OWNER_UNAVAILABLE')
+    expect(turn).not.toHaveBeenCalled()
+    expect(Reflect.get(live, 'timer')).toBeUndefined()
+    await host.dispose()
+  })
+
+  it('waits for a cancellation receipt even after native cleanup has removed the live connection', async () => {
+    const root = await directory(), host = new RlmHost({} as Context, root, '/unused', 100)
+    const record = await host.store.create({ ownerSessionId: 'owner', cwd: root, route: { provider: 'fixture', model: 'only' }, label: 'detached cancel', maxModelRequests: 1, maxWallTimeMs: 1000 })
+    record.state = 'cancelling'; await host.store.save(record)
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve }).then(async () => {
+      record.state = 'cancelled'; await host.store.save(record); return host.summary(record)
+    })
+    const cancellations = Reflect.get(host, 'cancellations') as Map<string, unknown>; cancellations.set(record.runId, pending)
+    let settled = false
+    const waiting = host.waitForResult(record.runId, 'owner').then(value => { settled = true; return value })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    release()
+    expect((await waiting).state).toBe('cancelled')
+    cancellations.clear(); await host.dispose()
+  })
+
+
+  it('does not promote a late normal ACP response to success after cancellation', async () => {
+    const root = await directory(), host = new RlmHost({} as Context, root, '/unused', 100)
+    const record = await host.store.create({ ownerSessionId: 'owner', cwd: root, route: { provider: 'fixture', model: 'only' }, label: 'late ACP', maxModelRequests: 1, maxWallTimeMs: 1000 })
+    record.state = 'running'
+    let finish!: (value: unknown) => void
+    const controller = new AbortController()
+    const assertSettled = vi.fn()
+    const live = { record, controller, acpId: 'fixture', acp: { request: vi.fn(() => new Promise(resolve => { finish = resolve })) }, evidence: { assertSettled } }
+    const turn = Reflect.get(host, 'turn').bind(host) as (value: unknown, text: string) => Promise<void>
+    const pending = turn(live, 'started before cancellation')
+    record.state = 'cancelled'; controller.abort(); finish({ stopReason: 'end_turn' })
+    await pending
+    expect(record.state).toBe('cancelled')
+    expect(assertSettled).not.toHaveBeenCalled()
+    await host.dispose()
+  })
+
+
+  it('plugin disposal waits for a detached cancellation and surfaces its receipt failure', async () => {
+    const root = await directory(), host = new RlmHost({} as Context, root, '/unused', 100)
+    let rejectReceipt!: (error: Error) => void
+    const pending = new Promise<never>((_resolve, reject) => { rejectReceipt = reject })
+    const cancellations = Reflect.get(host, 'cancellations') as Map<string, unknown>; cancellations.set('already-detached', pending)
+    let settled = false
+    const stopped = host.dispose().finally(() => { settled = true })
+    await Promise.resolve(); await Promise.resolve()
+    expect(settled).toBe(false)
+    rejectReceipt(new Error('receipt write failed'))
+    await expect(stopped).rejects.toThrow('RLM 原生进程清理未全部确认')
+    cancellations.clear()
+  })
+
 })
