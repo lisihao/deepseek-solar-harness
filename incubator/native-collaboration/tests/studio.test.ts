@@ -238,7 +238,9 @@ describe('WorkflowStudio admission and observation', () => {
     expect(await studio.resolveDelivery('session-b', prompt)).toBeUndefined()
     await studio.inspect({ sessionId: 'session-a', commandId: 'completed-command' })
     expect(onCompleted).toHaveBeenCalledTimes(1)
-    expect((await studio.store.readDelivery('session-a', 'completed-command'))?.status).toBe('submitted')
+    // Callback entry precedes the asynchronous durable settlement. Assert the
+    // completed ledger state, not the timing of the callback spy.
+    await vi.waitFor(async () => expect((await studio.store.readDelivery('session-a', 'completed-command'))?.status).toBe('submitted'))
   })
 
   test('keeps a completed run completed when its original-session callback is uncertain and never blindly resends it', async () => {
@@ -443,7 +445,7 @@ describe('WorkflowStudio admission and observation', () => {
     const source = (await studio.store.readSource('session-a', 'source-web'))!
     expect(await studio.resolveDelivery('session-a', buildStudioSourceDeliveryPrompt(source))).toBe('来源继续产物')
     expect(await studio.resolveDelivery('session-b', buildStudioSourceDeliveryPrompt(source))).toBeUndefined()
-    expect((await studio.store.readDelivery('session-a', 'source-web-command'))?.status).toBe('submitted')
+    await vi.waitFor(async () => expect((await studio.store.readDelivery('session-a', 'source-web-command'))?.status).toBe('submitted'))
     expect(onSourceCompleted).toHaveBeenCalledTimes(1)
   })
 
