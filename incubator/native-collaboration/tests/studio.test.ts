@@ -299,6 +299,7 @@ describe('WorkflowStudio admission and observation', () => {
     completed = true
     clock.tick()
     await waitForRun(studio, 'native-monitored-command', 'completed')
+    await vi.waitFor(async () => expect((await studio.store.readDelivery('session-a', 'native-monitored-command'))?.status).toBe('submitted'))
     expect((await studio.store.readRun('session-a', 'native-monitored-command'))?.run.status).toBe('completed')
     expect(execute).toHaveBeenCalledTimes(1)
     expect(inspect).toHaveBeenCalledTimes(1)
