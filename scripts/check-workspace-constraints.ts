@@ -141,6 +141,8 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-ego-lite-browser': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-remote-modules': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-theme': ['lib/styles'],
+  // Declarative benchmark suites publish their task data beside the lib.
+  '@deepseek-ai/dsh-bench-suite-dsh-native': ['suite'],
   // The Python runtime uses a distinct closed-resolution bin; the public CLI
   // keeps config-owned bare-package resolution through lib/bin.js.
   '@deepseek-ai/dsh-sdk-jsonrpc-demo': ['lib/packaged-bin.js'],

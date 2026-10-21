@@ -1,0 +1,253 @@
+/**
+ * Service Provider of the benchmark capability: `ctx.benchRuntime` runs an
+ * experiment — every (variant, task, repetition) of a registered suite — as
+ * isolated `dsh` child processes, grades each run with its task's grader,
+ * folds its session logs into metrics, and appends one record per run to the
+ * experiment ledger. Recorded runs are skipped, so a crashed or cancelled
+ * experiment resumes where it stopped.
+ *
+ * @module @deepseek-ai/dsh-bench-runner
+ */
+
+import { spawn } from 'node:child_process'
+import { join } from 'node:path'
+import { Service } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
+import type { BenchSuite, BenchTask, BenchTaskId } from '@deepseek-ai/dsh-bench'
+import z from '@deepseek-ai/schemastery'
+import { cellEnv, prepareCell, readRunSessions, scrubTemplateFiles } from './cell.ts'
+import { cellKey, ExperimentLedger, LEDGER_FORMAT_VERSION } from './ledger.ts'
+import { foldRunMetrics } from './metrics.ts'
+import type { ModelPrice } from './metrics.ts'
+import type { CellKey, Experiment, RunProgress, RunRecord, Variant } from './types.ts'
+
+export type * from './types.ts'
+export type { ModelPrice } from './metrics.ts'
+export { readExperiment } from './experiment.ts'
+export { ExperimentLedger, LEDGER_FORMAT_VERSION } from './ledger.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    benchRuntime: BenchRuntime
+  }
+}
+
+/** Runtime configuration. */
+export interface Config {
+  /** Launcher argv prefix for `dsh`, for example `[node, /abs/apps/cli/lib/bin.js]`. */
+  command: string[]
+  /** Absolute home whose `profiles/<profile>` seeds every run home. */
+  templateHome: string
+  /** Home-relative files copied into every run home (credentials, settings) and deleted once its child exits. */
+  templateFiles: string[]
+  /** Absolute directory holding one ledger directory per experiment. */
+  ledgerRoot: string
+  /** Runs executed at once. */
+  concurrency: number
+  /** Wall-time limit of one run's child process. */
+  runTimeoutMs: number
+  /** USD per million tokens, by model id; runs using an unlisted model get no cost. */
+  prices: ModelPrice[]
+}
+
+export const Config: z<Config> = z.object({
+  command: z.array(z.string()).required(),
+  templateHome: z.string().required(),
+  templateFiles: z.array(z.string()).required(),
+  ledgerRoot: z.string().required(),
+  concurrency: z.natural().min(1).default(1),
+  runTimeoutMs: z.natural().min(1).default(600_000),
+  prices: z.array(z.object({
+    model: z.string().required(),
+    input: z.number().min(0).required(),
+    output: z.number().min(0).required(),
+    cacheRead: z.number().min(0),
+  })).default([]),
+})
+
+/** Options of one {@link BenchRuntime.run} call. */
+export interface RunOptions {
+  /** Stops launching runs and kills running ones; unfinished runs stay unrecorded. */
+  signal?: AbortSignal
+  /** Called after each run is recorded. */
+  onProgress?: (progress: RunProgress) => void
+}
+
+/** Exit of one run's child process. */
+interface ChildExit {
+  code: number | null
+  timedOut: boolean
+  output: string
+}
+
+/** Bytes of child output kept for error messages. */
+const OUTPUT_TAIL_BYTES = 4000
+
+/** Runs benchmark experiments as isolated child processes. */
+export class BenchRuntime extends Service {
+  static inject = ['benchmarks']
+  static Config = Config
+
+  /**
+   * Create and install the runtime as `ctx.benchRuntime`.
+   * @param ctx - Cordis context carrying `ctx.benchmarks`.
+   * @param config - runtime configuration.
+   */
+  constructor(ctx: Context, private readonly config: Config) {
+    super(ctx, 'benchRuntime')
+    if (config.command.length === 0) throw new Error('bench-runner: command must name the dsh launcher')
+  }
+
+  /**
+   * Run every unrecorded cell of an experiment. Cells are ordered by
+   * repetition, then task, then variant, so a partial experiment stays
+   * balanced across variants.
+   * @param experiment - the experiment to run.
+   * @param options - cancellation and progress.
+   * @returns every record in the ledger after the run, earlier ones included.
+   * @throws Error before any run starts when the suite, a task, or a grader spec is invalid,
+   *   or when the ledger pins a different definition; the abort reason when cancelled.
+   */
+  async run(experiment: Experiment, options: RunOptions = {}): Promise<RunRecord[]> {
+    const suite = this.ctx.benchmarks.suite(experiment.suite)
+    if (suite === undefined) throw new Error(`benchmark suite ${JSON.stringify(experiment.suite)} is not registered`)
+    const tasks = this.selectTasks(experiment, await suite.load(options.signal))
+    const ledger = new ExperimentLedger(this.config.ledgerRoot, experiment)
+    await ledger.open()
+    const records = await ledger.records()
+    const done = new Set(records.map(record => cellKey(record.cell)))
+    const pending: { cell: CellKey; task: BenchTask; variant: Variant }[] = []
+    for (let rep = 0; rep < experiment.repetitions; rep += 1) {
+      for (const task of tasks) {
+        for (const variant of experiment.variants) {
+          const cell = { variant: variant.id, task: task.id, rep }
+          if (!done.has(cellKey(cell))) pending.push({ cell, task, variant })
+        }
+      }
+    }
+    const total = experiment.variants.length * tasks.length * experiment.repetitions
+    const worker = async (): Promise<void> => {
+      for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
+        options.signal?.throwIfAborted()
+        const record = await this.runCell(experiment, suite, ledger.dir, next, options.signal)
+        options.signal?.throwIfAborted()
+        await ledger.append(record)
+        records.push(record)
+        options.onProgress?.({ record, done: records.length, total })
+      }
+    }
+    const workers = Array.from({ length: Math.min(this.config.concurrency, pending.length) }, worker)
+    const settled = await Promise.allSettled(workers)
+    for (const result of settled) if (result.status === 'rejected') throw result.reason
+    return records
+  }
+
+  /**
+   * Apply the experiment's task subset and validate every grader spec.
+   * @param experiment - the experiment.
+   * @param all - the suite's tasks.
+   * @returns the tasks to run, in suite order.
+   */
+  private selectTasks(experiment: Experiment, all: readonly BenchTask[]): BenchTask[] {
+    let tasks = [...all]
+    if (experiment.tasks !== undefined) {
+      const wanted = new Set<BenchTaskId>(experiment.tasks)
+      const known = new Set(all.map(task => task.id))
+      for (const id of wanted) if (!known.has(id)) throw new Error(`suite ${JSON.stringify(experiment.suite)} has no task ${JSON.stringify(id)}`)
+      tasks = tasks.filter(task => wanted.has(task.id))
+    }
+    for (const task of tasks) {
+      const grader = this.ctx.benchmarks.grader(task.grader.kind)
+      if (grader === undefined) throw new Error(`task ${JSON.stringify(task.id)} names unregistered grader ${JSON.stringify(task.grader.kind)}`)
+      grader.validate(task.grader)
+    }
+    return tasks
+  }
+
+  /**
+   * Execute, measure, and grade one cell.
+   * @param experiment - the experiment.
+   * @param suite - the experiment's suite.
+   * @param ledgerDir - the experiment ledger directory.
+   * @param job - the cell with its task and variant.
+   * @param signal - cancellation.
+   * @returns the cell's record.
+   */
+  private async runCell(
+    experiment: Experiment,
+    suite: BenchSuite,
+    ledgerDir: string,
+    job: { cell: CellKey; task: BenchTask; variant: Variant },
+    signal: AbortSignal | undefined,
+  ): Promise<RunRecord> {
+    const startedAt = Date.now()
+    const dir = join(ledgerDir, 'cells', job.cell.variant, job.cell.task, String(job.cell.rep))
+    const template = { home: this.config.templateHome, files: this.config.templateFiles }
+    const dirs = await prepareCell(dir, job.task.fixture, template, experiment.profile)
+    const argv = [
+      ...this.config.command.slice(1),
+      '--profile', experiment.profile,
+      ...job.variant.patches.flatMap(patch => ['--patch', patch]),
+      job.task.prompt,
+    ]
+    const exit = await this.spawnChild(argv, dirs.workspace, cellEnv(process.env, dirs, job.variant), signal)
+    await scrubTemplateFiles(dirs.home, this.config.templateFiles)
+    const base = { formatVersion: LEDGER_FORMAT_VERSION as 1, cell: job.cell, exitCode: exit.code, suiteVersion: suite.version, startedAt }
+    let sessions
+    try {
+      sessions = await readRunSessions(dirs.home)
+    } catch (error) {
+      if (exit.timedOut) return { ...base, status: 'timeout', models: [], endedAt: Date.now() }
+      return { ...base, status: 'invalid', models: [], error: `session log unreadable: ${(error as Error).message}\n${exit.output}`, endedAt: Date.now() }
+    }
+    const { metrics, models } = foldRunMetrics(sessions.root, sessions.children, this.config.prices)
+    if (exit.timedOut) return { ...base, status: 'timeout', metrics, models, endedAt: Date.now() }
+    const grader = this.ctx.benchmarks.grader(job.task.grader.kind)
+    if (grader === undefined) {
+      return { ...base, status: 'invalid', metrics, models, error: `grader ${JSON.stringify(job.task.grader.kind)} was unregistered during the experiment`, endedAt: Date.now() }
+    }
+    try {
+      const input = { workspace: dirs.workspace, events: sessions.root, ...signal === undefined ? {} : { signal } }
+      const grade = await grader.grade(job.task.grader, input)
+      return { ...base, status: 'graded', grade, grader: { kind: grader.kind, version: grader.version }, metrics, models, endedAt: Date.now() }
+    } catch (error) {
+      signal?.throwIfAborted()
+      return { ...base, status: 'invalid', metrics, models, error: `grader failed: ${(error as Error).message}`, endedAt: Date.now() }
+    }
+  }
+
+  /**
+   * Run the dsh child to exit, killing it at the run timeout.
+   * @param argv - arguments after the launcher executable.
+   * @param cwd - the run workspace.
+   * @param env - the run environment.
+   * @param signal - cancellation; kills the child.
+   * @returns the exit outcome.
+   */
+  private spawnChild(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv, signal: AbortSignal | undefined): Promise<ChildExit> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(this.config.command[0] as string, argv, { cwd, env, signal, stdio: ['ignore', 'pipe', 'pipe'] })
+      let output = ''
+      let timedOut = false
+      const collect = (chunk: Buffer): void => {
+        output = (output + chunk.toString('utf8')).slice(-OUTPUT_TAIL_BYTES)
+      }
+      child.stdout.on('data', collect)
+      child.stderr.on('data', collect)
+      const timer = setTimeout(() => {
+        timedOut = true
+        child.kill('SIGKILL')
+      }, this.config.runTimeoutMs)
+      child.once('error', (error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+      child.once('close', (code) => {
+        clearTimeout(timer)
+        resolve({ code, timedOut, output })
+      })
+    })
+  }
+}
+
+export default BenchRuntime

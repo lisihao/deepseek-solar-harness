@@ -50,6 +50,8 @@ export { REGION_BEGIN, REGION_END }
  * errors, so the partition can never silently drift from the service API.
  */
 export const SERVICE_PAGE: Record<string, string> = {
+  benchmarks: 'bench.md',
+  benchRuntime: 'bench.md',
   agentLoop: 'core.md',
   agentDefaultModel: 'core.md',
   agentPresets: 'core.md',
@@ -720,6 +722,12 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   GouziFolderListing: 'folder listing is owned by packages/orchestration/ui-gouzi/src/contracts.ts',
   GouziProcessInfo: 'member process facts are owned by packages/orchestration/ui-gouzi/src/host-service.ts',
   KennelCollaborationKind: 'collaboration kind contract is owned by packages/orchestration/orchestration/src/kennel-collaboration.ts and documented in packages/orchestration/ui-gouzi/README.md',
+  BenchSuite: 'benchmark suite contract is documented in packages/bench/bench/README.md',
+  BenchSuiteId: 'benchmark suite id is documented in packages/bench/bench/README.md',
+  BenchGrader: 'benchmark grader contract is documented in packages/bench/bench/README.md',
+  Experiment: 'benchmark experiment definition is documented in packages/bench/bench-runner/README.md',
+  RunOptions: 'benchmark run options are documented in packages/bench/bench-runner/README.md',
+  RunRecord: 'benchmark run record format is documented in packages/bench/bench-runner/README.md',
   ModelCatalogSource: 'discovery source registration is owned by packages/llm/model-catalog-local/README.md',
   ModelCatalogSnapshot: 'durable catalog inventory is owned by packages/llm/model-catalog-local/README.md',
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',

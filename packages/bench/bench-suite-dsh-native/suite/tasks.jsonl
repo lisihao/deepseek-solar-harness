@@ -1,0 +1,3 @@
+{"id":"fix-sum-bug","prompt":"`node test.js` fails. Fix the bug in sum.js so the test passes, without editing test.js.","fixture":"fixtures/fix-sum-bug","grader":{"kind":"command-exit","command":["node","test.js"],"timeoutMs":30000},"tags":["code"]}
+{"id":"count-lines","prompt":"Count the lines in data.txt and write only the number to answer.txt.","fixture":"fixtures/count-lines","grader":{"kind":"command-exit","command":["node","check.js"],"timeoutMs":30000},"tags":["files"]}
+{"id":"shell-listing","prompt":"Use the shell to list the files in the current directory, then reply with how many there are.","grader":{"kind":"session-event","tool":"bash","min":1},"tags":["tools"]}

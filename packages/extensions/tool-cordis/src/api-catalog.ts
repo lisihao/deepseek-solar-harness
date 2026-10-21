@@ -379,6 +379,57 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'benchmarks',
+    summary: 'Registry of benchmark suites and graders.',
+    description: 'Registry of benchmark suites and graders. Each registration is an effect on the calling context\'s fiber, so unloading a suite plugin removes its suites and graders. Duplicate suite ids and grader kinds are refused; built-in graders occupy their kinds for the registry\'s lifetime.',
+    methods: [
+      {
+        signature: 'registerSuite(suite: BenchSuite): () => void',
+        description: 'Register a suite under its id.',
+        parameters: [{ name: 'suite', description: 'the suite; its id must not already be registered.' }],
+        returns: 'the disposer that unregisters it.',
+      },
+      {
+        signature: 'registerGrader(grader: BenchGrader): () => void',
+        description: 'Register a grader under its kind.',
+        parameters: [{ name: 'grader', description: 'the grader; its kind must not already be registered.' }],
+        returns: 'the disposer that unregisters it.',
+      },
+      {
+        signature: 'suite(id: BenchSuiteId): BenchSuite | undefined',
+        description: 'Look up a suite.',
+        parameters: [{ name: 'id', description: 'suite id.' }],
+        returns: 'the suite, or `undefined` when none is registered under `id`.',
+      },
+      {
+        signature: 'suites(): BenchSuite[]',
+        description: 'List registered suites.',
+        parameters: [],
+        returns: 'the suites in registration order.',
+      },
+      {
+        signature: 'grader(kind: string): BenchGrader | undefined',
+        description: 'Look up a grader.',
+        parameters: [{ name: 'kind', description: 'grader kind.' }],
+        returns: 'the grader, or `undefined` when none is registered under `kind`.',
+      },
+    ],
+  },
+  {
+    key: 'benchRuntime',
+    summary: 'Runs benchmark experiments as isolated child processes.',
+    description: 'Runs benchmark experiments as isolated child processes.',
+    methods: [
+      {
+        signature: 'async run(experiment: Experiment, options: RunOptions = {}): Promise<RunRecord[]>',
+        description: 'Run every unrecorded cell of an experiment. Cells are ordered by repetition, then task, then variant, so a partial experiment stays balanced across variants.',
+        parameters: [{ name: 'experiment', description: 'the experiment to run.' }, { name: 'options', description: 'cancellation and progress.' }],
+        returns: 'every record in the ledger after the run, earlier ones included.',
+        throws: ['Error before any run starts when the suite, a task, or a grader spec is invalid, or when the ledger pins a different definition; the abort reason when cancelled.'],
+      },
+    ],
+  },
+  {
     key: 'browser',
     summary: 'Registry and execution authority for the browser capability seam.',
     description: 'Registry and execution authority for the browser capability seam.\n\nProvider resolution happens for every call. Explicit selection fails closed when missing or unavailable; implicit selection succeeds only when exactly one provider is locally usable, so registration and HMR order never decide.',
@@ -3873,6 +3924,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface BashEnvVariableInfo extends BashEnvVariable {\n    contributor: string;\n    key: DshEnvironmentKey;\n}',
   },
   {
+    name: 'BenchGrader',
+    declaration: 'export interface BenchGrader {\n    kind: string;\n    version: number;\n    validate(spec: GraderSpec): void;\n    grade(spec: GraderSpec, input: GradeInput): Promise<GradeResult>;\n}',
+  },
+  {
+    name: 'BenchSuite',
+    declaration: 'export interface BenchSuite {\n    id: BenchSuiteId;\n    version: string;\n    description: string;\n    load(signal?: AbortSignal): Promise<readonly BenchTask[]>;\n}',
+  },
+  {
+    name: 'BenchSuiteId',
+    declaration: 'export type BenchSuiteId = Branded<\'BenchSuiteId\'>;',
+  },
+  {
+    name: 'BenchTask',
+    declaration: 'export interface BenchTask {\n    id: BenchTaskId;\n    prompt: string;\n    fixture?: string;\n    grader: GraderSpec;\n    tags: readonly string[];\n}',
+  },
+  {
+    name: 'BenchTaskId',
+    declaration: 'export type BenchTaskId = Branded<\'BenchTaskId\'>;',
+  },
+  {
     name: 'Branded',
     declaration: 'export type Branded<B extends string> = string & {\n    readonly [BRAND]: B;\n};',
   },
@@ -4027,6 +4098,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CatalogRefreshResult',
     declaration: 'export type CatalogRefreshResult = {\n    readonly available: true;\n    readonly models: readonly CatalogModel[];\n} | {\n    readonly available: false;\n    readonly reason: string;\n};',
+  },
+  {
+    name: 'CellKey',
+    declaration: 'export interface CellKey {\n    variant: VariantId;\n    task: BenchTaskId;\n    rep: number;\n}',
   },
   {
     name: 'ClientResponse',
@@ -4701,6 +4776,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ExecutionModelPreference = \'luna-first\' | \'claude-sonnet\' | \'balanced\';',
   },
   {
+    name: 'Experiment',
+    declaration: 'export interface Experiment {\n    id: ExperimentId;\n    suite: BenchSuiteId;\n    profile: string;\n    repetitions: number;\n    tasks?: readonly BenchTaskId[];\n    variants: readonly Variant[];\n}',
+  },
+  {
+    name: 'ExperimentId',
+    declaration: 'export type ExperimentId = Branded<\'ExperimentId\'>;',
+  },
+  {
     name: 'FileDiff',
     declaration: 'export interface FileDiff {\n    path: string;\n    oldText: string | null;\n    newText: string;\n}',
   },
@@ -4899,6 +4982,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'GouziSshTarget',
     declaration: 'export interface GouziSshTarget {\n    readonly address: string;\n    readonly port: number;\n    readonly user: string;\n    readonly route?: GouziSshRoute;\n}',
+  },
+  {
+    name: 'GradeInput',
+    declaration: 'export interface GradeInput {\n    workspace: string;\n    events: readonly SessionEvent[];\n    signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'GradeResult',
+    declaration: 'export interface GradeResult {\n    pass: boolean;\n    score: number;\n    details: string;\n}',
+  },
+  {
+    name: 'GraderSpec',
+    declaration: 'export interface GraderSpec {\n    kind: string;\n    [parameter: string]: unknown;\n}',
   },
   {
     name: 'ImageAttachmentLimits',
@@ -6329,8 +6424,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RpcResult<T> = {\n    ok: true;\n    value: T;\n} | {\n    ok: false;\n    error: RpcError;\n};',
   },
   {
+    name: 'RunMetrics',
+    declaration: 'export interface RunMetrics {\n    turns: number;\n    steps: number;\n    tokens: RunTokens;\n    timing: RunTiming;\n    tools: Readonly<Record<string, ToolStats>>;\n    retries: number;\n    sessions: number;\n    costUsd?: number;\n}',
+  },
+  {
     name: 'RunnerFailureRule',
     declaration: 'export interface RunnerFailureRule {\n    allowedExitCodes?: readonly number[];\n    fatalSignatures: readonly string[];\n    informationalLines?: readonly string[];\n}',
+  },
+  {
+    name: 'RunRecord',
+    declaration: 'export interface RunRecord {\n    formatVersion: 1;\n    cell: CellKey;\n    status: RunStatus;\n    grade?: GradeResult;\n    grader?: {\n        kind: string;\n        version: number;\n    };\n    metrics?: RunMetrics;\n    exitCode: number | null;\n    error?: string;\n    models: readonly string[];\n    suiteVersion: string;\n    startedAt: number;\n    endedAt: number;\n}',
+  },
+  {
+    name: 'RunStatus',
+    declaration: 'export type RunStatus = \'graded\' | \'timeout\' | \'invalid\';',
+  },
+  {
+    name: 'RunTiming',
+    declaration: 'export interface RunTiming {\n    wallMs: number;\n    llmMs: number;\n    toolCriticalMs: number;\n    overheadMs: number;\n}',
+  },
+  {
+    name: 'RunTokens',
+    declaration: 'export interface RunTokens {\n    input: number;\n    output: number;\n    cacheRead: number;\n    unreportedMessages: number;\n}',
   },
   {
     name: 'SandboxEnforcement',
@@ -7245,6 +7360,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ToolSchema {\n    name: string;\n    description: string;\n    parameters: Record<string, unknown>;\n}',
   },
   {
+    name: 'ToolStats',
+    declaration: 'export interface ToolStats {\n    calls: number;\n    errors: number;\n    totalMs: number;\n}',
+  },
+  {
     name: 'TurnEndCancelCause',
     declaration: 'export type TurnEndCancelCause = AgentCancelCause | {\n    readonly kind: \'legacy\';\n};',
   },
@@ -7323,6 +7442,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'UserQuestionProvider',
     declaration: 'export interface UserQuestionProvider {\n    ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>;\n}',
+  },
+  {
+    name: 'Variant',
+    declaration: 'export interface Variant {\n    id: VariantId;\n    patches: readonly string[];\n    env: Readonly<Record<string, string>>;\n}',
+  },
+  {
+    name: 'VariantId',
+    declaration: 'export type VariantId = Branded<\'VariantId\'>;',
   },
   {
     name: 'WebBootEntry',
