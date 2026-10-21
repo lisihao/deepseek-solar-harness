@@ -8,7 +8,7 @@ export interface ProgressWindow {
   readonly change: { readonly kind: string; readonly entries?: readonly { readonly type: string; readonly event: ProgressEvent }[] }
 }
 export interface Observable<T> { getSnapshot(): T; subscribe(listener: () => void): () => void }
-export interface PreparationState { readonly busy: boolean; readonly message: string }
+export interface PreparationState { readonly busy: boolean; readonly message: string; readonly fresh?: boolean; readonly transactionId: string }
 interface Block { readonly reason: string }
 interface Blocks<Id> {
   set(id: Id, block: Block | undefined): void
@@ -23,16 +23,23 @@ function owned(event: ProgressEvent): event is ProgressEvent & { data: { compact
 export function preparationState(window: ProgressWindow): PreparationState | undefined {
   let current: string | undefined
   let state: PreparationState | undefined
+  let fresh = false
   for (const entry of window.entries) {
+    const candidate = entry.event
+    if (entry.type === 'event' && candidate.type === 'compaction/summary' && typeof candidate.data === 'object' && candidate.data !== null
+      && 'compactionId' in candidate.data && candidate.data.compactionId === current && 'provider' in candidate.data && 'model' in candidate.data
+      && candidate.data.provider === 'solar-model-handoff' && candidate.data.model === 'fresh-context') fresh = true
     if (entry.type !== 'event' || !owned(entry.event)) continue
     const event = entry.event
     if (event.type === 'compaction/start') {
       current = event.data.compactionId
-      state = { busy: true, message: PREPARING_REASON }
+      fresh = false
+      state = { busy: true, message: PREPARING_REASON, transactionId: event.data.compactionId }
     } else if (current === undefined || current === event.data.compactionId) {
       current = undefined
-      state = event.data.error === undefined ? undefined : { busy: false,
-        message: '上下文交接未完成，输入已恢复；目标模型仍须完成交接才能执行。可切回原模型继续。' }
+      state = event.data.error === undefined ? fresh ? { busy: false, fresh: true, transactionId: event.data.compactionId,
+        message: '已取消交接；新模型将从空白任务上下文开始，旧聊天记录仍可查看。' } : undefined : { busy: false, transactionId: event.data.compactionId,
+        message: '交接未完成，未自动重试。可重新准备交接，或用 /handoff fresh 不携带旧任务上下文。' }
     }
   }
   return state
@@ -66,7 +73,7 @@ export class PreparationObserver<Id> implements Observable<PreparationState | un
     this.revision = window.revision
     if (contiguous && window.change.kind === 'append' && !window.change.entries?.some(entry => entry.type === 'event' && owned(entry.event))) return
     const next = preparationState(window)
-    if (next?.busy === this.state?.busy && next?.message === this.state?.message) return
+    if (next?.busy === this.state?.busy && next?.message === this.state?.message && next?.transactionId === this.state?.transactionId) return
     this.state = next
     this.syncBlock()
     for (const listener of this.listeners) listener()

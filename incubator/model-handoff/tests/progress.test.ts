@@ -21,6 +21,17 @@ function fixture(entries: ProgressWindow['entries'] = []) {
   return { source, block, blocks, writes, observer, publish }
 }
 describe('native handoff preparation affordance', () => {
+  it('reports a fresh context on explicit cancellation instead of asking to switch back', () => {
+    const f = fixture([event('compaction/start')])
+    f.publish([{ type: 'event', event: { type: 'compaction/summary', seq: 1,
+      data: { compactionId: id, provider: 'solar-model-handoff', model: 'fresh-context' } } }])
+    f.publish([event('compaction/end')])
+    expect(f.block.getSnapshot()).toBeUndefined()
+    expect(f.observer.getSnapshot()).toMatchObject({ busy: false, fresh: true })
+    expect(f.observer.getSnapshot()?.message).toContain('空白任务上下文')
+    expect(f.observer.getSnapshot()?.message).not.toContain('切回')
+    f.observer.dispose()
+  })
   it('locks before waiting, keeps the lock across intermediate events, and releases on commit', () => {
     const f = fixture()
     f.publish([event('compaction/start')])
@@ -47,7 +58,7 @@ describe('native handoff preparation affordance', () => {
     f.publish([event('compaction/end', id, 'cancelled')])
     expect(f.block.getSnapshot()).toBeUndefined()
     expect(f.observer.getSnapshot()).toMatchObject({ busy: false })
-    expect(f.observer.getSnapshot()?.message).toContain('目标模型仍须完成交接')
+    expect(f.observer.getSnapshot()?.message).toContain('/handoff fresh')
     f.observer.dispose()
   })
   it('rebuilds on reconnect replacement, loaded prepend and revision gaps', () => {

@@ -1,0 +1,31 @@
+# Operator routes and model handoff
+
+User-authorized amendment: 2026-10-21 (Asia/Shanghai). Implementation, local integration checks, installation and the no-model route UI checklist passed. Real model execution remains unrun. This amendment permits no live model test, automatic replay, merge, release, market publication or official-App modification.
+
+## Observable boundary
+
+Entering either `solar-chatgpt-web/chatgpt-web` or `solar-chatgpt-web/insight-analysis` starts a fresh operator task. It must not ask a model-handoff question or prepare/call Luna. Old conversation records remain available for viewing. The user's next question must reach the selected operator exactly once; a first-request Insight preset must not discard that question or require a second Send.
+
+Returning from the operator segment to a model-driven route asks two independent questions before target dispatch: whether to carry the recorded Web/Insight results with their corresponding task questions, and whether to carry the effective task context from immediately before entering the operator segment. Both, either, or neither can be selected. Neither produces an empty task checkpoint without a summary call. Selected short material uses the existing verbatim path; long material retains the existing explicit summary budget/confirmation rules. Native-to-native handoff retains its existing behavior.
+
+## History and durability
+
+Use the actual provider/model route, canonical model-selection/request events and plugin-owned versioned state. A previous request header alone cannot identify a transition that has not yet executed. Preserve a frozen reference to pre-operator effective task records before installing an empty checkpoint. Separate operator-segment records from that prior context; exclude regenerated system/skill/memory envelopes. Keep attribution, explicit task constraints, failure/unknown status and original log provenance. Do not manufacture a successful result when only a failure or no result was recorded.
+
+Persist the entry boundary, selected target and return choices before committing a replacement. On restart or route changes, reconcile the original checkpoint/receipt rather than dispatching or summarizing again. Excluded history must not reappear in a later handoff merely because its raw events remain on disk. Use canonical effective surface/checkpoint boundaries, not an unrestricted scan of shadowed raw events. Reject stale choices when the source or route changes. Do not add custom upstream Session event kinds or modify the App.
+
+An empty checkpoint from an earlier transaction is not proof that later operator messages were cleared. Recovery must identify the current transaction and its replacement range. After returning to a native route, subsequent native switches must update the recorded route facts; a later switch back must not bypass normal handoff. If a complete summary draft exists when preview confirmation is interrupted, resume its confirmation without another summary call. A failed or uncertain model attempt remains a separate no-replay case.
+
+Failed operator attempts may contribute visible partial text and the recorded failure or unknown outcome when explicitly selected. Keep the complete stream in its original canonical log; do not inject raw stream JSON, reasoning blocks, usage, or provider replay metadata into the handoff source.
+
+An explicit retry creates a new return-attempt identity before preparing its receipt. A previous failed or unknown receipt stays archived unchanged. Retry itself does not call a provider; an unresolved previous attempt is never replayed automatically.
+
+## Affected paths and checks
+
+Implementation scope: `incubator/model-handoff/src/` and its tests/README, this policy and `docs/model-handoff.md`; existing PR #283. Verification must cover both operator routes, idle selection and first-request preset entry, all four return-choice combinations, no previous successful Web request, restart recovery, new input retention, excluded-history non-resurrection, source attribution, zero fake-provider dispatch before a choice and zero summary calls on fresh/short entry. Reuse unchanged checks; run the stable persistence/integration gate once, then affected regressions only. Installed UI evidence and fake-service tests remain separate from unrun real model execution.
+
+The stable local `pnpm check` passed on 2026-10-21: build/declarations, strict types, 171 source tests, 39 built-runtime tests, both official CLI scratch-profile probes and the generated homepage check. The AgentLoop fake-provider probe observed operator Insight entry without Luna and exactly one copy of the first submitted question. Independent source review covered the current-transaction checkpoint, native-route tracking, preview recovery, projected stream content and failed/unknown retry archive regressions. These checks used no live model.
+
+Runtime `73e92a6bc19df25f269e13c3378b48f8002db839` passed [exact-head CI](https://github.com/lisihao/deepseek-solar-harness/actions/runs/39558952013) and was installed through the official bundled CLI after normal App/Host exit, an idle Resident check and a fresh backup. All 17 packed files matched; tar SHA-256 `5ddcbb9a1014b9cd73c57c1cfa9ef1071913365cb47331ec20e01e13ba09439e`. The official App reopened. Its accessibility capture exposed the window shell rather than page controls, so no automated-button acceptance is claimed. Original logs, unrelated plugin state and prior repair packages were retained.
+
+On 2026-10-21, the user directly confirmed switching an empty conversation through Web and Insight without a handoff prompt or context preparation, then returning to a native model with both independent questions. After submitting both **do not carry** answers, the cards disappeared and input recovered. Read-only reconciliation found `results: false`, `context: false`, a committed return and a returned operator entry. No handoff call identity was added; Resident state and Web JSON files were unchanged from the post-install baseline. This accepts the installed no-result/fresh-return interaction. The other return combinations and first-request input handling have fake-service coverage; actual result-carrying and real model execution were not run.

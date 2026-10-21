@@ -21,7 +21,7 @@ export function apply(ctx) {
             yield { type: 'finish', reason: { kind: 'stop' } }
           }
         }
-        const registration = ctx.llm.registerAdapter(['fixture-old', 'fixture-target', 'openai-codex'], new FixtureAdapter())
+        const registration = ctx.llm.registerAdapter(['fixture-old', 'fixture-target', 'solar-chatgpt-web', 'openai-codex'], new FixtureAdapter())
         const selection = { current: { provider: 'fixture-old', model: 'old' }, assembled: undefined }
         const handle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: process.env.DSH_HOME }, agentOptions: selection.current,
           setup: agentCtx => { installModelSelection(agentCtx, selection) } })
@@ -39,6 +39,7 @@ export function apply(ctx) {
         const answerReady = new Promise(resolve => { release = resolve })
         const disposeAnswerer = ctx.on('user-questions/request', async (request, next) => {
           if (request.agent?.id !== agent.id) return next()
+          if (request.questions[0]?.id === 'handoff-mode') return { answers: [{ id: 'handoff-mode', selected: ['携带当前任务上下文'] }] }
           if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
           checks.contextualChoices = (checks.contextualChoices ?? true) && request.questions.every(question => question.options?.some(option => option.label === (question.id === 'q1' ? '先跑离线测试' : '不要发布')))
           checks.oneQuestionPerCard = (checks.oneQuestionPerCard ?? true) && request.questions.length === 1
@@ -70,6 +71,96 @@ export function apply(ctx) {
         if (!checks.condensedRequest || !checks.rawHistory || !checks.trace) throw new Error('Real AgentLoop handoff lost source, answers, or request isolation.')
         disposeAnswerer()
         await handle.dispose()
+
+        const freshSelection = { current: { provider: 'fixture-old', model: 'old' }, assembled: undefined }
+        const freshHandle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: process.env.DSH_HOME }, agentOptions: freshSelection.current,
+          setup: agentCtx => { installModelSelection(agentCtx, freshSelection) } })
+        const freshAgent = freshHandle.agent
+        const oldFresh = 'PRIVATE_OLD_TASK_MUST_STAY_OUT_OF_FRESH_MODEL'
+        freshAgent.followup(createUserMessage({ content: [{ type: 'text', text: oldFresh }], source: { kind: 'user' } }))
+        await freshAgent.whenIdle()
+        const lunaBefore = calls.filter(call => call.model === 'gpt-6-luna').length
+        const disposeFresh = ctx.on('user-questions/request', async (request, next) => {
+          if (request.agent?.id !== freshAgent.id) return next()
+          if (request.questions[0]?.id !== 'handoff-mode') throw new Error('Fresh context asked a summary question.')
+          return { answers: [{ id: 'handoff-mode', selected: ['取消交接，空白开始'] }] }
+        })
+        freshSelection.current = { provider: 'fixture-target', model: 'target' }
+        freshAgent.session.append('model/selection', freshSelection.current)
+        const deadline = Date.now() + 5000
+        while (!freshAgent.session.snapshotEvents().some(event => event.type === 'compaction/summary' && event.data.model === 'fresh-context') && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        await freshAgent.whenIdle()
+        checks.freshNoLuna = calls.filter(call => call.model === 'gpt-6-luna').length === lunaBefore
+        freshAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'FRESH_NEW_TASK' }], source: { kind: 'user' } }))
+        await freshAgent.whenIdle()
+        const freshCall = calls.filter(call => call.model === 'target').at(-1)
+        const freshText = JSON.stringify(freshCall?.messages)
+        checks.freshRequest = Boolean(freshCall) && freshText.includes('FRESH_NEW_TASK') && !freshText.includes(oldFresh) && !freshText.includes('已核实的任务摘要')
+        checks.freshRawHistory = JSON.stringify((await ctx.sessionQuery.readSession(freshAgent.session.id)).events).includes(oldFresh)
+        if (!checks.freshNoLuna || !checks.freshRequest || !checks.freshRawHistory) throw new Error('Fresh context leaked old history, lost the new prompt, or called Luna.')
+        disposeFresh()
+        await freshHandle.dispose()
+
+        // Exercise the active agent/request path without the idle picker event.
+        // Cancelling this gate must settle the current turn before any target call.
+        const activeSelection = { current: { provider: 'fixture-old', model: 'old' }, assembled: undefined }
+        const activeHandle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: process.env.DSH_HOME }, agentOptions: activeSelection.current,
+          setup: agentCtx => { installModelSelection(agentCtx, activeSelection) } })
+        const activeAgent = activeHandle.agent
+        const activeOld = 'ACTIVE_OLD_TASK_MUST_NOT_REACH_TARGET'
+        activeAgent.followup(createUserMessage({ content: [{ type: 'text', text: activeOld }], source: { kind: 'user' } }))
+        await activeAgent.whenIdle()
+        const beforeActive = calls.length
+        const disposeActive = ctx.on('user-questions/request', async (request, next) => {
+          if (request.agent?.id !== activeAgent.id) return next()
+          if (request.questions[0]?.id !== 'handoff-mode') throw new Error('Active fresh choice asked a summary question.')
+          return { answers: [{ id: 'handoff-mode', selected: ['取消交接，空白开始'] }] }
+        })
+        activeSelection.current = { provider: 'fixture-target', model: 'target' }
+        activeAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'CANCELLED_TRIGGER_MUST_NOT_BE_SENT' }], source: { kind: 'user' } }))
+        await activeAgent.whenIdle()
+        checks.activeFreshNoDispatch = calls.length === beforeActive
+        const activeRaw = await ctx.sessionQuery.readSession(activeAgent.session.id)
+        checks.activeFreshCommitted = activeRaw.events.some(event => event.type === 'compaction/summary' && event.data.model === 'fresh-context')
+          && activeRaw.events.some(event => event.type === 'compaction/end' && !event.data.error)
+        activeAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'ACTIVE_FRESH_NEW_TASK' }], source: { kind: 'user' } }))
+        await activeAgent.whenIdle()
+        const activeText = JSON.stringify(calls.at(-1)?.messages)
+        checks.activeFreshNextInput = calls.length === beforeActive + 1 && calls.at(-1)?.model === 'target'
+          && activeText.includes('ACTIVE_FRESH_NEW_TASK') && !activeText.includes(activeOld) && !activeText.includes('CANCELLED_TRIGGER_MUST_NOT_BE_SENT')
+        if (!checks.activeFreshNoDispatch || !checks.activeFreshCommitted || !checks.activeFreshNextInput) throw new Error('Active cancellation dispatched a request or blocked the next fresh task.')
+        disposeActive()
+        await activeHandle.dispose()
+
+        // The operator route is entered by a real AgentLoop request. At this
+        // point the new human prompt is still the loop's local decision input,
+        // so a fresh boundary must not cancel it or require a second Send.
+        const insightSelection = { current: { provider: 'fixture-old', model: 'old' }, assembled: undefined }
+        const insightHandle = await ctx.agents.create({ sessionId: SessionId(randomUUID()), meta: { cwd: process.env.DSH_HOME }, agentOptions: insightSelection.current,
+          setup: agentCtx => { installModelSelection(agentCtx, insightSelection) } })
+        const insightAgent = insightHandle.agent
+        const insightOld = 'INSIGHT_OLD_TASK_MUST_NOT_REACH_OPERATOR'
+        insightAgent.followup(createUserMessage({ content: [{ type: 'text', text: insightOld }], source: { kind: 'user' } }))
+        await insightAgent.whenIdle()
+        const lunaBeforeInsight = calls.filter(call => call.model === 'gpt-6-luna').length
+        const disposeInsight = ctx.on('user-questions/request', async (request, next) => {
+          if (request.agent?.id !== insightAgent.id) return next()
+          throw new Error(`Operator first request unexpectedly asked ${request.questions[0]?.id ?? 'a handoff question'}.`)
+        })
+        insightSelection.current = { provider: 'solar-chatgpt-web', model: 'insight-analysis' }
+        const insightPrompt = 'INSIGHT_FIRST_REQUEST_MUST_REACH_OPERATOR_ONCE'
+        insightAgent.followup(createUserMessage({ content: [{ type: 'text', text: insightPrompt }], source: { kind: 'user' } }))
+        await insightAgent.whenIdle()
+        const insightCalls = calls.filter(call => call.model === 'insight-analysis')
+        const insightText = JSON.stringify(insightCalls.at(-1)?.messages)
+        checks.operatorInsightNoLuna = calls.filter(call => call.model === 'gpt-6-luna').length === lunaBeforeInsight
+        checks.operatorInsightPromptOnce = insightCalls.length === 1 && (insightText.match(new RegExp(insightPrompt, 'g')) ?? []).length === 1
+          && !insightText.includes(insightOld)
+        if (!checks.operatorInsightNoLuna || !checks.operatorInsightPromptOnce) throw new Error('Operator first request dropped, duplicated, or summarized the current prompt.')
+        disposeInsight()
+        await insightHandle.dispose()
         registration()
       } catch (caught) { error = caught instanceof Error ? caught.stack : String(caught) }
       await writeFile(process.env.SOLAR_HANDOFF_MARKER, JSON.stringify({ ok: error === undefined, checks, error }))

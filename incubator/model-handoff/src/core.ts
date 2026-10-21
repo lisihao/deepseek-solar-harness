@@ -101,8 +101,8 @@ function validateDraft(value: unknown, requireOptions = false): HandoffDraft {
   if (!Array.isArray(value.questions)) {
     throw new HandoffError('invalid-shape', 'questions must be an array')
   }
-  if (value.questions.length < 2 || value.questions.length > 3) {
-    throw new HandoffError('question-count', 'questions must contain 2 or 3 items')
+  if (value.questions.length > 3) {
+    throw new HandoffError('question-count', 'questions must contain 0 to 3 items')
   }
 
   const questions: HandoffQuestion[] = []
@@ -177,7 +177,7 @@ function validateTarget(value: unknown): HandoffTarget {
 }
 
 /**
- * Render a deterministic, self-contained handoff for the selected target.
+ * Render a deterministic, self-contained handoff.
  * Answers are emitted byte-for-byte as supplied, including surrounding spaces.
  */
 export function renderHandoff(
@@ -189,7 +189,7 @@ export function renderHandoff(
   if (!Array.isArray(answers)) {
     throw new HandoffError('invalid-input', 'answers must be an array')
   }
-  const validatedTarget = validateTarget(target)
+  validateTarget(target)
   if (answers.length !== validatedDraft.questions.length) {
     throw new HandoffError('answer-mismatch', 'answers must contain exactly one answer for every question')
   }
@@ -210,17 +210,13 @@ export function renderHandoff(
   }
 
   const answerById = new Map(validatedAnswers.map((answer) => [answer.id, answer.answer]))
-  const lines = [
-    '模型交接',
-    `目标提供方：${validatedTarget.provider}`,
-    `目标模型：${validatedTarget.model}`,
-    '摘要：',
-    validatedDraft.summary,
-  ]
+  const lines = ['模型交接', validatedDraft.summary]
   validatedDraft.questions.forEach((question, index) => {
+    const answer = answerById.get(question.id) as string
+    if (answer === '暂无补充') return
     lines.push(
       `问题${index + 1}：${question.question}`,
-      `回答${index + 1}：${answerById.get(question.id) as string}`,
+      `回答${index + 1}：${answer}`,
     )
   })
   return lines.join('\n')
