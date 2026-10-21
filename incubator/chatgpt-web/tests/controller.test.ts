@@ -484,6 +484,35 @@ describe('WebController', () => {
 
     expect(result).toMatchObject({ stage: 'indeterminate', error: { code: 'WEB_SUBMISSION_MISMATCH' } })
     expect(browser.submitResources).toHaveLength(1)
+    expect(browser.finishCalls).toBe(0)
+  })
+
+  it('records private-safe submission mismatch diagnostics without prompt, bubble, or URL text', async () => {
+    const root = await makeRoot()
+    const store = new WebRunStore(root)
+    const browser = new FakeBrowser()
+    const expected = 'expected private prompt 你好'
+    const observed = 'different private bubble 你好'
+    browser.submitResult = page({
+      url: 'https://chatgpt.com/c/private-conversation-id',
+      userMessageCount: 1,
+      userMessages: [observed],
+    })
+    const controller = new WebController(store, browser, options())
+
+    const result = await controller.start(randomUUID(), request({ prompt: expected }))
+    const diagnostic = result.error?.message ?? ''
+
+    expect(result).toMatchObject({ stage: 'indeterminate', error: { code: 'WEB_SUBMISSION_MISMATCH' } })
+    expect(diagnostic).toContain('userMessageCount=1')
+    expect(diagnostic).toContain('userMessagesLength=1')
+    expect(diagnostic).toContain(`expectedNormalizedChars=${Array.from(expected).length}`)
+    expect(diagnostic).toContain(`observedNormalizedChars=${Array.from(observed).length}`)
+    expect(diagnostic).toContain(`observedMessageNormalizedChars=${Array.from(observed).length}`)
+    expect(diagnostic).not.toContain(expected)
+    expect(diagnostic).not.toContain(observed)
+    expect(diagnostic).not.toContain('private-conversation-id')
+    expect(browser.finishCalls).toBe(0)
   })
 
   it('retains the fence when a later observation switches away from the confirmed conversation URL', async () => {

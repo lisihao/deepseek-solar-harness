@@ -36,6 +36,14 @@ const STDERR_NOTICE_OVERHEAD_BYTES = 64 * 1024
 const MAX_CATALOG_CHOICES = 128
 const CATALOG_PROCESS_TIMEOUT_MULTIPLIER = 2
 const CATALOG_PROCESS_TIMEOUT_MAX_MS = 120_000
+/**
+ * The post-send receipt check is intentionally a short, read-only grace
+ * window.  It is capped separately from the command budget so a delayed DOM
+ * bubble cannot turn submission into an unbounded wait.
+ */
+const SUBMIT_RECEIPT_POLL_WINDOW_MS = 5_000
+const SUBMIT_RECEIPT_POLL_INTERVAL_MS = 100
+const SUBMIT_PROCESS_SAFETY_MARGIN_MS = 250
 const EGO_NOTICE_PREFIX = '[ego-browser:notice]'
 const OBSERVATION_KEYS = [
   'url',
@@ -1393,15 +1401,46 @@ __emit({ ok: true, value: __observation });
       break
     case 'submit':
       body = `
+const __submitStartedAt = Date.now();
+const __submitDeadline = __submitStartedAt + Math.max(0, __input.timeoutMs - ${SUBMIT_PROCESS_SAFETY_MARGIN_MS});
 const __task = await taskSpace(__input.resource.spaceId);
 __assertAgent(__task);
 const __page = __task.page(__input.resource.pageLabel);
-if (__input.resource.conversationUrl && await __page.url() !== __input.resource.conversationUrl) {
+const __submitPageUrl = await __page.url();
+if (__input.resource.conversationUrl && __submitPageUrl !== __input.resource.conversationUrl) {
   __throw("WEB_RESOURCE_CHANGED", "ChatGPT resource URL changed");
 }
 const __inspect = ${inspectSource};
 ${menuSource}
 ${searchSource}
+const __isChatGptUrl = (value) => {
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.toLowerCase();
+    return parsed.protocol === "https:" && (hostname === "chatgpt.com" || hostname.endsWith(".chatgpt.com") || hostname === "chat.openai.com" || hostname.endsWith(".chat.openai.com"));
+  } catch {
+    return false;
+  }
+};
+const __isChatGptRoot = (value) => {
+  try { return __isChatGptUrl(value) && new URL(value).pathname === "/"; } catch { return false; }
+};
+const __isChatGptConversation = (value) => {
+  try { return __isChatGptUrl(value) && new URL(value).pathname.startsWith("/c/"); } catch { return false; }
+};
+const __sameOrigin = (left, right) => {
+  try { return new URL(left).origin === new URL(right).origin; } catch { return false; }
+};
+let __receiptRoute = undefined;
+const __isSubmissionRoute = (observation) => {
+  if (!observation || typeof observation.url !== "string" || !__isChatGptUrl(observation.url)) return false;
+  if (__input.resource.conversationUrl !== undefined) return observation.url === __input.resource.conversationUrl;
+  if (typeof __receiptRoute !== "string") return false;
+  if (observation.url === __receiptRoute) return true;
+  return __isChatGptRoot(__receiptRoute)
+    && __isChatGptConversation(observation.url)
+    && __sameOrigin(__receiptRoute, observation.url);
+};
 const __initial = await __page.evaluate(__inspect);
 if (__initial.loginRequired) __throw("WEB_LOGIN_REQUIRED", "ChatGPT login is required");
 if (__initial.visibleError) __throw("WEB_PAGE_ERROR", "ChatGPT page reported a visible error");
@@ -1422,6 +1461,7 @@ if (__input.request.modelLabel !== undefined && __before.modelLabel !== __input.
 if (!__matchesRequestedEffort(__before, __input.request.effortLabel)) {
   __throw("WEB_EFFORT_MISMATCH", "Observed reasoning label does not match the request");
 }
+__receiptRoute = __initial.url;
 const __composerSelector = await __page.evaluate(() => {
   const selectors = [
     "div.ProseMirror[contenteditable=\\"true\\"]",
@@ -1509,7 +1549,35 @@ const __sendSelector = await __page.evaluate(() => {
 });
 if (!__sendSelector) __throw("WEB_SEND_UNAVAILABLE", "ChatGPT send control is unavailable");
 await __page.click(__sendSelector, { timeout: __input.timeoutMs, label: "send ChatGPT prompt" });
-const __afterClick = await __page.evaluate(__inspect);
+let __afterClick = await __page.evaluate(__inspect);
+const __canPollReceipt = __afterClick
+  && __afterClick.userMessageCount === 0
+  && Array.isArray(__afterClick.userMessages) && __afterClick.userMessages.length === 0
+  && Array.isArray(__afterClick.assistantMessages) && __afterClick.assistantMessages.length === 0
+  && __afterClick.loginRequired !== true
+  && __afterClick.visibleError === undefined
+  && __isSubmissionRoute(__afterClick);
+if (__canPollReceipt) {
+  if (__input.resource.conversationUrl === undefined) __receiptRoute = __afterClick.url;
+  const __pollDeadline = Math.min(__submitDeadline, Date.now() + ${SUBMIT_RECEIPT_POLL_WINDOW_MS});
+  const __maxPolls = Math.ceil(${SUBMIT_RECEIPT_POLL_WINDOW_MS} / ${SUBMIT_RECEIPT_POLL_INTERVAL_MS});
+  for (let __poll = 0; __poll < __maxPolls && Date.now() < __pollDeadline; __poll += 1) {
+    const __remaining = __pollDeadline - Date.now();
+    if (__remaining <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(${SUBMIT_RECEIPT_POLL_INTERVAL_MS}, __remaining)));
+    if (Date.now() >= __pollDeadline) break;
+    __afterClick = await __page.evaluate(__inspect);
+    const __continuePolling = __afterClick
+      && __afterClick.userMessageCount === 0
+      && Array.isArray(__afterClick.userMessages) && __afterClick.userMessages.length === 0
+      && Array.isArray(__afterClick.assistantMessages) && __afterClick.assistantMessages.length === 0
+      && __afterClick.loginRequired !== true
+      && __afterClick.visibleError === undefined
+      && __isSubmissionRoute(__afterClick);
+    if (!__continuePolling) break;
+    if (__input.resource.conversationUrl === undefined) __receiptRoute = __afterClick.url;
+  }
+}
 __emit({ ok: true, value: {
   ...__afterClick,
   modelLabel: __afterFill.modelLabel,

@@ -146,6 +146,16 @@ function normalizeReceiptText(value: string): string {
   return value.replace(/\r\n?/g, '\n')
 }
 
+function normalizedCharacterLength(value: string): number {
+  return Array.from(normalizeReceiptText(value)).length
+}
+
+function submissionMismatchMessage(request: WebRunRequest, observation: ChatGptPageObservation): string {
+  const observedLengths = observation.userMessages.map(normalizedCharacterLength)
+  const observedTotal = observedLengths.reduce((total, length) => total + length, 0)
+  return `The original TaskSpace does not show exactly one matching user message (userMessageCount=${observation.userMessageCount}; userMessagesLength=${observation.userMessages.length}; expectedNormalizedChars=${normalizedCharacterLength(request.prompt)}; observedNormalizedChars=${observedTotal}; observedMessageNormalizedChars=${observedLengths.join(',') || 'none'})`
+}
+
 function isChatGptHttpsUrl(value: string): boolean {
   try {
     const parsed = new URL(value)
@@ -539,7 +549,7 @@ export class WebController {
         resource,
         problem: {
           code: 'WEB_SUBMISSION_MISMATCH',
-          message: 'The original TaskSpace does not show exactly one matching user message',
+          message: submissionMismatchMessage(request, observation),
         },
       }
     }

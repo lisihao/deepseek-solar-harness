@@ -95,6 +95,75 @@ async function executeGeneratedSource(source: string, taskSpace: (...args: unkno
   return { stdout, stderr: '', exitCode: 0 as const, executionStopped: true as const }
 }
 
+function generatedSubmitFixture(
+  postClickObservations: readonly AdapterObservation[],
+  fixtureOptions: {
+    readonly resource?: WebRunResource
+    readonly initialObservation?: AdapterObservation
+    readonly initialPageUrl?: string
+    readonly beforeSendDelayMs?: number
+  } = {},
+) {
+  const prompt = request().prompt
+  const fixtureResource = fixtureOptions.resource ?? resource
+  const initialObservation = fixtureOptions.initialObservation ?? observation
+  let filled = false
+  let sent = false
+  let currentUrl = fixtureOptions.initialPageUrl ?? 'about:blank'
+  let modelView: 'simple' | 'advanced' = 'simple'
+  let postClickReads = 0
+  let sendAt: number | undefined
+  const clicks: string[] = []
+  const page = {
+    async url() { return currentUrl },
+    async goto() { currentUrl = 'https://chatgpt.com/' },
+    async waitForSelector() {},
+    async waitForFunction() {},
+    async evaluate(fn: unknown, argument?: unknown) {
+      const source = String(fn)
+      if (argument === 'button[aria-label="选择 ChatGPT 模型"]') return { expanded: 'false' }
+      if (argument === '[role="menu"]') return false
+      if (source.includes('function inspectChatGptPage')) {
+        if (!filled) return initialObservation
+        if (!sent) return { ...initialObservation, composerText: prompt }
+        const index = Math.min(postClickReads, postClickObservations.length - 1)
+        postClickReads += 1
+        return postClickObservations[index]
+      }
+      if (source.includes('data-model-picker-view')) {
+        return { advanced: modelView === 'advanced', simple: modelView === 'simple', toggle: true }
+      }
+      if (source.includes('div.ProseMirror') && source.includes('prompt-textarea')) return 'textarea#prompt-textarea'
+      if (source.includes('send-button')) return 'button[data-testid="send-button"]'
+      throw new Error(`unexpected evaluate callback: ${source.slice(0, 80)}`)
+    },
+    async click(selector: string) {
+      clicks.push(selector)
+      if (selector === 'button[aria-label="选择 ChatGPT 模型"]') modelView = 'simple'
+      if (selector === '[data-model-picker-view-toggle="true"][role="menuitem"]') modelView = 'advanced'
+      if (selector === 'button[data-testid="send-button"]') {
+        if (fixtureOptions.beforeSendDelayMs !== undefined) vi.advanceTimersByTime(fixtureOptions.beforeSendDelayMs)
+        sendAt = Date.now()
+        sent = true
+      }
+    },
+    async fill() { filled = true },
+    async press() {},
+  }
+  const taskSpace = async () => ({ ownership: 'agent', spaceId: fixtureResource.spaceId, page: () => page })
+  const run: EgoProcessRunner = vi.fn(async (input: Parameters<EgoProcessRunner>[0]) => executeGeneratedSource(input.source, taskSpace))
+  return {
+    run,
+    page,
+    clicks,
+    postClickReads: () => postClickReads,
+    sendAt: () => sendAt,
+    setConversationUrl: () => {
+      if (fixtureResource.conversationUrl !== undefined) currentUrl = fixtureResource.conversationUrl
+    },
+  }
+}
+
 describe('EgoWebAdapter', () => {
   it('creates one agent TaskSpace and reuses the resource without a second call', async () => {
     const fixture = runnerReturning({ spaceId: 3, pageLabel: 'p1' })
@@ -765,6 +834,121 @@ describe('EgoWebAdapter', () => {
       '[data-model-picker-view="advanced"]',
     ])
     expect(calls.evaluate.every(({ source }) => !source.includes('function.toString()'))).toBe(true)
+  })
+
+  it('polls the generated submit receipt for a delayed matching user bubble without a second click', async () => {
+    vi.useFakeTimers({ now: 0 })
+    try {
+      const prompt = request().prompt
+      const delayed = { ...observation, userMessages: [prompt], userMessageCount: 1, generating: true }
+      const fixture = generatedSubmitFixture([observation, delayed])
+      const adapter = new EgoWebAdapter({ ...options, commandTimeoutMs: 10_000 }, fixture.run)
+
+      await expect(adapter.prepare(resource, request())).resolves.toEqual(observation)
+      fixture.setConversationUrl()
+      const submitted = adapter.submit(resource, request())
+      await vi.runAllTimersAsync()
+
+      await expect(submitted).resolves.toEqual(delayed)
+      expect(fixture.clicks.filter((selector) => selector === 'button[data-testid="send-button"]')).toHaveLength(1)
+      expect(fixture.postClickReads()).toBe(2)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('counts pre-send work against the same total deadline before receipt polling', async () => {
+    vi.useFakeTimers({ now: 0 })
+    try {
+      const fixture = generatedSubmitFixture([observation], { beforeSendDelayMs: 8_850 })
+      const adapter = new EgoWebAdapter({ ...options, commandTimeoutMs: 10_000 }, fixture.run)
+
+      await expect(adapter.prepare(resource, request())).resolves.toEqual(observation)
+      fixture.setConversationUrl()
+      const submitted = adapter.submit(resource, request())
+      await vi.runAllTimersAsync()
+
+      await expect(submitted).resolves.toMatchObject({ userMessageCount: 0, userMessages: [] })
+      expect(fixture.sendAt()).toBe(8_850)
+      expect(Date.now()).toBeLessThanOrEqual(9_750)
+      expect(fixture.postClickReads()).toBeLessThan(50)
+      expect(fixture.clicks.filter((selector) => selector === 'button[data-testid="send-button"]')).toHaveLength(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('allows one same-origin root-to-conversation transition for a new resource, then stops on another conversation', async () => {
+    vi.useFakeTimers({ now: 0 })
+    try {
+      const newResource: WebRunResource = { spaceId: 3, pageLabel: 'p1' }
+      const rootObservation = { ...observation, url: 'https://chatgpt.com/' }
+      const firstConversation = { ...rootObservation, url: 'https://chatgpt.com/c/first-conversation' }
+      const otherConversation = { ...rootObservation, url: 'https://chatgpt.com/c/other-conversation' }
+      const fixture = generatedSubmitFixture(
+        [rootObservation, firstConversation, otherConversation],
+        { resource: newResource, initialObservation: rootObservation, initialPageUrl: 'https://chatgpt.com/' },
+      )
+      const adapter = new EgoWebAdapter({ ...options, commandTimeoutMs: 10_000 }, fixture.run)
+
+      await expect(adapter.prepare(newResource, request())).resolves.toEqual(rootObservation)
+      const submitted = adapter.submit(newResource, request())
+      await vi.runAllTimersAsync()
+
+      await expect(submitted).resolves.toEqual(otherConversation)
+      expect(fixture.postClickReads()).toBe(3)
+      expect(fixture.clicks.filter((selector) => selector === 'button[data-testid="send-button"]')).toHaveLength(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('returns a permanently missing receipt within the fixed polling slice', async () => {
+    vi.useFakeTimers({ now: 0 })
+    try {
+      const fixture = generatedSubmitFixture([observation])
+      const adapter = new EgoWebAdapter({ ...options, commandTimeoutMs: 10_000 }, fixture.run)
+
+      await expect(adapter.prepare(resource, request())).resolves.toEqual(observation)
+      fixture.setConversationUrl()
+      const submitted = adapter.submit(resource, request())
+      await vi.runAllTimersAsync()
+
+      await expect(submitted).resolves.toMatchObject({ userMessageCount: 0, userMessages: [] })
+      expect(fixture.clicks.filter((selector) => selector === 'button[data-testid="send-button"]')).toHaveLength(1)
+      expect(fixture.postClickReads()).toBeLessThanOrEqual(50)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    ['mismatched bubble', { ...observation, userMessages: ['different prompt'], userMessageCount: 1 }],
+    ['duplicate bubbles', { ...observation, userMessages: [request().prompt, request().prompt], userMessageCount: 2 }],
+    ['assistant appeared', { ...observation, assistantMessages: [{ text: 'answer', markdown: 'answer' }] }],
+    ['visible error', { ...observation, visibleError: 'temporary error' }],
+    ['login required', { ...observation, loginRequired: true }],
+    ['route changed', { ...observation, url: 'https://chatgpt.com/c/other-route' }],
+  ] as const)('returns %s immediately without receipt polling or send retries', async (_name, afterClick) => {
+    vi.useFakeTimers({ now: 0 })
+    try {
+      const fixture = generatedSubmitFixture([afterClick])
+      const adapter = new EgoWebAdapter({ ...options, commandTimeoutMs: 10_000 }, fixture.run)
+
+      await expect(adapter.prepare(resource, request())).resolves.toEqual(observation)
+      fixture.setConversationUrl()
+      await expect(adapter.submit(resource, request())).resolves.toEqual(afterClick)
+
+      expect(fixture.clicks.filter((selector) => selector === 'button[data-testid="send-button"]')).toHaveLength(1)
+      expect(fixture.postClickReads()).toBe(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('selects the visible webpage-search option and preserves its pill while inserting the exact prompt', async () => {
