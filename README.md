@@ -5,8 +5,8 @@
 这里给出本机已安装插件的固定版本快照、可复制的安装指令，以及我们开发或修改的插件验证包。**Solar 的 `0.1.0-dev.0` 包与维护 fork 是预览分发，不是稳定市场 Release。** 同版本的不同构建按完整源码提交和 SHA-256 区分；不要仅凭版本号判断是否相同。
 
 - [精选包与校验目录](distribution/plugins/) · [机器可读包目录](distribution/plugins/catalog.json)
-- [如何使用这七个插件](docs/curated-plugin-usage.md) · [安装、备份和恢复说明](docs/curated-plugin-installation.md)
-- [全部已安装插件快照](docs/installed-plugins-2026-10-21.json) · [旧的 2026-10-19 快照](docs/installed-plugins-2026-10-19.json)
+- [如何使用这八个插件](docs/curated-plugin-usage.md) · [安装、备份和恢复说明](docs/curated-plugin-installation.md)
+- [全部已安装插件快照](docs/installed-plugins-2026-10-22.json) · [旧的 2026-10-19 快照](docs/installed-plugins-2026-10-19.json)
 
 ## 先选需要的插件
 
@@ -15,7 +15,8 @@
 | 看上下文和费用 | `dsh-context`、`dsh-cost-meter` | 社区原版；费用显示为估算 |
 | 切换原生模型并保留任务 | `model-handoff` | 短任务免摘要调用、取消后新任务、Web 进入/返回选择和提示框已验收；不保证摘要质量 |
 | 多阶段原生任务和可编辑流程 | `native-resident` + `native-collaboration` | 持久化/调度的无密钥检查及流程编辑、保存重开已验收；真实任务结果需自行验收 |
-| 网页回答、洞察分析 | `chatgpt-web` | **实验性**：旧安装包 `2c338f9` 的真实请求出现回执不匹配；新包 `c165a3a` 已通过源码检查并安装核对；修复后真实回答链路尚未验收 |
+| 网页回答、洞察分析 | `chatgpt-web` | **实验性**：旧安装包 `2c338f9` 的真实请求出现回执不匹配；新包 `67cd3aa` 已通过源码检查并安装核对；修复后真实回答链路尚未验收 |
+| 技能目录过大、旧目录累积 | `skill-context` | 完整技能仍保留，按需搜索后由官方工具加载；原生模拟请求已验证，真实模型请求未运行 |
 | 原始 Prime RLM | `rlm` | macOS arm64 原始运行时与本地机制检查；未证明普遍推理质量收益 |
 | 修复压缩预检失败 | `billion-context` | Solar fork 的 `every compression tier is exhausted` 修复；不是 handoff 的替代品 |
 | 壁纸列表/本地文件夹轮换 | `dream-skin` | Solar 维护 fork；个人图片不随包分发 |
@@ -67,11 +68,11 @@ done
 安装快照中的 LoopX 使用了本机已有的兼容性许可；本仓库不会复制该许可或绕过宿主版本检查。若安装时报告版本不兼容，请停止并核对作者支持范围，不能把本机已安装当作其他环境可直接启用的保证。
 
 <!-- SOLAR-INSTALLED-PLUGINS:START -->
-核对日期：2026-10-21（Asia/Shanghai）。profile 配置共 **49 个 bundle**：16 个官方、26 个社区原版、7 个本仓库精选验证包（5 个 Solar 自研、2 个维护 fork）。这是配置和已安装包元数据快照；不表示本轮逐个验证了 GUI 开关或真实功能，也不表示最新版本。
+核对日期：2026-10-22（Asia/Hong_Kong）。profile 配置共 **50 个 bundle**：16 个官方、26 个社区原版、8 个本仓库精选验证包（6 个 Solar 自研、2 个维护 fork）。这是配置和已安装包元数据快照；不表示本轮逐个验证了 GUI 开关或真实功能，也不表示最新版本。
 
-[机器可读清单](docs/installed-plugins-2026-10-21.json)不包含账号、配置值、会话或本机安装路径。
+[机器可读清单](docs/installed-plugins-2026-10-22.json)不包含账号、配置值、会话或本机安装路径。
 
-### 自研与维护包：7 项
+### 自研与维护包：8 项
 
 | 插件 | 快照版本 | 用途 | 安装或启用方式 |
 |---|---|---|---|
@@ -82,6 +83,7 @@ done
 | [`@lisihao/dsh-solar-model-handoff`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 原生模型上下文交接与 Web 返回范围选择 | `bash "$work/install.sh" --ref "$ref" model-handoff` |
 | [`@lisihao/dsh-solar-chatgpt-web`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | ChatGPT 网页算子和洞察分析；实验性 | `bash "$work/install.sh" --ref "$ref" chatgpt-web` |
 | [`@lisihao/dsh-solar-rlm`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 原始 Prime RLM/Continual Harness 适配；实验性 | `bash "$work/install.sh" --ref "$ref" rlm` |
+| [`@lisihao/dsh-solar-skill-context`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 技能按需检索；旧完整目录退出请求、原日志保留 | `bash "$work/install.sh" --ref "$ref" skill-context` |
 
 ### 社区原版：26 项
 

@@ -1,8 +1,8 @@
 # Curated plugin usage guide
 
-This guide is the public, English-language usage reference for the Solar plugin set described by the V4 homepage. Chinese labels below are the labels used by the candidate UI. The guide records the evidence boundary as of 2026-10-21 (Asia/Shanghai); a source checkout, a packed artifact, an enabled plugin, and a successful live task are separate facts.
+This guide is the public, English-language usage reference for the Solar plugin set described by the V4 homepage. Chinese labels below are the labels used by the candidate UI. The guide records the evidence boundary as of 2026-10-22 (Asia/Hong_Kong); a source checkout, a packed artifact, an enabled plugin, and a successful live task are separate facts.
 
-V4 is built for the official DeepSeek Harness `0.2.1-rc.2` and does not rebuild or modify the official app. The Solar market has not been published yet, so there is no Discover index URL to add. The five Solar plugins remain development candidates. Exact preview archives and maintained forks are distributed in `distribution/plugins/`, independently of a market release. Do not present an incubator package as a market release.
+V4 is built for the official DeepSeek Harness `0.2.1-rc.2` and does not rebuild or modify the official app. The Solar market has not been published yet, so there is no Discover index URL to add. The six Solar plugins remain development candidates. Exact preview archives and maintained forks are distributed in `distribution/plugins/`, independently of a market release. Do not present an incubator package as a market release.
 
 ## Install and restart
 
@@ -31,10 +31,17 @@ The public source history is useful for provenance, but it is not a release chan
 | `@lisihao/dsh-solar-model-handoff` | Source repair and a packed development artifact | Short-task and keyless route checks exist. A live model summary and result-carrying handoff are not claimed here. |
 | `@lisihao/dsh-solar-native-resident` | Native service, `solar_resident`, persistent lanes, and the durable local TaskGraph | Source, built-package, and scratch checks exist. This does not claim indefinite autonomous work, provider quality, or complete live-provider acceptance. |
 | `@lisihao/dsh-solar-native-collaboration` | `协同模式`, `执行流程`, native handoff/allocation, and Resident coordination | Editing and save/read paths are bounded and can be model-free. Execution and quota-labelled canaries require a deliberate provider action. |
-| `@lisihao/dsh-solar-chatgpt-web` | `ChatGPT 网页算子`, `洞察分析`, Web model discovery, and provider snapshots | Web and Insight remain experimental. A real attempt with the installed `2c338f9` artifact ended in `WEB_SUBMISSION_MISMATCH`; the newer `c165a3a` distribution candidate passed source/keyless checks and was installed with all 54 packed files verified; its live answer path remains untested. The original TaskSpace was absent from a later task list although the user reported no intervention, so recovery must inspect the original status without resubmitting and the outcome is unknown. No successful live Web/Insight run is claimed. |
+| `@lisihao/dsh-solar-chatgpt-web` | `ChatGPT 网页算子`, `洞察分析`, Web model discovery, and provider snapshots | Web and Insight remain experimental. A real attempt with the installed `2c338f9` artifact ended in `WEB_SUBMISSION_MISMATCH`; the newer `67cd3aa` distribution candidate passed source/keyless checks and was installed with all 54 packed files verified; its live answer path remains untested. The original TaskSpace was absent from a later task list although the user reported no intervention, so recovery must inspect the original status without resubmitting and the outcome is unknown. No successful live Web/Insight run is claimed. |
 | `@lisihao/dsh-solar-rlm@0.1.0-dev.0` | The exact packed artifact built from source commit `6a47ed6` | Installed self-tests are keyless and local. Real-provider acceptance inside the installed App remains unrun. Separate source/evaluator experiments do not establish a general quality benefit. Later source changes are not assumed to be in this installed artifact. |
+| `@lisihao/dsh-solar-skill-context` | Bounded discovery and canonical retirement of old full catalogs | 11 installed files verified; source/fake-model and isolated App Host checks pass, including the official Desktop-scoped loader. Manual plugin-list confirmation, real user-session disk restart and provider execution are separate/unrun. |
 | `billion-context@0.1.202-solar.1` | Installed Solar-maintained fork with the preflight repair | The fork's source and fake/native checks pass at its stated boundary. A real long-session replay and model-quality or token-savings claim are not established. It is a context layer, not a second handoff or scheduler. |
 | Dream Skin local-folder candidate | Source commit `2f6929c`, the exact packed version `10.21.2-folder.2f6929c` | The source snapshot's package metadata still reports `10.21.1`; `10.21.2` is not presented as a published release. User wallpaper folders are read at runtime when selected and are not included in the package. |
+
+## On-demand skill context
+
+Install `skill-context`, relaunch, and confirm **Solar 技能按需上下文** in the installed-plugin list. No separate chat panel or model is added. The next normally authorized native request uses `solar_skill_search` for relevant names/descriptions, then the unchanged official `skill` loader for complete instructions. A few keywords or an exact skill name work; broad results expose `nextOffset`. Defaults are eight matches, at most 240 Unicode characters per description and 8,192 UTF-8 bytes per result JSON. Search itself does not call a model or execute a skill.
+
+Old visible automatic catalogs leave the canonical request through individual standard Session replacements; original log events and already loaded skill bodies remain. Installing or opening the plugin does not retry an old request or rewrite every stored conversation. Cleanup runs when a subsequent native request is admitted. Agent policies permitting `skill` must also expose `solar_skill_search`; an incompatible allowlist stops with a named error before changing that Session. Disable removes the hook/search tool and leaves the official mechanism available. This repair does not shrink arbitrary system prompts, loaded documents or tool results, and does not guarantee any future request fits its model window. Source and isolated fake-model checks are separate from real-provider or real user-session restart acceptance.
 
 ## Model handoff
 
@@ -132,6 +139,7 @@ The following map is the practical rule for the visible controls in this guide. 
 | `洞察分析` stage execution | May use Gemini and ChatGPT website quotas. It is experimental and has no successful end-to-end claim here. |
 | `solar_rlm_run`; RLM `continue` / `refine` | Runs or continues Prime through the calling DSH provider and may use its quota. |
 | `solar_rlm_inspect`; RLM `cancel` | No new model turn; an unknown native effect remains an observation/reconciliation case. |
+| `solar_skill_search` | Reads a local scoped skill snapshot; no model call, skill execution or remote search. |
 | billion-context compression | Occurs inside a real client model request; the plugin does not supply a free model call or guarantee savings. |
 | Dream Skin settings, local-folder rotation, and low-power toggle | No model quota; local file reads and user-supplied image URLs are separate I/O. |
 
@@ -139,7 +147,7 @@ When an external effect is pending or unknown, inspect the original resource or 
 
 ## Data and privacy boundary
 
-Solar plugins write only to their own namespaces under `$DSH_HOME/solar/` and retain versioned records. The main namespaces used by this guide are:
+Plugin-owned data uses namespaces under `$DSH_HOME/solar/` and versioned records. The skill-context adapter also appends standard, source-citing Session replacement events to the official log; it creates no private database and preserves original events. The main namespaces used by this guide are:
 
 - `model-handoff/` for handoff receipts, route boundaries, summaries, and human answers;
 - `native-collaboration/` for session mode, flow sources, drafts, runs, and delivery records;

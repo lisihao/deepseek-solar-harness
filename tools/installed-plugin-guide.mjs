@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-const snapshot = JSON.parse(await readFile(`${root}docs/installed-plugins-2026-10-21.json`, 'utf8'))
+const snapshot = JSON.parse(await readFile(`${root}docs/installed-plugins-2026-10-22.json`, 'utf8'))
 const begin = '<!-- SOLAR-INSTALLED-PLUGINS:START -->'
 const end = '<!-- SOLAR-INSTALLED-PLUGINS:END -->'
 const purpose = {
@@ -26,6 +26,7 @@ const purpose = {
   '@lisihao/dsh-solar-native-collaboration': '普通/智能协同与执行流程编辑',
   '@lisihao/dsh-solar-model-handoff': '原生模型上下文交接与 Web 返回范围选择',
   '@lisihao/dsh-solar-chatgpt-web': 'ChatGPT 网页算子和洞察分析；实验性',
+  '@lisihao/dsh-solar-skill-context': '技能按需检索；旧完整目录退出请求、原日志保留',
   '@lisihao/dsh-solar-rlm': '原始 Prime RLM/Continual Harness 适配；实验性',
   'billion-context': 'Solar 维护的上下文压缩预检修复', 'dsh-dream-skin': 'Solar 维护的壁纸轮换/本地文件夹图源',
 }
@@ -36,9 +37,9 @@ const curated = snapshot.plugins.filter(p => p.category === 'curated')
 const community = snapshot.plugins.filter(p => p.category === 'community')
 const official = snapshot.plugins.filter(p => p.category === 'official')
 const body = [
-  `核对日期：2026-10-21（Asia/Shanghai）。profile 配置共 **${snapshot.plugins.length} 个 bundle**：${official.length} 个官方、${community.length} 个社区原版、${curated.length} 个本仓库精选验证包（5 个 Solar 自研、2 个维护 fork）。这是配置和已安装包元数据快照；不表示本轮逐个验证了 GUI 开关或真实功能，也不表示最新版本。`,
-  '[机器可读清单](docs/installed-plugins-2026-10-21.json)不包含账号、配置值、会话或本机安装路径。',
-  '### 自研与维护包：7 项', [header, ...curated.map(p => row(p, purpose[p.name], `\`bash "$work/install.sh" --ref "$ref" ${p.packageId}\``))].join('\n'),
+  `核对日期：2026-10-22（Asia/Hong_Kong）。profile 配置共 **${snapshot.plugins.length} 个 bundle**：${official.length} 个官方、${community.length} 个社区原版、${curated.length} 个本仓库精选验证包（6 个 Solar 自研、2 个维护 fork）。这是配置和已安装包元数据快照；不表示本轮逐个验证了 GUI 开关或真实功能，也不表示最新版本。`,
+  '[机器可读清单](docs/installed-plugins-2026-10-22.json)不包含账号、配置值、会话或本机安装路径。',
+  `### 自研与维护包：${curated.length} 项`, [header, ...curated.map(p => row(p, purpose[p.name], `\`bash "$work/install.sh" --ref "$ref" ${p.packageId}\``))].join('\n'),
   `### 社区原版：${community.length} 项`,
   '先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。安装成功不等于账号、外部依赖或真实执行已验收。`dsh-purge-community` 会修改官方 App runtime/CLI，与本项目保持官方 App 不变的 D1 约束不一致；该行仅记录已有安装，不构成推荐配置。', [header, ...community.map(p => row(p, purpose[p.name], `\`"$DSH_CLI" plugin --profile desktop add '${p.installSpec}'\``))].join('\n'),
   '### 官方内置：16 项',

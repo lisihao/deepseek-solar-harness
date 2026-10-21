@@ -117,11 +117,11 @@
       "name": "@lisihao/dsh-solar-chatgpt-web",
       "version": "0.1.0-dev.0",
       "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
-      "sourceCommit": "c165a3aff116ec56f482419122441c6abf0473d2",
+      "sourceCommit": "67cd3aa143b30fc97f19bd2b55c392b8f14145eb",
       "artifact": {
-        "file": "chatgpt-web/c165a3a/lisihao-dsh-solar-chatgpt-web-0.1.0-dev.0.tgz",
-        "sha256": "afc08b64a428c3409e674c4153ea6243dd5ac72760319ef9c900379cd8c06d58",
-        "size": 419822
+        "file": "chatgpt-web/67cd3aa/lisihao-dsh-solar-chatgpt-web-0.1.0-dev.0.tgz",
+        "sha256": "20eaacd5205864db4b88e8b735cb943943e9838a98bef4be5833f8a0ed9b5118",
+        "size": 415504
       },
       "historicalArtifacts": [
         {
@@ -130,6 +130,14 @@
           "sha256": "525a60d4c514e57e0657c81c5a8c44d7d9385631d69492627ba8763c90f2be34",
           "size": 415230,
           "origin": "previously-installed-desktop-profile",
+          "installableCandidate": false
+        },
+        {
+          "sourceCommit": "c165a3aff116ec56f482419122441c6abf0473d2",
+          "file": "chatgpt-web/c165a3a/lisihao-dsh-solar-chatgpt-web-0.1.0-dev.0.tgz",
+          "sha256": "afc08b64a428c3409e674c4153ea6243dd5ac72760319ef9c900379cd8c06d58",
+          "size": 419822,
+          "origin": "previously-installed-receipt-repair",
           "installableCandidate": false
         }
       ],
@@ -144,7 +152,7 @@
       "validationScope": {
         "source": {
           "status": "passed",
-          "scope": "408 source tests, build/types and exact source CI 39574197415"
+          "scope": "existing full 408-test boundary plus 15 affected adapter tests, types/build, built fake CLI and exact CI 39639247638 for native skill notice exclusion"
         },
         "scratch": {
           "status": "passed",
@@ -152,7 +160,7 @@
         },
         "ui": {
           "status": "not-run",
-          "scope": "c165a3a installed with 54 packed files verified and App/Host restarted; new button interaction not run; prior settings acceptance belongs to historical 2c338f9"
+          "scope": "67cd3aa installed with 54 packed files verified; post-install UI/live answer not run; prior settings acceptance belongs to 2c338f9"
         },
         "live": {
           "status": "not-run"
@@ -286,6 +294,40 @@
         },
         "ui": {
           "status": "not-recorded-by-curation"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "skill-context",
+      "name": "@lisihao/dsh-solar-skill-context",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "9fb931bb39913463fce79ad2955a160934a368d3",
+      "artifact": {
+        "file": "skill-context/9fb931b/lisihao-dsh-solar-skill-context-0.1.0-dev.0.tgz",
+        "sha256": "4c75036ce7a910c1d1c3660199ed149e2ba4d578791c030c4b5d9265754992c4",
+        "size": 15196
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "97-test stable local gate plus affected 10-case AgentLoop suite including Desktop-scoped loader, types/build, independent review and exact follow-up CI 39642142906"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "packed profile and installed App Host isolated rc.2 AgentLoop with fake adapter; 1477 skills, three retired catalogs, search and official scoped load pass; no real provider/user-session writes"
+        },
+        "ui": {
+          "status": "not-run",
+          "scope": "11 installed packed files verified; App Host isolated check passed; manual installed-plugin UI confirmation not run; not real user-session persistence or provider acceptance"
         },
         "live": {
           "status": "not-run"
