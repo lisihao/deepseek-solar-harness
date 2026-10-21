@@ -194,6 +194,8 @@ export interface FakeStudioUiApiOptions {
   readonly deferredCompletionMs?: number
   /** Fixture-only visual scenario: the current session has no captured workflow. */
   readonly emptyOverview?: boolean
+  /** Fixture-only visual scenario: selecting `smart` fails its readiness check with this message. */
+  readonly smartBlockedMessage?: string
 }
 
 /** Browser-fixture-only in-memory API. It has no Host, network, or model integration. */
@@ -221,8 +223,11 @@ export class FakeStudioUiApi implements StudioUiApi {
   private readonly listeners = new Set<() => void>()
   private readonly deferredCompletionMs: number
 
+  private readonly smartBlockedMessage: string | undefined
+
   constructor(options: FakeStudioUiApiOptions = {}) {
     this.deferredCompletionMs = options.deferredCompletionMs ?? 350
+    this.smartBlockedMessage = options.smartBlockedMessage
     this.sources = new Map((options.emptyOverview ? [] : seededSources()).map(source => [source.id, clone(source)]))
   }
 
@@ -371,6 +376,7 @@ export class FakeStudioUiApi implements StudioUiApi {
   async setMode(input: { readonly sessionId: string; readonly mode: 'ordinary' | 'smart'; readonly expectedRevision: number }): Promise<CollaborationModeState> {
     this.requireSession(input.sessionId)
     if (input.expectedRevision !== this.mode.revision) throw new Error('FIXTURE_MODE_CAS_CONFLICT')
+    if (input.mode === 'smart' && this.smartBlockedMessage !== undefined) throw new Error(this.smartBlockedMessage)
     this.counters.modeSelections += 1
     this.mode = { ...this.mode, mode: input.mode, revision: this.mode.revision + 1 }
     this.notify()

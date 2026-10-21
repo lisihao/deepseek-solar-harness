@@ -307,18 +307,6 @@ ${scopedFlowCss}
   .solar-workflow-studio__canvas { min-height: 320px; }
 }
 
-.solar-session-mode {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  color: var(--dsw-alias-label-primary, inherit);
-}
-.solar-session-mode__label { color: var(--dsw-alias-label-secondary, inherit); font-size: .86rem; }
-.solar-session-mode button { min-height: 28px; padding: 4px 8px; border-radius: 7px; }
-.solar-session-mode button[aria-pressed="true"] { border-color: var(--dsw-alias-brand-primary, #ba7dff); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #ba7dff) 14%, transparent); }
-.solar-session-mode__error { width: 100%; color: var(--dsw-alias-state-error-primary, #e87070); font-size: .85rem; }
-
 @media (max-width: 780px) {
   .solar-workflow-studio { padding: 10px; }
   .solar-workflow-studio__layout { grid-template-columns: minmax(0, 1fr); }
@@ -329,17 +317,45 @@ ${scopedFlowCss}
 `
 
 const sessionModeCss = `
-.solar-session-mode {
+.solar-session-mode { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.solar-session-mode__toggle {
   display: inline-flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  color: var(--dsw-alias-label-primary, inherit);
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, inherit);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.solar-session-mode__label { color: var(--dsw-alias-label-secondary, inherit); font-size: .86rem; }
-.solar-session-mode button { min-height: 28px; padding: 4px 8px; border-radius: 7px; }
-.solar-session-mode button[aria-pressed="true"] { border-color: var(--dsw-alias-brand-primary, #ba7dff); background: color-mix(in srgb, var(--dsw-alias-brand-primary, #ba7dff) 14%, transparent); }
-.solar-session-mode__error { width: 100%; color: var(--dsw-alias-state-error-primary, #e87070); font-size: .85rem; }
+.solar-session-mode__toggle:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, .12)); }
+.solar-session-mode__toggle:disabled { cursor: default; opacity: .55; }
+.solar-session-mode__toggle[aria-pressed="true"] {
+  color: var(--dsw-alias-brand-primary, #4d6bfe);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4d6bfe) 12%, transparent);
+}
+.solar-session-mode__popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(280px, 55vw);
+  padding: 8px 10px;
+  border: .5px solid var(--dsw-alias-border-l3, rgba(127, 127, 127, .3));
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  color: var(--dsw-alias-state-error-primary, #d93026);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 `
 
 /** Rendered once by each isolated panel. It includes both React Flow's base rules and Solar's theme rules. */

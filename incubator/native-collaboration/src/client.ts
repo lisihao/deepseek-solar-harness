@@ -26,6 +26,7 @@ import {
   nativeCheckGraphId,
   nativeCheckVerdict,
   nodeStatusLabel,
+  readinessRows,
   upsertGraphSnapshot,
   type GraphControlAction,
 } from './client-helpers.js'
@@ -209,13 +210,6 @@ function timeLabel(value: string | undefined): string | undefined {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return undefined
   return date.toLocaleString('zh-CN')
-}
-
-function toolLabel(name: string, index: number): string {
-  if (name === 'solar_resident') return 'Resident 调度器'
-  if (name === 'solar_delegate') return '单次原生委派'
-  if (name === 'solar_coordinate') return '协同任务图'
-  return `扩展工具 ${index + 1}`
 }
 
 function actionLabel(action: GraphControlAction): string {
@@ -526,16 +520,17 @@ function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: Remot
 
   const checkedAt = timeLabel(status?.checkedAt)
   const resident = status?.resident
+  const rows = status === undefined ? undefined : readinessRows(status, graphs, value => new Date(value).toLocaleString('zh-CN'))
   const codexCheckAvailable = canStartNativeCheck('codex', graphs, pendingTests, inspectionTargets)
   const claudeCodeCheckAvailable = canStartNativeCheck('claude-code', graphs, pendingTests, inspectionTargets)
   return createElement('main', { style: panelStyle }, [
     createElement('header', { key: 'header', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
       createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem' } }, '智能协同'),
-      createElement('p', { key: 'summary', style: mutedStyle }, '这里显示本机能力注册和 Resident 任务图。已注册不等于已登录或真实执行通过。'),
+      createElement('p', { key: 'summary', style: mutedStyle }, '开启后，主模型遇到适合拆分的复杂任务时，会把它拆成几个步骤交给本机的 Codex 或 Claude Code 执行，再汇总结果。在对话输入框左侧点「智能协同」即可为当前会话开启，切换本身不会调用模型；执行过程在会话的「执行流程」里查看。'),
     ]),
     remote.error === undefined
       ? null
-      : createElement('p', { key: 'mount-error', role: 'alert', style: { ...sectionStyle, color: 'var(--dsw-alias-state-error-primary)' } }, `无法连接智能协同控制通道：${remote.error}`),
+      : createElement('p', { key: 'mount-error', role: 'alert', style: { ...sectionStyle, color: 'var(--dsw-alias-state-error-primary)' } }, `无法连接智能协同服务：${remote.error}`),
     notice === undefined
       ? null
       : createElement('p', {
@@ -543,35 +538,39 @@ function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: Remot
         role: notice.tone === 'error' ? 'alert' : 'status',
         style: { ...sectionStyle, color: notice.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'inherit' },
       }, notice.message),
-    createElement('section', { key: 'registration', style: sectionStyle }, [
+    createElement('section', { key: 'readiness', style: sectionStyle }, [
       createElement('div', { key: 'heading', style: { display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap' } }, [
-        createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '已注册的本机能力'),
+        createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '就绪状态'),
         createElement('button', {
           key: 'refresh',
           type: 'button',
           disabled: remote.api === undefined || refreshing,
           onClick: () => { void refresh(true) },
           style: buttonStyle,
-        }, refreshing ? '正在刷新…' : '刷新注册和任务状态'),
+        }, refreshing ? '正在刷新…' : '刷新状态'),
       ]),
-      status === undefined
-        ? createElement('p', { key: 'loading', style: mutedStyle }, remote.api === undefined ? '正在连接本机控制通道…' : '正在读取本机注册状态…')
-        : createElement('div', { key: 'data', style: { display: 'grid', gap: 8, minWidth: 0 } }, [
-          createElement('p', { key: 'resident', style: mutedStyle }, `Resident：${status.resident.available ? '已连接' : '未连接'}。${displayMessage(status.resident.message, '未返回说明。')}`),
-          checkedAt === undefined ? null : createElement('p', { key: 'checked-at', style: mutedStyle }, `上次读取：${checkedAt}`),
-          createElement('div', { key: 'providers', style: { display: 'grid', gap: 4 } }, [
-            createElement('strong', { key: 'title' }, '官方单次委派提供方注册'),
-            ...status.providers.map(provider => createElement('div', { key: provider.name, style: mutedStyle }, `${provider.label}：${provider.available ? '已注册' : '未注册'}`)),
+      rows === undefined
+        ? createElement('p', { key: 'loading', style: mutedStyle }, remote.api === undefined ? '正在连接智能协同服务…' : '正在读取状态…')
+        : createElement('dl', { key: 'rows', style: { display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', gap: '8px 16px', margin: 0, minWidth: 0 } }, rows.flatMap(row => [
+          createElement('dt', { key: `${row.key}:title`, style: { margin: 0, color: 'var(--dsw-alias-label-secondary)' } }, row.title),
+          createElement('dd', { key: `${row.key}:value`, style: { margin: 0, display: 'grid', gap: 4, minWidth: 0 } }, [
+            createElement('span', {
+              key: 'text',
+              style: {
+                overflowWrap: 'anywhere',
+                color: row.tone === 'ok'
+                  ? 'var(--dsw-alias-state-success-primary)'
+                  : row.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
+              },
+            }, row.text),
+            row.hint === undefined ? null : createElement('span', { key: 'hint', style: mutedStyle }, row.hint),
           ]),
-          createElement('div', { key: 'tools', style: { display: 'grid', gap: 4 } }, [
-            createElement('strong', { key: 'title' }, '工具注册'),
-            ...status.tools.map((tool, index) => createElement('div', { key: tool.name, style: mutedStyle }, `${toolLabel(tool.name, index)}：${tool.available ? '已注册' : '未注册'}`)),
-          ]),
-        ]),
+        ])),
+      checkedAt === undefined ? null : createElement('p', { key: 'checked-at', style: { ...mutedStyle, fontSize: 12 } }, `状态读取于 ${checkedAt}`),
     ]),
     createElement('section', { key: 'tests', style: sectionStyle }, [
-      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '原生执行连接测试'),
-      createElement('p', { key: 'copy', style: mutedStyle }, '以下操作只会在你点击后提交一项测试，并使用相应的订阅额度。测试请求原生执行器不使用工具、不修改文件，也不接入 DSH 工具桥；运行时自身记录不在此承诺范围内。加载页面和刷新状态不会调用模型。'),
+      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '连接测试'),
+      createElement('p', { key: 'copy', style: mutedStyle }, '点击后向对应工具发一条只要求回复固定标记的测试，会消耗少量订阅额度；测试不读写文件、不使用工具。打开本页和刷新状态不会调用模型。'),
       createElement('div', { key: 'buttons', style: actionRowStyle }, [
         createElement('button', {
           key: 'codex',
@@ -579,14 +578,14 @@ function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: Remot
           disabled: remote.api === undefined || resident?.available !== true || !codexCheckAvailable,
           onClick: () => { void runTest('codex') },
           style: buttonStyle,
-        }, pendingTests.has('codex') ? 'Codex 测试正在提交…' : '测试 Codex（使用订阅额度）'),
+        }, pendingTests.has('codex') ? 'Codex 测试正在提交…' : '测试 Codex'),
         createElement('button', {
           key: 'claude',
           type: 'button',
           disabled: remote.api === undefined || resident?.available !== true || !claudeCodeCheckAvailable,
           onClick: () => { void runTest('claude-code') },
           style: buttonStyle,
-        }, pendingTests.has('claude-code') ? 'Claude Code 测试正在提交…' : '测试 Claude Code（使用订阅额度）'),
+        }, pendingTests.has('claude-code') ? 'Claude Code 测试正在提交…' : '测试 Claude Code'),
       ]),
     ]),
     inspectionTargets.length === 0
@@ -608,17 +607,26 @@ function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: Remot
           ]),
         ])),
       ]),
-    createElement('section', { key: 'graphs', style: { display: 'grid', gap: 10, minWidth: 0 } }, [
-      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, 'Resident 任务图'),
-      graphs.length === 0
-        ? createElement('p', { key: 'empty', style: mutedStyle }, '尚未观察到本机任务图。')
-        : createElement('div', { key: 'list', style: { display: 'grid', gap: 10, minWidth: 0 } }, graphs.map(snapshot => createElement(GraphCard, {
-          key: snapshot.graph.id,
-          snapshot,
-          pendingGraphIds,
-          inspectionRequiredGraphIds,
-          onControl: controlGraph,
-        }))),
+    createElement('details', { key: 'details', style: { ...sectionStyle, display: 'block' } }, [
+      createElement('summary', { key: 'summary', style: { cursor: 'pointer', fontWeight: 600 } }, `最近协同任务与技术详情（${graphs.length} 个任务）`),
+      createElement('div', { key: 'body', style: { display: 'grid', gap: 12, marginTop: 12, minWidth: 0 } }, [
+        status === undefined
+          ? null
+          : createElement('div', { key: 'registration', style: { display: 'grid', gap: 4 } }, [
+            createElement('strong', { key: 'title' }, '官方子智能体注册（单次委派用）'),
+            ...status.providers.map(provider => createElement('div', { key: provider.name, style: mutedStyle }, `${provider.label}：${provider.available ? '已注册' : '未注册'}`)),
+            createElement('p', { key: 'resident', style: mutedStyle }, `调度器说明：${displayMessage(status.resident.message, '未返回说明。')}`),
+          ]),
+        graphs.length === 0
+          ? createElement('p', { key: 'empty', style: mutedStyle }, '还没有协同任务。')
+          : createElement('div', { key: 'list', style: { display: 'grid', gap: 10, minWidth: 0 } }, graphs.map(snapshot => createElement(GraphCard, {
+            key: snapshot.graph.id,
+            snapshot,
+            pendingGraphIds,
+            inspectionRequiredGraphIds,
+            onControl: controlGraph,
+          }))),
+      ]),
     ]),
   ])
 }
@@ -660,11 +668,11 @@ export function apply(ctx: Context): void {
     const remote = useRemoteAccess(remoteStore)
     return createElement(WorkflowStudioPanel, { sessionId: String(props.sessionId), api: remote.studio, error: remote.error })
   }
-  const ModeView = (props: PropsRuntime<'conversation.session.header.actions'>): ReactElement => {
+  const ModeView = (props: PropsRuntime<'conversation.input.left'>): ReactElement => {
     const remote = useRemoteAccess(remoteStore)
     return createElement(SessionModeControl, { sessionId: String(props.sessionId), api: remote.studio, error: remote.error })
   }
   ctx.slots.inject('conversation.view', () => ctx.slots.register({ name: 'conversation.view', id: 'solar-native-collaboration', order: 45, label: () => '执行流程' }, FlowView))
-  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({ name: 'conversation.session.header.actions', id: 'solar-session-collaboration-mode', order: 45 }, ModeView))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'solar-native-collaboration', order: 45, label: () => '协同诊断' }, Diagnostics))
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({ name: 'conversation.input.left', id: 'solar-session-collaboration-mode', order: 45, label: () => '智能协同' }, ModeView))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'solar-native-collaboration', order: 45, label: () => '智能协同' }, Diagnostics))
 }

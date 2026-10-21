@@ -18,6 +18,10 @@ Open the page with `?empty=1` to render a successful empty overview, without
 source flows, drafts or execution records. This exercises the explanatory empty
 state and its refresh action without creating a task or model request.
 
+The `SessionModeControl` toggle sits in an approximated composer tool row. Open the page with
+`?smartBlocked=1` to make the fake `setMode('smart')` fail as a failed readiness check would, which
+shows the failure popover above the toggle.
+
 `overview`, source refresh, editing, saving, inspection, and mode selection never increment
 `counters.modelStarts`. Only `run()` creates a new fixture model start. An explicit `resume()`
 uses the original source/run identity, increments `counters.resumes`, and advances only its
