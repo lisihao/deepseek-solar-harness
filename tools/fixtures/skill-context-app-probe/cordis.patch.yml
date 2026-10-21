@@ -1,0 +1,6 @@
+# Internal-only installed-host acceptance probe. It is never a Solar market
+# package; install it only in a disposable scratch profile or an explicitly
+# authorized temporary installed-host acceptance, then remove it after receipt.
+- insert:
+    - id: solar-skill-context-app-probe
+      name: '@lisihao/dsh-solar-skill-context-app-probe'
