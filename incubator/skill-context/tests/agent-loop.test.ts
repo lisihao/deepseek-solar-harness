@@ -238,6 +238,59 @@ describe('published rc.2 AgentLoop skill-context integration', () => {
       .filter(event => event.type === 'developer/message')).toHaveLength(3)
   })
 
+  it('matches the Desktop preset when the official loader is scoped to the agent', async () => {
+    const fixture = await mountRequestHarness([
+      toolCallResponse('scoped-search-latest', 'solar_skill_search', { query: 'desktop-scoped-latest', offset: 0 }),
+      toolCallResponse('scoped-load-latest', 'skill', { name: 'desktop-scoped-latest' }),
+      textResponse('scoped official loader completed'),
+    ], { scopedSkillTool: true })
+    fixtures.push(fixture)
+    fixture.ctx.skills.register({
+      name: 'desktop-scoped-latest',
+      description: 'The newest skill reached through the Desktop-scoped official loader.',
+      content: 'DESKTOP_SCOPED_SKILL_BODY',
+      source: 'runtime',
+    })
+    await fixture.ctx.plugin(SkillContext)
+
+    expect(fixture.ctx.tools.get('skill')).toBeUndefined()
+    expect(fixture.ctx.tools.get('solar_skill_search')).toBeDefined()
+
+    const seed = historicalCatalogSeed()
+    const agent = await createLoopAgent(fixture, 'desktop-scoped-loader', { seed })
+    expect(fixture.ctx.tools.get('skill', agent.agent)).toBeDefined()
+    expect(fixture.ctx.tools.get('solar_skill_search', agent.agent)).toBeDefined()
+
+    await followLoopAgent(agent, 'search and load the newest desktop-scoped skill')
+
+    expect(fixture.adapter.requests).toHaveLength(3)
+    for (const request of fixture.adapter.requests) {
+      expect(catalogs(request)).toHaveLength(0)
+      expect(notices(request)).toHaveLength(1)
+      expect(request.tools?.map(tool => tool.name)).toEqual(['skill', 'solar_skill_search'])
+    }
+
+    const events = agent.agent.session.snapshotEvents() as readonly SessionEvent[]
+    expect(events.slice(0, seed.length)).toEqual(seed)
+    const retirements = events.filter((event): event is DeveloperMessageEvent => event.type === 'developer/message'
+      && event.data.message.source.kind === 'solar-skill-context'
+      && event.data.message.content.length === 0)
+    expect(retirements.map(event => event.sourceEventSeqs)).toEqual(
+      seed.filter(event => event.type === 'user/message' && event.data.source.kind === 'skill-catalog')
+        .map(event => [event.seq]),
+    )
+
+    const search = toolResultFor(events, 'solar_skill_search')
+    expect(search?.data.message.isError).toBe(false)
+    expect(JSON.parse(messageText(search!.data.message))).toMatchObject({
+      totalMatches: 1,
+      matches: [{ name: 'desktop-scoped-latest' }],
+    })
+    const loaded = toolResultFor(events, 'skill')
+    expect(loaded?.data.message.isError).toBe(false)
+    expect(messageText(loaded!.data.message)).toContain('DESKTOP_SCOPED_SKILL_BODY')
+  })
+
   it('refuses malformed historical catalog records before modifying their surface or dispatching a model request', () => {
     const session = Session.create(SessionId('malformed-skill-catalog'))
     session.append('user/message', createUserMessage({

@@ -69,8 +69,9 @@ async function publishedLoopSupport() {
     SessionProjectionRegistry: projections.default
   };
 }
-async function mountRequestHarness(plan) {
+async function mountRequestHarness(plan, options = {}) {
   const ctx = new Context();
+  const scopedSkillTool = options.scopedSkillTool === true;
   const { SystemPrompt, SessionProjectionRegistry } = await publishedLoopSupport();
   await ctx.plugin(LlmRuntime);
   await ctx.plugin(SessionStore);
@@ -88,7 +89,7 @@ async function mountRequestHarness(plan) {
       return process.cwd();
     }
   });
-  await ctx.plugin(OfficialSkillTool, {});
+  if (!scopedSkillTool) await ctx.plugin(OfficialSkillTool, {});
   await ctx.plugin(AgentLoop, { agents: [] });
   const adapter = new CapturingAdapter(plan);
   ctx.llm.registerAdapter(["skill-context-fixture"], adapter);
@@ -102,6 +103,7 @@ async function mountRequestHarness(plan) {
     adapter,
     flushes,
     handles,
+    scopedSkillTool,
     async cleanup() {
       await Promise.allSettled(handles.splice(0).reverse().map((handle) => handle.dispose()));
       await ctx.fiber.dispose();
@@ -109,11 +111,15 @@ async function mountRequestHarness(plan) {
   };
 }
 async function createLoopAgent(harness, id, options = {}) {
+  const setup = harness.scopedSkillTool || options.setup !== void 0 ? async (agentCtx, agent) => {
+    if (harness.scopedSkillTool) await agentCtx.plugin(OfficialSkillTool, {});
+    return await options.setup?.(agentCtx, agent);
+  } : void 0;
   const handle = await harness.ctx.agents.create({
     sessionId: SessionId(id),
     agentOptions: { provider: "skill-context-fixture", model: "fixture-model" },
     ...options.seed === void 0 ? {} : { seed: options.seed },
-    ...options.setup === void 0 ? {} : { setup: options.setup }
+    ...setup === void 0 ? {} : { setup }
   });
   harness.handles.push(handle);
   return handle;
@@ -157,9 +163,11 @@ function verifyHostTools(ctx) {
   const tools = hostGet(ctx, "tools");
   assert(tools !== void 0 && typeof tools.schemas === "function", "APP_PROBE_HOST_TOOLS_UNAVAILABLE: host tools service is unavailable");
   const names = new Set(tools.schemas().map((schema) => schema.name).filter((name2) => typeof name2 === "string"));
-  assert(names.has("skill"), "APP_PROBE_HOST_TOOL_MISSING: official skill tool is not registered");
   assert(names.has("solar_skill_search"), "APP_PROBE_HOST_TOOL_MISSING: solar_skill_search is not registered");
-  return { tools: ["skill", "solar_skill_search"] };
+  return {
+    globalTools: ["solar_skill_search"],
+    officialSkillInHostGlobal: names.has("skill")
+  };
 }
 function configuredDshHome(ctx) {
   const config = hostGet(ctx, "hostConfig") ?? hostGet(ctx, "hostconfig");
@@ -290,7 +298,7 @@ async function runIsolatedAcceptance(signal) {
     toolCallResponse("app-probe-search-latest", "solar_skill_search", { query: TARGET_SKILL, offset: 0 }),
     toolCallResponse("app-probe-load-latest", "skill", { name: TARGET_SKILL }),
     textResponse("Isolated keyless acceptance completed.")
-  ]);
+  ], { scopedSkillTool: true });
   let agent;
   let cancelAgent;
   try {
@@ -299,8 +307,24 @@ async function runIsolatedAcceptance(signal) {
     const plugin = installed.plugin;
     signal.throwIfAborted();
     await harness.ctx.plugin(plugin);
+    assert(
+      harness.ctx.tools.get("skill") === void 0,
+      "APP_PROBE_GLOBAL_SKILL_VISIBLE: isolated Desktop-shaped harness mounted the official loader globally"
+    );
+    assert(
+      harness.ctx.tools.get("solar_skill_search") !== void 0,
+      "APP_PROBE_GLOBAL_SEARCH_MISSING: isolated bounded search is not globally registered"
+    );
     const seed = historicalSeed();
     agent = await createLoopAgent(harness, "solar-skill-context-app-probe", { seed });
+    assert(
+      harness.ctx.tools.get("skill", agent.agent) !== void 0,
+      "APP_PROBE_SCOPED_SKILL_MISSING: isolated Agent does not resolve the official skill loader"
+    );
+    assert(
+      harness.ctx.tools.get("solar_skill_search", agent.agent) !== void 0,
+      "APP_PROBE_SCOPED_SEARCH_MISSING: isolated Agent does not resolve bounded search"
+    );
     cancelAgent = () => {
       agent?.agent.cancel({ kind: "hook", reason: "skill-context app probe cancelled" }, { keepInbox: true });
     };

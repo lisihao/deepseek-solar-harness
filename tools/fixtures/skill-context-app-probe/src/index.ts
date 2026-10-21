@@ -1,7 +1,10 @@
 /**
  * Internal installed-host acceptance probe for skill-context.
  *
- * The host is observed only for the two installed tool registrations. Every
+ * Its first app-ready host observation is only the global bounded-search
+ * registration; host configuration is read later only to resolve the receipt
+ * path. The Desktop preset scopes the official `skill` loader to each Agent,
+ * which this fixture reproduces only inside its new isolated Context. Every
  * Session, AgentRegistry, SkillRegistry, and fake LLM used below belongs to a
  * newly created isolated Context from request-harness, so this probe cannot
  * write a user's session or trigger host-wide memory/browser/model plugins.
@@ -74,14 +77,19 @@ function hostGet(ctx: Context, key: string): unknown {
   return (ctx as unknown as { get(name: string): unknown }).get(key)
 }
 
-/** The first app-ready operation: observe only the host's installed tool schemas. */
-function verifyHostTools(ctx: Context): { readonly tools: readonly ['skill', 'solar_skill_search'] } {
+/** The first app-ready operation: observe only the host's global tool schemas. */
+function verifyHostTools(ctx: Context): {
+  readonly globalTools: readonly ['solar_skill_search']
+  readonly officialSkillInHostGlobal: boolean
+} {
   const tools = hostGet(ctx, 'tools') as { schemas?: () => readonly { name?: unknown }[] } | undefined
   assert(tools !== undefined && typeof tools.schemas === 'function', 'APP_PROBE_HOST_TOOLS_UNAVAILABLE: host tools service is unavailable')
   const names = new Set(tools.schemas().map(schema => schema.name).filter((name): name is string => typeof name === 'string'))
-  assert(names.has('skill'), 'APP_PROBE_HOST_TOOL_MISSING: official skill tool is not registered')
   assert(names.has('solar_skill_search'), 'APP_PROBE_HOST_TOOL_MISSING: solar_skill_search is not registered')
-  return { tools: ['skill', 'solar_skill_search'] }
+  return {
+    globalTools: ['solar_skill_search'],
+    officialSkillInHostGlobal: names.has('skill'),
+  }
 }
 
 function configuredDshHome(ctx: Context): string | undefined {
@@ -231,7 +239,7 @@ async function runIsolatedAcceptance(signal: AbortSignal): Promise<UnknownRecord
     toolCallResponse('app-probe-search-latest', 'solar_skill_search', { query: TARGET_SKILL, offset: 0 }),
     toolCallResponse('app-probe-load-latest', 'skill', { name: TARGET_SKILL }),
     textResponse('Isolated keyless acceptance completed.'),
-  ])
+  ], { scopedSkillTool: true })
   let agent: Awaited<ReturnType<typeof createLoopAgent>> | undefined
   let cancelAgent: (() => void) | undefined
   try {
@@ -240,8 +248,16 @@ async function runIsolatedAcceptance(signal: AbortSignal): Promise<UnknownRecord
     const plugin = installed.plugin
     signal.throwIfAborted()
     await harness.ctx.plugin(plugin)
+    assert(harness.ctx.tools.get('skill') === undefined,
+      'APP_PROBE_GLOBAL_SKILL_VISIBLE: isolated Desktop-shaped harness mounted the official loader globally')
+    assert(harness.ctx.tools.get('solar_skill_search') !== undefined,
+      'APP_PROBE_GLOBAL_SEARCH_MISSING: isolated bounded search is not globally registered')
     const seed = historicalSeed()
     agent = await createLoopAgent(harness, 'solar-skill-context-app-probe', { seed })
+    assert(harness.ctx.tools.get('skill', agent.agent) !== undefined,
+      'APP_PROBE_SCOPED_SKILL_MISSING: isolated Agent does not resolve the official skill loader')
+    assert(harness.ctx.tools.get('solar_skill_search', agent.agent) !== undefined,
+      'APP_PROBE_SCOPED_SEARCH_MISSING: isolated Agent does not resolve bounded search')
     cancelAgent = () => {
       agent?.agent.cancel({ kind: 'hook', reason: 'skill-context app probe cancelled' }, { keepInbox: true })
     }

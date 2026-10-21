@@ -9,7 +9,7 @@
 import { createRequire } from 'node:module'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { type AgentSetup } from '@deepseek-ai/dsh-agent'
 import {
   LlmAdapter,
   LlmRuntime,
@@ -75,7 +75,17 @@ export interface RequestHarness {
   readonly adapter: CapturingAdapter
   readonly flushes: { count: number }
   readonly handles: LoopAgentHandle[]
+  /** Desktop presets install the official loader in each agent scope. */
+  readonly scopedSkillTool: boolean
   cleanup(): Promise<void>
+}
+
+export interface RequestHarnessOptions {
+  /**
+   * Match the Desktop preset shape: `solar_skill_search` remains global while
+   * the official `skill` loader is composed into every Agent scope.
+   */
+  readonly scopedSkillTool?: boolean
 }
 
 async function publishedLoopSupport(): Promise<{ SystemPrompt: any; SessionProjectionRegistry: any }> {
@@ -95,8 +105,12 @@ async function publishedLoopSupport(): Promise<{ SystemPrompt: any; SessionProje
 }
 
 /** Mount the published AgentLoop prerequisite spine in a new, isolated Context. */
-export async function mountRequestHarness(plan: ResponsePlan[]): Promise<RequestHarness> {
+export async function mountRequestHarness(
+  plan: ResponsePlan[],
+  options: RequestHarnessOptions = {},
+): Promise<RequestHarness> {
   const ctx = new Context()
+  const scopedSkillTool = options.scopedSkillTool === true
   const { SystemPrompt, SessionProjectionRegistry } = await publishedLoopSupport()
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
@@ -114,7 +128,7 @@ export async function mountRequestHarness(plan: ResponsePlan[]): Promise<Request
       return process.cwd()
     },
   })
-  await ctx.plugin(OfficialSkillTool, {})
+  if (!scopedSkillTool) await ctx.plugin(OfficialSkillTool, {})
   await ctx.plugin(AgentLoop, { agents: [] })
 
   const adapter = new CapturingAdapter(plan)
@@ -130,6 +144,7 @@ export async function mountRequestHarness(plan: ResponsePlan[]): Promise<Request
     adapter,
     flushes,
     handles,
+    scopedSkillTool,
     async cleanup(): Promise<void> {
       await Promise.allSettled(handles.splice(0).reverse().map(handle => handle.dispose()))
       await ctx.fiber.dispose()
@@ -141,13 +156,21 @@ export async function mountRequestHarness(plan: ResponsePlan[]): Promise<Request
 export async function createLoopAgent(
   harness: RequestHarness,
   id: string,
-  options: { readonly seed?: readonly SessionEvent[]; readonly setup?: (agentCtx: any) => void } = {},
+  options: { readonly seed?: readonly SessionEvent[]; readonly setup?: AgentSetup } = {},
 ): Promise<LoopAgentHandle> {
+  const setup: AgentSetup | undefined = harness.scopedSkillTool || options.setup !== undefined
+    ? async (agentCtx, agent) => {
+      // AgentRegistry awaits setup before publication, so this official tool is
+      // visible to the first pre-step and its first assembled request.
+      if (harness.scopedSkillTool) await agentCtx.plugin(OfficialSkillTool, {})
+      return await options.setup?.(agentCtx, agent)
+    }
+    : undefined
   const handle = await harness.ctx.agents.create({
     sessionId: SessionId(id),
     agentOptions: { provider: 'skill-context-fixture', model: 'fixture-model' },
     ...options.seed === undefined ? {} : { seed: options.seed },
-    ...options.setup === undefined ? {} : { setup: options.setup },
+    ...setup === undefined ? {} : { setup },
   }) as LoopAgentHandle
   harness.handles.push(handle)
   return handle
