@@ -977,10 +977,14 @@ export async function executeCondition({
   const protocol = condition.protocol ?? 'recursion-ablation-v1'
   const qualityPilot = protocol === 'quality-pilot-v1'
   const qualityRecovery = protocol === 'quality-recovery-v1'
-  if (protocol !== 'recursion-ablation-v1' && !qualityPilot && !qualityRecovery) fail('RLM_CONDITION_PROTOCOL', 'unsupported explicit condition protocol')
+  const qualityControl = protocol === 'quality-control-v1'
+  if (protocol !== 'recursion-ablation-v1' && !qualityPilot && !qualityRecovery && !qualityControl) fail('RLM_CONDITION_PROTOCOL', 'unsupported explicit condition protocol')
   if (qualityPilot && condition.arm !== 'R' && condition.arm !== 'S') fail('RLM_CONDITION_PROTOCOL', 'quality text task requires R or S')
   if (qualityRecovery && condition.arm !== 'S') fail('RLM_CONDITION_PROTOCOL', 'quality recovery requires S')
-  const nativeLimits = qualityRecovery
+  if (qualityControl && !['R', 'S', 'S0'].includes(condition.arm)) fail('RLM_CONDITION_PROTOCOL', 'quality control requires R, S or S0')
+  const nativeLimits = qualityControl
+    ? { protocol: 'quality-control-v1', requestLimit: 32, wallTimeMs: 1_200_000 }
+    : qualityRecovery
     ? { protocol: 'quality-recovery-v1', requestLimit: 11, wallTimeMs: 1_200_000 }
     : qualityPilot
       ? { protocol: 'quality-pilot-v1', requestLimit: 32, wallTimeMs: 1_200_000 }
@@ -1067,7 +1071,7 @@ export async function executeCondition({
   const childIntents = observedChildRequests(receipt, condition)
   const childRequests = childIntents.filter(child => child.physicalAdmitted)
   const childRoster = await readChildRosterEvidence(worker)
-  const expectedDepth = qualityPilot || qualityRecovery || condition.arm === 'S' ? 1 : 0
+  const expectedDepth = qualityControl ? (condition.arm === 'S0' ? 0 : 1) : qualityPilot || qualityRecovery || condition.arm === 'S' ? 1 : 0
   const physicalCleanup = worker?.result?.physicalCleanup === true
   const exitedCleanly = worker?.exit?.code === 0 && worker?.exit?.signal === null
   const depthMatches = worker?.result?.nativeDepth === expectedDepth && worker?.result?.actualDepth === expectedDepth

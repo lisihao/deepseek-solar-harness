@@ -22,7 +22,7 @@ test('recovery admits only eleven same-tree logical and physical requests, then 
  }finally{await rm(d,{recursive:true,force:true})}
 })
 test('recovery strategy describes native turn-boundary timing without benchmark labels',()=>{
- assert.match(RECOVERY_POLICY,/parent assistant turn ends/);assert.match(RECOVERY_POLICY,/at most TWO children/);assert.match(RECOVERY_POLICY,/ELEVEN model requests/);assert.doesNotMatch(RECOVERY_POLICY,/Answer: 121|gold|benchmark answer/)
+ assert.match(RECOVERY_POLICY,/parent assistant turn ends/);assert.match(RECOVERY_POLICY,/at most TWO children/);assert.match(RECOVERY_POLICY,/ELEVEN model requests/);assert.doesNotMatch(RECOVERY_POLICY,/Answer:\s*\d+|gold|benchmark answer/)
 })
 
 test('a second output cannot reuse the same actual spending prefix',async()=>{
@@ -31,7 +31,7 @@ test('a second output cannot reuse the same actual spending prefix',async()=>{
 })
 
 test('public receipt grading omits gold and the raw upstream scorer payload',()=>{
- assert.deepEqual(sanitizeGrade({score:0.5,exact:false,attemptedParse:'116',gold:'121',official:{answer:'121',context:'private'}}),{score:0.5,exact:false,attemptedParse:'116'})
+ assert.deepEqual(sanitizeGrade({score:0.5,exact:false,attemptedParse:'candidate-value',gold:'private-reference-value',official:{answer:'private-reference-value',context:'private'}}),{score:0.5,exact:false,attemptedParse:'candidate-value'})
 })
 
 test('a partial allocation is reconciled as owned without inventing a real-start marker',async()=>{

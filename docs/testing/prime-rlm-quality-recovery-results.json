@@ -1,0 +1,75 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-quality-recovery-sanitized-results-v1",
+  "executionSourceHead": "094d1f970e847578e6c7ed436988e0ef3c696f36",
+  "preparedFingerprint": "320ca14704d05dc0b6dd1d4e2fdd65d0d8aeed17eac7c15c2b1ead71f24abca4",
+  "model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "maxTokens": 16384
+  },
+  "task": {
+    "id": "oolong-trec-32k-15000243",
+    "contextSha256": "64e3a042daf4bf66fbbb8b59d0a008179d5d4ce4a1554d7bcc11eba7f2204150",
+    "records": 787
+  },
+  "status": "incomplete",
+  "answerPresent": false,
+  "officialTaskScore": null,
+  "workerLifecycleCompleted": true,
+  "cleanupComplete": true,
+  "resources": {
+    "modelRequests": 11,
+    "physicalModelRequests": 11,
+    "confirmedModelRequests": 11,
+    "unknownModelRequests": 0,
+    "requestsWithKnownUsage": 11,
+    "requestsWithoutKnownUsage": 0,
+    "knownUsageTotals": {
+      "inputTokens": 60989,
+      "outputTokens": 7243,
+      "totalTokens": 191240
+    },
+    "elapsedMs": 241294
+  },
+  "rootRequests": 4,
+  "childRequests": 7,
+  "strategy": {
+    "children": 2,
+    "firstRequestsContainInitialTask": true,
+    "rootAgentMessageCalls": 0,
+    "rootPythonCalls": 2,
+    "rootRequests": 4,
+    "childRequests": 7
+  },
+  "coverage": {
+    "rows": 787,
+    "uniqueIds": 787,
+    "exactQuestions": true,
+    "validLabels": true
+  },
+  "diagnosticOnly": {
+    "offlineChildAggregateQuality": "worse than completed bare answer",
+    "parentAggregated": false,
+    "completedQualityPair": false
+  },
+  "accounting": {
+    "cumulativeAdmitted": 600,
+    "cumulativeConfirmed": 586,
+    "cumulativeUnknown": 14,
+    "cap": 600
+  },
+  "closes": {
+    "provider": "closed",
+    "relay": "closed",
+    "networkProfile": "closed",
+    "longReadProfile": "closed"
+  },
+  "currentAuthorization": {
+    "cumulativeCap": 700,
+    "newPanelMaximum": 97,
+    "newPanelCumulativeMaximum": 697
+  },
+  "privateAnswersAndGoldOmitted": true
+}

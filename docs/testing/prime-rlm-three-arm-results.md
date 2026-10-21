@@ -2,11 +2,11 @@
 
 Date: 2026-10-21, Asia/Shanghai. The fixed [protocol](prime-rlm-three-arm-protocol.md) produced **no completed native-versus-bare quality pair**. The bare answer completed; both original Prime and the plugin consumed their 32-request tree ceilings without writing an answer. The [machine-readable report](prime-rlm-three-arm-results.json) retains all attempts.
 
-| Arm | Final numeric answer | Absolute error (gold 121) | Official score | Root / child calls | Task status |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Bare D1 | 116 | 5 | 0.2373046875 | 1 / 0 | Complete |
-| Original Prime R32 | Missing | Unscored | Unscored | 7 / 25 | Incomplete |
-| Plugin S32 | Missing | Unscored | Unscored | 7 / 25 | Incomplete |
+| Arm | Official score | Root / child calls | Task status |
+| --- | ---: | ---: | --- |
+| Bare D1 | 0.2373046875 | 1 / 0 | Complete |
+| Original Prime R32 | Unscored | 7 / 25 | Incomplete |
+| Plugin S32 | Unscored | 7 / 25 | Incomplete |
 
 The unchanged official score is 0.75^absolute_error. Independent grading reproduced the bare score. Worker lifecycle completion and clean shutdown are true for both native arms, but neither proves task completion. The runner's stop text “all conditions completed” means the declared conditions were attempted; the explicit per-condition status remains incomplete. No draft is promoted to a completed answer.
 

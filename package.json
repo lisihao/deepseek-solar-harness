@@ -24,7 +24,7 @@
     "test:arc:native": "node tools/rlm-arc-pilot/native-worker.test.mjs",
     "test:recursion": "node --test tools/rlm-recursion-pilot/tasks.test.mjs tools/rlm-recursion-pilot/control.test.mjs tools/rlm-recursion-pilot/run.test.mjs tools/rlm-recursion-pilot/resume.test.mjs tools/rlm-recursion-pilot/revalidate.test.mjs tools/rlm-recursion-pilot/network-profile.test.mjs",
     "test:recursion:native": "node tools/rlm-recursion-pilot/native-acceptance.mjs",
-    "test:quality": "node --test tools/rlm-quality-pilot/task.test.mjs tools/rlm-quality-pilot/run.test.mjs tools/rlm-quality-pilot/long-read.test.mjs tools/rlm-quality-pilot/three-arm.test.mjs tools/rlm-quality-pilot/recovery.test.mjs",
+    "test:quality": "node --test tools/rlm-quality-pilot/task.test.mjs tools/rlm-quality-pilot/run.test.mjs tools/rlm-quality-pilot/long-read.test.mjs tools/rlm-quality-pilot/three-arm.test.mjs tools/rlm-quality-pilot/recovery.test.mjs tools/rlm-quality-pilot/controlled.test.mjs",
     "test:quality:native": "node tools/rlm-quality-pilot/native-acceptance.mjs"
   },
   "devDependencies": {

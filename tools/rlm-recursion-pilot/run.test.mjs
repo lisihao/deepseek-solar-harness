@@ -313,6 +313,37 @@ test('quality text executor gives original and plugin the same 32-call native co
   })
 })
 
+test('quality control keeps native budgets matched and allows depth-zero S0', async () => {
+  for (const arm of ['R', 'S', 'S0']) await withPreparedPanel(`quality-control-${arm}`, async ({ manifest }) => {
+    const original = manifest.conditions.find(x => x.arm === 'S')
+    const condition = { ...original, arm, protocol: 'quality-control-v1',
+      autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -s answer.json' } }
+    const task = (await privateTasks(manifest))[condition.taskIndex]
+    const ledger = await Ledger.open(join(condition.durableDirectory, 'quality-ledger.jsonl'), { total: 65, perRun: 32 })
+    let start
+    const outcome = await executeCondition({ manifest, condition, task, ledger,
+      provider: { modelInfo: { name: 'fixture' }, setPhysicalAdmission() {} },
+      relay: { restoreOptions: async value => value }, grade: () => ({ primaryScore: 1, schemaValid: true, errors: [] }),
+      reservePort: async () => ({ port: 14001, releaseIpv4: async () => {}, close: async () => {} }),
+      sandboxBuilder: () => '(version 1)',
+      spawnWorker: async ({ config }) => {
+        start = config.start
+        await writeFile(join(condition.workspace, 'answer.json'), '{}')
+        return { result: { state: 'completed', nativeDepth: arm === 'S0' ? 0 : 1, actualDepth: arm === 'S0' ? 0 : 1, physicalCleanup: true },
+          exit: { code: 0, signal: null }, stdout: '', stderr: '', error: null }
+      },
+    })
+    assert.equal(start.protocol, 'quality-control-v1')
+    assert.equal(start.arm, arm)
+    assert.equal(start.requestLimit, 32)
+    assert.equal(start.wallTimeMs, 1_200_000)
+    assert.deepEqual(start.autonomous, condition.autonomous)
+    assert.equal(outcome.executionCompleted, true)
+    assert.equal(outcome.cleanupComplete, true)
+    assert.equal(outcome.resources.modelRequests, 0)
+  })
+})
+
 test('quality recovery configures the plugin with an eleven-call native ceiling', async () => {
   for (const arm of ['S']) await withPreparedPanel(`quality-recovery-${arm}`, async ({ manifest }) => {
     const original = manifest.conditions.find(x => x.arm === 'S')

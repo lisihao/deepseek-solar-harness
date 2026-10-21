@@ -195,6 +195,32 @@ async function testConfigModes() {
   await assert.rejects(() => __test.normalizeConfig({ ...recoveryStart(), requestLimit: 12 }), /ARC_REQUEST_LIMIT_CHANGED/)
   await assert.rejects(() => __test.normalizeConfig({ ...recoveryStart(), arm: 'R' }), /ARC_WORKER_CONFIG/)
 
+  const controlStart = arm => ({
+    ...fixture.base,
+    protocol: 'quality-control-v1',
+    arm,
+    requestLimit: 32,
+    wallTimeMs: 1_200_000,
+    autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' },
+  })
+  const controlR = await __test.normalizeConfig(controlStart('R'))
+  const controlS = await __test.normalizeConfig(controlStart('S'))
+  const controlS0 = await __test.normalizeConfig(controlStart('S0'))
+  for (const [control, arm, nativeDepth] of [[controlR, 'R', 1], [controlS, 'S', 1], [controlS0, 'S0', 0]]) {
+    assert.equal(control.protocol, 'quality-control-v1')
+    assert.equal(control.arm, arm)
+    assert.equal(control.nativeDepth, nativeDepth)
+    assert.equal(control.requestLimit, 32)
+    assert.equal(control.wallTimeMs, 1_200_000)
+    assert.deepEqual(control.autonomous, { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' })
+    assert.equal(control.brokerSocket, undefined)
+    assert.equal(control.brokerState, undefined)
+    assert.equal(__test.defaultNativeDepth('quality-control-v1', arm), nativeDepth)
+  }
+  await assert.rejects(() => __test.normalizeConfig({ ...controlStart('S'), requestLimit: 31 }), /ARC_REQUEST_LIMIT_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({ ...controlStart('S'), requestLimit: 33 }), /ARC_REQUEST_LIMIT_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({ ...controlStart('unknown') }), /ARC_WORKER_CONFIG/)
+
   const recursionStart = arm => ({
     ...fixture.base,
     protocol: 'recursion-ablation-v1',

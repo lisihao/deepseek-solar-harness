@@ -1,0 +1,24 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-controlled-plan-v1",
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "prior": { "admitted": 600, "confirmed": 586, "unknown": 14 },
+  "cumulativeCap": 700,
+  "maximumNew": 97,
+  "maximumCumulativeForPanel": 697,
+  "conditions": [
+    { "id": "D1", "arm": "D", "maxRequests": 1, "tools": false },
+    { "id": "R32", "arm": "R", "maxRequests": 32, "nativeDepth": 1 },
+    { "id": "S32", "arm": "S", "maxRequests": 32, "nativeDepth": 1 },
+    { "id": "S0_32", "arm": "S0", "maxRequests": 32, "nativeDepth": 0 }
+  ],
+  "model": { "provider": "openai-codex", "model": "gpt-6.1-sol", "reasoningEffort": "high", "configuredMaxTokens": 16384 },
+  "taskId": "oolong-trec-32k-15000243",
+  "contextSha256": "64e3a042daf4bf66fbbb8b59d0a008179d5d4ce4a1554d7bcc11eba7f2204150",
+  "allPriorOutcomesRetained": true,
+  "rawAndReferenceAnswersPrivate": true,
+  "exploratoryAdaptation": true,
+  "paidApiFallback": false,
+  "automaticRetry": false
+}
