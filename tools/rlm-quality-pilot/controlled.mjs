@@ -914,7 +914,7 @@ async function proofArm({ arm, manifest, output }) {
   const workerResult = await captureProofArtifact(manifest, join(evidenceRoot, 'parent-worker-result.json'), `${arm} retained worker result`)
   const retainedWorker = await readProofArtifact(manifest, workerResult, `${arm} retained worker result`)
   const rawResult = retainedWorker.result?.raw
-  const originalJournal = arm === 'R' ? rawResult?.rawJournal : rawResult?.nativeJournal
+  const originalJournal = arm === 'R' ? join(condition.data, 'native-worker-events.jsonl') : rawResult?.nativeJournal
   if (typeof originalJournal !== 'string' || !inside(condition.runDirectory, originalJournal)) {
     fail('CONTROL_PROOF_EVIDENCE', `${arm} worker did not retain its native journal path`)
   }
@@ -1007,6 +1007,12 @@ async function assertProofArmEvidence(manifest, arm, value) {
   const worker = await readProofArtifact(manifest, value.evidence.workerResult, `${arm} retained worker result`)
   const journal = await verifyProofArtifact(manifest, value.evidence.nativeJournal, `${arm} retained native journal`)
   const journalInfo = await stat(journal)
+  if (arm === 'R') {
+    const events = (await readFile(journal, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    for (const type of ['r-acp', 'r-native-root-session', 'r-native-shutdown']) {
+      if (!events.some(event => event.type === type)) fail('CONTROL_PROOF', 'original Prime proof lacks actual ACP lifecycle events')
+    }
+  }
   const provider = await readProofArtifact(manifest, value.evidence.providerStats, `${arm} provider fixture stats`)
   if (journalInfo.size < 1 || !inside(dirname(value.evidence.workerResult.path), journal)
     || outcome?.condition?.id !== `proof-${arm}` || outcome?.condition?.arm !== arm
