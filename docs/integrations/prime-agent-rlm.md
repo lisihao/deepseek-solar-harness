@@ -4,6 +4,8 @@ Status: implementation and earlier existing-app installation were authorized; la
 
 The [retrospective Q03 result](../testing/prime-rlm-q03-bare-supplement-results.md) shows one mixed primary-F1 gain while label accuracy favors bare D and S0 outperforms S. The original-task [three-arm panel](../testing/prime-rlm-three-arm-results.md) and [operational recovery](../testing/prime-rlm-quality-recovery-results.md) did not produce a completed native-versus-bare quality pair. Spawn/steer timing is confirmed and its instruction workaround was followed in the last attempt; semantic improvement remains unestablished there. Prime's original host and mechanisms remain unmodified. No paid API fallback, credit purchase, installed-app update, merge or release is included.
 
+The [reproduction-gap review](../testing/prime-rlm-gap-review.md) records the shared custom provider bridge, task/model/runtime/protocol differences, ruled-out prompt-rule hypothesis and upstream Discussion #3709. Original binary preservation is not a certification of official-provider or benchmark equivalence.
+
 This is a separately commissioned RLM plugin. It does not change the scope, ownership or runtime of native-collaboration or native-resident. OpenHuman, TinyJuice and Jev are not dependencies.
 
 ## Outcome and reference boundary
