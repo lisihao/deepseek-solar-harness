@@ -34,6 +34,18 @@ const observation: AdapterObservation = {
   effortLabel: 'Medium',
 }
 
+function catalogFrameValue() {
+  return {
+    formatVersion: 1,
+    observedAt: '2026-10-20T08:09:00.000Z',
+    browser: { kind: 'ego-lite' as const, spaceId: resource.spaceId, pageLabel: resource.pageLabel },
+    models: [{ label: 'Future Medium', available: true, selected: true }],
+    effortModelLabel: 'Future Medium',
+    efforts: [{ label: 'Novel horizon', id: 'horizon-v17', index: 4, available: true, selected: true }],
+    selected: { modelLabel: 'Future Medium', effortLabel: 'Novel horizon', effortId: 'horizon-v17' },
+  }
+}
+
 function success(value: unknown) {
   return {
     stdout: `${EGO_FRAME_MARKER}${JSON.stringify({ ok: true, value })}\n`,
@@ -551,15 +563,7 @@ describe('EgoWebAdapter', () => {
   })
 
   it('strictly validates the catalog frame and binds it to the requested target page', async () => {
-    const value = {
-      formatVersion: 1,
-      observedAt: '2026-10-20T08:09:00.000Z',
-      browser: { kind: 'ego-lite' as const, spaceId: resource.spaceId, pageLabel: resource.pageLabel },
-      models: [{ label: 'Future Medium', available: true, selected: true }],
-      effortModelLabel: 'Future Medium',
-      efforts: [{ label: 'Novel horizon', id: 'horizon-v17', index: 4, available: true, selected: true }],
-      selected: { modelLabel: 'Future Medium', effortLabel: 'Novel horizon', effortId: 'horizon-v17' },
-    }
+    const value = catalogFrameValue()
     await expect(new EgoWebAdapter(options, runnerReturning(value).run).catalog(resource, {})).resolves.toEqual(value)
     await expect(new EgoWebAdapter(options, runnerReturning({ ...value, extra: true }).run).catalog(resource, {}))
       .rejects.toMatchObject({ code: 'WEB_EGO_FRAME' })
@@ -567,6 +571,39 @@ describe('EgoWebAdapter', () => {
       ...value,
       browser: { ...value.browser, pageLabel: 'p2' },
     }).run).catalog(resource, {})).rejects.toMatchObject({ code: 'WEB_EGO_FRAME' })
+  })
+
+  it('extends and caps catalog process timeout without changing its inner DOM timeout', async () => {
+    for (const [commandTimeoutMs, expectedProcessTimeoutMs] of [[25_000, 50_000], [70_000, 120_000]] as const) {
+      const fixture = runnerReturning(catalogFrameValue())
+      await expect(new EgoWebAdapter({ ...options, commandTimeoutMs }, fixture.run).catalog(resource, {}))
+        .resolves.toEqual(catalogFrameValue())
+
+      const invocation = fixture.calls.mock.calls[0]?.[0]
+      expect(invocation?.timeoutMs).toBe(expectedProcessTimeoutMs)
+      expect(invocation?.source).toContain(`\"timeoutMs\":${commandTimeoutMs}`)
+    }
+  })
+
+  it('keeps non-catalog operations at the configured command timeout', async () => {
+    const calls = vi.fn(async (invocation: Parameters<EgoProcessRunner>[0]) => {
+      if (invocation.source.includes('const __operation = "create";')) return success({ spaceId: 3, pageLabel: 'p1' })
+      if (invocation.source.includes('const __operation = "finish";')) return success({ finished: true })
+      if (invocation.source.includes('const __operation = "prepare";')
+        || invocation.source.includes('const __operation = "observe";')
+        || invocation.source.includes('const __operation = "submit";')) return success(observation)
+      throw new Error('unexpected Ego operation')
+    })
+    const adapter = new EgoWebAdapter({ ...options, commandTimeoutMs: 25_000 }, calls as unknown as EgoProcessRunner)
+    const created = await adapter.create('original-operation-budgets')
+
+    await adapter.prepare(created, request())
+    await adapter.observe(created)
+    await adapter.submit(created, request())
+    await adapter.finish(created)
+
+    expect(calls).toHaveBeenCalledTimes(5)
+    for (const [invocation] of calls.mock.calls) expect(invocation.timeoutMs).toBe(25_000)
   })
 
   it('names the catalog URL-boundary phase without returning the page URL', async () => {

@@ -34,6 +34,8 @@ const DEFAULT_STDERR_MAX_BYTES = 32 * 1024
 const STDERR_NOTICE_OVERHEAD_BYTES = 64 * 1024
 /** Operational output bound, never a list of model or effort names. */
 const MAX_CATALOG_CHOICES = 128
+const CATALOG_PROCESS_TIMEOUT_MULTIPLIER = 2
+const CATALOG_PROCESS_TIMEOUT_MAX_MS = 120_000
 const EGO_NOTICE_PREFIX = '[ego-browser:notice]'
 const OBSERVATION_KEYS = [
   'url',
@@ -86,6 +88,12 @@ type EgoFrame = FrameSuccess | FrameFailure
 
 function browserError(code: string, message: string): WebBrowserError {
   return new WebBrowserError(code, message)
+}
+
+function catalogProcessTimeoutMs(commandTimeoutMs: number): number {
+  return commandTimeoutMs >= CATALOG_PROCESS_TIMEOUT_MAX_MS / CATALOG_PROCESS_TIMEOUT_MULTIPLIER
+    ? CATALOG_PROCESS_TIMEOUT_MAX_MS
+    : commandTimeoutMs * CATALOG_PROCESS_TIMEOUT_MULTIPLIER
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -1631,7 +1639,7 @@ export class EgoWebAdapter implements WebBrowserAdapter {
       resource,
       input,
       timeoutMs: this.#config.commandTimeoutMs,
-    }, signal), resource)
+    }, signal, catalogProcessTimeoutMs(this.#config.commandTimeoutMs)), resource)
   }
 
   async prepare(resource: WebRunResource, request: WebRunRequest, signal?: AbortSignal): Promise<ChatGptPageObservation> {
@@ -1716,7 +1724,12 @@ export class EgoWebAdapter implements WebBrowserAdapter {
     }
   }
 
-  async #invoke<T>(operation: EgoOperation, input: unknown, signal: AbortSignal | undefined): Promise<T> {
+  async #invoke<T>(
+    operation: EgoOperation,
+    input: unknown,
+    signal: AbortSignal | undefined,
+    processTimeoutMs = this.#config.commandTimeoutMs,
+  ): Promise<T> {
     this.#lastNotices = []
     let result: EgoProcessResult
     try {
@@ -1724,7 +1737,7 @@ export class EgoWebAdapter implements WebBrowserAdapter {
         executable: this.#config.executable,
         source: scriptFor(operation, input),
         cwd: this.#config.cwd,
-        timeoutMs: this.#config.commandTimeoutMs,
+        timeoutMs: processTimeoutMs,
         stdoutMaxBytes: this.#stdoutMaxBytes,
         stderrMaxBytes: this.#stderrMaxBytes,
         signal,

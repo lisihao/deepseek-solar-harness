@@ -74,3 +74,5 @@ RLM, recurring monitoring, upstream patches, Desktop builds, releases, and marke
 ### Catalogue failure diagnostics
 
 Explicit model-catalogue refresh reports whether creating the target, reading its controls, or finishing the owned target failed. Named `WEB_`/`EGO_` error codes survive ordinary remote error serialization; a cleanup failure retains the original failure as well. Diagnostic text does not include adapter messages, process stderr, page contents, account data or paths. No automatic retry is added. A generic browser-command error alone is not evidence of a network, quota or PATH cause.
+
+Catalogue discovery uses a bounded whole-process budget of twice `commandTimeoutMs`, capped at 120,000 ms, while every individual DOM wait keeps `commandTimeoutMs`. At the default 25,000 ms setting, the aggregate discovery/restoration budget is 50,000 ms. The other browser operations retain their existing budgets. A retained empty-page trace required 29,314 ms for the full catalogue and exact Pro restoration, exceeding the former 25,000 ms process limit. This is timing evidence from that observed page, not a guarantee for other pages or accounts.
