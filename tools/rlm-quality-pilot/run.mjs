@@ -43,13 +43,14 @@ import { serializeDispatcher } from '../rlm-recursion-pilot/control.mjs'
 import { executeCondition } from '../rlm-recursion-pilot/run.mjs'
 import { installNoReuseProfile } from '../rlm-recursion-pilot/network-profile.mjs'
 import { gradeTask, loadTask } from './task.mjs'
+import { createLongReadProfile } from './long-read.mjs'
 
 const execFile = promisify(execFileCallback)
 const TOOL_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const REPOSITORY_ROOT = resolve(TOOL_DIRECTORY, '../..')
 const DEFAULT_PRIOR_ROOT = '/Users/sihaoli/Projects/DeepSeek-Solar-Harness-V4/artifacts/rlm-recursion-20261021'
-const DEFAULT_OUTPUT = join(DEFAULT_PRIOR_ROOT, 'bare-quality-v2')
-const DEFAULT_TMP_ROOT = '/private/tmp/bq2'
+const DEFAULT_OUTPUT = join(DEFAULT_PRIOR_ROOT, 'bare-quality-v3')
+const DEFAULT_TMP_ROOT = '/private/tmp/bq3'
 const DEFAULT_PRIOR_CLOSURE = join(DEFAULT_PRIOR_ROOT, 'revalidation/no-reuse-v2/final-closure.json')
 const DEFAULT_PRIOR_CLOSURE_SHA256 = 'c3fd18c63b72a40176867bd311df274d05b2d22a653e3c4dd88b87b230d65593'
 const PREPARED_FILE = 'prepared.json'
@@ -67,13 +68,13 @@ const FIXED_ROUTE = Object.freeze({
 })
 
 const FIXED_LIMITS = Object.freeze({
-  newPhaseRequests: 15,
-  perRunRequests: 14,
+  newPhaseRequests: 14,
+  perRunRequests: 13,
   directRequests: 1,
-  rlmRequests: 14,
-  priorCharged: 507,
+  rlmRequests: 13,
+  priorCharged: 508,
   priorConfirmed: 495,
-  priorUnknown: 12,
+  priorUnknown: 13,
   globalCap: 522,
   wallTimeMs: 1_200_000,
   autonomousMaxTurns: 14,
@@ -83,6 +84,7 @@ const FIXED_LIMITS = Object.freeze({
 const EXECUTION_FILES = Object.freeze([
   'tools/rlm-quality-pilot/run.mjs',
   'tools/rlm-quality-pilot/task.mjs',
+  'tools/rlm-quality-pilot/long-read.mjs',
   'tools/rlm-quality-pilot/official-score.py',
   'tools/rlm-arc-pilot/run.mjs',
   'tools/rlm-arc-pilot/native-worker.mjs',
@@ -288,7 +290,7 @@ function nativePrompt(task) {
     'The original task context is available at inputs/context.txt.',
     task.question,
     'Write the final answer to answer.json as exactly a JSON object with one string field: {"answer":"..."}.',
-    'The whole tree is limited to 14 model requests and 20 minutes.',
+    'The whole tree is limited to 13 model requests and 20 minutes.',
   ].join('\n\n')
 }
 
@@ -429,7 +431,7 @@ async function validatePriorPhase({
     || ledgerReceipt.physicalAdmitted !== 25 || ledgerReceipt.stopped !== false) {
     fail('BQ_PRIOR_LEDGER', 'prior phase ledger is not the accepted 25 settled requests')
   }
-  Object.assign(artifacts, await validateBeforeSendFailure(root))
+  Object.assign(artifacts, await validateBeforeSendFailure(root), await validateReadTimeoutFailure(root))
   return { root, closure: { path: closureFile, sha256: closureSha256, value: closure }, artifacts }
 }
 
@@ -468,9 +470,41 @@ async function validateBeforeSendFailure(root) {
   return artifacts
 }
 
+const READ_TIMEOUT_CLOSURE_SHA256 = '0b8ab6e3ec68f64801cb0d0b92eb3fad5d0037b3778084263178544f615fb632'
+
+async function validateReadTimeoutFailure(root) {
+  const phase = join(root, 'bare-quality-v2')
+  const path = await assertRegularFile(join(phase, 'final-closure.json'), 'read-timeout failure closure')
+  const sha256 = await sha256File(path)
+  if (root === resolve(DEFAULT_PRIOR_ROOT) && sha256 !== READ_TIMEOUT_CLOSURE_SHA256) fail('BQ_READ_CLOSURE', 'read-timeout failure closure changed')
+  const closure = await readJson(path, 'read-timeout failure closure')
+  if (closure?.kind !== 'prime-rlm-bare-quality-read-timeout-closure-v1' || closure.formatVersion !== 1
+    || closure.modelHttpRequests !== 1 || closure.nativeConditionStarted !== false || closure.ownedProcessesAbsent !== true
+    || closure.providerClosed !== true || closure.relayClosed !== true || closure.networkProfileDisposed !== true
+    || closure.unknownChargeRetained !== true || closure.accounting?.cumulativeAdmitted !== 508
+    || closure.accounting?.cumulativeConfirmed !== 495 || closure.accounting?.cumulativeUnknown !== 13
+    || closure.transportCode !== 'UND_ERR_BODY_TIMEOUT') fail('BQ_READ_CLOSURE', 'read timeout is not closed with its charge retained')
+  const artifacts = { readTimeoutClosure: { path, sha256 } }
+  for (const name of ['prepared.json', 'run-receipt.json', 'provider-ledger.jsonl', 'analysis.json', 'runs/D1/markers/result.json', 'runs/D1/parent-model-intents.jsonl', 'runs/D1/parent-model-chunks.jsonl']) {
+    const reference = closure.artifacts?.[name]
+    const file = await assertRegularFile(join(phase, name), `read-timeout ${name}`)
+    const digest = await sha256File(file)
+    if (!SHA256.test(reference?.sha256 ?? '') || digest !== reference.sha256) fail('BQ_READ_REFERENCE', `read-timeout ${name} changed`)
+    artifacts[`readTimeout:${name}`] = { path: file, sha256: digest }
+  }
+  if (await exists(join(phase, 'runs/S14/markers/real-condition-started.json'))) fail('BQ_READ_NATIVE', 'failed phase unexpectedly started a native condition')
+  const ledger = await Ledger.open(join(phase, 'provider-ledger.jsonl'), { total: 15, perRun: 14 })
+  const receipt = await ledger.receipt()
+  if (receipt.newAdmitted !== 1 || receipt.settled !== 0 || receipt.unknown !== 1 || receipt.physicalAdmitted !== 1
+    || !receipt.rows.some(row => row.type === 'network-diagnostic' && row.event?.error?.code === 'UND_ERR_BODY_TIMEOUT')) {
+    fail('BQ_READ_LEDGER', 'failure is not the retained single physical body-timeout admission')
+  }
+  return artifacts
+}
+
 async function assertOutputScope({ output, priorRoot }) {
   const root = await assertDirectory(priorRoot, 'prior root')
-  const expected = join(root, 'bare-quality-v2')
+  const expected = join(root, 'bare-quality-v3')
   if (requireAbsolute(output, 'output') !== expected) fail('BQ_OUTPUT_SCOPE', `output must be the one-shot namespace ${expected}`)
   if (await exists(expected)) fail('BQ_OUTPUT_REPLAY', 'the one-shot output namespace already exists; never replay this comparison')
   return expected
@@ -541,9 +575,9 @@ async function createConditions({ output, tmpRoot, sharedRuntimeRoot, runtime, g
 }
 
 /**
- * Make the 15-request Ledger show the accepted 507-call prefix without
- * inventing 507 synthetic durable request records.  D1 is separately limited
- * to one logical/physical request; S14 retains the native tree limit of 14.
+ * Make the 14-request Ledger show the accepted 508-call prefix without
+ * inventing 508 synthetic durable request records.  D1 is separately limited
+ * to one logical/physical request; S14 retains the native tree limit of 13.
  */
 function qualityBudgetView(base, conditions) {
   const limits = new Map(conditions.map(condition => [condition.id, condition.id === 'D1' ? FIXED_LIMITS.directRequests : FIXED_LIMITS.rlmRequests]))
@@ -733,7 +767,7 @@ function taskMatchesManifest(task, manifest) {
 export async function assertPreparedFingerprint(manifest, { taskLoader = loadTask } = {}) {
   if (!isRecord(manifest)) fail('BQ_PREPARED_FORMAT', 'prepared manifest must be an object')
   const source = await assertDirectory(manifest.runner?.sourceRoot, 'prepared source root')
-  const expectedOutput = join(await assertDirectory(manifest.prior?.root, 'prepared prior root'), 'bare-quality-v2')
+  const expectedOutput = join(await assertDirectory(manifest.prior?.root, 'prepared prior root'), 'bare-quality-v3')
   if (manifest.output !== expectedOutput) fail('BQ_OUTPUT_SCOPE', 'prepared output is not the fixed one-shot namespace')
   const prior = await validatePriorPhase({
     priorRoot: manifest.prior.root,
@@ -1031,6 +1065,7 @@ export async function runPanel({
   nativeExecutor = executeCondition,
   modelWireLoader = loadCompiledModelWire,
   networkProfileInstaller = installNoReuseProfile,
+  longReadProfileInstaller = createLongReadProfile,
   runtimeAssert = assertRealRunRuntime,
 } = {}) {
   const preflight = await assertRunPreflight({ output, acceptanceArtifact, acceptanceSha256, nativeProof, taskLoader })
@@ -1050,6 +1085,7 @@ export async function runPanel({
   let provider
   let relay
   let networkProfile
+  let longReadProfile
   let panelError = null
   const results = []
   const closes = {}
@@ -1059,8 +1095,9 @@ export async function runPanel({
     const initial = await baseLedger.receipt()
     if (initial.newAdmitted !== 0 || initial.priorAdmitted !== 0 || initial.stopped) fail('BQ_LEDGER_STARTED', 'prepared quality ledger is not fresh')
     ledger = qualityBudgetView(baseLedger, manifest.conditions)
+    longReadProfile = longReadProfileInstaller({ baseFetch: originalFetch, bodyTimeoutMs: FIXED_LIMITS.wallTimeMs })
     networkProfile = networkProfileInstaller({
-      baseFetch: originalFetch,
+      baseFetch: longReadProfile.fetch,
       onDiagnostic: event => baseLedger.appendSync({ type: 'network-diagnostic', event }),
     })
     globalThis.fetch = networkProfile.fetch
@@ -1124,6 +1161,7 @@ export async function runPanel({
     try { await provider?.close?.(); closes.provider = provider ? 'closed' : 'not-loaded' } catch (error) { closes.provider = redact(errorText(error)); panelError ??= `provider close: ${closes.provider}` }
     try { await relay?.close?.(); closes.relay = relay ? 'closed' : 'not-created' } catch (error) { closes.relay = redact(errorText(error)); panelError ??= `relay close: ${closes.relay}` }
     try { networkProfile?.dispose?.(); closes.networkProfile = networkProfile ? 'disposed' : 'not-installed' } catch (error) { closes.networkProfile = redact(errorText(error)); panelError ??= `network profile dispose: ${closes.networkProfile}` }
+    try { await longReadProfile?.close?.(); closes.longReadProfile = longReadProfile ? 'closed' : 'not-created' } catch (error) { closes.longReadProfile = redact(errorText(error)); panelError ??= `long read profile close: ${closes.longReadProfile}` }
     globalThis.fetch = originalFetch
   }
   const accounting = ledger ? await ledger.receipt() : baseLedger ? await baseLedger.receipt() : null
@@ -1281,9 +1319,9 @@ export function parseArgs(argv) {
 function usage() {
   return [
     'Usage:',
-    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --prepare --task <private-task-artifact> [--output <fixed-bare-quality-v2>] [--tmp-root /private/tmp/bq2]',
-    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --run --output <fixed-bare-quality-v2> --provider-module <private-module> --provider-sha256 <sha256> --provider-package <name> --credential-file <private-file> --acceptance-artifact <accepted-json> --acceptance-sha256 <sha256> --native-proof <accepted-native-json>',
-    '  node tools/rlm-quality-pilot/run.mjs --analyze [--output <fixed-bare-quality-v2>]',
+    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --prepare --task <private-task-artifact> [--output <fixed-bare-quality-v3>] [--tmp-root /private/tmp/bq3]',
+    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --run --output <fixed-bare-quality-v3> --provider-module <private-module> --provider-sha256 <sha256> --provider-package <name> --credential-file <private-file> --acceptance-artifact <accepted-json> --acceptance-sha256 <sha256> --native-proof <accepted-native-json>',
+    '  node tools/rlm-quality-pilot/run.mjs --analyze [--output <fixed-bare-quality-v3>]',
   ].join('\n')
 }
 

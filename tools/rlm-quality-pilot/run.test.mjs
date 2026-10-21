@@ -91,6 +91,22 @@ async function createPriorRoot(base) {
     ownedProcessesAbsent: true, providerClosed: true, relayClosed: true, networkProfileDisposed: true, unknownChargeRetained: true,
     accounting: { cumulativeAdmitted: 507, cumulativeConfirmed: 495, cumulativeUnknown: 12 }, artifacts: failureArtifacts,
   })
+  const readFailed = join(root, 'bare-quality-v2')
+  await mkdir(join(readFailed, 'runs/D1/markers'), { recursive: true })
+  const readNames = ['prepared.json', 'run-receipt.json', 'analysis.json', 'runs/D1/markers/result.json', 'runs/D1/parent-model-intents.jsonl', 'runs/D1/parent-model-chunks.jsonl']
+  for (const name of readNames) await writeJson(join(readFailed, name), { fixture: true })
+  const readLedger = await Ledger.open(join(readFailed, 'provider-ledger.jsonl'), { total: 15, perRun: 14 })
+  const readId = await readLedger.admit('D1', { fixture: true })
+  readLedger.admitPhysical({ runId: 'D1', logicalRequest: readId, event: { fixture: true } })
+  readLedger.appendSync({ type: 'network-diagnostic', event: { error: { code: 'UND_ERR_BODY_TIMEOUT' } } })
+  await readLedger.settle(readId, [], new Error('fixture body timeout'))
+  const readArtifacts = {}
+  for (const name of [...readNames, 'provider-ledger.jsonl']) readArtifacts[name] = { sha256: await fileSha(join(readFailed, name)) }
+  await writeJson(join(readFailed, 'final-closure.json'), {
+    formatVersion: 1, kind: 'prime-rlm-bare-quality-read-timeout-closure-v1', modelHttpRequests: 1, nativeConditionStarted: false,
+    ownedProcessesAbsent: true, providerClosed: true, relayClosed: true, networkProfileDisposed: true, unknownChargeRetained: true,
+    accounting: { cumulativeAdmitted: 508, cumulativeConfirmed: 495, cumulativeUnknown: 13 }, transportCode: 'UND_ERR_BODY_TIMEOUT', artifacts: readArtifacts,
+  })
   return { root, closurePath, closureSha256: await fileSha(closurePath) }
 }
 
@@ -121,7 +137,7 @@ async function withPrepared(name, operation) {
       assert.equal(path, taskPath)
       return structuredClone(task)
     }
-    const output = join(prior.root, 'bare-quality-v2')
+    const output = join(prior.root, 'bare-quality-v3')
     // The native Prime socket path has a hard length boundary.  Keep this
     // test-only temporary root short just like the production /private/tmp/bq1.
     tmpRoot = join(BASE, `bq${process.pid}-${++temporaryOrdinal}`)
@@ -176,18 +192,18 @@ async function acceptanceFor({ base, manifest }) {
   return { acceptancePath, acceptanceSha256: await fileSha(acceptancePath), proofPath }
 }
 
-test('quality budget keeps the accepted 507 = 495 + 12 prefix and preserves an unknown stop', async () => {
+test('quality budget keeps the accepted 508 = 495 + 13 prefix and preserves an unknown stop', async () => {
   const root = await mkdtemp(join(BASE, 'bq-budget-'))
   try {
-    const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: 15, perRun: 14 })
+    const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: FIXED_LIMITS.newPhaseRequests, perRun: FIXED_LIMITS.perRunRequests })
     const view = qualityBudgetView(base, [{ id: 'D1' }, { id: 'S14' }])
     const d = await view.admit('D1', { fixture: true })
     view.admitPhysical({ runId: 'D1', logicalRequest: d, event: { fixture: true } })
     await view.settle(d, [], new Error('fixture transport loss'))
     const receipt = await view.receipt()
-    assert.equal(receipt.cumulativeAdmitted, 508)
+    assert.equal(receipt.cumulativeAdmitted, 509)
     assert.equal(receipt.cumulativeConfirmed, 495)
-    assert.equal(receipt.cumulativeUnknown, 13)
+    assert.equal(receipt.cumulativeUnknown, 14)
     assert.equal(receipt.stopped, true)
     await assert.rejects(() => view.admit('S14', { fixture: true }), /EXPERIMENT_STOPPED/)
   } finally {
@@ -198,7 +214,7 @@ test('quality budget keeps the accepted 507 = 495 + 12 prefix and preserves an u
 test('D1 sends exactly one full public user message, drains EOF, and never supplies tools', async () => {
   const root = await mkdtemp(join(BASE, 'bq-direct-'))
   try {
-    const ledgerBase = await Ledger.open(join(root, 'ledger.jsonl'), { total: 15, perRun: 14 })
+    const ledgerBase = await Ledger.open(join(root, 'ledger.jsonl'), { total: FIXED_LIMITS.newPhaseRequests, perRun: FIXED_LIMITS.perRunRequests })
     const ledger = qualityBudgetView(ledgerBase, [{ id: 'D1' }, { id: 'S14' }])
     let physicalAdmission
     let receivedOptions
@@ -249,7 +265,7 @@ test('D1 sends exactly one full public user message, drains EOF, and never suppl
 
 test('S14 projects only public context/question into the existing native worker start config', async () => {
   await withPrepared('native-projection', async ({ manifest, task }) => {
-    const base = await Ledger.open(manifest.ledger.path, { total: 15, perRun: 14 })
+    const base = await Ledger.open(manifest.ledger.path, { total: FIXED_LIMITS.newPhaseRequests, perRun: FIXED_LIMITS.perRunRequests })
     const ledger = qualityBudgetView(base, manifest.conditions)
     const condition = manifest.conditions.find(value => value.id === 'S14')
     let physicalAdmission
@@ -350,12 +366,12 @@ test('run retains a failed S14 output and analysis keeps the missing/failed cond
   })
 })
 
-test('D1 plus all fourteen S calls cannot admit a sixteenth phase request', async t => {
+test('D1 plus all thirteen S calls cannot admit a fifteenth phase request', async t => {
   const root = await mkdtemp(join(BASE, 'bq-cap-'))
   t.after(() => rm(root, { recursive: true, force: true }))
-  const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: 15, perRun: 14 })
+  const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: FIXED_LIMITS.newPhaseRequests, perRun: FIXED_LIMITS.perRunRequests })
   const view = qualityBudgetView(base, [{ id: 'D1' }, { id: 'S14' }])
-  for (const runId of ['D1', ...Array(14).fill('S14')]) {
+  for (const runId of ['D1', ...Array(13).fill('S14')]) {
     const id = await view.admit(runId, { fixture: true })
     view.admitPhysical({ runId, logicalRequest: id, event: { fixture: true } })
     await view.settle(id, [{ type: 'finish', reason: { kind: 'stop' } }])
@@ -364,10 +380,10 @@ test('D1 plus all fourteen S calls cannot admit a sixteenth phase request', asyn
   await assert.rejects(view.admit('S14', {}), /BQ_ARM_LIMIT/)
   await assert.rejects(view.admit('other', {}), /BQ_ARM_SCOPE/)
   const receipt = await view.receipt()
-  assert.equal(receipt.newAdmitted, 15)
-  assert.equal(receipt.physicalAdmitted, 15)
+  assert.equal(receipt.newAdmitted, 14)
+  assert.equal(receipt.physicalAdmitted, 14)
   assert.equal(receipt.cumulativeAdmitted, 522)
-  assert.equal(receipt.cumulativeUnknown, 12)
+  assert.equal(receipt.cumulativeUnknown, 13)
 })
 
 test('actual compiled wire decodes bare input to host content blocks and preserves the final answer', async t => {
@@ -375,7 +391,7 @@ test('actual compiled wire decodes bare input to host content blocks and preserv
   const root = await mkdtemp(join(BASE, 'bq-wire-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const compiled = await compileCurrentSources({ sourceRoot: ROOT, packageRoot: join(ROOT, 'incubator/rlm'), shared: join(root, 'shared') })
-  const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: 15, perRun: 14 })
+  const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: FIXED_LIMITS.newPhaseRequests, perRun: FIXED_LIMITS.perRunRequests })
   const ledger = qualityBudgetView(base, [{ id: 'D1' }, { id: 'S14' }])
   let admitPhysical
   const provider = {
