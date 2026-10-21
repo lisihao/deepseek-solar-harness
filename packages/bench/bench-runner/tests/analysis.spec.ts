@@ -118,6 +118,14 @@ describe('analyzeExperiment comparisons', () => {
     expect(analysis.variants[1]).toMatchObject({ invalid: 10, invalidRate: 0.5, successRate: 1 })
   })
 
+  it('marks a baseline that invalidates its failures as unreliable instead of calling the variant regressed', () => {
+    const fixed = grid(['fixed'], 20, 1, (_variant, task) => task < 10)
+    const crashyBase = Array.from({ length: 20 }, (_, task) =>
+      task < 10 ? run('base', `t${String(task)}`, 0, true) : run('base', `t${String(task)}`, 0, false, { status: 'invalid' }))
+    const comparison = analyzeExperiment(experiment('base', 'fixed'), [...crashyBase, ...fixed], options).comparisons[0]!
+    expect(comparison.verdict).toBe('unreliable')
+  })
+
   it('gives the same interval for the same seed and a different one for another seed', () => {
     const records = grid(['base', 'v'], 15, 2, (variant, task, rep) => (task + rep + (variant === 'v' ? 1 : 0)) % 3 === 0)
     const a = analyzeExperiment(experiment('base', 'v'), records, options).comparisons[0]!.success

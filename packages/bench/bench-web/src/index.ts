@@ -107,7 +107,13 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
-      const id = path.startsWith(`${EXPERIMENTS_PATH}/`) ? decodeURIComponent(path.slice(EXPERIMENTS_PATH.length + 1)) : undefined
+      let id: string | undefined
+      try {
+        id = path.startsWith(`${EXPERIMENTS_PATH}/`) ? decodeURIComponent(path.slice(EXPERIMENTS_PATH.length + 1)) : undefined
+      } catch {
+        // A malformed percent-escape cannot name an experiment.
+        id = ''
+      }
       if (path !== EXPERIMENTS_PATH && (id === undefined || id === '' || id.includes('/'))) {
         sendError(response, 404, { error: 'NOT_FOUND' })
         return

@@ -6,8 +6,9 @@
  * tasks both sides ran validly, so every task weighs the same whatever its
  * repetition count. Intervals come from a seeded percentile bootstrap over
  * tasks. Invalid runs are excluded from success rates but are counted, and a
- * variant that invalidates more runs than the baseline is marked
- * `unreliable` instead of looking better for losing its failures.
+ * comparison whose two sides differ in invalid rate by more than the
+ * tolerance is marked `unreliable`: the side that loses more failures to
+ * invalid runs would otherwise look better.
  *
  * @module @deepseek-ai/dsh-bench-runner/analysis
  */
@@ -222,12 +223,12 @@ function paired(
 /**
  * Verdict of a success estimate.
  * @param success - the estimate.
- * @param invalidGap - variant invalid rate minus baseline invalid rate.
+ * @param invalidGap - variant invalid rate minus baseline invalid rate; either sign can bias the comparison.
  * @param options - thresholds.
  * @returns the verdict.
  */
 function verdictOf(success: Estimate, invalidGap: number, options: AnalysisOptions): Verdict {
-  if (invalidGap > options.invalidTolerance) return 'unreliable'
+  if (Math.abs(invalidGap) > options.invalidTolerance) return 'unreliable'
   if (success.tasks < options.minTasks) return 'insufficient'
   if (success.low > 0) return 'improved'
   if (success.high < 0) return 'regressed'

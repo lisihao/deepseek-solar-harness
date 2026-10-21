@@ -165,8 +165,24 @@ describe('bench-web routes', () => {
     ['/api/bench/experiments/', 404],
     ['/api/bench/experiments/a%2Fb', 404],
     [undefined, 404],
+    ['/api/bench/experiments/%', 404],
+    ['/api/bench/experiments/%E0%A4%A', 404],
   ])('answers %s with %i', async (url, status) => {
     expect((await call(mount(runtime), request('GET', url))).status).toBe(status)
+  })
+
+  it('never passes an id containing a slash to the runtime', async () => {
+    const asked: string[] = []
+    const recording = {
+      experiments: () => Promise.resolve([]),
+      ledger: (id: string) => {
+        asked.push(id)
+        return Promise.resolve(undefined)
+      },
+    }
+    expect((await call(mount(recording), request('GET', '/api/bench/experiments/a%2F..%2Fb'))).status).toBe(404)
+    expect((await call(mount(recording), request('GET', '/api/bench/experiments/ok'))).status).toBe(404)
+    expect(asked).toEqual(['ok'])
   })
 
   it('allows only GET', async () => {

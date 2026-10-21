@@ -169,7 +169,7 @@ export interface AnalysisOptions {
   margin: number
   /** Paired tasks below which a comparison is `insufficient`. At least 3. */
   minTasks: number
-  /** Invalid-rate excess over the baseline above which a comparison is `unreliable`. */
+  /** Invalid-rate difference from the baseline, in either direction, above which a comparison is `unreliable`. */
   invalidTolerance: number
 }
 
@@ -193,7 +193,7 @@ export interface Estimate {
  * - `equivalent`: the interval lies inside ±margin.
  * - `underpowered`: neither; more tasks or repetitions are needed.
  * - `insufficient`: fewer paired tasks than `minTasks`.
- * - `unreliable`: the variant invalidates runs more often than the baseline by more than `invalidTolerance`.
+ * - `unreliable`: the variant's and the baseline's invalid rates differ by more than `invalidTolerance`.
  */
 export type Verdict = 'improved' | 'regressed' | 'equivalent' | 'underpowered' | 'insufficient' | 'unreliable'
 

@@ -53,7 +53,7 @@ variants:                    # the first is the baseline
 
 - **每个 variant**：按状态统计的运行数、`invalidRate`、`successRate`（通过数除以已评分和超时的运行数：超时算失败，invalid 不计入）、按任务计的 `passAnyRate` 和 `passAllRate`、有价格运行的平均成本及 `pricedRuns`、平均 token、只按已评分运行计算的平均墙钟时间（超时的时间是被截断的）、各时间桶之和、按总耗时排序的工具，以及运行结果不一致的 `flakyTasks`。
 - **每个对比**：对成功率、成本、token 和墙钟时间，计算配对任务上（variant − 基线）的均值，这样每个任务的权重相同，与重复次数无关。两边没有都有效运行的任务列在 `droppedTasks` 中。每个估计都附带按任务做的带种子的百分位 bootstrap 区间，以及用 Student-t 分位数算出的 80% 功效下的 MDE；MDE 只用于展示，从不参与判定。
-- **判定**，按以下顺序：variant 的 invalid 率比基线高出 `invalidTolerance` 以上时为 `unreliable`（这样遇到难题就崩溃的插件不会显得更好）；配对任务数少于 `minTasks` 时为 `insufficient`；区间不含 0 时为 `improved` 或 `regressed`；区间完全落在 ±`margin` 之内时为 `equivalent`；其余为 `underpowered`。
+- **判定**，按以下顺序：variant 与基线的 invalid 率相差（任一方向）超过 `invalidTolerance` 时为 `unreliable`（否则因 invalid 而少算失败的一方会显得更好）；配对任务数少于 `minTasks` 时为 `insufficient`；区间不含 0 时为 `improved` 或 `regressed`；区间完全落在 ±`margin` 之内时为 `equivalent`；其余为 `underpowered`。
 - **此外**：任务 × variant 的通过率 `matrix`，以及 `pareto` 集合，即在成功率和平均成本两方面都没有被其他有价格的 variant 同时超过的那些 variant。
 
 所有选项都必须显式给出：`confidence`（0.9、0.95 或 0.99）、`resamples`（≥ 100）、`seed`、`margin`（取值 [0, 1)）、`minTasks`（≥ 3）和 `invalidTolerance`（取值 [0, 1]）。相同的记录和种子会得到相同的区间。
