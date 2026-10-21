@@ -10,6 +10,7 @@ const stateSchema = z.object({
   target: z.object({ provider: z.string().min(1), model: z.string().min(1) }).strict(),
   fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   phase: z.enum(['prepared', 'calling', 'draft', 'answered', 'confirmed', 'committed', 'failed']),
+  mode: z.enum(['summary', 'verbatim', 'fresh']).optional(),
   draftText: z.string().optional(),
   answers: z.array(z.object({ id: z.string(), answer: z.string() }).strict()).optional(),
   confirmedText: z.string().optional(),
@@ -21,6 +22,9 @@ const stateSchema = z.object({
     id: z.string(), final: z.boolean(), status: z.enum(['calling', 'completed']),
     request: z.record(z.string(), z.unknown()), rawOutput: z.array(z.unknown()).optional(),
     usage: z.record(z.string(), z.unknown()).optional(), finish: z.string().optional(),
+    failure: z.object({ code: z.string(), message: z.string(), status: z.number().optional(),
+      requestId: z.string().optional(), providerRetryAfterMs: z.number().optional() }).strict().optional(),
+    thrown: z.string().optional(),
   }).strict()).optional(),
 }).strict()
 export type HandoffState = z.infer<typeof stateSchema>

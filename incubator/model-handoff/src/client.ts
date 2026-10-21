@@ -27,9 +27,9 @@ export function apply(ctx: Context): void {
         padding: '12px 16px', borderRadius: '12px', lineHeight: 1.6, overflowWrap: 'anywhere',
         color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-specific-input-major)',
         border: '1px solid var(--dsw-alias-border-l2)' },
-    }, createElement('strong', null, state.busy ? '正在准备上下文…' : '模型交接未完成'),
+    }, createElement('strong', null, state.busy ? '正在准备上下文…' : state.fresh ? '已使用空白上下文' : '模型交接未完成'),
     createElement('div', null, state.busy
-      ? '正在整理会话并生成交接摘要。输入和发送已暂停，原草稿会保留；准备好后会显示补充问题和摘要确认。'
+      ? '正在准备任务上下文。可选择携带任务内容，或取消交接并空白开始。输入和发送暂时停用，原草稿会保留。'
       : state.message))
   }
   ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({

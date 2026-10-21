@@ -67,6 +67,19 @@ describe('model handoff core', () => {
     expect(draft.questions[0]).toEqual({ id, question })
   })
 
+  it('accepts drafts with zero or one question', () => {
+    expect(parseDraft(JSON.stringify({ summary: '没有需要补充的问题。', questions: [] }))).toEqual({
+      summary: '没有需要补充的问题。',
+      questions: [],
+    })
+    expect(parseDraft(JSON.stringify({ summary: '只有一个未决事项。', questions: [
+      { id: 'only', question: '是否保留这个事项？' },
+    ] }))).toEqual({
+      summary: '只有一个未决事项。',
+      questions: [{ id: 'only', question: '是否保留这个事项？' }],
+    })
+  })
+
   it.each([
     ['not-json', 'invalid-json'],
     ['```json\n{"summary":"x","questions":[]}\n```', 'code-fence'],
@@ -75,7 +88,12 @@ describe('model handoff core', () => {
     ['{"summary":"x","questions":[],"extra":true}', 'unexpected-field'],
     ['{"summary":1,"questions":[]}', 'invalid-string'],
     ['{"summary":"   ","questions":[]}', 'empty-string'],
-    ['{"summary":"x","questions":[{"id":"a","question":"q"}]}', 'question-count'],
+    [JSON.stringify({ summary: 'x', questions: [
+      { id: 'a', question: 'q' },
+      { id: 'b', question: 'q2' },
+      { id: 'c', question: 'q3' },
+      { id: 'd', question: 'q4' },
+    ] }), 'question-count'],
     ['{"summary":"x","questions":[{"id":"a","question":"q"},{"id":"a","question":"q2"}]}', 'duplicate-id'],
     [JSON.stringify({ summary: 'x', questions: [{ id: 'a', question: 'q', extra: true }, { id: 'b', question: 'q2' }] }), 'unexpected-field'],
     [JSON.stringify({ summary: 'x'.repeat(50_001), questions: [{ id: 'a', question: 'q' }, { id: 'b', question: 'q2' }] }), 'length-exceeded'],
@@ -110,15 +128,22 @@ describe('model handoff core', () => {
 
     expect(rendered).toBe([
       '模型交接',
-      '目标提供方：codex',
-      '目标模型：目标模型-中文',
-      '摘要：',
       '摘要含有换行\n以及 emoji 🧭。',
       '问题1：第一个问题？',
       '回答1：精确答案：保留空格 以及 🌟',
-      '问题2：第二个问题？',
-      '回答2：暂无补充',
     ].join('\n'))
+    expect(rendered).not.toContain('codex')
+    expect(rendered).not.toContain('目标模型-中文')
+    expect(rendered).not.toContain('第二个问题？')
+    expect(rendered).not.toContain('暂无补充')
+  })
+
+  it('renders only the title and summary when no questions need context', () => {
+    expect(renderHandoff(
+      { summary: '交接摘要。', questions: [] },
+      [],
+      { provider: 'codex', model: '目标模型' },
+    )).toBe('模型交接\n交接摘要。')
   })
 
   it('requires exactly one nonblank answer for every question', () => {

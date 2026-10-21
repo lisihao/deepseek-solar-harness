@@ -65,6 +65,7 @@ const config = {
   maxInputBytes: 1_500_000,
   maxOutputTokens: 8192,
   maxHandoffBytes: 48_000,
+  verbatimMaxChars: 0,
 }
 
 const draft = JSON.stringify({
@@ -602,6 +603,112 @@ describe('model-handoff runtime boundary', () => {
     expect(fixture.asks).toHaveLength(0)
   })
 
+  it('lets explicit cancellation start fresh before any Luna call and never resurrects the old task', async () => {
+    const f = await createFixture({ cancelAt: 'handoff-mode' })
+    fixtures.push(f)
+    f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+    const first = f.session.surface.nodes[1]!
+    const last = f.session.surface.nodes.at(-1)!
+    await f.engine.compactRegion(first, last, f.agent)
+    expect(f.calls).toHaveLength(0)
+    expect(f.session.deriveMessages().filter(m => m.role !== 'system').flatMap(m => m.content)).toEqual([])
+    expect(JSON.stringify(f.session.snapshotEvents())).toContain('旧会话中的原始任务')
+    expect(await f.engine.store.read(f.session.id)).toMatchObject({ mode: 'fresh', phase: 'confirmed', target })
+    expect((await f.engine.source(f.session)).records).toEqual([])
+    f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: '新任务，不是原任务的继续' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+    const next = await f.engine.source(f.session)
+    expect(next.text).toContain('新任务，不是原任务的继续')
+    expect(next.text).not.toContain('旧会话中的原始任务')
+  })
+
+  it('cancels the final summary preview into an empty context without another model call', async () => {
+    const f = await createFixture({ cancelAt: 'handoff-confirm' })
+    fixtures.push(f)
+    f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+    const user = f.session.surface.nodes.at(-1)!
+    await f.engine.compactRegion(user, user, f.agent)
+    expect(f.calls).toHaveLength(1)
+    expect(f.session.deriveMessages().flatMap(m => m.content).some(b => b.type === 'text' && b.text.includes('交接摘要'))).toBe(false)
+    expect(await f.engine.store.read(f.session.id)).toMatchObject({ mode: 'fresh', calls: [{ finish: 'stop' }] })
+    expect(f.session.snapshotEvents().findLast(e => e.type === 'compaction/end')?.data).not.toHaveProperty('error')
+  })
+
+  it('recovers a persisted fresh checkpoint and admits only the next task after plugin reload', async () => {
+    const f = await createFixture({ cancelAt: 'handoff-mode' })
+    fixtures.push(f)
+    f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+    const user = f.session.surface.nodes.at(-1)!
+    await f.engine.compactRegion(user, user, f.agent)
+    const saved = await f.engine.store.read(f.session.id)
+    await new HandoffStore(join(f.root, 'solar', 'model-handoff')).write(saved!)
+    f.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'FRESH_AFTER_RELOAD' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+    const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+    const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+    const previousHome = process.env.DSH_HOME
+    process.env.DSH_HOME = f.root
+    try {
+      await applyRuntime(f.ctx, config)
+      await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 2, step: 1, signal: new AbortController().signal }, async () => target)).resolves.toEqual(target)
+      expect(f.calls).toHaveLength(0)
+      const messages = JSON.stringify(f.session.deriveMessages())
+      expect(messages).toContain('FRESH_AFTER_RELOAD')
+      expect(messages).not.toContain('旧会话中的原始任务')
+      expect(f.session.snapshotEvents().filter(e => e.type === 'compaction/summary')).toHaveLength(1)
+    } finally {
+      removeAgents(); removeCommands()
+      if (previousHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previousHome
+    }
+  })
+
+  it('persists an expanding generated summary as failed and never retries it silently', async () => {
+    const f = await createFixture({ historyTexts: ['短任务'] })
+    fixtures.push(f)
+    f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+    const user = f.session.surface.nodes.at(-1)!
+    await expect(f.engine.compactRegion(user, user, f.agent)).rejects.toThrow('摘要长于任务原文')
+    expect(await f.engine.store.read(f.session.id)).toMatchObject({ phase: 'failed' })
+    await expect(f.engine.compactRegion(user, user, f.agent)).rejects.toThrow('未自动重发')
+    expect(f.calls).toHaveLength(1)
+  })
+
+  it('rejects an expanding completed final receipt after restart without replaying the call', async () => {
+    const f = await createFixture({ historyTexts: ['短任务'] })
+    fixtures.push(f)
+    f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+    const source = await f.engine.source(f.session)
+    await f.engine.store.write({ formatVersion: 1, id: '12345678-1234-4234-8234-123456789abc', sessionId: f.session.id,
+      target, fingerprint: source.fingerprint, phase: 'calling', calls: [{ id: 'final-call', final: true,
+        status: 'completed', finish: 'stop', request: {}, rawOutput: [{ type: 'text', text: draft }] }] })
+    const user = f.session.surface.nodes.at(-1)!
+    await expect(f.engine.compactRegion(user, user, f.agent)).rejects.toThrow('摘要长于任务原文')
+    expect(await f.engine.store.read(f.session.id)).toMatchObject({ phase: 'failed', error: expect.stringContaining('摘要长于任务原文') })
+    expect(f.calls).toHaveLength(0)
+    expect(f.asks).toHaveLength(0)
+  })
+
+  it('holds the initial choice before any summary and confirms a short task verbatim without questions or model calls', async () => {
+    const task = '这是虚构的灯塔测试；预算1800元，原3000元作废。先列离线测试，不写代码。桥梁🧭-042，截止时间未知。'
+    const f = await createFixture({ historyTexts: [task], recordMode: true, blockQuestionId: 'handoff-mode' })
+    fixtures.push(f)
+    f.engine.settings = { ...config, verbatimMaxChars: 1200 }
+    f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+    const user = f.session.surface.nodes.at(-1)!
+    const pending = f.engine.compactRegion(user, user, f.agent)
+    await waitFor(() => f.asks.length === 1)
+    expect(f.calls).toHaveLength(0)
+    f.releaseQuestions()
+    await pending
+    expect(f.calls).toHaveLength(0)
+    expect(f.asks.map(a => a.ids)).toEqual([['handoff-mode'], ['handoff-confirm']])
+    const preview = f.asks.at(-1)!.detail!
+    expect(preview).toContain(task)
+    expect(preview).toContain('没有调用摘要模型')
+    expect(preview).toContain('字符')
+    expect(preview).not.toContain('tokens；')
+    expect(await f.engine.store.read(f.session.id)).toMatchObject({ mode: 'verbatim', calls: [] })
+  })
+
   it('persists completed malformed-call evidence and never retries it automatically', async () => {
     const fixture = await createFixture({ malformedLuna: true, includeUsage: true })
     fixtures.push(fixture)
@@ -618,9 +725,22 @@ describe('model-handoff runtime boundary', () => {
     await expect(fixture.engine.compactRegion(user!, user!, fixture.agent)).rejects.toThrow()
     expect(fixture.calls).toHaveLength(1)
   })
+
+  it('retains the actual provider finish failure instead of only a generic Luna message', async () => {
+    const f = await createFixture({ failureLuna: true })
+    fixtures.push(f)
+    f.engine.operations.set(f.session, { target, selectionSeq: 0 })
+    const user = f.session.surface.nodes.at(-1)!
+    await expect(f.engine.compactRegion(user, user, f.agent)).rejects.toThrow('FIXTURE_STREAM_ERROR')
+    expect((await f.engine.store.read(f.session.id))?.calls?.[0]).toMatchObject({ finish: 'error',
+      failure: { code: 'FIXTURE_STREAM_ERROR', message: 'fixture upstream ended', status: 503 } })
+    expect(f.calls).toHaveLength(1)
+  })
 })
 
 type FixtureOptions = {
+  readonly recordMode?: boolean
+  readonly cancelAt?: 'handoff-mode' | 'handoff-budget' | 'handoff-confirm'
   readonly assertPreparationPublished?: boolean
   readonly blockLuna?: boolean
   readonly blockQuestions?: boolean
@@ -631,6 +751,7 @@ type FixtureOptions = {
   readonly historyTexts?: readonly string[]
   readonly approveBudget?: boolean
   readonly malformedLuna?: boolean
+  readonly failureLuna?: boolean
   readonly includeUsage?: boolean
   readonly chooseCandidates?: boolean
   readonly blockQuestionId?: string
@@ -666,7 +787,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
   })
   append('turn/start', { turn: 1 })
   append('system/message', { turn: 1, step: 0, message: createSystemMessage('系统头') }, { surfaceOp: 'append' })
-  const historyTexts = options.historyTexts ?? ['旧会话中的原始任务']
+  const historyTexts = options.historyTexts ?? ['旧会话中的原始任务；保留明确事实、更正、失败和下一步边界。'.repeat(8)]
   for (const text of historyTexts) append('user/message', createUserMessage({
     content: [{ type: 'text', text }],
     source: { kind: 'user' },
@@ -708,6 +829,10 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
             })
           }
           yield { type: 'text-delta', index: 0, text: options.malformedLuna ? 'not-json' : draft }
+          if (options.failureLuna) {
+            yield { type: 'finish', reason: { kind: 'error', failure: { code: 'FIXTURE_STREAM_ERROR', message: 'fixture upstream ended', status: 503 } } }
+            return
+          }
           if (options.includeUsage) yield { type: 'usage', usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 } }
           yield { type: 'finish', reason: { kind: 'stop' } }
         },
@@ -734,6 +859,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
   let resolveQuestions!: () => void
   const removeQuestions = ctx.provide('userQuestions', {
     ask: async (request: { questions: readonly { id: string; detail?: string; options?: readonly { label: string }[] }[]; signal?: AbortSignal; agent: Agent; }): Promise<unknown> => {
+      if (request.questions[0]?.id === 'handoff-mode' && !options.recordMode && options.cancelAt !== 'handoff-mode') return { answers: [{ id: 'handoff-mode', selected: ['携带当前任务上下文'] }] }
       asks.push({ ids: request.questions.map(question => question.id), options: request.questions.map(question => question.options?.map(option => option.label) ?? []), ...request.questions[0]?.detail === undefined ? {} : { detail: request.questions[0].detail } })
       if (blockedQuestions > 0 && (options.blockQuestionId === undefined || request.questions[0]?.id === options.blockQuestionId)) {
         blockedQuestions -= 1
@@ -743,6 +869,8 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
         })
       }
       if (request.questions[0]?.id === 'handoff-budget' && options.approveBudget) return { answers: [{ id: 'handoff-budget', selected: ['按此上限继续'] }] }
+      if (request.questions[0]?.id === options.cancelAt) return { answers: [{ id: options.cancelAt, selected: ['取消交接，空白开始'] }] }
+      if (request.questions[0]?.id === 'handoff-mode') return { answers: [{ id: 'handoff-mode', selected: ['携带当前任务上下文'] }] }
       if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
       if (options.chooseCandidates) return { answers: request.questions.map(question => ({ id: question.id, selected: [question.options![0]!.label] })) }
       return { answers: request.questions.map(question => ({ id: question.id, selected: [], custom: question.id === 'next' ? '先运行验证。' : '保留失败未知状态。' })) }
