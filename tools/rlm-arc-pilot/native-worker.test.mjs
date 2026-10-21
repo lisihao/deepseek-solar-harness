@@ -173,6 +173,28 @@ async function testConfigModes() {
     route: { ...fixture.base.route, model: 'other-model' },
   }), /ARC_ROUTE_CHANGED/)
 
+  const recoveryStart = () => ({
+    ...fixture.base,
+    protocol: 'quality-recovery-v1',
+    arm: 'S',
+    requestLimit: 11,
+    wallTimeMs: 1_200_000,
+    autonomous: { maxTurns: 11, maxTokens: 4_000_000, gate: 'test -f answer.json' },
+  })
+  const recovery = await __test.normalizeConfig(recoveryStart())
+  assert.equal(recovery.protocol, 'quality-recovery-v1')
+  assert.equal(recovery.arm, 'S')
+  assert.equal(recovery.nativeDepth, 1)
+  assert.equal(recovery.requestLimit, 11)
+  assert.equal(recovery.wallTimeMs, 1_200_000)
+  assert.deepEqual(recovery.autonomous, { maxTurns: 11, maxTokens: 4_000_000, gate: 'test -f answer.json' })
+  assert.equal(recovery.brokerSocket, undefined)
+  assert.equal(recovery.brokerState, undefined)
+  assert.equal(__test.defaultNativeDepth('quality-recovery-v1', 'S'), 1)
+  await assert.rejects(() => __test.normalizeConfig({ ...recoveryStart(), requestLimit: 10 }), /ARC_REQUEST_LIMIT_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({ ...recoveryStart(), requestLimit: 12 }), /ARC_REQUEST_LIMIT_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({ ...recoveryStart(), arm: 'R' }), /ARC_WORKER_CONFIG/)
+
   const recursionStart = arm => ({
     ...fixture.base,
     protocol: 'recursion-ablation-v1',

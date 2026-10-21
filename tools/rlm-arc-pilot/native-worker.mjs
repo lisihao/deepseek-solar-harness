@@ -23,12 +23,16 @@ const FIXED_AUTONOMOUS = Object.freeze({ maxTurns: 32, maxTokens: 4_000_000 })
 const ARC_PROTOCOL = 'arc-pilot-v1'
 const RECURSION_ABLATION_PROTOCOL = 'recursion-ablation-v1'
 const QUALITY_PILOT_PROTOCOL = 'quality-pilot-v1'
+const QUALITY_RECOVERY_PROTOCOL = 'quality-recovery-v1'
 const RECURSION_ABLATION_REQUEST_LIMIT = 14
 const RECURSION_ABLATION_WALL_TIME_MS = 1_200_000
 const RECURSION_ABLATION_AUTONOMOUS = Object.freeze({ maxTurns: 14, maxTokens: 4_000_000 })
 const QUALITY_PILOT_REQUEST_LIMIT = 32
 const QUALITY_PILOT_WALL_TIME_MS = 1_200_000
 const QUALITY_PILOT_AUTONOMOUS = Object.freeze({ maxTurns: 32, maxTokens: 4_000_000 })
+const QUALITY_RECOVERY_REQUEST_LIMIT = 11
+const QUALITY_RECOVERY_WALL_TIME_MS = 1_200_000
+const QUALITY_RECOVERY_AUTONOMOUS = Object.freeze({ maxTurns: 11, maxTokens: 4_000_000 })
 const PRIME_META = 'ai.primeintellect.prime-agent'
 const MAX_HTTP_REQUEST_BYTES = 32 * 1024 * 1024
 const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024
@@ -153,9 +157,12 @@ async function normalizeConfig(message) {
   const protocol = message.protocol === undefined ? ARC_PROTOCOL : message.protocol
   const recursionAblation = protocol === RECURSION_ABLATION_PROTOCOL
   const qualityPilot = protocol === QUALITY_PILOT_PROTOCOL
-  if (protocol !== ARC_PROTOCOL && !recursionAblation && !qualityPilot) throw error('ARC_WORKER_CONFIG', 'protocol must be arc-pilot-v1, recursion-ablation-v1, or quality-pilot-v1')
+  const qualityRecovery = protocol === QUALITY_RECOVERY_PROTOCOL
+  if (protocol !== ARC_PROTOCOL && !recursionAblation && !qualityPilot && !qualityRecovery) throw error('ARC_WORKER_CONFIG', 'protocol must be arc-pilot-v1, recursion-ablation-v1, quality-pilot-v1, or quality-recovery-v1')
   if (recursionAblation) {
     if (message.arm !== 'S0' && message.arm !== 'S') throw error('ARC_WORKER_CONFIG', 'recursion ablation arm must be S0 or S')
+  } else if (qualityRecovery) {
+    if (message.arm !== 'S') throw error('ARC_WORKER_CONFIG', 'quality recovery arm must be S')
   } else if (message.arm !== 'R' && message.arm !== 'S') {
     throw error('ARC_WORKER_CONFIG', 'arm must be R or S')
   }
@@ -163,13 +170,16 @@ async function normalizeConfig(message) {
   if (!isRecord(message.modelInfo)) throw error('ARC_WORKER_CONFIG', 'modelInfo must be parent-supplied metadata')
   const requestLimit = recursionAblation
     ? RECURSION_ABLATION_REQUEST_LIMIT
-    : qualityPilot ? QUALITY_PILOT_REQUEST_LIMIT : FIXED_REQUEST_LIMIT
+    : qualityPilot ? QUALITY_PILOT_REQUEST_LIMIT
+      : qualityRecovery ? QUALITY_RECOVERY_REQUEST_LIMIT : FIXED_REQUEST_LIMIT
   const wallTimeMs = recursionAblation
     ? RECURSION_ABLATION_WALL_TIME_MS
-    : qualityPilot ? QUALITY_PILOT_WALL_TIME_MS : FIXED_WALL_TIME_MS
+    : qualityPilot ? QUALITY_PILOT_WALL_TIME_MS
+      : qualityRecovery ? QUALITY_RECOVERY_WALL_TIME_MS : FIXED_WALL_TIME_MS
   const autonomous = recursionAblation
     ? RECURSION_ABLATION_AUTONOMOUS
-    : qualityPilot ? QUALITY_PILOT_AUTONOMOUS : FIXED_AUTONOMOUS
+    : qualityPilot ? QUALITY_PILOT_AUTONOMOUS
+      : qualityRecovery ? QUALITY_RECOVERY_AUTONOMOUS : FIXED_AUTONOMOUS
   if (message.requestLimit !== requestLimit) throw error('ARC_REQUEST_LIMIT_CHANGED', `expected ${String(requestLimit)}`)
   if (message.wallTimeMs !== wallTimeMs) throw error('ARC_WALL_TIME_CHANGED', `expected ${String(wallTimeMs)}`)
   if (!Number.isSafeInteger(message.bridgePort) || message.bridgePort < 1 || message.bridgePort > 65_535) {
@@ -184,7 +194,7 @@ async function normalizeConfig(message) {
   const shared = await requireDirectory(message.shared, 'shared')
   const compiled = await requireDirectory(message.compiled, 'compiled')
   const packageRoot = await requireDirectory(message.packageRoot, 'packageRoot')
-  const brokerOptional = recursionAblation || qualityPilot
+  const brokerOptional = recursionAblation || qualityPilot || qualityRecovery
   const brokerSocket = message.brokerSocket === undefined && brokerOptional ? undefined : absolute(message.brokerSocket, 'brokerSocket')
   const brokerState = message.brokerState === undefined && brokerOptional ? undefined : absolute(message.brokerState, 'brokerState')
   if ((brokerSocket !== undefined && !inside(directory, brokerSocket)) || (brokerState !== undefined && !inside(directory, brokerState))) {
@@ -202,10 +212,11 @@ async function normalizeConfig(message) {
     original,
     protocol,
     arm: message.arm,
-    nativeDepth: recursionAblation ? (message.arm === 'S0' ? 0 : 1) : qualityPilot ? 1 : 0,
+    nativeDepth: recursionAblation ? (message.arm === 'S0' ? 0 : 1) : qualityPilot || qualityRecovery ? 1 : 0,
     label: recursionAblation
       ? 'Recursion ablation text task'
-      : qualityPilot ? 'Quality pilot text task' : 'ARC fixed author task',
+      : qualityPilot ? 'Quality pilot text task'
+        : qualityRecovery ? 'Quality recovery text task' : 'ARC fixed author task',
     directory,
     workspace,
     home,
@@ -223,6 +234,8 @@ async function normalizeConfig(message) {
       ? 'worker accepts only the frozen 14-turn/4000000-token recursion-ablation autonomous configuration'
       : qualityPilot
         ? 'worker accepts only the frozen 32-turn/4000000-token quality-pilot autonomous configuration'
+        : qualityRecovery
+          ? 'worker accepts only the frozen 11-turn/4000000-token quality-recovery autonomous configuration'
         : 'worker accepts only the frozen 32-turn/4000000-token autonomous configuration'),
     brokerSocket,
     brokerState,
@@ -594,6 +607,7 @@ function classifyFailure(failure, controller) {
 
 function defaultNativeDepth(protocol, arm) {
   if (protocol === QUALITY_PILOT_PROTOCOL && (arm === 'R' || arm === 'S')) return 1
+  if (protocol === QUALITY_RECOVERY_PROTOCOL && arm === 'S') return 1
   return protocol === RECURSION_ABLATION_PROTOCOL && arm === 'S' ? 1 : 0
 }
 

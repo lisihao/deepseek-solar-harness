@@ -313,8 +313,39 @@ test('quality text executor gives original and plugin the same 32-call native co
   })
 })
 
+test('quality recovery configures the plugin with an eleven-call native ceiling', async () => {
+  for (const arm of ['S']) await withPreparedPanel(`quality-recovery-${arm}`, async ({ manifest }) => {
+    const original = manifest.conditions.find(x => x.arm === 'S')
+    const condition = { ...original, arm, protocol: 'quality-recovery-v1',
+      autonomous: { maxTurns: 11, maxTokens: 4_000_000, gate: 'test -s answer.json' } }
+    const task = (await privateTasks(manifest))[condition.taskIndex]
+    const ledger = await Ledger.open(join(condition.durableDirectory, 'quality-ledger.jsonl'), { total: 11, perRun: 11 })
+    let start
+    const outcome = await executeCondition({ manifest, condition, task, ledger,
+      provider: { modelInfo: { name: 'fixture' }, setPhysicalAdmission() {} },
+      relay: { restoreOptions: async value => value }, grade: () => ({ primaryScore: 1, schemaValid: true, errors: [] }),
+      reservePort: async () => ({ port: 14001, releaseIpv4: async () => {}, close: async () => {} }),
+      sandboxBuilder: () => '(version 1)',
+      spawnWorker: async ({ config }) => {
+        start = config.start
+        await writeFile(join(condition.workspace, 'answer.json'), '{}')
+        return { result: { state: 'completed', nativeDepth: 1, actualDepth: 1, physicalCleanup: true },
+          exit: { code: 0, signal: null }, stdout: '', stderr: '', error: null }
+      },
+    })
+    assert.equal(start.protocol, 'quality-recovery-v1')
+    assert.equal(start.arm, arm)
+    assert.equal(start.requestLimit, 11)
+    assert.equal(start.wallTimeMs, 1_200_000)
+    assert.deepEqual(start.autonomous, condition.autonomous)
+    assert.equal(outcome.executionCompleted, true)
+    assert.equal(outcome.cleanupComplete, true)
+    assert.equal(outcome.resources.modelRequests, 0)
+  })
+})
+
 test('explicit unknown quality protocol and unsupported arm fail before native execution', async () => {
-  for (const addition of [{ protocol: 'unknown' }, { protocol: 'quality-pilot-v1', arm: 'S0' }]) {
+  for (const addition of [{ protocol: 'unknown' }, { protocol: 'quality-pilot-v1', arm: 'S0' }, { protocol: 'quality-recovery-v1', arm: 'R' }]) {
     let started = false
     await assert.rejects(() => executeCondition({ manifest: {}, condition: { ...addition }, task: {},
       provider: {}, ledger: {}, relay: {}, spawnWorker: async () => { started = true } }), /RLM_CONDITION_PROTOCOL/)

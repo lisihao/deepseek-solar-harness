@@ -1,0 +1,238 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-three-arm-results-v1",
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "executionSourceHead": "82a0e0d3e60e41abbc52282128285b207a802a7a",
+  "preparedFingerprint": "d4248f2c7ccbef6276f4e318fddac9bd298c73e84a7997c77ac2944d3aa2f1e5",
+  "model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "maxTokens": 16384,
+    "configuredMaxOutputTokens": 16384
+  },
+  "task": {
+    "id": "oolong-trec-32k-15000243",
+    "records": 787,
+    "contextBytes": 78138,
+    "contextSha256": "64e3a042daf4bf66fbbb8b59d0a008179d5d4ce4a1554d7bcc11eba7f2204150",
+    "gold": 121,
+    "scorerSha256": "247583a3b653b91c39fb88a102460802f1493175b23d05a7217aead0d685c64c"
+  },
+  "priorAttempt": {
+    "status": "one unknown bare connection, two native arms not run",
+    "newRequests": 1,
+    "unknown": 1,
+    "closedPrefix": 524,
+    "sourceHead": "23e3c67ba8abef5be9c3e5d9f2426c5b1d3e58b6"
+  },
+  "conditions": [
+    {
+      "id": "D1",
+      "status": "completed",
+      "answerPresent": true,
+      "answerSha256": "130a06f1d3b187f52568590bf012497b6844028b024faa99e9bcc45c64f6069d",
+      "numericAnswer": 116,
+      "gold": 121,
+      "absoluteError": 5,
+      "score": 0.2373046875,
+      "exact": false,
+      "rootRequests": 1,
+      "childRequests": 0,
+      "recursionObserved": false,
+      "resources": {
+        "modelRequests": 1,
+        "physicalModelRequests": 1,
+        "confirmedModelRequests": 1,
+        "unknownModelRequests": 0,
+        "requestsWithKnownUsage": 1,
+        "requestsWithoutKnownUsage": 0,
+        "knownUsageTotals": {
+          "inputTokens": 23315,
+          "outputTokens": 14332,
+          "totalTokens": 37647
+        },
+        "elapsedMs": 416114
+      },
+      "workerLifecycleCompleted": true,
+      "cleanupComplete": true,
+      "taskAnswerCompleted": true
+    },
+    {
+      "id": "R32",
+      "status": "incomplete",
+      "answerPresent": false,
+      "answerSha256": null,
+      "numericAnswer": null,
+      "gold": 121,
+      "absoluteError": null,
+      "score": null,
+      "exact": null,
+      "rootRequests": 7,
+      "childRequests": 25,
+      "recursionObserved": true,
+      "resources": {
+        "modelRequests": 32,
+        "physicalModelRequests": 32,
+        "confirmedModelRequests": 32,
+        "unknownModelRequests": 0,
+        "requestsWithKnownUsage": 32,
+        "requestsWithoutKnownUsage": 0,
+        "knownUsageTotals": {
+          "inputTokens": 94983,
+          "outputTokens": 3513,
+          "totalTokens": 347328
+        },
+        "elapsedMs": 257837
+      },
+      "workerLifecycleCompleted": true,
+      "cleanupComplete": true,
+      "taskAnswerCompleted": false
+    },
+    {
+      "id": "S32",
+      "status": "incomplete",
+      "answerPresent": false,
+      "answerSha256": null,
+      "numericAnswer": null,
+      "gold": 121,
+      "absoluteError": null,
+      "score": null,
+      "exact": null,
+      "rootRequests": 7,
+      "childRequests": 25,
+      "recursionObserved": true,
+      "resources": {
+        "modelRequests": 32,
+        "physicalModelRequests": 32,
+        "confirmedModelRequests": 32,
+        "unknownModelRequests": 0,
+        "requestsWithKnownUsage": 32,
+        "requestsWithoutKnownUsage": 0,
+        "knownUsageTotals": {
+          "inputTokens": 130065,
+          "outputTokens": 3551,
+          "totalTokens": 346608
+        },
+        "elapsedMs": 230402
+      },
+      "workerLifecycleCompleted": true,
+      "cleanupComplete": true,
+      "taskAnswerCompleted": false
+    }
+  ],
+  "denominator": {
+    "plannedAcrossBothAttempts": 6,
+    "completed": 1,
+    "incomplete": 2,
+    "unknown": 1,
+    "notRun": 2,
+    "completedBareNativeQualityPairs": 0
+  },
+  "accounting": {
+    "prefix": {
+      "admitted": 524,
+      "confirmed": 510,
+      "unknown": 14
+    },
+    "new": {
+      "admitted": 65,
+      "confirmed": 65,
+      "unknown": 0,
+      "physicalAdmitted": 65
+    },
+    "cumulative": {
+      "admitted": 589,
+      "confirmed": 575,
+      "unknown": 14,
+      "cap": 600,
+      "withinCap": true
+    },
+    "stopped": false
+  },
+  "originalPluginDifferential": {
+    "initialNormalizedOptionsEqual": true,
+    "rawOptionHashes": [
+      "53b7352802e72fd326c5dd68837ef583e8a76e431f4d9ad25fded0f2d2ba0787",
+      "1c1d5e416426db0f7352ad34491cc0341191c938097e2fc73e90eef97598116a"
+    ],
+    "normalizedSha256": "914ceaf32e44762bd73fe66844cf29c728015090ea5522381cdd617b89e9b4fc",
+    "normalizations": [
+      "top-level route sessionId",
+      "message durable id",
+      "exact condition-owned path prefix",
+      "Conversation log path line"
+    ],
+    "noNormalizationOfTaskDatesOrContent": true,
+    "toolsAndRouteEqual": true,
+    "qualityEquivalenceEstablished": false
+  },
+  "nativeTiming": {
+    "firstRequestClarificationBeforeTask": {
+      "R": 8,
+      "S": 6
+    },
+    "initialTaskPermanentlyLost": false,
+    "taskRowsEventuallyDurable": true,
+    "rootCause": "Spawn kickoff waits for parent turn_done; immediate steering clarification can start the child earlier. Repeated child queries then consume the tree budget before useful batch work completes.",
+    "localControl": [
+      {
+        "arm": "R",
+        "earlyMessage": false,
+        "scriptedRequests": 6,
+        "initialTaskInFirstChild": true,
+        "followupInFirstChild": false,
+        "initialTaskEventuallyVisible": true,
+        "cleanupComplete": true
+      },
+      {
+        "arm": "R",
+        "earlyMessage": true,
+        "scriptedRequests": 7,
+        "initialTaskInFirstChild": false,
+        "followupInFirstChild": true,
+        "initialTaskEventuallyVisible": true,
+        "cleanupComplete": true
+      },
+      {
+        "arm": "S",
+        "earlyMessage": false,
+        "scriptedRequests": 6,
+        "initialTaskInFirstChild": true,
+        "followupInFirstChild": false,
+        "initialTaskEventuallyVisible": true,
+        "cleanupComplete": true
+      },
+      {
+        "arm": "S",
+        "earlyMessage": true,
+        "scriptedRequests": 7,
+        "initialTaskInFirstChild": false,
+        "followupInFirstChild": true,
+        "initialTaskEventuallyVisible": true,
+        "cleanupComplete": true
+      }
+    ],
+    "realModelRequestsInLocalReproduction": 0,
+    "failedFixtureAttemptsRetained": 2
+  },
+  "evidence": {
+    "preparedSha256": "3c93bf3713f9f6e60a5755581f106eb3ba52cfe0f4445d1e33e730607ee80727",
+    "receiptSha256": "198af00fae2f93efaba9e97aa52eeee343ceafbc66b020313ad033fb990022d2",
+    "ledgerSha256": "03a9406f48f76454639213beeb8bf554638715e95d75600dd9d145144b33a59f",
+    "independentVerificationSha256": "55ba37e25469aa87bee14b6e58dbf9d27af08d6254dedf1134126b3c1867d92a",
+    "closureSha256": "799807f07f25b8340293c42b344307607b8c8f6bcdbd838def30eff4c9532fea",
+    "messageOrderReproductionSha256": "0004addaa576d8dbcdd0765342373531dc8f2db050799dc0e5018dc16675a2f3",
+    "runtimeManifestSha256": "b6e34a977b4eb782b9a6e2c12436ad911adf30b511bd3df73214b55f829107f9",
+    "compiledHash": "7c4aa9fa77bd6514f13deaa5a6a10607bb60efdc526feb91e6b7f3e49415c2a3"
+  },
+  "interpretation": {
+    "originalPaperTaskBenefitEstablished": false,
+    "pluginPackagingFaultEstablished": false,
+    "causalRecursionBenefitEstablished": false,
+    "learningBenefitEstablished": false,
+    "allNegativeOutcomesRetained": true,
+    "remainingAuthorization": 11
+  }
+}

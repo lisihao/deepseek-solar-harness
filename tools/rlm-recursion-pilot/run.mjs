@@ -976,11 +976,15 @@ export async function executeCondition({
   }
   const protocol = condition.protocol ?? 'recursion-ablation-v1'
   const qualityPilot = protocol === 'quality-pilot-v1'
-  if (protocol !== 'recursion-ablation-v1' && !qualityPilot) fail('RLM_CONDITION_PROTOCOL', 'unsupported explicit condition protocol')
+  const qualityRecovery = protocol === 'quality-recovery-v1'
+  if (protocol !== 'recursion-ablation-v1' && !qualityPilot && !qualityRecovery) fail('RLM_CONDITION_PROTOCOL', 'unsupported explicit condition protocol')
   if (qualityPilot && condition.arm !== 'R' && condition.arm !== 'S') fail('RLM_CONDITION_PROTOCOL', 'quality text task requires R or S')
-  const nativeLimits = qualityPilot
-    ? { protocol: 'quality-pilot-v1', requestLimit: 32, wallTimeMs: 1_200_000 }
-    : { protocol: 'recursion-ablation-v1', requestLimit: FIXED_LIMITS.perTreeRequests, wallTimeMs: FIXED_LIMITS.wallTimeMs }
+  if (qualityRecovery && condition.arm !== 'S') fail('RLM_CONDITION_PROTOCOL', 'quality recovery requires S')
+  const nativeLimits = qualityRecovery
+    ? { protocol: 'quality-recovery-v1', requestLimit: 11, wallTimeMs: 1_200_000 }
+    : qualityPilot
+      ? { protocol: 'quality-pilot-v1', requestLimit: 32, wallTimeMs: 1_200_000 }
+      : { protocol: 'recursion-ablation-v1', requestLimit: FIXED_LIMITS.perTreeRequests, wallTimeMs: FIXED_LIMITS.wallTimeMs }
   const startedAt = Date.now()
   const beforeInputs = await hashPublicInputs(condition.workspace, task)
   const durableDispatch = { ...condition, directory: join(condition.durableDirectory, 'parent-intents'), gameId: condition.taskId }
@@ -1063,7 +1067,7 @@ export async function executeCondition({
   const childIntents = observedChildRequests(receipt, condition)
   const childRequests = childIntents.filter(child => child.physicalAdmitted)
   const childRoster = await readChildRosterEvidence(worker)
-  const expectedDepth = qualityPilot || condition.arm === 'S' ? 1 : 0
+  const expectedDepth = qualityPilot || qualityRecovery || condition.arm === 'S' ? 1 : 0
   const physicalCleanup = worker?.result?.physicalCleanup === true
   const exitedCleanly = worker?.exit?.code === 0 && worker?.exit?.signal === null
   const depthMatches = worker?.result?.nativeDepth === expectedDepth && worker?.result?.actualDepth === expectedDepth
