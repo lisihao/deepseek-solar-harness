@@ -1,0 +1,550 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-recursion-complete-attempt-summary-v1",
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "executionSourceHead": "673eb9ee97ec588fc87d8b8073d0910d068247d3",
+  "primeCommit": "7cbffa77b38facd7c87277fa3c82bcadbe816880",
+  "model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "maxOutputTokens": 16384
+  },
+  "task": {
+    "dataset": "oolongbench/oolong-synth",
+    "revision": "81d2f8d9349f6ff329d695f9be494051e9f05cb9",
+    "validPairWindow": 70017,
+    "records": 438,
+    "customQuery": true,
+    "paperReproduction": false
+  },
+  "limits": {
+    "perTree": 14,
+    "wallTimeMs": 1200000,
+    "cumulativeCap": 522
+  },
+  "phases": [
+    {
+      "name": "original-four-cell",
+      "fingerprint": "343a37090a5a34171d488a4d70567c1ffde24e07cfd4ef4f7803c1212f8b1d9b",
+      "manifestSha256": "f06633114394ef2e30bc8da2d275971d557e35d5e5e321b9a39a99922ee87916",
+      "ledgerSha256": "d214923dc204c6ee0040e2de9f4a2162a8a23d85cc04dcd5d3af242b66869f56",
+      "network": {
+        "firstTwo": "original provider system proxy",
+        "third": "NO_PROXY=chatgpt.com"
+      },
+      "accounting": {
+        "admitted": 9,
+        "confirmed": 6,
+        "unknown": 3
+      },
+      "cells": [
+        {
+          "id": "01S0",
+          "arm": "S0",
+          "taskId": "oolong-multinli-70016-q02",
+          "kind": "Q02",
+          "status": "incomplete",
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "score": 0,
+          "labelAccuracy": 0,
+          "schemaValid": false,
+          "selfConsistency": false,
+          "countsExact": false,
+          "pairsExact": null,
+          "recordCoverage": 0,
+          "modelRequests": 5,
+          "confirmed": 4,
+          "unknown": 1,
+          "childRequests": 0,
+          "rootRequests": 5,
+          "rosterObserved": false,
+          "resources": {
+            "modelRequests": 5,
+            "physicalModelRequests": 5,
+            "confirmedModelRequests": 4,
+            "unknownModelRequests": 1,
+            "requestsWithKnownUsage": 4,
+            "requestsWithoutKnownUsage": 1,
+            "knownUsageTotals": {
+              "inputTokens": 16378,
+              "outputTokens": 1769,
+              "totalTokens": 44515
+            },
+            "elapsedMs": 91406
+          },
+          "answerSha256": null,
+          "resultSha256": "8ed39f2abc31fc37f873c4239376d752e81f46d22cdabf362beee96fe593992f"
+        },
+        {
+          "id": "01S",
+          "arm": "S",
+          "taskId": "oolong-multinli-70016-q02",
+          "kind": "Q02",
+          "status": "incomplete",
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "score": 0,
+          "labelAccuracy": 0,
+          "schemaValid": false,
+          "selfConsistency": false,
+          "countsExact": false,
+          "pairsExact": null,
+          "recordCoverage": 0,
+          "modelRequests": 2,
+          "confirmed": 1,
+          "unknown": 1,
+          "childRequests": 0,
+          "rootRequests": 2,
+          "rosterObserved": false,
+          "resources": {
+            "modelRequests": 2,
+            "physicalModelRequests": 2,
+            "confirmedModelRequests": 1,
+            "unknownModelRequests": 1,
+            "requestsWithKnownUsage": 1,
+            "requestsWithoutKnownUsage": 1,
+            "knownUsageTotals": {
+              "inputTokens": 8033,
+              "outputTokens": 41,
+              "totalTokens": 8074
+            },
+            "elapsedMs": 22113
+          },
+          "answerSha256": null,
+          "resultSha256": "4cdde72b25e1824d3856f4944406404c235748eef1309893c56947207e909584"
+        },
+        {
+          "id": "02S",
+          "arm": "S",
+          "taskId": "oolong-multinli-70017-q03",
+          "kind": "Q03",
+          "status": "incomplete",
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "score": 0,
+          "labelAccuracy": 0,
+          "schemaValid": false,
+          "selfConsistency": false,
+          "countsExact": false,
+          "pairsExact": false,
+          "recordCoverage": 0,
+          "modelRequests": 2,
+          "confirmed": 1,
+          "unknown": 1,
+          "childRequests": 0,
+          "rootRequests": 2,
+          "rosterObserved": false,
+          "resources": {
+            "modelRequests": 2,
+            "physicalModelRequests": 2,
+            "confirmedModelRequests": 1,
+            "unknownModelRequests": 1,
+            "requestsWithKnownUsage": 1,
+            "requestsWithoutKnownUsage": 1,
+            "knownUsageTotals": {
+              "inputTokens": 8035,
+              "outputTokens": 61,
+              "totalTokens": 8096
+            },
+            "elapsedMs": 13917
+          },
+          "answerSha256": null,
+          "resultSha256": "1f318ab66b0bc390a9753e0f5502422c441164c3e42da00ddf2ac1a26ef26287"
+        },
+        {
+          "id": "02S0",
+          "arm": "S0",
+          "taskId": "oolong-multinli-70017-q03",
+          "kind": "Q03",
+          "status": "not-run",
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "score": null,
+          "labelAccuracy": null,
+          "schemaValid": false,
+          "selfConsistency": false,
+          "countsExact": null,
+          "pairsExact": null,
+          "recordCoverage": 0,
+          "modelRequests": 0,
+          "confirmed": 0,
+          "unknown": 0,
+          "childRequests": 0,
+          "rootRequests": 0,
+          "rosterObserved": false,
+          "resources": null,
+          "answerSha256": null,
+          "resultSha256": null
+        }
+      ]
+    },
+    {
+      "name": "ipv4-v1",
+      "fingerprint": "0f541180f71f5b3db27a589fc575fe49ce201de8f79afc27344bb056af979c89",
+      "manifestSha256": "54d4a026e1256e554fcad7a623144f1efc4890761bc69fee746928ed89f5967c",
+      "ledgerSha256": "0e84789c79e51615cccbc8d181060c349b27f574a181ba25cdcae90d448671d8",
+      "network": {
+        "NO_PROXY": "chatgpt.com",
+        "dnsOrder": "ipv4first",
+        "autoSelectFamily": false
+      },
+      "accounting": {
+        "admitted": 9,
+        "confirmed": 8,
+        "unknown": 1
+      },
+      "cells": [
+        {
+          "id": "v1S0",
+          "arm": "S0",
+          "taskId": "oolong-multinli-70017-q03",
+          "kind": "Q03",
+          "status": "incomplete",
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "score": 0,
+          "labelAccuracy": 0,
+          "schemaValid": false,
+          "selfConsistency": false,
+          "countsExact": false,
+          "pairsExact": false,
+          "recordCoverage": 0,
+          "modelRequests": 9,
+          "confirmed": 8,
+          "unknown": 1,
+          "childRequests": 0,
+          "rootRequests": 9,
+          "rosterObserved": false,
+          "resources": {
+            "modelRequests": 9,
+            "physicalModelRequests": 9,
+            "confirmedModelRequests": 8,
+            "unknownModelRequests": 1,
+            "requestsWithKnownUsage": 8,
+            "requestsWithoutKnownUsage": 1,
+            "knownUsageTotals": {
+              "inputTokens": 43361,
+              "outputTokens": 3275,
+              "totalTokens": 137004
+            },
+            "elapsedMs": 133854
+          },
+          "answerSha256": null,
+          "resultSha256": "a42a1c71fc04d955be45f1077cd15ba25bd4b3aebd98c0da04dce5cb60ef9c09"
+        },
+        {
+          "id": "v1S",
+          "arm": "S",
+          "taskId": "oolong-multinli-70017-q03",
+          "kind": "Q03",
+          "status": "not-run",
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "score": null,
+          "labelAccuracy": null,
+          "schemaValid": false,
+          "selfConsistency": false,
+          "countsExact": null,
+          "pairsExact": null,
+          "recordCoverage": 0,
+          "modelRequests": 0,
+          "confirmed": 0,
+          "unknown": 0,
+          "childRequests": 0,
+          "rootRequests": 0,
+          "rosterObserved": false,
+          "resources": null,
+          "answerSha256": null,
+          "resultSha256": null
+        }
+      ]
+    },
+    {
+      "name": "no-reuse-v2",
+      "fingerprint": "67c50321e244b3b7d1c39908acd6c5881e331d5c3cd13d2e75ec59a2e206b514",
+      "manifestSha256": "817f577b579189e2498b76515bb7362726c7e7f6907861fec072fdacba05b7dc",
+      "ledgerSha256": "ce0f53485c72fcbe7941b4e33eb121d6ca0ad58addd9778e868583def4c022ec",
+      "network": {
+        "NO_PROXY": "chatgpt.com",
+        "dnsOrder": "ipv4first",
+        "autoSelectFamily": false,
+        "connectionClose": true
+      },
+      "accounting": {
+        "admitted": 25,
+        "confirmed": 25,
+        "unknown": 0
+      },
+      "cells": [
+        {
+          "id": "v2S0",
+          "arm": "S0",
+          "taskId": "oolong-multinli-70017-q03",
+          "kind": "Q03",
+          "status": "completed",
+          "executionCompleted": true,
+          "cleanupComplete": true,
+          "score": 0.3076923076923077,
+          "labelAccuracy": 0.9315068493150684,
+          "schemaValid": true,
+          "selfConsistency": true,
+          "countsExact": false,
+          "pairsExact": false,
+          "recordCoverage": 438,
+          "modelRequests": 11,
+          "confirmed": 11,
+          "unknown": 0,
+          "childRequests": 0,
+          "rootRequests": 11,
+          "rosterObserved": false,
+          "resources": {
+            "modelRequests": 11,
+            "physicalModelRequests": 11,
+            "confirmedModelRequests": 11,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 11,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 42328,
+              "outputTokens": 6176,
+              "totalTokens": 282872
+            },
+            "elapsedMs": 210491
+          },
+          "answerSha256": "d3443d051a45d0c0d336099a195d5fa115f080257ad6ee3e56ffaf4e97a93586",
+          "resultSha256": "37b23331a4eaae3dbcf5f8ab08c0b57a8a4920aad8e0d1520bcc1a6f9b26f40f"
+        },
+        {
+          "id": "v2S",
+          "arm": "S",
+          "taskId": "oolong-multinli-70017-q03",
+          "kind": "Q03",
+          "status": "completed",
+          "executionCompleted": true,
+          "cleanupComplete": true,
+          "score": 0.23999999999999996,
+          "labelAccuracy": 0.9223744292237442,
+          "schemaValid": true,
+          "selfConsistency": true,
+          "countsExact": false,
+          "pairsExact": false,
+          "recordCoverage": 438,
+          "modelRequests": 14,
+          "confirmed": 14,
+          "unknown": 0,
+          "childRequests": 8,
+          "rootRequests": 6,
+          "rosterObserved": true,
+          "resources": {
+            "modelRequests": 14,
+            "physicalModelRequests": 14,
+            "confirmedModelRequests": 14,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 14,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 117274,
+              "outputTokens": 11575,
+              "totalTokens": 231633
+            },
+            "elapsedMs": 343696
+          },
+          "answerSha256": "aea45c44d06c1d32b9c4db4ca523aa301e30443a75bf73c10144bdb4d90aba22",
+          "resultSha256": "f8bac6ba8e3dd8b2a8af64b22264397cc89776ec64e37dcefb39cb55e0714971"
+        }
+      ]
+    }
+  ],
+  "denominator": {
+    "planned": 8,
+    "completed": 2,
+    "incomplete": 4,
+    "notRun": 2,
+    "completeQualityPairs": 1
+  },
+  "accounting": {
+    "historical": {
+      "charged": 463,
+      "confirmed": 456,
+      "unknown": 7,
+      "individualRawLedgerAvailable": false
+    },
+    "new": {
+      "charged": 43,
+      "confirmed": 39,
+      "unknown": 4
+    },
+    "cumulative": {
+      "charged": 506,
+      "confirmed": 495,
+      "unknown": 11,
+      "cap": 522,
+      "remaining": 16
+    }
+  },
+  "quality": {
+    "S0": {
+      "pairF1": 0.3076923076923077,
+      "labelAccuracy": 0.9315068493150684,
+      "correct": 408,
+      "requests": 11,
+      "elapsedMs": 210491
+    },
+    "S": {
+      "pairF1": 0.23999999999999996,
+      "labelAccuracy": 0.9223744292237442,
+      "correct": 404,
+      "requests": 14,
+      "rootRequests": 6,
+      "childRequests": 8,
+      "elapsedMs": 343696
+    },
+    "delta": {
+      "pairF1SMinusS0": -0.06769230769230775,
+      "labelAccuracySMinusS0": -0.0091324200913242
+    },
+    "benefitObserved": false,
+    "generalEffectEstablished": false,
+    "fullTreeUsage": {
+      "S0": {
+        "inputTokens": 42328,
+        "outputTokens": 6176,
+        "totalTokens": 282872,
+        "cacheReadTokens": 234368
+      },
+      "S": {
+        "inputTokens": 117274,
+        "outputTokens": 11575,
+        "totalTokens": 231633,
+        "cacheReadTokens": 102784
+      }
+    }
+  },
+  "errorAnalysis": {
+    "formatVersion": 1,
+    "kind": "native-recursion-answer-error-analysis-v1",
+    "time": "2026-10-21T02:20:03.855Z",
+    "records": 438,
+    "correct": {
+      "S0": 408,
+      "S": 404
+    },
+    "pairedRecordOutcomes": {
+      "bothCorrect": 400,
+      "onlyS0Correct": 8,
+      "onlySCorrect": 4,
+      "bothWrong": 26
+    },
+    "confusion": {
+      "S0": {
+        "entailment": {
+          "entailment": 112,
+          "contradiction": 2,
+          "neutral": 4
+        },
+        "contradiction": {
+          "entailment": 0,
+          "contradiction": 129,
+          "neutral": 16
+        },
+        "neutral": {
+          "entailment": 6,
+          "contradiction": 2,
+          "neutral": 167
+        }
+      },
+      "S": {
+        "entailment": {
+          "entailment": 110,
+          "contradiction": 1,
+          "neutral": 7
+        },
+        "contradiction": {
+          "entailment": 0,
+          "contradiction": 125,
+          "neutral": 20
+        },
+        "neutral": {
+          "entailment": 5,
+          "contradiction": 1,
+          "neutral": 169
+        }
+      }
+    },
+    "pairSets": {
+      "S0": {
+        "expected": 33,
+        "predicted": 32,
+        "truePositives": 10,
+        "falsePositives": 22,
+        "falseNegatives": 23
+      },
+      "S": {
+        "expected": 33,
+        "predicted": 42,
+        "truePositives": 9,
+        "falsePositives": 33,
+        "falseNegatives": 24
+      }
+    },
+    "usersWithIncorrectCounts": {
+      "S0": 21,
+      "S": 21
+    },
+    "children": {
+      "count": 4,
+      "chunks": [
+        {
+          "index": 0,
+          "records": 110,
+          "correct": 104,
+          "allLabelsUsedInFinal": true,
+          "fileSha256": "15255e9ffc829988f6e2d249d46fc1c75a96a8963157d6a95796ce39fe64269f"
+        },
+        {
+          "index": 1,
+          "records": 110,
+          "correct": 102,
+          "allLabelsUsedInFinal": true,
+          "fileSha256": "36603192f83fb1f8a30708234e6431b0623ad03d0b6da4806519c00b61d0cebd"
+        },
+        {
+          "index": 2,
+          "records": 110,
+          "correct": 102,
+          "allLabelsUsedInFinal": true,
+          "fileSha256": "b8775584c525425cfec0050d6b52da389851e3ac472c61f46b4e84a2aedcc45b"
+        },
+        {
+          "index": 3,
+          "records": 108,
+          "correct": 96,
+          "allLabelsUsedInFinal": true,
+          "fileSha256": "774153573c46c1019e9338ae1c713ddb449b2b2015304a4513cf410c6a963329"
+        }
+      ],
+      "allChildLabelsUsedInFinal": true
+    },
+    "answerHashes": {
+      "S0": "d3443d051a45d0c0d336099a195d5fa115f080257ad6ee3e56ffaf4e97a93586",
+      "S": "aea45c44d06c1d32b9c4db4ca523aa301e30443a75bf73c10144bdb4d90aba22"
+    }
+  },
+  "evidence": {
+    "finalClosureSha256": "c3fd18c63b72a40176867bd311df274d05b2d22a653e3c4dd88b87b230d65593",
+    "nativeProofSha256": "6a74f2ae15182bc56c066ffeb48ec2ea763320ec7ab771478162805e7b4166f6",
+    "runtimeManifestSha256": "b6e34a977b4eb782b9a6e2c12436ad911adf30b511bd3df73214b55f829107f9",
+    "compiledHash": "7c4aa9fa77bd6514f13deaa5a6a10607bb60efdc526feb91e6b7f3e49415c2a3"
+  },
+  "interpretation": [
+    "The valid pair completed with real recursive child contributions; this is an observed negative single-task result, not a transport failure or absence of recursion.",
+    "All 438 final recursive labels match the four child files. Counts and pair enumeration are internally consistent with the predicted labels.",
+    "The recursive answer fixes four flat errors and introduces eight errors where flat was correct. Threshold-sensitive pair constraints amplify these classification differences.",
+    "A single completed pair cannot establish a general effect or isolate the causes of stochastic semantic mistakes. Connection-close permitted this 25-request pair to finish, but does not prove the underlying intermittent network fault is resolved.",
+    "No additional model trial is run after the negative result. Sixteen requests remain; the current two-tree reservation requires 28.",
+    "The earlier installed artifact is unchanged. No paper reproduction or held-out Continual Harness effect is claimed."
+  ]
+}

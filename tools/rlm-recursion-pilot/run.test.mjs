@@ -86,8 +86,9 @@ async function withPreparedPanel(name, operation) {
       runtimePreparer: async ({ shared }) => {
         const runtimes = join(shared, 'runtimes')
         await mkdir(runtimes, { recursive: true, mode: 0o700 })
-        const runtimeManifest = join(PACKAGE_ROOT, 'assets/runtime-manifest.json')
-        const value = JSON.parse(await readFile(runtimeManifest, 'utf8'))
+        const runtimeManifest = join(shared, 'fixture-runtime-manifest.json')
+        const value = { formatVersion: 1, primeCommit: JSON.parse(await readFile(PLAN, 'utf8')).primeCommit, fixture: true }
+        await writeFile(runtimeManifest, JSON.stringify(value), { mode: 0o600 })
         return {
           paths: { binary: '/fixture/prime', python: '/usr/bin/python3', packageDir: '/fixture/package', fingerprint: 'fixture-runtime' },
           manifest: { path: runtimeManifest, sha256: await sha256File(runtimeManifest), primeCommit: value.primeCommit, archiveSha256: value.archiveSha256 ?? null },

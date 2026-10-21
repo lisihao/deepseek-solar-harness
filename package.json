@@ -22,7 +22,7 @@
     "test:plugin:rlm": "node tools/rlm-plugin-test.mjs",
     "test:arc": "node --test tools/rlm-arc-pilot/baseline.test.mjs tools/rlm-arc-pilot/attachment-relay.test.mjs tools/rlm-arc-pilot/broker.test.mjs tools/rlm-arc-pilot/ledger.test.mjs tools/rlm-arc-pilot/run.test.mjs",
     "test:arc:native": "node tools/rlm-arc-pilot/native-worker.test.mjs",
-    "test:recursion": "node --test tools/rlm-recursion-pilot/tasks.test.mjs tools/rlm-recursion-pilot/control.test.mjs tools/rlm-recursion-pilot/run.test.mjs",
+    "test:recursion": "node --test tools/rlm-recursion-pilot/tasks.test.mjs tools/rlm-recursion-pilot/control.test.mjs tools/rlm-recursion-pilot/run.test.mjs tools/rlm-recursion-pilot/resume.test.mjs tools/rlm-recursion-pilot/revalidate.test.mjs tools/rlm-recursion-pilot/network-profile.test.mjs",
     "test:recursion:native": "node tools/rlm-recursion-pilot/native-acceptance.mjs"
   },
   "devDependencies": {
