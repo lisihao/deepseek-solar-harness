@@ -205,7 +205,7 @@ first_cli_line="$(awk '/^cli:/{print NR; exit}' "$EVENTS")"
 [ -n "$(find "$DSH_HOME/solar/curated-installer/backups" -name package.json -type f -print -quit)" ]
 backup_receipt="$(find "$DSH_HOME/solar/curated-installer/backups" -name receipt.tsv -type f -print -quit)"
 [ -n "$backup_receipt" ]
-rg -q '^compatibility.json\tabsent$' "$backup_receipt"
+grep -Fqx "$(printf 'compatibility.json\tabsent')" "$backup_receipt"
 for package_id in resident collaboration web; do
   cached_path="$DSH_HOME/artifacts/curated/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/$package_id.tgz"
   [ -f "$cached_path" ]
