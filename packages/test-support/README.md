@@ -8,6 +8,7 @@ These packages support repository development, tests, and examples rather than p
 |---|---|
 | [`acp-snapshot/`](acp-snapshot/README.md) | Provides the ACP snapshot-test toolkit |
 | [`agent-loop-testkit/`](agent-loop-testkit/README.md) | Mounts shared prerequisites for AgentLoop tests |
+| [`bench-testkit/`](bench-testkit/README.md) | Checks benchmark suites for conformance |
 | [`invariants/`](../runtime-diagnostics/invariants/README.md) | Runs development-time runtime-contract assertions |
 | [`loader-smoke/`](loader-smoke/README.md) | Launches Loader-composed applications for smoke tests |
 | [`llm-mock-server/`](llm-mock-server/README.md) | Provides a deterministic OpenAI-compatible fault server |

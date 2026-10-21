@@ -473,6 +473,22 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Plugins register direct human commands without sending invocations to the model.',
   },
   {
+    key: 'benchmarks',
+    pkg: 'bench',
+    title: 'Benchmark suite and grader registry',
+    mode: 'seam',
+    implementations: ['bench-suite-dsh-native'],
+    consumers: ['bench-runner'],
+    note: 'Suite plugins register tasks and graders; the runtime reads them to run experiments.',
+  },
+  {
+    key: 'benchRuntime',
+    pkg: 'bench-runner',
+    title: 'Benchmark experiment runtime',
+    mode: 'core',
+    note: 'Runs each (variant, task, repetition) as an isolated dsh child process and appends one run record per cell to the experiment ledger.',
+  },
+  {
     key: 'sessionProjections',
     pkg: 'session-projection',
     title: 'Session projection units',

@@ -387,6 +387,46 @@ Depends on: [`LocalConfig`](#deepseek-aidsh-bash-local)
 
 Source: [`packages/shell/bash-sandbox/src/index.ts:35`](../packages/shell/bash-sandbox/src/index.ts)
 
+<a id="deepseek-aidsh-bench-runner"></a>
+
+## `@deepseek-ai/dsh-bench-runner`
+
+Requires: `benchmarks`
+
+```ts config-catalog
+/** Runtime configuration. */
+export interface Config {
+  /** Launcher argv prefix for `dsh`, for example `[node, /abs/apps/cli/lib/bin.js]`. */
+  command: string[]
+  /** Absolute home whose `profiles/<profile>` seeds every run home. */
+  templateHome: string
+  /** Home-relative files copied into every run home (credentials, settings). */
+  templateFiles: string[]
+  /** Absolute directory holding one ledger directory per experiment. */
+  ledgerRoot: string
+  /** Runs executed at once. */
+  concurrency: number
+  /** Wall-time limit of one run's child process. */
+  runTimeoutMs: number
+  /** USD per million tokens, by model id; runs using an unlisted model get no cost. */
+  prices: ModelPrice[]
+}
+
+/** USD per million tokens for one model; `cacheRead` defaults to `input`. */
+export interface ModelPrice {
+  /** Provider model id as logged on assistant messages. */
+  model: string
+  /** Prompt tokens not served from cache. */
+  input: number
+  /** Completion tokens. */
+  output: number
+  /** Prompt tokens served from cache. */
+  cacheRead?: number
+}
+```
+
+Source: [`packages/bench/bench-runner/src/index.ts:36`](../packages/bench/bench-runner/src/index.ts)
+
 <a id="deepseek-aidsh-browser"></a>
 
 ## `@deepseek-ai/dsh-browser`
@@ -3906,6 +3946,8 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-agent` ([`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts))
 - `@deepseek-ai/dsh-api-gateway` — requires `typert` ([`packages/api/gateway/src/index.ts`](../packages/api/gateway/src/index.ts))
 - `@deepseek-ai/dsh-api-remotes` ([`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts))
+- `@deepseek-ai/dsh-bench` ([`packages/bench/bench/src/index.ts`](../packages/bench/bench/src/index.ts))
+- `@deepseek-ai/dsh-bench-suite-dsh-native` — requires `benchmarks` ([`packages/bench/bench-suite-dsh-native/src/index.ts`](../packages/bench/bench-suite-dsh-native/src/index.ts))
 - `@deepseek-ai/dsh-client-locale` ([`packages/client/locale/src/index.ts`](../packages/client/locale/src/index.ts))
 - `@deepseek-ai/dsh-client-modules` — requires `webServer` · `loader` ([`packages/client/modules/src/index.ts`](../packages/client/modules/src/index.ts))
 - `@deepseek-ai/dsh-client-runtime` ([`packages/client/runtime/src/index.ts`](../packages/client/runtime/src/index.ts))
@@ -4026,6 +4068,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-app-boot` ([`packages/boot/app-boot/src/index.ts`](../packages/boot/app-boot/src/index.ts))
 - `@deepseek-ai/dsh-atomic-write` ([`packages/util/atomic-write/src/index.ts`](../packages/util/atomic-write/src/index.ts))
 - `@deepseek-ai/dsh-base` ([`packages/bundle/base/src/index.ts`](../packages/bundle/base/src/index.ts))
+- `@deepseek-ai/dsh-bench-testkit` ([`packages/test-support/bench-testkit/src/index.ts`](../packages/test-support/bench-testkit/src/index.ts))
 - `@deepseek-ai/dsh-brand` ([`packages/util/brand/src/index.ts`](../packages/util/brand/src/index.ts))
 - `@deepseek-ai/dsh-chatgpt-web-operator` ([`packages/bundle/chatgpt-web-operator/src/index.ts`](../packages/bundle/chatgpt-web-operator/src/index.ts))
 - `@deepseek-ai/dsh-client-schema-form` ([`packages/client/schema-form/src/index.ts`](../packages/client/schema-form/src/index.ts))
