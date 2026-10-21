@@ -50,7 +50,7 @@ The browser contribution observes this plugin's namespaced native `compaction/st
 
 This UI is an affordance after the Host event reaches the Client, not a substitute for the existing Host target-request gate. It does not promise zero transport latency after a picker click. The original session journal remains complete. Rendered default/narrow layouts, actual keyboard behavior and draft preservation in the installed App require human acceptance; source and keyless tests alone do not establish those results.
 
-The status notice is horizontally centered within the conversation column using the normal composer width, with narrow-width padding. Its explicit **Close** button hides only this notice; it neither cancels preparation nor releases the input/Send block. Dismissal survives navigation within the current plugin lifecycle for that transaction and phase. A new handoff or a transition from preparing to an error/fresh result can show a new notice. This does not change the official question-card renderer.
+The status notice is horizontally centered within the conversation column using the normal composer width, with narrow-width padding. Its **×** button has an accessible close label and hides only this notice; it neither cancels preparation nor releases the input/Send block. Dismissal survives navigation within the current plugin lifecycle for that transaction and phase. A new handoff or a transition from preparing to an error/fresh result can show a new notice. This does not change the official question-card renderer.
 
 ## Repair acceptance status (2026-10-21)
 

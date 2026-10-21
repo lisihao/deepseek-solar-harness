@@ -39,7 +39,7 @@ export function apply(ctx: Context): void {
         onClick: () => { dismissed.add(noticeKey); redraw(value => value + 1) },
         style: { flexShrink: 0, cursor: 'pointer', color: 'inherit', background: 'transparent',
           border: '1px solid var(--dsw-alias-border-l2)', borderRadius: '6px', padding: '2px 8px', font: 'inherit' },
-      }, '关闭 ×')),
+      }, '×')),
     createElement('div', null, state.busy
       ? '正在准备任务上下文。可选择携带任务内容，或取消交接并空白开始。输入和发送暂时停用，原草稿会保留。'
       : state.message)))
