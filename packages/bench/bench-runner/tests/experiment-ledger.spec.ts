@@ -70,6 +70,13 @@ describe('ExperimentLedger', () => {
     await expect(new ExperimentLedger(dir, { ...experiment, repetitions: 2 }).open()).rejects.toThrow(/different definition/)
   })
 
+  it('reports an unversioned ledger as a format mismatch when reopened', async () => {
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(join(dir, 'exp'))
+    await writeFile(join(dir, 'exp', 'experiment.json'), `${JSON.stringify(experiment, undefined, 2)}\n`)
+    await expect(new ExperimentLedger(dir, experiment).open()).rejects.toThrow(/ledger format undefined is not readable/)
+  })
+
   it('drops a torn final line and refuses foreign formats and corrupt interior lines', async () => {
     const ledger = new ExperimentLedger(dir, experiment)
     await ledger.open()

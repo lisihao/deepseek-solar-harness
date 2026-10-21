@@ -62,7 +62,7 @@ export class ExperimentLedger {
    * @param root - absolute ledger root holding one directory per experiment.
    * @param experiment - the experiment this ledger records.
    */
-  constructor(root: string, private readonly experiment: Experiment) {
+  constructor(private readonly root: string, private readonly experiment: Experiment) {
     this.dir = join(root, experiment.id)
   }
 
@@ -79,6 +79,8 @@ export class ExperimentLedger {
       return
     }
     if (existing.trimEnd() !== pinned) {
+      // A ledger in another format must say so, not claim the definition changed.
+      await readPinnedExperiment(this.root, this.experiment.id)
       throw new Error(`experiment ${JSON.stringify(this.experiment.id)} already has a ledger with a different definition at ${this.dir}; use a new experiment id`)
     }
   }
