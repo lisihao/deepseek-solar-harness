@@ -129,6 +129,49 @@ async function testConfigModes() {
   assert.equal(arc.wallTimeMs, 3_600_000)
   assert.deepEqual(arc.autonomous, { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' })
   assert.equal((await __test.normalizeConfig({ ...arcStart, arm: 'R' })).nativeDepth, 0)
+  const arcWithoutBroker = { ...arcStart }
+  delete arcWithoutBroker.brokerSocket
+  delete arcWithoutBroker.brokerState
+  await assert.rejects(() => __test.normalizeConfig(arcWithoutBroker), /ARC_WORKER_CONFIG/)
+
+  const qualityStart = arm => ({
+    ...fixture.base,
+    protocol: 'quality-pilot-v1',
+    arm,
+    requestLimit: 32,
+    wallTimeMs: 1_200_000,
+    autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' },
+  })
+  const qualityR = await __test.normalizeConfig(qualityStart('R'))
+  const qualityS = await __test.normalizeConfig(qualityStart('S'))
+  for (const quality of [qualityR, qualityS]) {
+    assert.equal(quality.protocol, 'quality-pilot-v1')
+    assert.equal(quality.nativeDepth, 1)
+    assert.equal(quality.requestLimit, 32)
+    assert.equal(quality.wallTimeMs, 1_200_000)
+    assert.deepEqual(quality.autonomous, { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' })
+    assert.equal(quality.brokerSocket, undefined)
+    assert.equal(quality.brokerState, undefined)
+  }
+  assert.equal(qualityR.arm, 'R')
+  assert.equal(qualityS.arm, 'S')
+  assert.equal(__test.defaultNativeDepth('quality-pilot-v1', 'R'), 1)
+  assert.equal(__test.defaultNativeDepth('quality-pilot-v1', 'S'), 1)
+  await assert.rejects(() => __test.normalizeConfig({ ...qualityStart('S0') }), /ARC_WORKER_CONFIG/)
+  await assert.rejects(() => __test.normalizeConfig({ ...qualityStart('R'), requestLimit: 14 }), /ARC_REQUEST_LIMIT_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({ ...qualityStart('R'), wallTimeMs: 3_600_000 }), /ARC_WALL_TIME_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({
+    ...qualityStart('R'),
+    autonomous: { maxTurns: 14, maxTokens: 4_000_000, gate: 'test -f answer.json' },
+  }), /ARC_AUTONOMOUS_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({
+    ...qualityStart('S'),
+    autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: '   ' },
+  }), /ARC_AUTONOMOUS_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({
+    ...qualityStart('S'),
+    route: { ...fixture.base.route, model: 'other-model' },
+  }), /ARC_ROUTE_CHANGED/)
 
   const recursionStart = arm => ({
     ...fixture.base,

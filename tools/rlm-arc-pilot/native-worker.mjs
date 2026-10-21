@@ -22,9 +22,13 @@ const FIXED_WALL_TIME_MS = 3_600_000
 const FIXED_AUTONOMOUS = Object.freeze({ maxTurns: 32, maxTokens: 4_000_000 })
 const ARC_PROTOCOL = 'arc-pilot-v1'
 const RECURSION_ABLATION_PROTOCOL = 'recursion-ablation-v1'
+const QUALITY_PILOT_PROTOCOL = 'quality-pilot-v1'
 const RECURSION_ABLATION_REQUEST_LIMIT = 14
 const RECURSION_ABLATION_WALL_TIME_MS = 1_200_000
 const RECURSION_ABLATION_AUTONOMOUS = Object.freeze({ maxTurns: 14, maxTokens: 4_000_000 })
+const QUALITY_PILOT_REQUEST_LIMIT = 32
+const QUALITY_PILOT_WALL_TIME_MS = 1_200_000
+const QUALITY_PILOT_AUTONOMOUS = Object.freeze({ maxTurns: 32, maxTokens: 4_000_000 })
 const PRIME_META = 'ai.primeintellect.prime-agent'
 const MAX_HTTP_REQUEST_BYTES = 32 * 1024 * 1024
 const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024
@@ -148,7 +152,8 @@ async function normalizeConfig(message) {
   const original = exactJson(message, 'start config')
   const protocol = message.protocol === undefined ? ARC_PROTOCOL : message.protocol
   const recursionAblation = protocol === RECURSION_ABLATION_PROTOCOL
-  if (protocol !== ARC_PROTOCOL && !recursionAblation) throw error('ARC_WORKER_CONFIG', 'protocol must be arc-pilot-v1 or recursion-ablation-v1')
+  const qualityPilot = protocol === QUALITY_PILOT_PROTOCOL
+  if (protocol !== ARC_PROTOCOL && !recursionAblation && !qualityPilot) throw error('ARC_WORKER_CONFIG', 'protocol must be arc-pilot-v1, recursion-ablation-v1, or quality-pilot-v1')
   if (recursionAblation) {
     if (message.arm !== 'S0' && message.arm !== 'S') throw error('ARC_WORKER_CONFIG', 'recursion ablation arm must be S0 or S')
   } else if (message.arm !== 'R' && message.arm !== 'S') {
@@ -156,9 +161,15 @@ async function normalizeConfig(message) {
   }
   if (typeof message.task !== 'string' || message.task.length === 0) throw error('ARC_WORKER_CONFIG', 'task must be the non-empty parent-supplied author prompt')
   if (!isRecord(message.modelInfo)) throw error('ARC_WORKER_CONFIG', 'modelInfo must be parent-supplied metadata')
-  const requestLimit = recursionAblation ? RECURSION_ABLATION_REQUEST_LIMIT : FIXED_REQUEST_LIMIT
-  const wallTimeMs = recursionAblation ? RECURSION_ABLATION_WALL_TIME_MS : FIXED_WALL_TIME_MS
-  const autonomous = recursionAblation ? RECURSION_ABLATION_AUTONOMOUS : FIXED_AUTONOMOUS
+  const requestLimit = recursionAblation
+    ? RECURSION_ABLATION_REQUEST_LIMIT
+    : qualityPilot ? QUALITY_PILOT_REQUEST_LIMIT : FIXED_REQUEST_LIMIT
+  const wallTimeMs = recursionAblation
+    ? RECURSION_ABLATION_WALL_TIME_MS
+    : qualityPilot ? QUALITY_PILOT_WALL_TIME_MS : FIXED_WALL_TIME_MS
+  const autonomous = recursionAblation
+    ? RECURSION_ABLATION_AUTONOMOUS
+    : qualityPilot ? QUALITY_PILOT_AUTONOMOUS : FIXED_AUTONOMOUS
   if (message.requestLimit !== requestLimit) throw error('ARC_REQUEST_LIMIT_CHANGED', `expected ${String(requestLimit)}`)
   if (message.wallTimeMs !== wallTimeMs) throw error('ARC_WALL_TIME_CHANGED', `expected ${String(wallTimeMs)}`)
   if (!Number.isSafeInteger(message.bridgePort) || message.bridgePort < 1 || message.bridgePort > 65_535) {
@@ -173,8 +184,9 @@ async function normalizeConfig(message) {
   const shared = await requireDirectory(message.shared, 'shared')
   const compiled = await requireDirectory(message.compiled, 'compiled')
   const packageRoot = await requireDirectory(message.packageRoot, 'packageRoot')
-  const brokerSocket = message.brokerSocket === undefined && recursionAblation ? undefined : absolute(message.brokerSocket, 'brokerSocket')
-  const brokerState = message.brokerState === undefined && recursionAblation ? undefined : absolute(message.brokerState, 'brokerState')
+  const brokerOptional = recursionAblation || qualityPilot
+  const brokerSocket = message.brokerSocket === undefined && brokerOptional ? undefined : absolute(message.brokerSocket, 'brokerSocket')
+  const brokerState = message.brokerState === undefined && brokerOptional ? undefined : absolute(message.brokerState, 'brokerState')
   if ((brokerSocket !== undefined && !inside(directory, brokerSocket)) || (brokerState !== undefined && !inside(directory, brokerState))) {
     throw error('ARC_WORKER_CONFIG', 'broker socket and state must remain inside this run directory')
   }
@@ -190,8 +202,10 @@ async function normalizeConfig(message) {
     original,
     protocol,
     arm: message.arm,
-    nativeDepth: recursionAblation ? (message.arm === 'S0' ? 0 : 1) : 0,
-    label: recursionAblation ? 'Recursion ablation text task' : 'ARC fixed author task',
+    nativeDepth: recursionAblation ? (message.arm === 'S0' ? 0 : 1) : qualityPilot ? 1 : 0,
+    label: recursionAblation
+      ? 'Recursion ablation text task'
+      : qualityPilot ? 'Quality pilot text task' : 'ARC fixed author task',
     directory,
     workspace,
     home,
@@ -207,7 +221,9 @@ async function normalizeConfig(message) {
     wallTimeMs: message.wallTimeMs,
     autonomous: normalizedAutonomous(message.autonomous, autonomous, recursionAblation
       ? 'worker accepts only the frozen 14-turn/4000000-token recursion-ablation autonomous configuration'
-      : 'worker accepts only the frozen 32-turn/4000000-token autonomous configuration'),
+      : qualityPilot
+        ? 'worker accepts only the frozen 32-turn/4000000-token quality-pilot autonomous configuration'
+        : 'worker accepts only the frozen 32-turn/4000000-token autonomous configuration'),
     brokerSocket,
     brokerState,
     bridgePort: message.bridgePort,
@@ -576,6 +592,11 @@ function classifyFailure(failure, controller) {
   return 'failed'
 }
 
+function defaultNativeDepth(protocol, arm) {
+  if (protocol === QUALITY_PILOT_PROTOCOL && (arm === 'R' || arm === 'S')) return 1
+  return protocol === RECURSION_ABLATION_PROTOCOL && arm === 'S' ? 1 : 0
+}
+
 async function closeServer(server) {
   if (!server) return { ok: false, reason: 'bridge was not created' }
   try {
@@ -757,7 +778,7 @@ async function runOriginal(config, { journal, transport, controller }) {
     await mkdir(sessionDir, { recursive: true, mode: 0o700 })
     await Promise.all([
       writeFile(join(agentDir, '.arc-worker-marker'), 'owned by native-worker\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' }).catch(failureValue => { if (failureValue?.code !== 'EEXIST') throw failureValue }),
-      writeFile(join(agentDir, 'settings.json'), JSON.stringify({ factory: { enabled: false }, harnessRefinements: false, rlmMaxDepth: 0 }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' }),
+      writeFile(join(agentDir, 'settings.json'), JSON.stringify({ factory: { enabled: false }, harnessRefinements: false, rlmMaxDepth: config.nativeDepth }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' }),
       writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { 'solar-dsh': { baseUrl: `http://127.0.0.1:${String(config.bridgePort)}/v1`, apiKey: 'pending', api: 'openai-completions', authHeader: true, models: [{ id: 'selected', name: config.modelInfo.name, contextWindow: config.modelInfo?.context?.contextWindow, maxTokens: FIXED_ROUTE.maxTokens, reasoning: true, input: config.modelInfo?.inputModalities?.includes?.('image') ? ['text', 'image'] : ['text'] }] } } }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' }),
       writeFile(join(agentDir, 'environment.json'), JSON.stringify({ brokerSocket: config.brokerSocket, brokerState: config.brokerState }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' }),
     ])
@@ -786,7 +807,7 @@ async function runOriginal(config, { journal, transport, controller }) {
     // Replace the placeholder after the fixed bridge has successfully bound.
     await writeFile(join(agentDir, 'models.json'), JSON.stringify({ providers: { 'solar-dsh': { baseUrl: bridge.baseUrl, apiKey: bridge.token, api: 'openai-completions', authHeader: true, models: [{ id: 'selected', name: config.modelInfo.name, contextWindow: config.modelInfo?.context?.contextWindow, maxTokens: FIXED_ROUTE.maxTokens, reasoning: true, input: config.modelInfo?.inputModalities?.includes?.('image') ? ['text', 'image'] : ['text'] }] } } }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'w' })
     const args = directLaunchArguments(config, socket)
-    await journal.append('r-native-launch', { runtimeFingerprint: runtime.fingerprint, args, nativeSettings: { factoryEnabled: false, harnessRefinements: false }, route: config.route })
+    await journal.append('r-native-launch', { runtimeFingerprint: runtime.fingerprint, args, nativeSettings: { factoryEnabled: false, harnessRefinements: false, rlmMaxDepth: config.nativeDepth }, route: config.route })
     child = spawn(runtime.binary, args, { cwd: config.workspace, env, stdio: ['pipe', 'pipe', 'pipe'] })
     client = new AcpClient(child, {
       maxFrameBytes: 16 * 1024 * 1024,
@@ -1030,7 +1051,7 @@ async function execute(message) {
   } catch (failure) {
     const failedProtocol = config?.protocol ?? (typeof message?.protocol === 'string' ? message.protocol : ARC_PROTOCOL)
     const failedArm = config?.arm ?? (typeof message?.arm === 'string' ? message.arm : null)
-    const failedNativeDepth = config?.nativeDepth ?? (failedProtocol === RECURSION_ABLATION_PROTOCOL && failedArm === 'S' ? 1 : 0)
+    const failedNativeDepth = config?.nativeDepth ?? defaultNativeDepth(failedProtocol, failedArm)
     result = {
       type: 'result',
       arm: failedArm,
@@ -1084,4 +1105,4 @@ if (isDirectWorkerEntrypoint()) {
 // Kept deliberately small and side-effect free for the zero-model boundary
 // test. These helpers are not a parent/worker protocol surface.
 export { normalizeConfig }
-export const __test = { exactJson, inlineAttachment, inlineImage, createStopLatch, normalizeConfig }
+export const __test = { exactJson, inlineAttachment, inlineImage, createStopLatch, normalizeConfig, defaultNativeDepth }

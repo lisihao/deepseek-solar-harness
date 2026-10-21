@@ -974,6 +974,13 @@ export async function executeCondition({
   if (!isRecord(manifest) || !isRecord(condition) || !provider || !ledger || !relay || !task) {
     fail('RLM_CONDITION_ARGS', 'manifest, condition, provider, ledger, relay, and task are required')
   }
+  const protocol = condition.protocol ?? 'recursion-ablation-v1'
+  const qualityPilot = protocol === 'quality-pilot-v1'
+  if (protocol !== 'recursion-ablation-v1' && !qualityPilot) fail('RLM_CONDITION_PROTOCOL', 'unsupported explicit condition protocol')
+  if (qualityPilot && condition.arm !== 'R' && condition.arm !== 'S') fail('RLM_CONDITION_PROTOCOL', 'quality text task requires R or S')
+  const nativeLimits = qualityPilot
+    ? { protocol: 'quality-pilot-v1', requestLimit: 32, wallTimeMs: 1_200_000 }
+    : { protocol: 'recursion-ablation-v1', requestLimit: FIXED_LIMITS.perTreeRequests, wallTimeMs: FIXED_LIMITS.wallTimeMs }
   const startedAt = Date.now()
   const beforeInputs = await hashPublicInputs(condition.workspace, task)
   const durableDispatch = { ...condition, directory: join(condition.durableDirectory, 'parent-intents'), gameId: condition.taskId }
@@ -995,7 +1002,7 @@ export async function executeCondition({
     })
     const start = {
       type: 'start',
-      protocol: 'recursion-ablation-v1',
+      protocol: nativeLimits.protocol,
       arm: condition.arm,
       directory: condition.runDirectory,
       shared: manifest.shared.path,
@@ -1004,8 +1011,8 @@ export async function executeCondition({
       task: condition.prompt.task,
       route: { ...FIXED_ROUTE },
       modelInfo: provider.modelInfo,
-      requestLimit: FIXED_LIMITS.perTreeRequests,
-      wallTimeMs: FIXED_LIMITS.wallTimeMs,
+      requestLimit: nativeLimits.requestLimit,
+      wallTimeMs: nativeLimits.wallTimeMs,
       autonomous: condition.autonomous,
       bridgePort: reservation.port,
       dependencyReadRoots: [manifest.package.root, join(manifest.shared.path, 'node_modules'), join(manifest.runner.sourceRoot, 'node_modules')],
@@ -1056,7 +1063,7 @@ export async function executeCondition({
   const childIntents = observedChildRequests(receipt, condition)
   const childRequests = childIntents.filter(child => child.physicalAdmitted)
   const childRoster = await readChildRosterEvidence(worker)
-  const expectedDepth = condition.arm === 'S' ? 1 : 0
+  const expectedDepth = qualityPilot || condition.arm === 'S' ? 1 : 0
   const physicalCleanup = worker?.result?.physicalCleanup === true
   const exitedCleanly = worker?.exit?.code === 0 && worker?.exit?.signal === null
   const depthMatches = worker?.result?.nativeDepth === expectedDepth && worker?.result?.actualDepth === expectedDepth

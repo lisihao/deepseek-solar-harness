@@ -387,7 +387,7 @@ export function createSyntheticProvider({ arm, fixture }) {
   }
 }
 
-async function prepareFixture({ sourceRoot, shared, tempRoot, artifactRoot, arm }) {
+export async function prepareFixture({ sourceRoot, shared, tempRoot, artifactRoot, arm }) {
   const id = `native-${arm.toLowerCase()}`
   const runDirectory = join(tempRoot, 'runs', id)
   const workspace = join(runDirectory, 'workspace')
@@ -449,7 +449,7 @@ async function prepareFixture({ sourceRoot, shared, tempRoot, artifactRoot, arm 
   return { fixture, task, condition, parentPrivate, protectedCanaryRoot }
 }
 
-function gradeFixture(task, text) {
+export function gradeFixture(task, text) {
   const errors = []
   let value
   try { value = JSON.parse(text) } catch { errors.push('answer.json is not JSON') }
