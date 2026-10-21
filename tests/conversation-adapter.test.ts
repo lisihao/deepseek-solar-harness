@@ -138,6 +138,51 @@ describe('ConversationWebAdapter', () => {
     expect(startInsight).not.toHaveBeenCalled()
   })
 
+  it('projects marked Harness background before extracting the latest portable user question', async () => {
+    const web = fakeWeb()
+    const resolveDelivery = vi.fn(async () => undefined)
+    const adapter = new ConversationWebAdapter({
+      web: web.adapter,
+      startInsight: vi.fn(async () => studioRun('completed', 'must not run')),
+      inspectInsight: vi.fn(async () => studioRun('completed', 'must not inspect')),
+      resolveDelivery,
+      insightWaitMs: 20,
+      pollMs: 1,
+    })
+    const background = `runtime-background-marker:${'R'.repeat(140 * 1024)}`
+    const input = {
+      ...request(),
+      messages: [
+        {
+          id: 'actual-question' as never,
+          role: 'user',
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'EXACT CURRENT QUESTION: Which constraint still applies?' }],
+        },
+        {
+          id: 'generated-runtime-context' as never,
+          role: 'user',
+          source: {
+            kind: 'runtime-context',
+            form: 'snapshot',
+            sections: [{ name: 'runtime', text: background }],
+          } as never,
+          content: [{ type: 'text', text: background }],
+        },
+      ] as GenerateOptions['messages'],
+    }
+    const before = JSON.stringify(input)
+
+    await collect(adapter.stream(input))
+
+    expect(resolveDelivery).toHaveBeenCalledWith('conversation-session', 'EXACT CURRENT QUESTION: Which constraint still applies?')
+    expect(web.controller.start).toHaveBeenCalledOnce()
+    const prompt = web.controller.start.mock.calls[0]?.[1].prompt
+    expect(prompt).toContain('EXACT CURRENT QUESTION: Which constraint still applies?')
+    expect(prompt).not.toContain('runtime-background-marker')
+    expect(JSON.stringify(input)).toBe(before)
+  })
+
   it('returns a durable completed delivery without executing either provider route', async () => {
     const web = fakeWeb()
     const resolveDelivery = vi.fn(async () => '# 已完成流程结果')

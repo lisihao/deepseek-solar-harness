@@ -2,6 +2,17 @@
 
 Recorded on 2026-10-20, Asia/Shanghai. This is an unreleased development candidate under `incubator/chatgpt-web`, not a market release. Source, scratch-profile, real browser preparation and installed execution are separate evidence boundaries.
 
+## 2026-10-21 portable request-context repair
+
+This source-only repair keeps the webpage operator's 128 KiB request limit and no-auto-retry policy. Before prompt construction and current-question extraction, it removes only the marked Harness system envelope and marked `catalog`/`snapshot`/`recall` background from the named automatic producers. The observed `plugin:hindsight` and `dsh-mnemon` `recall` records follow that background rule; `dsh-mnemon` `instructions` remains retained. It preserves retained message order and exact text, including explicit workspace instructions, source-less request input, task notices/relays, compact checkpoints, unknown system-source content, historical tool calls/results/errors, and explicit one-shot `system` text. It is not a semantic summary, a tail truncation mechanism, or a provider fallback.
+
+Focused keyless checks passed on this source tree:
+
+- `pnpm vitest run tests/llm-adapter.test.ts tests/conversation-adapter.test.ts incubator/chatgpt-web/tests/conversation-runtime.test.ts` — 31 tests in 3 files.
+- `pnpm typecheck` — passed.
+
+The regression includes approximately 140 KiB of marked Harness system text and 401 KiB of marked skill-catalog content plus source entries, followed by a short real question. The resulting browser prompt remains within the existing bound and retains the exact allowed conversation data. Separate cases confirm oversized explicit user, task, and one-shot system input still fail before capture or controller start, with a byte-count-only `system`/`messages`/`toolSchemas` diagnostic. A private offline reconstruction of the reported request uses the logged message surface, request header and initial tool history. The old serializer reproduces the exact **559,966 UTF-8 bytes** and `WEB_PROMPT_TOO_LARGE`; the repaired serializer produces **5,975 bytes**, retaining the actual question, instruction text and tool declarations. It removes marked system/catalog/snapshot/automatic-recall material without truncating retained text. This pure replay performs no browser or model operation and does not establish live webpage availability. The final local `pnpm check` passed build/declarations, strict types, **387 tests in 45 files**, both built-package official CLI scratch-profile probes, and the generated homepage check. These probes use fake browser/native services and produced no real browser/model execution. Installed-App acceptance and exact-head CI remain separate checks.
+
 ## Inputs
 
 - Published Harness `0.2.1-rc.2`, Cordis `4.0.5`, macOS arm64.

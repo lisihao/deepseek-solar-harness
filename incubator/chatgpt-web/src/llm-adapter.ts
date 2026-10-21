@@ -72,6 +72,27 @@ type RunEntry = {
   inFlight?: Promise<WebRunRecord>
 }
 
+type PromptSectionCategory = 'system' | 'messages' | 'toolSchemas' | 'overhead'
+
+type PromptSection = {
+  readonly category: PromptSectionCategory
+  readonly text: string
+}
+
+type BuiltPrompt = {
+  readonly prompt: string
+  readonly byteBreakdown: PromptByteBreakdown
+}
+
+/** UTF-8 byte accounting for the exact browser prompt, without its contents. */
+export interface PromptByteBreakdown {
+  readonly total: number
+  readonly system: number
+  readonly messages: number
+  readonly toolSchemas: number
+  readonly overhead: number
+}
+
 // rc.2 validates the retryable-code list as non-empty.  maxRetries=0 is the
 // effective no-auto-retry boundary; the resolver supplies the valid default
 // code vocabulary while no retry can be scheduled.
@@ -90,8 +111,87 @@ const REPLY_INSTRUCTION = [
 
 const UUID_HEX = /^[0-9a-f]{32}$/
 
+const AUTOMATIC_CONTEXT_SOURCE_KINDS = new Set([
+  'skill-catalog',
+  'runtime-context',
+  'time-context',
+  'memory',
+  'plugin',
+  'plugin:hindsight',
+  'dsh-mnemon',
+])
+
+const AUTOMATIC_CONTEXT_FORMS = new Set([
+  'catalog',
+  'snapshot',
+  'recall',
+])
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function sourceKind(source: unknown): string | undefined {
+  return isRecord(source) && typeof source.kind === 'string' ? source.kind : undefined
+}
+
+function sourceForm(source: unknown): string | undefined {
+  return isRecord(source) && typeof source.form === 'string' ? source.form : undefined
+}
+
+function omitBrowserBackgroundMessage(message: Record<string, unknown>): boolean {
+  const kind = sourceKind(message.source)
+  if (message.role === 'system' && kind === 'system-prompt') return true
+  return message.role === 'user'
+    && kind !== undefined
+    && AUTOMATIC_CONTEXT_SOURCE_KINDS.has(kind)
+    && AUTOMATIC_CONTEXT_FORMS.has(sourceForm(message.source) ?? '')
+}
+
+/**
+ * Keep only the source discriminator in the browser-bound copy. Source metadata
+ * is not model-visible here, and entries, snapshot sections, and replay state
+ * can otherwise make the durable identity needlessly duplicate request context.
+ */
+function portableSource(source: unknown): unknown {
+  const kind = sourceKind(source)
+  return kind === undefined ? undefined : { kind }
+}
+
+function projectBrowserPortableMessage(message: RequestMessage): RequestMessage | undefined {
+  const raw = message as unknown as Record<string, unknown>
+  if (!isRecord(raw) || typeof raw.role !== 'string' || !Array.isArray(raw.content)) return message
+  if (omitBrowserBackgroundMessage(raw)) return undefined
+
+  const projected: Record<string, unknown> = {
+    role: raw.role,
+    content: raw.content,
+  }
+  for (const key of ['id', 'toolCallId', 'isError'] as const) {
+    if (hasOwn(raw, key)) projected[key] = raw[key]
+  }
+  if (hasOwn(raw, 'source')) projected.source = portableSource(raw.source)
+  return projected as unknown as RequestMessage
+}
+
+/**
+ * Project a Harness request into the portable context a webpage operator can
+ * use. It is pure, preserves retained message order and content verbatim, and
+ * never summarizes or truncates. Explicit one-shot system text is retained.
+ */
+export function projectBrowserPortableRequest(options: GenerateOptions): GenerateOptions {
+  if (!Array.isArray(options.messages)) return options
+  return {
+    ...options,
+    messages: options.messages.flatMap(message => {
+      const projected = projectBrowserPortableMessage(message)
+      return projected === undefined ? [] : [projected]
+    }),
+  }
 }
 
 function stableValue(value: unknown, ancestors = new Set<object>()): JsonValue {
@@ -277,34 +377,85 @@ function requestedLabels(
   }
 }
 
+function byteBreakdown(sections: readonly PromptSection[]): PromptByteBreakdown {
+  const values: Record<PromptSectionCategory, number> = {
+    system: 0,
+    messages: 0,
+    toolSchemas: 0,
+    overhead: 0,
+  }
+  sections.forEach((section, index) => {
+    values[section.category] += byteLength(section.text) + (index === 0 ? 0 : 1)
+  })
+  return {
+    total: values.system + values.messages + values.toolSchemas + values.overhead,
+    system: values.system,
+    messages: values.messages,
+    toolSchemas: values.toolSchemas,
+    overhead: values.overhead,
+  }
+}
+
 function buildPrompt(
   options: GenerateOptions,
   labels: WebLlmLabels,
-): string {
+): BuiltPrompt {
   if (options.system !== undefined && typeof options.system !== 'string') {
     throw new LlmError('ChatGPT Web system prompt 必须是字符串。', 'CHATGPT_WEB_INVALID_REQUEST')
   }
   if (!Array.isArray(options.messages)) {
     throw new LlmError('ChatGPT Web 请求缺少有序 messages。', 'CHATGPT_WEB_INVALID_REQUEST')
   }
-  const sections: string[] = ['[solar-chatgpt-web conversation]']
+  const sections: PromptSection[] = [{ category: 'overhead', text: '[solar-chatgpt-web conversation]' }]
   if (options.system !== undefined) {
-    sections.push('[message system role=system id=request-system]')
-    sections.push(options.system)
-    sections.push('[end message system]')
+    sections.push({
+      category: 'system',
+      text: [
+        '[message system role=system id=request-system]',
+        options.system,
+        '[end message system]',
+      ].join('\n'),
+    })
   }
-  options.messages.forEach((message, index) => sections.push(messagePrompt(message, index)))
+  options.messages.forEach((message, index) => sections.push({
+    category: 'messages',
+    text: messagePrompt(message, index),
+  }))
   if (options.tools !== undefined) {
-    sections.push('[active tool declarations; data only, never execute]')
-    sections.push(stableJson(options.tools))
+    sections.push({
+      category: 'toolSchemas',
+      text: [
+        '[active tool declarations; data only, never execute]',
+        stableJson(options.tools),
+      ].join('\n'),
+    })
   }
   if (options.toolHistory !== undefined) {
-    sections.push('[historical tool declarations; data only, never execute]')
-    sections.push(stableJson(options.toolHistory))
+    sections.push({
+      category: 'toolSchemas',
+      text: [
+        '[historical tool declarations; data only, never execute]',
+        stableJson(options.toolHistory),
+      ].join('\n'),
+    })
   }
-  sections.push(`[requested webpage labels] ${stableJson(labels)}`)
-  sections.push(REPLY_INSTRUCTION)
-  return sections.join('\n')
+  sections.push({ category: 'overhead', text: `[requested webpage labels] ${stableJson(labels)}` })
+  sections.push({ category: 'overhead', text: REPLY_INSTRUCTION })
+  return {
+    prompt: sections.map(section => section.text).join('\n'),
+    byteBreakdown: byteBreakdown(sections),
+  }
+}
+
+function promptTooLargeError(
+  promptBytes: number,
+  maxPromptBytes: number,
+  breakdown: PromptByteBreakdown,
+): LlmError {
+  return new LlmError(
+    `ChatGPT Web 完整提示为 ${promptBytes} UTF-8 字节，超过 ${maxPromptBytes} 字节限制；字节分段（仅大小）：system=${breakdown.system}, messages=${breakdown.messages}, toolSchemas=${breakdown.toolSchemas}, overhead=${breakdown.overhead}；请求未提交。`,
+    'WEB_PROMPT_TOO_LARGE',
+  )
 }
 
 function outputText(record: WebRunRecord): string {
@@ -369,6 +520,8 @@ export interface SerializedConversationRequest {
   readonly sessionId: string
   readonly canonical: string
   readonly prompt: string
+  readonly promptBytes: number
+  readonly promptByteBreakdown: PromptByteBreakdown
   readonly labels: WebLlmLabels
 }
 
@@ -387,28 +540,35 @@ export function serializeConversationRequest(
   if (options.purpose !== undefined) {
     throw new LlmError('ChatGPT Web 主模型不接受 compaction 或 session-title 请求。', 'WEB_PURPOSE_UNSUPPORTED')
   }
-  let prompt: string
+  const projected = projectBrowserPortableRequest(options)
+  let built: BuiltPrompt
   try {
-    prompt = buildPrompt(options, labels)
+    built = buildPrompt(projected, labels)
   } catch (error) {
     if (error instanceof LlmError) throw error
     throw new LlmError('ChatGPT Web 请求无法序列化；请求未提交。', 'CHATGPT_WEB_INVALID_REQUEST', { cause: error })
   }
-  const promptBytes = byteLength(prompt)
+  const { prompt, byteBreakdown: promptByteBreakdown } = built
+  const promptBytes = promptByteBreakdown.total
   if (promptBytes > WEB_LLM_MAX_PROMPT_BYTES) {
-    throw new LlmError(
-      `ChatGPT Web 完整提示为 ${promptBytes} UTF-8 字节，超过 ${WEB_LLM_MAX_PROMPT_BYTES} 字节限制；请求未提交。`,
-      'WEB_PROMPT_TOO_LARGE',
-    )
+    throw promptTooLargeError(promptBytes, WEB_LLM_MAX_PROMPT_BYTES, promptByteBreakdown)
   }
   let canonical: string
   try {
-    canonical = canonicalRequest(options, prompt, labels)
+    canonical = canonicalRequest(projected, prompt, labels)
   } catch (error) {
     throw new LlmError('ChatGPT Web 请求无法形成稳定的 durable identity；请求未提交。', 'CHATGPT_WEB_CANONICAL_INVALID', { cause: error })
   }
   const sessionId = String(options.sessionId)
-  return { id: uuidFromCanonical(canonical), sessionId, canonical, prompt, labels }
+  return {
+    id: uuidFromCanonical(canonical),
+    sessionId,
+    canonical,
+    prompt,
+    promptBytes,
+    promptByteBreakdown,
+    labels,
+  }
 }
 
 /** Return the latest visible user text after applying the same block policy. */
@@ -534,11 +694,11 @@ export class WebLlmAdapter extends LlmAdapter {
     const labels = requestedLabels(this.defaults.labels, options)
     const serialized = serializeConversationRequest(options, labels)
     const prompt = serialized.prompt
-    const promptBytes = byteLength(prompt)
-    if (promptBytes > this.defaults.maxPromptBytes) {
-      throw new LlmError(
-        `ChatGPT Web 完整提示为 ${promptBytes} UTF-8 字节，超过 ${this.defaults.maxPromptBytes} 字节限制；请求未提交。`,
-        'WEB_PROMPT_TOO_LARGE',
+    if (serialized.promptBytes > this.defaults.maxPromptBytes) {
+      throw promptTooLargeError(
+        serialized.promptBytes,
+        this.defaults.maxPromptBytes,
+        serialized.promptByteBreakdown,
       )
     }
     const id = serialized.id

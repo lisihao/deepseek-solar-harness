@@ -13,6 +13,7 @@ import {
 import type { StudioRun } from '@lisihao/dsh-solar-native-collaboration/studio-contracts'
 import {
   latestUserTextFromMessages,
+  projectBrowserPortableRequest,
   serializeConversationRequest,
   WEB_LLM_MODEL,
   WEB_LLM_NAME,
@@ -173,12 +174,14 @@ export class ConversationWebAdapter extends LlmAdapter {
     }
     throwIfAborted(options.signal)
 
-    // This extracts and validates the latest user text before either route or
-    // the delivery resolver can cause an external effect.
-    const question = latestUserTextFromMessages(options.messages)
+    // This extracts and validates the latest portable user text before either
+    // route or the delivery resolver can cause an external effect. The Web
+    // operator cannot use Harness-only prompt/catalog snapshots as a question.
+    const portableOptions = projectBrowserPortableRequest(options)
+    const question = latestUserTextFromMessages(portableOptions.messages)
     const sessionId = String(options.sessionId)
-    const serialized = serializeConversationRequest(options, {
-      ...(options.reasoningEffort === undefined ? {} : { effortLabel: String(options.reasoningEffort) }),
+    const serialized = serializeConversationRequest(portableOptions, {
+      ...(portableOptions.reasoningEffort === undefined ? {} : { effortLabel: String(portableOptions.reasoningEffort) }),
     })
     if (this.options.resolveDelivery !== undefined) {
       let delivered: string | undefined
@@ -199,7 +202,7 @@ export class ConversationWebAdapter extends LlmAdapter {
     }
 
     if (options.model === WEB_LLM_MODEL) {
-      yield* this.options.web.stream(options)
+      yield* this.options.web.stream(portableOptions)
       return
     }
     if (options.model !== INSIGHT_LLM_MODEL) {

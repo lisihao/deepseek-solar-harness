@@ -5,6 +5,7 @@ import { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import {
   serializeConversationRequest,
   WebLlmAdapter,
+  WEB_LLM_MAX_PROMPT_BYTES,
   WEB_LLM_MODEL,
   WEB_LLM_NAME,
   WEB_LLM_PROVIDER,
@@ -183,6 +184,198 @@ describe('WebLlmAdapter', () => {
     expect(Buffer.byteLength(serialized.prompt, 'utf8')).toBeLessThanOrEqual(128 * 1024)
   })
 
+  it('projects only marked Harness background while retaining ordered portable conversation context', async () => {
+    const harnessSystem = `system-envelope-marker:${'S'.repeat(140 * 1024)}`
+    const skillCatalog = `skill-catalog-marker:${'C'.repeat(401 * 1024)}`
+    const input = options({
+      messages: [
+        {
+          id: 'harness-system' as never,
+          role: 'system',
+          source: { kind: 'system-prompt', sections: [{ name: 'system-section-marker', text: harnessSystem }] } as never,
+          content: [{ type: 'text', text: harnessSystem }],
+        },
+        {
+          id: 'skill-catalog' as never,
+          role: 'user',
+          source: {
+            kind: 'skill-catalog',
+            form: 'catalog',
+            entries: [{ id: 'catalog-entry-marker', text: skillCatalog }],
+          } as never,
+          content: [{ type: 'text', text: skillCatalog }],
+        },
+        {
+          id: 'runtime-context' as never,
+          role: 'user',
+          source: { kind: 'runtime-context', form: 'snapshot', sections: [{ name: 'runtime', text: 'runtime-section-marker' }] } as never,
+          content: [{ type: 'text', text: 'RUNTIME CONTEXT MARKER' }],
+        },
+        {
+          id: 'time-context' as never,
+          role: 'user',
+          source: { kind: 'time-context', form: 'snapshot', sections: [{ name: 'time', text: 'time-section-marker' }] } as never,
+          content: [{ type: 'text', text: 'TIME CONTEXT MARKER' }],
+        },
+        {
+          id: 'memory-context' as never,
+          role: 'user',
+          source: { kind: 'memory', form: 'recall', entries: ['memory-entry-marker'] } as never,
+          content: [{ type: 'text', text: 'MEMORY CONTEXT MARKER' }],
+        },
+        {
+          id: 'hindsight-recall' as never,
+          role: 'user',
+          source: { kind: 'plugin:hindsight', form: 'recall', entries: ['hindsight-recall-entry-marker'] } as never,
+          content: [{ type: 'text', text: 'HINDSIGHT RECALL MARKER' }],
+        },
+        {
+          id: 'mnemon-recall' as never,
+          role: 'user',
+          source: { kind: 'dsh-mnemon', form: 'recall', entries: ['mnemon-recall-entry-marker'] } as never,
+          content: [{ type: 'text', text: 'MNEMON RECALL MARKER' }],
+        },
+        {
+          id: 'plugin-catalog' as never,
+          role: 'user',
+          source: { kind: 'plugin', form: 'catalog', entries: ['plugin-catalog-entry-marker'] } as never,
+          content: [{ type: 'text', text: 'PLUGIN CATALOG MARKER' }],
+        },
+        {
+          id: 'unknown-system' as never,
+          role: 'system',
+          source: { kind: 'unknown-system-producer', form: 'snapshot', sections: [{ name: 'unknown', text: 'unknown-source-section-marker' }] } as never,
+          content: [{ type: 'text', text: 'UNKNOWN SYSTEM MESSAGE: retain this exact text.' }],
+        },
+        {
+          id: 'workspace-instructions' as never,
+          role: 'user',
+          source: {
+            kind: 'dsh-mnemon',
+            form: 'instructions',
+            entries: [{ id: 'instruction-entry-marker', text: 'unrelated source metadata' }],
+          } as never,
+          content: [{ type: 'text', text: 'WORKSPACE INSTRUCTION: retain exact user constraints.' }],
+        },
+        {
+          id: 'actual-user' as never,
+          role: 'user',
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'EXACT USER CONSTRAINT: answer in Chinese and preserve numbers.' }],
+        },
+        {
+          id: 'historic-assistant' as never,
+          role: 'assistant',
+          source: {
+            kind: 'model',
+            provider: 'other',
+            model: 'other-model',
+            replayState: { marker: 'replay-state-marker' },
+          },
+          content: [{ type: 'tool-call', id: 'history-call' as never, name: 'historical-tool', arguments: '{"order":1}' }],
+        },
+        {
+          id: 'historic-tool-result' as never,
+          role: 'tool',
+          source: { kind: 'tool', callId: 'history-call' as never },
+          toolCallId: 'history-call' as never,
+          isError: true,
+          content: [{ type: 'text', text: 'HISTORICAL TOOL ERROR: unavailable result.' }],
+        },
+        {
+          id: 'task-notice' as never,
+          role: 'user',
+          source: { kind: 'task', form: 'notice', summary: 'task notice', entries: ['task-entry-marker'] } as never,
+          content: [{ type: 'text', text: 'TASK NOTICE: retain the open task context.' }],
+        },
+        {
+          id: 'compact-checkpoint' as never,
+          role: 'user',
+          source: { kind: 'compact-checkpoint', form: 'notice', summary: 'checkpoint' } as never,
+          content: [{ type: 'text', text: 'COMPACT CHECKPOINT: retain the checkpoint text.' }],
+        },
+        {
+          id: 'task-relay' as never,
+          role: 'user',
+          source: { kind: 'task', form: 'relay' } as never,
+          content: [{ type: 'text', text: 'TASK RELAY: keep the assigned constraint.' }],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'FINAL SHORT QUESTION: What is the next step?' }],
+        },
+      ] as GenerateOptions['messages'],
+      tools: [{
+        name: 'active-tool',
+        description: 'An active declaration retained as data only.',
+        parameters: { type: 'object', properties: {} },
+      }],
+    })
+    const before = JSON.stringify(input)
+    const serialized = serializeConversationRequest(input)
+    expect(serialized.promptBytes).toBe(Buffer.byteLength(serialized.prompt, 'utf8'))
+    expect(serialized.promptBytes).toBeLessThan(WEB_LLM_MAX_PROMPT_BYTES)
+    expect(serialized.promptByteBreakdown.messages).toBeGreaterThan(0)
+    expect(serialized.promptByteBreakdown.toolSchemas).toBeGreaterThan(0)
+    expect(serialized.prompt).not.toContain('system-envelope-marker')
+    expect(serialized.prompt).not.toContain('skill-catalog-marker')
+    expect(serialized.prompt).not.toContain('RUNTIME CONTEXT MARKER')
+    expect(serialized.prompt).not.toContain('TIME CONTEXT MARKER')
+    expect(serialized.prompt).not.toContain('MEMORY CONTEXT MARKER')
+    expect(serialized.prompt).not.toContain('HINDSIGHT RECALL MARKER')
+    expect(serialized.prompt).not.toContain('MNEMON RECALL MARKER')
+    expect(serialized.prompt).not.toContain('PLUGIN CATALOG MARKER')
+    expect(serialized.prompt).toContain('WORKSPACE INSTRUCTION: retain exact user constraints.')
+    expect(serialized.prompt).toContain('UNKNOWN SYSTEM MESSAGE: retain this exact text.')
+    expect(serialized.prompt).toContain('EXACT USER CONSTRAINT: answer in Chinese and preserve numbers.')
+    expect(serialized.prompt).toContain('historical-tool')
+    expect(serialized.prompt).toContain('HISTORICAL TOOL ERROR: unavailable result.')
+    expect(serialized.prompt).toContain('"isError":true')
+    expect(serialized.prompt).toContain('TASK NOTICE: retain the open task context.')
+    expect(serialized.prompt).toContain('COMPACT CHECKPOINT: retain the checkpoint text.')
+    expect(serialized.prompt).toContain('TASK RELAY: keep the assigned constraint.')
+    expect(serialized.prompt).toContain('FINAL SHORT QUESTION: What is the next step?')
+    expect(serialized.prompt).toContain('active-tool')
+    expect(serialized.prompt.indexOf('WORKSPACE INSTRUCTION: retain exact user constraints.')).toBeLessThan(
+      serialized.prompt.indexOf('EXACT USER CONSTRAINT: answer in Chinese and preserve numbers.'),
+    )
+    expect(serialized.prompt.indexOf('EXACT USER CONSTRAINT: answer in Chinese and preserve numbers.')).toBeLessThan(
+      serialized.prompt.indexOf('historical-tool'),
+    )
+    expect(serialized.prompt.indexOf('historical-tool')).toBeLessThan(
+      serialized.prompt.indexOf('HISTORICAL TOOL ERROR: unavailable result.'),
+    )
+    expect(serialized.prompt.indexOf('HISTORICAL TOOL ERROR: unavailable result.')).toBeLessThan(
+      serialized.prompt.indexOf('TASK NOTICE: retain the open task context.'),
+    )
+    expect(serialized.prompt.indexOf('TASK NOTICE: retain the open task context.')).toBeLessThan(
+      serialized.prompt.indexOf('COMPACT CHECKPOINT: retain the checkpoint text.'),
+    )
+    expect(serialized.prompt.indexOf('COMPACT CHECKPOINT: retain the checkpoint text.')).toBeLessThan(
+      serialized.prompt.indexOf('TASK RELAY: keep the assigned constraint.'),
+    )
+    expect(serialized.prompt.indexOf('TASK RELAY: keep the assigned constraint.')).toBeLessThan(
+      serialized.prompt.indexOf('FINAL SHORT QUESTION: What is the next step?'),
+    )
+    expect(serialized.canonical).not.toContain('catalog-entry-marker')
+    expect(serialized.canonical).not.toContain('instruction-entry-marker')
+    expect(serialized.canonical).not.toContain('hindsight-recall-entry-marker')
+    expect(serialized.canonical).not.toContain('mnemon-recall-entry-marker')
+    expect(serialized.canonical).not.toContain('runtime-section-marker')
+    expect(serialized.canonical).not.toContain('unknown-source-section-marker')
+    expect(serialized.canonical).not.toContain('replay-state-marker')
+    expect(JSON.stringify(input)).toBe(before)
+
+    const controller = fakeController()
+    const captures: WebRunRequest[] = []
+    const adapter = new WebLlmAdapter(controller, {
+      onRequest: async capture => { captures.push(capture.request) },
+    })
+    await collect(adapter.stream(input))
+    expect(captures).toEqual([controller.start.mock.calls[0]?.[1]])
+    expect(captures[0]?.prompt).toBe(serialized.prompt)
+  })
+
   it('rejects images and files before controller admission', async () => {
     const fake = fakeController()
     const adapter = new WebLlmAdapter(fake)
@@ -218,6 +411,60 @@ describe('WebLlmAdapter', () => {
       }],
     })))).rejects.toMatchObject({ code: 'WEB_PROMPT_TOO_LARGE' })
     expect(limited.start).not.toHaveBeenCalled()
+  })
+
+  it('rejects retained user, task, and one-shot system input before capture or browser admission with byte-only diagnostics', async () => {
+    const cases: Array<readonly [string, GenerateOptions]> = [
+      [
+        'explicit user',
+        options({
+          messages: [{
+            id: 'large-user' as never,
+            role: 'user',
+            source: { kind: 'user' },
+            content: [{ type: 'text', text: `large-user-marker:${'U'.repeat(WEB_LLM_MAX_PROMPT_BYTES)}` }],
+          }],
+        }),
+      ],
+      [
+        'task notice',
+        options({
+          messages: [{
+            id: 'large-task' as never,
+            role: 'user',
+            source: { kind: 'task', form: 'notice', summary: 'large task' } as never,
+            content: [{ type: 'text', text: `large-task-marker:${'T'.repeat(WEB_LLM_MAX_PROMPT_BYTES)}` }],
+          }],
+        }),
+      ],
+      [
+        'one-shot system',
+        options({
+          system: `large-system-marker:${'P'.repeat(WEB_LLM_MAX_PROMPT_BYTES)}`,
+        }),
+      ],
+    ]
+
+    for (const [name, input] of cases) {
+      const before = JSON.stringify(input)
+      const controller = fakeController()
+      const capture = vi.fn(async () => undefined)
+      const adapter = new WebLlmAdapter(controller, { onRequest: capture })
+      const failure = await collect(adapter.stream(input)).then(
+        () => undefined,
+        error => error,
+      )
+      expect(failure, name).toMatchObject({ code: 'WEB_PROMPT_TOO_LARGE' })
+      const message = (failure as Error).message
+      expect(message).toMatch(/system=\d+, messages=\d+, toolSchemas=\d+, overhead=\d+/)
+      expect(message).not.toContain('large-user-marker')
+      expect(message).not.toContain('large-task-marker')
+      expect(message).not.toContain('large-system-marker')
+      expect(JSON.stringify(input)).toBe(before)
+      expect(capture, name).not.toHaveBeenCalled()
+      expect(controller.start, name).not.toHaveBeenCalled()
+      expect(controller.observe, name).not.toHaveBeenCalled()
+    }
   })
 
   it('uses a stable command id for the same durable request and a new id for a new message', async () => {
