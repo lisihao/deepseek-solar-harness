@@ -7,7 +7,7 @@ import { mkdir, open, readFile, realpath, stat, writeFile } from 'node:fs/promis
 import { createServer } from 'node:http'
 import { createConnection, Server as NetServer } from 'node:net'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFile = promisify(execFileCallback)
@@ -20,6 +20,11 @@ const FIXED_ROUTE = Object.freeze({
 const FIXED_REQUEST_LIMIT = 32
 const FIXED_WALL_TIME_MS = 3_600_000
 const FIXED_AUTONOMOUS = Object.freeze({ maxTurns: 32, maxTokens: 4_000_000 })
+const ARC_PROTOCOL = 'arc-pilot-v1'
+const RECURSION_ABLATION_PROTOCOL = 'recursion-ablation-v1'
+const RECURSION_ABLATION_REQUEST_LIMIT = 14
+const RECURSION_ABLATION_WALL_TIME_MS = 1_200_000
+const RECURSION_ABLATION_AUTONOMOUS = Object.freeze({ maxTurns: 14, maxTokens: 4_000_000 })
 const PRIME_META = 'ai.primeintellect.prime-agent'
 const MAX_HTTP_REQUEST_BYTES = 32 * 1024 * 1024
 const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024
@@ -127,13 +132,13 @@ function normalizedRoute(value) {
   return { ...FIXED_ROUTE }
 }
 
-function normalizedAutonomous(value) {
+function normalizedAutonomous(value, fixed, detail) {
   if (!isRecord(value)
-    || value.maxTurns !== FIXED_AUTONOMOUS.maxTurns
-    || value.maxTokens !== FIXED_AUTONOMOUS.maxTokens
+    || value.maxTurns !== fixed.maxTurns
+    || value.maxTokens !== fixed.maxTokens
     || typeof value.gate !== 'string'
     || value.gate.trim().length === 0) {
-    throw error('ARC_AUTONOMOUS_CHANGED', 'worker accepts only the frozen 32-turn/4000000-token autonomous configuration')
+    throw error('ARC_AUTONOMOUS_CHANGED', detail)
   }
   return { maxTurns: value.maxTurns, maxTokens: value.maxTokens, gate: value.gate }
 }
@@ -141,11 +146,21 @@ function normalizedAutonomous(value) {
 async function normalizeConfig(message) {
   if (!isRecord(message) || message.type !== 'start') throw error('ARC_WORKER_CONFIG', 'first IPC message must be start')
   const original = exactJson(message, 'start config')
-  if (message.arm !== 'R' && message.arm !== 'S') throw error('ARC_WORKER_CONFIG', 'arm must be R or S')
+  const protocol = message.protocol === undefined ? ARC_PROTOCOL : message.protocol
+  const recursionAblation = protocol === RECURSION_ABLATION_PROTOCOL
+  if (protocol !== ARC_PROTOCOL && !recursionAblation) throw error('ARC_WORKER_CONFIG', 'protocol must be arc-pilot-v1 or recursion-ablation-v1')
+  if (recursionAblation) {
+    if (message.arm !== 'S0' && message.arm !== 'S') throw error('ARC_WORKER_CONFIG', 'recursion ablation arm must be S0 or S')
+  } else if (message.arm !== 'R' && message.arm !== 'S') {
+    throw error('ARC_WORKER_CONFIG', 'arm must be R or S')
+  }
   if (typeof message.task !== 'string' || message.task.length === 0) throw error('ARC_WORKER_CONFIG', 'task must be the non-empty parent-supplied author prompt')
   if (!isRecord(message.modelInfo)) throw error('ARC_WORKER_CONFIG', 'modelInfo must be parent-supplied metadata')
-  if (message.requestLimit !== FIXED_REQUEST_LIMIT) throw error('ARC_REQUEST_LIMIT_CHANGED', `expected ${String(FIXED_REQUEST_LIMIT)}`)
-  if (message.wallTimeMs !== FIXED_WALL_TIME_MS) throw error('ARC_WALL_TIME_CHANGED', `expected ${String(FIXED_WALL_TIME_MS)}`)
+  const requestLimit = recursionAblation ? RECURSION_ABLATION_REQUEST_LIMIT : FIXED_REQUEST_LIMIT
+  const wallTimeMs = recursionAblation ? RECURSION_ABLATION_WALL_TIME_MS : FIXED_WALL_TIME_MS
+  const autonomous = recursionAblation ? RECURSION_ABLATION_AUTONOMOUS : FIXED_AUTONOMOUS
+  if (message.requestLimit !== requestLimit) throw error('ARC_REQUEST_LIMIT_CHANGED', `expected ${String(requestLimit)}`)
+  if (message.wallTimeMs !== wallTimeMs) throw error('ARC_WALL_TIME_CHANGED', `expected ${String(wallTimeMs)}`)
   if (!Number.isSafeInteger(message.bridgePort) || message.bridgePort < 1 || message.bridgePort > 65_535) {
     throw error('ARC_WORKER_CONFIG', 'bridgePort must be a valid TCP port')
   }
@@ -158,9 +173,9 @@ async function normalizeConfig(message) {
   const shared = await requireDirectory(message.shared, 'shared')
   const compiled = await requireDirectory(message.compiled, 'compiled')
   const packageRoot = await requireDirectory(message.packageRoot, 'packageRoot')
-  const brokerSocket = absolute(message.brokerSocket, 'brokerSocket')
-  const brokerState = absolute(message.brokerState, 'brokerState')
-  if (!inside(directory, brokerSocket) || !inside(directory, brokerState)) {
+  const brokerSocket = message.brokerSocket === undefined && recursionAblation ? undefined : absolute(message.brokerSocket, 'brokerSocket')
+  const brokerState = message.brokerState === undefined && recursionAblation ? undefined : absolute(message.brokerState, 'brokerState')
+  if ((brokerSocket !== undefined && !inside(directory, brokerSocket)) || (brokerState !== undefined && !inside(directory, brokerState))) {
     throw error('ARC_WORKER_CONFIG', 'broker socket and state must remain inside this run directory')
   }
   if (inside(directory, shared)) throw error('ARC_WORKER_CONFIG', 'shared may not be inside the writable run directory')
@@ -173,7 +188,10 @@ async function normalizeConfig(message) {
 
   return {
     original,
+    protocol,
     arm: message.arm,
+    nativeDepth: recursionAblation ? (message.arm === 'S0' ? 0 : 1) : 0,
+    label: recursionAblation ? 'Recursion ablation text task' : 'ARC fixed author task',
     directory,
     workspace,
     home,
@@ -187,7 +205,9 @@ async function normalizeConfig(message) {
     modelInfo: exactJson(message.modelInfo, 'modelInfo'),
     requestLimit: message.requestLimit,
     wallTimeMs: message.wallTimeMs,
-    autonomous: normalizedAutonomous(message.autonomous),
+    autonomous: normalizedAutonomous(message.autonomous, autonomous, recursionAblation
+      ? 'worker accepts only the frozen 14-turn/4000000-token recursion-ablation autonomous configuration'
+      : 'worker accepts only the frozen 32-turn/4000000-token autonomous configuration'),
     brokerSocket,
     brokerState,
     bridgePort: message.bridgePort,
@@ -494,19 +514,13 @@ function daemonCommand(socketPath, command, timeoutMs, signal) {
   })
 }
 
-async function setAndGetDepth(socketPath, activeSessionId, signal) {
+async function getDepth(socketPath, activeSessionId, expectedDepth, signal) {
   if (typeof activeSessionId !== 'string' || activeSessionId.length === 0) throw error('ARC_DEPTH_SESSION', 'native root session id is missing')
-  const set = await daemonCommand(socketPath, { type: 'set_rlm_max_depth', activeSessionId, maxDepth: 0, global: false }, 15_000, signal)
+  if (!Number.isSafeInteger(expectedDepth) || expectedDepth < 0) throw error('ARC_DEPTH_EXPECTED', 'expected native depth must be a non-negative safe integer')
   const get = await daemonCommand(socketPath, { type: 'get_rlm_max_depth_status', activeSessionId }, 15_000, signal)
-  if (get?.data?.maxDepth !== 0) throw error('ARC_DEPTH_READBACK', JSON.stringify(get?.data ?? null))
-  return { set, get }
-}
-
-async function getDepthZero(socketPath, activeSessionId, signal) {
-  if (typeof activeSessionId !== 'string' || activeSessionId.length === 0) throw error('ARC_DEPTH_SESSION', 'native root session id is missing')
-  const get = await daemonCommand(socketPath, { type: 'get_rlm_max_depth_status', activeSessionId }, 15_000, signal)
-  if (get?.data?.maxDepth !== 0) throw error('ARC_DEPTH_READBACK', JSON.stringify(get?.data ?? null))
-  return { get }
+  const actualDepth = get?.data?.maxDepth
+  if (actualDepth !== expectedDepth) throw error('ARC_DEPTH_READBACK', JSON.stringify(get?.data ?? null))
+  return { get, actualDepth }
 }
 
 async function importCompiled(compiled, file) {
@@ -671,7 +685,7 @@ async function startDirectBridge({ config, transport, controller, journal, repla
           resolveImage: imageResolverWithBudget(),
         })
         assertFixedCallRoute(dshRequest)
-      const depth = await getDepthZero(getNativeSession().socket, getNativeSession().activeSessionId, signal)
+        const depth = await getDepth(getNativeSession().socket, getNativeSession().activeSessionId, config.nativeDepth, signal)
         ordinal += 1
         const serializable = cloneOptionsWithoutSignal(dshRequest)
         await journal.append('r-model-intent', { ordinal, primeRequest: body, dshRequest: serializable, depth })
@@ -726,6 +740,7 @@ async function runOriginal(config, { journal, transport, controller }) {
   let failure
   let state = 'failed'
   let nativeStopReason
+  let actualDepth = null
   let journalTail = Promise.resolve()
   try {
     const [{ loadRuntime }, { AcpClient }, { ReplayRegistry }, { PrimeEvidence }] = await Promise.all([
@@ -806,8 +821,9 @@ async function runOriginal(config, { journal, transport, controller }) {
     if (!root) throw error('ARC_NATIVE_SESSION', 'native list --json did not expose the root session')
     rootSession = { activeSessionId: root.activeSessionId, sessionFile: root.sessionFile, socket }
     await journal.append('r-native-root-session', { listed, root: rootSession })
-    const initialDepth = await getDepthZero(socket, rootSession.activeSessionId, controller.signal)
-    await journal.append('r-native-depth0-before-prompt', { native: rootSession, depth: initialDepth })
+    const initialDepth = await getDepth(socket, rootSession.activeSessionId, config.nativeDepth, controller.signal)
+    actualDepth = initialDepth.actualDepth
+    await journal.append('r-native-depth-before-prompt', { native: rootSession, expectedDepth: config.nativeDepth, actualDepth, depth: initialDepth })
     primeEvidence.beginTurn()
     promptResult = object(await client.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: config.task }] }, { timeoutMs: config.wallTimeMs, signal: controller.signal }))
     if (updateFailure) throw updateFailure
@@ -847,7 +863,10 @@ async function runOriginal(config, { journal, transport, controller }) {
   const physicalCleanup = cleanup.shutdown?.ok === true && cleanup.frontendExited?.ok === true && cleanup.bridgeClosed?.ok === true
   return {
     type: 'result',
-    arm: 'R',
+    arm: config.arm,
+    protocol: config.protocol,
+    nativeDepth: config.nativeDepth,
+    actualDepth,
     state,
     answer,
     requests: transport.requestCount,
@@ -855,9 +874,9 @@ async function runOriginal(config, { journal, transport, controller }) {
     nativeStopReason: nativeStopReason ?? null,
     physicalCleanup,
     cleanup,
-    raw: { ...evidence, promptResult: promptResult ?? null, rootSession: rootSession ?? null },
+    raw: { ...evidence, promptResult: promptResult ?? null, rootSession: rootSession ?? null, nativeDepth: config.nativeDepth, actualDepth },
     ...(failure === undefined ? {} : { fault: recordError(failure) }),
-    providerCodec: 'R and S use the same parent IPC DSH-provider codec; this is not an independent provider-private protocol control.',
+    providerCodec: 'R, S, and S0 use the same parent IPC DSH-provider codec; this is not an independent provider-private protocol control.',
   }
 }
 
@@ -869,6 +888,7 @@ async function runSolar(config, { journal, transport, controller }) {
   let record
   let failure
   let state = 'failed'
+  let actualDepth = null
   let sessionReadyResolve
   let sessionReadyReject
   const sessionReady = new Promise((resolveReady, rejectReady) => { sessionReadyResolve = resolveReady; sessionReadyReject = rejectReady })
@@ -878,16 +898,17 @@ async function runSolar(config, { journal, transport, controller }) {
     const { RlmHost } = await importCompiled(config.compiled, 'host.mjs')
     const beforeDispatch = async signal => {
       const native = await sessionReady
-      const depth = await getDepthZero(native.socket, native.activeSessionId, signal ?? controller.signal)
-      await journal.append('s-native-depth0', { native, depth })
+      const depth = await getDepth(native.socket, native.activeSessionId, config.nativeDepth, signal ?? controller.signal)
+      actualDepth = depth.actualDepth
+      await journal.append('s-native-depth-before-dispatch', { native, expectedDepth: config.nativeDepth, actualDepth, depth })
     }
     const llm = createRemoteLlm({ transport, modelInfo: config.modelInfo, controller, beforeDispatch })
-    host = new RlmHost({ llm, attachments: { saveImage: async ({ data, mediaType }) => inlineAttachment(data, mediaType) } }, config.data, config.packageRoot, MAX_HTTP_REQUEST_BYTES, { factoryEnabled: false, harnessRefinements: false, rlmMaxDepth: 0 })
+    host = new RlmHost({ llm, attachments: { saveImage: async ({ data, mediaType }) => inlineAttachment(data, mediaType) } }, config.data, config.packageRoot, MAX_HTTP_REQUEST_BYTES, { factoryEnabled: false, harnessRefinements: false, rlmMaxDepth: config.nativeDepth })
     const owner = { sessionId: `arc-s-${randomUUID()}`, route: { ...config.route }, signal: controller.signal }
     const started = await withFixedBridgePort(config.bridgePort, () => host.start({
       task: config.task,
       cwd: config.workspace,
-      label: 'ARC fixed author task',
+      label: config.label,
       inputs: [],
       maxModelRequests: config.requestLimit,
       maxWallTimeMs: config.wallTimeMs,
@@ -902,7 +923,7 @@ async function runSolar(config, { journal, transport, controller }) {
     }
     const native = { activeSessionId: record.nativeSessionId, socket: control.socket }
     sessionReadyResolve(native)
-    await journal.append('s-host-started', { started, record, native, nativeSettings: { factoryEnabled: false, harnessRefinements: false }, route: config.route })
+    await journal.append('s-host-started', { started, record, native, nativeSettings: { factoryEnabled: false, harnessRefinements: false, rlmMaxDepth: config.nativeDepth }, route: config.route })
     terminal = await waitForHost(host, runId, owner.sessionId, controller)
     if (terminal.state !== 'idle') throw error(`ARC_S_TERMINAL_${String(terminal.state).toUpperCase()}`, terminal.message ?? 'RlmHost did not reach native idle terminal')
     state = 'completed'
@@ -942,7 +963,10 @@ async function runSolar(config, { journal, transport, controller }) {
     && cleanup.bridgeClosed?.ok === true
   return {
     type: 'result',
-    arm: 'S',
+    arm: config.arm,
+    protocol: config.protocol,
+    nativeDepth: config.nativeDepth,
+    actualDepth,
     state,
     answer: terminal?.result ?? '',
     requests: transport.requestCount,
@@ -950,9 +974,9 @@ async function runSolar(config, { journal, transport, controller }) {
     nativeStopReason: terminal?.state ?? (failure === undefined ? null : errorText(failure)),
     physicalCleanup,
     cleanup,
-    raw: { hostStartRecord: record ?? null, terminal: terminal ?? null, nativeJournal: runId && host ? join(host.store.directory(runId), 'journal.jsonl') : null },
+    raw: { hostStartRecord: record ?? null, terminal: terminal ?? null, nativeJournal: runId && host ? join(host.store.directory(runId), 'journal.jsonl') : null, nativeDepth: config.nativeDepth, actualDepth },
     ...(failure === undefined ? {} : { fault: recordError(failure) }),
-    providerCodec: 'R and S use the same parent IPC DSH-provider codec; this is not an independent provider-private protocol control.',
+    providerCodec: 'R, S, and S0 use the same parent IPC DSH-provider codec; this is not an independent provider-private protocol control.',
   }
 }
 
@@ -976,16 +1000,18 @@ async function execute(message) {
     journal = new DurableJournal(join(config.data, 'native-worker-events.jsonl'))
     await writeExclusiveJson(join(config.data, 'native-worker-config.original.json'), config.original)
     await journal.append('worker-configuration', {
+      protocol: config.protocol,
       arm: config.arm,
+      nativeDepth: config.nativeDepth,
       route: config.route,
       requestLimit: config.requestLimit,
       wallTimeMs: config.wallTimeMs,
       autonomous: config.autonomous,
-      brokerSocket: config.brokerSocket,
-      brokerState: config.brokerState,
+      ...(config.brokerSocket === undefined ? {} : { brokerSocket: config.brokerSocket }),
+      ...(config.brokerState === undefined ? {} : { brokerState: config.brokerState }),
       bridgePort: config.bridgePort,
       dependencyReadRoots: config.dependencyReadRoots,
-      nativeSettings: { factoryEnabled: false, harnessRefinements: false, maxDepth: 0 },
+      nativeSettings: { factoryEnabled: false, harnessRefinements: false, rlmMaxDepth: config.nativeDepth },
       node: process.version,
       nodePath: process.execPath,
     })
@@ -998,13 +1024,19 @@ async function execute(message) {
     }
     if (pendingStop.reason !== undefined) activeStop(pendingStop.reason)
     if (controller.signal.aborted) throw controller.signal.reason
-    result = config.arm === 'R'
-      ? await runOriginal(config, { journal, transport, controller })
-      : await runSolar(config, { journal, transport, controller })
+    result = config.protocol === RECURSION_ABLATION_PROTOCOL || config.arm !== 'R'
+      ? await runSolar(config, { journal, transport, controller })
+      : await runOriginal(config, { journal, transport, controller })
   } catch (failure) {
+    const failedProtocol = config?.protocol ?? (typeof message?.protocol === 'string' ? message.protocol : ARC_PROTOCOL)
+    const failedArm = config?.arm ?? (typeof message?.arm === 'string' ? message.arm : null)
+    const failedNativeDepth = config?.nativeDepth ?? (failedProtocol === RECURSION_ABLATION_PROTOCOL && failedArm === 'S' ? 1 : 0)
     result = {
       type: 'result',
-      arm: config?.arm ?? (message?.arm === 'R' ? 'R' : 'S'),
+      arm: failedArm,
+      protocol: failedProtocol,
+      nativeDepth: failedNativeDepth,
+      actualDepth: null,
       state: controller?.signal.aborted ? 'cancelled' : classifyFailure(failure, controller ?? { signal: { aborted: false } }),
       answer: '',
       requests: transport?.requestCount ?? 0,
@@ -1013,7 +1045,7 @@ async function execute(message) {
       physicalCleanup: false,
       cleanup: { worker: { ok: false, error: recordError(failure) } },
       fault: recordError(failure),
-      providerCodec: 'R and S use the same parent IPC DSH-provider codec; this is not an independent provider-private protocol control.',
+      providerCodec: 'R, S, and S0 use the same parent IPC DSH-provider codec; this is not an independent provider-private protocol control.',
     }
   }
   try { await journal?.append('worker-result', result) } catch { /* The result still reaches the trusted parent. */ }
@@ -1023,27 +1055,33 @@ async function execute(message) {
   if (process.connected) process.disconnect()
 }
 
-process.on('message', message => {
-  if (isRecord(message) && message.type === 'stop') {
-    const reason = pendingStop.note(message.reason)
-    activeStop?.(reason)
-    return
+function isDirectWorkerEntrypoint() {
+  return process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+}
+
+if (isDirectWorkerEntrypoint()) {
+  if (process.versions.node.split('.')[0] !== '22') {
+    throw error('ARC_NODE_VERSION', `native worker requires Node 22, got ${process.version}`)
   }
-  if (transport?.handle(message)) return
-  if (started) return
-  started = true
-  void execute(message)
-})
+  process.on('message', message => {
+    if (isRecord(message) && message.type === 'stop') {
+      const reason = pendingStop.note(message.reason)
+      activeStop?.(reason)
+      return
+    }
+    if (transport?.handle(message)) return
+    if (started) return
+    started = true
+    void execute(message)
+  })
 
-process.on('disconnect', () => {
-  const reason = pendingStop.note('parent IPC disconnected')
-  activeStop?.(reason)
-})
-
-if (process.versions.node.split('.')[0] !== '22') {
-  throw error('ARC_NODE_VERSION', `native worker requires Node 22, got ${process.version}`)
+  process.on('disconnect', () => {
+    const reason = pendingStop.note('parent IPC disconnected')
+    activeStop?.(reason)
+  })
 }
 
 // Kept deliberately small and side-effect free for the zero-model boundary
 // test. These helpers are not a parent/worker protocol surface.
-export const __test = { exactJson, inlineAttachment, inlineImage, createStopLatch }
+export { normalizeConfig }
+export const __test = { exactJson, inlineAttachment, inlineImage, createStopLatch, normalizeConfig }

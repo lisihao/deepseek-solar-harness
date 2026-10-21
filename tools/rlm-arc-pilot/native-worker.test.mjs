@@ -67,6 +67,99 @@ function testStopLatch() {
   assert.equal(latch.note('later timeout'), 'provider unknown')
 }
 
+function testImportedWorkerDoesNotListenForIpc() {
+  assert.equal(process.listenerCount('message'), 0, 'importing the worker must not install its IPC listener')
+  assert.equal(process.listenerCount('disconnect'), 0, 'importing the worker must not install its disconnect listener')
+}
+
+async function configFixture() {
+  const root = await mkdtemp('/private/tmp/arc-native-worker-config-')
+  const directory = join(root, 'run')
+  const shared = join(root, 'shared')
+  const compiled = join(shared, 'compiled')
+  const packageRoot = join(shared, 'package')
+  await Promise.all([
+    mkdir(join(directory, 'workspace'), { recursive: true, mode: 0o700 }),
+    mkdir(join(directory, 'home'), { recursive: true, mode: 0o700 }),
+    mkdir(join(directory, 'tmp'), { recursive: true, mode: 0o700 }),
+    mkdir(join(directory, 'data'), { recursive: true, mode: 0o700 }),
+    mkdir(compiled, { recursive: true, mode: 0o700 }),
+    mkdir(packageRoot, { recursive: true, mode: 0o700 }),
+  ])
+  return {
+    directory,
+    shared,
+    compiled,
+    packageRoot,
+    base: {
+      type: 'start',
+      directory,
+      shared,
+      compiled,
+      packageRoot,
+      task: 'Read inputs from the working directory and write the requested answer.',
+      route: { provider: 'openai-codex', model: 'gpt-6.1-sol', reasoningEffort: 'high', maxTokens: 16_384 },
+      modelInfo: { name: 'fixed-model', context: { contextWindow: 128_000 }, inputModalities: ['text'] },
+      bridgePort: 14_001,
+      dependencyReadRoots: [packageRoot],
+    },
+  }
+}
+
+function sameRecursionConfig(config) {
+  const { original: _original, arm: _arm, nativeDepth: _nativeDepth, ...same } = config
+  return same
+}
+
+async function testConfigModes() {
+  const fixture = await configFixture()
+  const arcStart = {
+    ...fixture.base,
+    arm: 'S',
+    requestLimit: 32,
+    wallTimeMs: 3_600_000,
+    autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' },
+    brokerSocket: join(fixture.directory, 'broker.sock'),
+    brokerState: join(fixture.directory, 'broker-state'),
+  }
+  const arc = await __test.normalizeConfig(arcStart)
+  assert.equal(arc.protocol, 'arc-pilot-v1')
+  assert.equal(arc.nativeDepth, 0)
+  assert.equal(arc.requestLimit, 32)
+  assert.equal(arc.wallTimeMs, 3_600_000)
+  assert.deepEqual(arc.autonomous, { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' })
+  assert.equal((await __test.normalizeConfig({ ...arcStart, arm: 'R' })).nativeDepth, 0)
+
+  const recursionStart = arm => ({
+    ...fixture.base,
+    protocol: 'recursion-ablation-v1',
+    arm,
+    requestLimit: 14,
+    wallTimeMs: 1_200_000,
+    autonomous: { maxTurns: 14, maxTokens: 4_000_000, gate: 'test -f answer.json' },
+  })
+  const s0 = await __test.normalizeConfig(recursionStart('S0'))
+  const s = await __test.normalizeConfig(recursionStart('S'))
+  assert.equal(s0.nativeDepth, 0)
+  assert.equal(s.nativeDepth, 1)
+  assert.equal(s0.label, s.label)
+  assert.equal(s0.brokerSocket, undefined)
+  assert.equal(s0.brokerState, undefined)
+  assert.deepEqual(sameRecursionConfig(s0), sameRecursionConfig(s))
+
+  await assert.rejects(() => __test.normalizeConfig({
+    ...recursionStart('S0'),
+    route: { ...fixture.base.route, provider: 'other-provider' },
+  }), /ARC_ROUTE_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({ ...recursionStart('S0'), requestLimit: 32 }), /ARC_REQUEST_LIMIT_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({ ...recursionStart('R') }), /ARC_WORKER_CONFIG/)
+  await assert.rejects(() => __test.normalizeConfig({ ...recursionStart('S0'), wallTimeMs: 3_600_000 }), /ARC_WALL_TIME_CHANGED/)
+  await assert.rejects(() => __test.normalizeConfig({
+    ...recursionStart('S0'),
+    autonomous: { maxTurns: 14, maxTokens: 4_000_000, gate: '   ' },
+  }), /ARC_AUTONOMOUS_CHANGED/)
+}
+
 async function testSandbox() {
   const root = await mkdtemp('/private/tmp/arc-native-worker-test-')
   const run = join(root, 'run')
@@ -178,6 +271,8 @@ async function main() {
   assert.equal(process.versions.node.split('.')[0], '22', `expected Node 22, got ${process.version}`)
   testJsonBoundary()
   testStopLatch()
+  testImportedWorkerDoesNotListenForIpc()
+  await testConfigModes()
   const sandbox = await testSandbox()
   process.stdout.write(`${JSON.stringify({ status: 'passed', sandboxRoot: sandbox.root, sandbox: sandbox.result })}\n`)
 }

@@ -16,12 +16,14 @@
     "test:plugin": "node tools/plugin-test.mjs && node tools/rlm-plugin-test.mjs",
     "homepage": "node tools/homepage.mjs",
     "homepage:check": "node tools/homepage.mjs --check",
-    "check": "pnpm build && pnpm typecheck && pnpm test && pnpm test:arc && pnpm test:plugin && pnpm homepage:check",
+    "check": "pnpm build && pnpm typecheck && pnpm test && pnpm test:arc && pnpm test:recursion && pnpm test:plugin && pnpm homepage:check",
     "build:rlm": "node tools/build-rlm.mjs",
     "capsule:rlm": "node tools/rlm-capsule.mjs",
     "test:plugin:rlm": "node tools/rlm-plugin-test.mjs",
     "test:arc": "node --test tools/rlm-arc-pilot/baseline.test.mjs tools/rlm-arc-pilot/attachment-relay.test.mjs tools/rlm-arc-pilot/broker.test.mjs tools/rlm-arc-pilot/ledger.test.mjs tools/rlm-arc-pilot/run.test.mjs",
-    "test:arc:native": "node tools/rlm-arc-pilot/native-worker.test.mjs"
+    "test:arc:native": "node tools/rlm-arc-pilot/native-worker.test.mjs",
+    "test:recursion": "node --test tools/rlm-recursion-pilot/tasks.test.mjs tools/rlm-recursion-pilot/control.test.mjs tools/rlm-recursion-pilot/run.test.mjs",
+    "test:recursion:native": "node tools/rlm-recursion-pilot/native-acceptance.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.263",

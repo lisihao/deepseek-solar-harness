@@ -434,7 +434,7 @@ async function readAuthorPreparation(path, plan) {
   }
 }
 
-async function compileCurrentSources({ sourceRoot, packageRoot, shared }) {
+export async function compileCurrentSources({ sourceRoot, packageRoot, shared }) {
   const esbuild = await import('esbuild')
   const compiled = join(shared, 'compiled')
   await mkdir(compiled, { recursive: true, mode: 0o700 })
@@ -475,7 +475,7 @@ async function compileCurrentSources({ sourceRoot, packageRoot, shared }) {
   return { compiled, outputs, hash: canonicalHash(outputs) }
 }
 
-async function prepareSharedRuntime({ compiled, packageRoot, shared }) {
+export async function prepareSharedRuntime({ compiled, packageRoot, shared }) {
   const runtime = await import(pathToFileURL(join(compiled, 'runtime.mjs')).href)
   if (typeof runtime.loadRuntime !== 'function') fail('ARC_RUNTIME_IMPORT', 'compiled runtime did not export loadRuntime')
   const paths = await runtime.loadRuntime(packageRoot, shared)
@@ -1322,7 +1322,7 @@ export function createModelDispatcher({ condition, provider, relay, ledger }) {
       } finally { active = undefined }
       if (state.logicalRequest) {
         const receipt = await ledger.receipt()
-        process.stdout.write(`${JSON.stringify({ event: 'model-settled', arm: condition.arm, gameId: condition.gameId, cumulativeRequests: receipt.admitted, unknown: receipt.unknown, physical: receipt.physicalAdmitted })}\n`)
+        process.stdout.write(`${JSON.stringify({ event: 'model-settled', arm: condition.arm, gameId: condition.gameId, cumulativeRequests: receipt.cumulativeAdmitted ?? receipt.admitted, unknown: receipt.cumulativeUnknown ?? receipt.unknown, physical: receipt.physicalAdmitted })}\n`)
       }
     }
   }
@@ -1333,7 +1333,7 @@ export function createModelDispatcher({ condition, provider, relay, ledger }) {
   }
 }
 
-async function reserveBridgePort() {
+export async function reserveBridgePort() {
   const ipv4 = createNetServer()
   await new Promise((resolveListen, rejectListen) => {
     ipv4.once('error', rejectListen)
@@ -1369,7 +1369,7 @@ function cleanupIsComplete(receipt) {
   return receipt?.backend?.stopped === true && receipt?.proxy?.removed === true && receipt?.engine?.removed === true
 }
 
-async function spawnNativeWorker({ workerPath, sandbox, config, onModel }) {
+export async function spawnNativeWorker({ workerPath, sandbox, config, onModel }) {
   const child = spawn('/usr/bin/sandbox-exec', ['-p', sandbox, DEFAULT_NODE, workerPath], {
     cwd: config.directory,
     env: { PATH: process.env.PATH ?? '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
@@ -1419,7 +1419,7 @@ async function spawnNativeWorker({ workerPath, sandbox, config, onModel }) {
     config.abortAll?.('parent wall-time deadline')
     escalation = setTimeout(() => child.kill('SIGTERM'), 20_000)
     escalation.unref()
-  }, FIXED_LIMITS.wallTimeMs + 90_000)
+  }, (config.start.wallTimeMs ?? FIXED_LIMITS.wallTimeMs) + 90_000)
   deadline.unref()
   child.send(config.start)
   let exit
@@ -1574,7 +1574,7 @@ async function runBaselineCondition({ condition, manifest, plan, provider, relay
   }
 }
 
-async function loadRealProvider({ providerModule, providerSha256, providerPackage, credentialFile, dataRoot, sourceRoot, maxModelRequests, onPhysical, onTransportEvent, attachments }) {
+export async function loadRealProvider({ providerModule, providerSha256, providerPackage, credentialFile, dataRoot, sourceRoot, maxModelRequests, onPhysical, onTransportEvent, attachments }) {
   const modulePath = await assertRegularFile(providerModule, 'provider module')
   if (!SHA256.test(providerSha256 ?? '')) fail('ARC_PROVIDER_HASH', '--provider-sha256 is required for run')
   if (await sha256File(modulePath) !== providerSha256.toLowerCase()) fail('ARC_PROVIDER_HASH', 'provider module hash differs from the explicit pin')
