@@ -85,7 +85,7 @@ done
 
 ### 社区原版：26 项
 
-先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。安装成功不等于账号、外部依赖或真实执行已验收。
+先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。安装成功不等于账号、外部依赖或真实执行已验收。`dsh-purge-community` 会修改官方 App runtime/CLI，与本项目保持官方 App 不变的 D1 约束不一致；该行仅记录已有安装，不构成推荐配置。
 
 | 插件 | 快照版本 | 用途 | 安装或启用方式 |
 |---|---|---|---|
@@ -109,7 +109,7 @@ done
 | [`@dickpy/dsh-imagegen`](https://github.com/dickpy/dsh-imagegen) | `1.9.2` | 生图；另需配置提供商 | `"$DSH_CLI" plugin --profile desktop add '@dickpy/dsh-imagegen@1.9.2'` |
 | [`graph-memory`](https://github.com/adoresever/graph-memory) | `1.6.0-beta.17` | 知识图谱记忆；另需后端依赖 | `"$DSH_CLI" plugin --profile desktop add 'github:adoresever/graph-memory#5841b1987c3967998818764c9d4238add5f3aa7c'` |
 | [`clearai-dsh`](https://github.com/Clearailhc/clearai-dsh) | `0.5.6` | 证据驱动研究与领域本体预置 | `"$DSH_CLI" plugin --profile desktop add 'clearai-dsh@0.5.6'` |
-| [`dsh-purge-community`](https://github.com/kingcharleslzy-ai/dsh-purge) | `1.6.38` | 提示词/规则管理和本机备份回滚 | `"$DSH_CLI" plugin --profile desktop add 'https://github.com/kingcharleslzy-ai/dsh-purge/releases/download/v1.6.38/dsh-purge-community-1.6.38.tgz'` |
+| [`dsh-purge-community`](https://github.com/kingcharleslzy-ai/dsh-purge) | `1.6.38` | 修改官方 App runtime/CLI；仅记录已安装状态，不属于 D1 推荐配置 | `"$DSH_CLI" plugin --profile desktop add 'https://github.com/kingcharleslzy-ai/dsh-purge/releases/download/v1.6.38/dsh-purge-community-1.6.38.tgz'` |
 | [`dsh-session-prefix`](https://github.com/john-walks-slow/dsh-session-prefix) | `0.1.0` | 会话阶段前缀；Jev/Agent 工具路径需独立配置 | `"$DSH_CLI" plugin --profile desktop add 'dsh-session-prefix@0.1.0'` |
 | [`@dsh-jev/plugin`](https://github.com/luobosibing2/dsh-jev-plugin) | `0.1.0` | Jev 决策集成；需独立配置，不默认启用能力 | `"$DSH_CLI" plugin --profile desktop add 'github:luobosibing2/dsh-jev-plugin#c54e071e99eb839749b3991d29ede9ca20e275f6'` |
 | [`dsh-univer-office`](https://github.com/dream-num/dsh-univer-office) | `0.3.7` | Univer 文档预览与协作工作区 | `"$DSH_CLI" plugin --profile desktop add 'dsh-univer-office@0.3.7'` |

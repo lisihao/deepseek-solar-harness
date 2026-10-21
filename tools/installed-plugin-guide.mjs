@@ -16,7 +16,7 @@ const purpose = {
   'dsh-chat-import': '从其他工具导入会话', 'dsh-synapse': '非线性会话工作区',
   'dsh-agent-persona': '按工作区或会话配置人设', 'dsh-mnemon': '可组合记忆来源与视图',
   '@dickpy/dsh-imagegen': '生图；另需配置提供商', 'graph-memory': '知识图谱记忆；另需后端依赖',
-  'clearai-dsh': '证据驱动研究与领域本体预置', 'dsh-purge-community': '提示词/规则管理和本机备份回滚',
+  'clearai-dsh': '证据驱动研究与领域本体预置', 'dsh-purge-community': '修改官方 App runtime/CLI；仅记录已安装状态，不属于 D1 推荐配置',
   'dsh-session-prefix': '会话阶段前缀；Jev/Agent 工具路径需独立配置',
   '@dsh-jev/plugin': 'Jev 决策集成；需独立配置，不默认启用能力',
   'dsh-univer-office': 'Univer 文档预览与协作工作区',
@@ -40,7 +40,7 @@ const body = [
   '[机器可读清单](docs/installed-plugins-2026-10-21.json)不包含账号、配置值、会话或本机安装路径。',
   '### 自研与维护包：7 项', [header, ...curated.map(p => row(p, purpose[p.name], `\`bash "$work/install.sh" --ref "$ref" ${p.packageId}\``))].join('\n'),
   `### 社区原版：${community.length} 项`,
-  '先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。安装成功不等于账号、外部依赖或真实执行已验收。', [header, ...community.map(p => row(p, purpose[p.name], `\`"$DSH_CLI" plugin --profile desktop add '${p.installSpec}'\``))].join('\n'),
+  '先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。安装成功不等于账号、外部依赖或真实执行已验收。`dsh-purge-community` 会修改官方 App runtime/CLI，与本项目保持官方 App 不变的 D1 约束不一致；该行仅记录已有安装，不构成推荐配置。', [header, ...community.map(p => row(p, purpose[p.name], `\`"$DSH_CLI" plugin --profile desktop add '${p.installSpec}'\``))].join('\n'),
   '### 官方内置：16 项',
   '这些条目随已安装官方 App/运行环境提供；在「插件 → 已安装」或官方内置插件设置中按需启用。基础运行环境和原生 Web 界面不需要重复安装。下表官方版本按已发布 App 基线列出；不会用这些开关复制他人的账号或配置。', [header, ...official.map((p, index) => row(p, officialPurpose[index], index < 2 ? '随官方 App 提供' : '在官方插件设置中启用；按需完成其登录/依赖配置'))].join('\n'),
 ].join('\n\n')

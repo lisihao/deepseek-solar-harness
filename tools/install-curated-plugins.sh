@@ -374,7 +374,7 @@ if [ "$MODE" = "list" ]; then
     [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || die "--ref must be a lowercase 40-character commit SHA"
     require_command curl
     require_command mktemp
-    LIST_TEMP_ROOT="$(mktemp -d -t dsh-curated-list)"
+    LIST_TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dsh-curated-list.XXXXXX")"
     trap 'rm -rf "$LIST_TEMP_ROOT"' EXIT HUP INT TERM
     LIST_CATALOG="$LIST_TEMP_ROOT/catalog.json"
     curl --fail --location --silent --show-error --output "$LIST_CATALOG" \
