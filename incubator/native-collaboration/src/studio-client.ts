@@ -102,6 +102,89 @@ interface StageData {
 type StudioFlowNode = Node<StageData, 'studio-stage'>
 type StudioFlowEdge = Edge
 
+export type WorkflowStudioPresentation = 'loading' | 'unavailable' | 'empty' | 'selection' | 'editor'
+
+export interface WorkflowStudioPresentationInput {
+  readonly overview: Pick<StudioOverview, 'sources' | 'drafts'> | undefined
+  readonly draft: EditableStudioDraft | undefined
+  readonly loading: boolean
+  readonly apiAvailable: boolean
+  readonly hasServiceError: boolean
+  readonly hasOverviewError: boolean
+}
+
+/**
+ * Chooses the one primary screen state. Keeping this separate from React state
+ * prevents an empty session from looking like an inactive editor.
+ */
+export function workflowStudioPresentation({
+  overview,
+  draft,
+  loading,
+  apiAvailable,
+  hasServiceError,
+  hasOverviewError,
+}: WorkflowStudioPresentationInput): WorkflowStudioPresentation {
+  if (draft !== undefined) return 'editor'
+  if (!apiAvailable || hasServiceError || hasOverviewError) return 'unavailable'
+  if (loading || overview === undefined) return 'loading'
+  return overview.sources.length === 0 && overview.drafts.length === 0 ? 'empty' : 'selection'
+}
+
+/**
+ * A revision number alone cannot tell whether a draft was persisted: revision
+ * zero is valid for both an initial editable draft and a stored draft.
+ */
+export function studioDraftSaveStatus(
+  draft: EditableStudioDraft | undefined,
+  overview: Pick<StudioOverview, 'drafts'> | undefined,
+  dirty: boolean,
+): string | undefined {
+  if (draft === undefined) return undefined
+  if (dirty) return '有未保存修改'
+  const persisted = overview?.drafts.some(saved => saved.id === draft.id && saved.revision === draft.expectedRevision) ?? false
+  return persisted ? `已保存 · 版本 ${draft.expectedRevision}` : '尚未保存'
+}
+
+export interface WorkflowStudioRunAction {
+  readonly label: string
+  readonly hint: string
+  readonly hintTone: 'muted' | 'warning'
+  readonly disabled: boolean
+}
+
+/** Keeps the visible action aligned with the existing save-before-run guard. */
+export function workflowStudioRunAction(
+  dirty: boolean,
+  commandId: string | undefined,
+  commandBusy: boolean,
+): WorkflowStudioRunAction {
+  if (dirty) return {
+    label: '保存后执行',
+    hint: '先保存草稿；编辑和保存不会启动模型。',
+    hintTone: 'muted',
+    disabled: true,
+  }
+  if (commandId === undefined) return {
+    label: '按此草稿再次执行',
+    hint: '可能使用所选模型额度；若执行回执不确定，只检查原执行身份，不会自动再次提交。',
+    hintTone: 'warning',
+    disabled: false,
+  }
+  if (commandBusy) return {
+    label: '正在检查执行…',
+    hint: '只检查该次执行状态，不会再次提交。',
+    hintTone: 'muted',
+    disabled: true,
+  }
+  return {
+    label: '检查该次执行状态',
+    hint: '只检查该次执行状态，不会再次提交。',
+    hintTone: 'muted',
+    disabled: false,
+  }
+}
+
 const NODE_TYPES = { 'studio-stage': WorkflowStageNode }
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu
 
@@ -383,19 +466,24 @@ function NodeInspector({
     properties.unsupported.length === 0
       ? null
       : createElement('p', { key: 'unsupported', className: 'solar-workflow-studio__error', role: 'alert' }, `当前流程的 ${properties.unsupported.join('、')} 不是文本；未修改该字段时会原样保留。`),
-    createElement(NodeJsonField, {
-      key: 'parameters',
-      label: '其余参数 JSON',
-      value: additionalNodeParametersForProvider(graph.providerId, node.parameters),
-      validate: value => validateAdditionalNodeParametersForProvider(graph.providerId, value),
-      onCommit: parameters => onChange(withAdditionalNodeParametersForProvider(node, graph.providerId, parameters)),
-    }),
-    createElement(NodeJsonField, {
-      key: 'metadata',
-      label: '元数据 JSON',
-      value: node.metadata,
-      onCommit: metadata => onChange({ ...node, metadata }),
-    }),
+    createElement('details', { key: 'advanced', className: 'solar-workflow-studio__advanced-fields' }, [
+      createElement('summary', { key: 'summary' }, '高级阶段参数'),
+      createElement('div', { key: 'content', className: 'solar-workflow-studio__advanced-content' }, [
+        createElement(NodeJsonField, {
+          key: 'parameters',
+          label: '其余参数 JSON',
+          value: additionalNodeParametersForProvider(graph.providerId, node.parameters),
+          validate: value => validateAdditionalNodeParametersForProvider(graph.providerId, value),
+          onCommit: parameters => onChange(withAdditionalNodeParametersForProvider(node, graph.providerId, parameters)),
+        }),
+        createElement(NodeJsonField, {
+          key: 'metadata',
+          label: '元数据 JSON',
+          value: node.metadata,
+          onCommit: metadata => onChange({ ...node, metadata }),
+        }),
+      ]),
+    ]),
     createElement('button', { key: 'delete', type: 'button', 'data-variant': 'danger', onClick: () => onDelete(node) }, '删除此阶段'),
   ])
 }
@@ -412,18 +500,23 @@ function GraphInspector({ graph, onChange }: { readonly graph: StudioGraph; read
         'aria-label': '流程名称',
       }),
     ]),
-    createElement(NodeJsonField, {
-      key: 'parameters',
-      label: '流程参数 JSON',
-      value: graph.parameters,
-      onCommit: parameters => onChange(withStudioGraphParameters(graph, parameters)),
-    }),
-    createElement(NodeJsonField, {
-      key: 'metadata',
-      label: '流程元数据 JSON',
-      value: graph.metadata,
-      onCommit: metadata => onChange(withStudioGraphMetadata(graph, metadata)),
-    }),
+    createElement('details', { key: 'advanced', className: 'solar-workflow-studio__advanced-fields' }, [
+      createElement('summary', { key: 'summary' }, '高级流程参数'),
+      createElement('div', { key: 'content', className: 'solar-workflow-studio__advanced-content' }, [
+        createElement(NodeJsonField, {
+          key: 'parameters',
+          label: '流程参数 JSON',
+          value: graph.parameters,
+          onCommit: parameters => onChange(withStudioGraphParameters(graph, parameters)),
+        }),
+        createElement(NodeJsonField, {
+          key: 'metadata',
+          label: '流程元数据 JSON',
+          value: graph.metadata,
+          onCommit: metadata => onChange(withStudioGraphMetadata(graph, metadata)),
+        }),
+      ]),
+    ]),
   ])
 }
 
@@ -440,20 +533,24 @@ function FlowSources({
 }): ReactElement {
   const sources = overview?.sources ?? []
   const drafts = overview?.drafts ?? []
-  const currentTitle = draft === undefined ? '选择流程' : graphTitle(draft.graph)
-  const currentState = draft === undefined ? undefined : draft.expectedRevision === 0 ? '未保存草稿' : `版本 ${draft.expectedRevision}`
-  return createElement('details', { className: 'solar-workflow-studio__flow-picker' }, [
+  const choosing = draft === undefined
+  const currentTitle = choosing ? '选择来源流程或已保存草稿' : graphTitle(draft.graph)
+  return createElement('details', {
+    className: 'solar-workflow-studio__flow-picker',
+    open: choosing,
+    'aria-label': choosing ? '选择来源流程或已保存草稿' : '切换当前草稿',
+  }, [
     createElement('summary', { key: 'summary', className: 'solar-workflow-studio__flow-picker-summary' }, [
-      createElement('span', { key: 'label', className: 'solar-workflow-studio__muted' }, '当前流程'),
-      createElement('strong', { key: 'title' }, currentTitle),
-      currentState === undefined ? null : createElement('span', { key: 'state', className: 'solar-workflow-studio__muted' }, currentState),
-      createElement('span', { key: 'counts', className: 'solar-workflow-studio__muted' }, `来源 ${sources.length} · 草稿 ${drafts.length}`),
+      createElement('span', { key: 'label', className: 'solar-workflow-studio__muted' }, choosing ? '选择流程' : '切换流程'),
+      choosing ? createElement('strong', { key: 'title' }, currentTitle) : null,
+      createElement('span', { key: 'counts', className: 'solar-workflow-studio__muted' }, `来源流程 ${sources.length} · 已保存草稿 ${drafts.length}`),
     ]),
     createElement('div', { key: 'content', className: 'solar-workflow-studio__flow-picker-content' }, [
       createElement('div', { key: 'sources', className: 'solar-workflow-studio__list' }, [
       createElement('strong', { key: 'heading' }, '来源流程'),
+      createElement('p', { key: 'description', className: 'solar-workflow-studio__muted' }, '选择来源会基于原流程建立草稿；修改草稿不会影响原执行。保存后才可执行。'),
       sources.length === 0
-        ? createElement('span', { key: 'empty', className: 'solar-workflow-studio__muted' }, '当前会话尚未捕获来源流程。')
+        ? createElement('span', { key: 'empty', className: 'solar-workflow-studio__muted' }, '当前会话暂无来源流程。')
         : sources.map(source => createElement('button', {
           key: source.id,
           type: 'button',
@@ -464,6 +561,7 @@ function FlowSources({
     ]),
     createElement('div', { key: 'drafts', className: 'solar-workflow-studio__list' }, [
       createElement('strong', { key: 'heading' }, '已保存草稿'),
+      createElement('p', { key: 'description', className: 'solar-workflow-studio__muted' }, '选择草稿以继续编辑；执行始终使用其精确保存版本。'),
       drafts.length === 0
         ? createElement('span', { key: 'empty', className: 'solar-workflow-studio__muted' }, '当前会话没有已保存草稿。')
         : drafts.map(saved => createElement('button', {
@@ -514,7 +612,7 @@ function RunList({ records, onInspect, onResume, busyCommands, resumingCommands,
                 disabled: resumeDisabled || pendingResume || busyCommands.has(record.commandId),
                 onClick: () => onResume(record.commandId),
               }, pendingResume ? '正在继续原执行…' : '继续原执行（可能使用额度）'),
-              createElement('span', { key: 'hint', className: 'solar-workflow-studio__muted' }, '只推进未执行阶段，不重跑全部流程。'),
+              createElement('span', { key: 'hint', className: 'solar-workflow-studio__quota-warning' }, '可能使用所选模型额度；只推进未执行阶段，不创建替代执行。'),
             ]),
         ])
       }),
@@ -560,7 +658,7 @@ function RunEvidencePanel({
               disabled: resumeDisabled === true || resuming === true,
               onClick: () => onResume(resume.commandId, resume.sourceId),
             }, resuming === true ? '正在继续原执行…' : '继续原执行（可能使用额度）'),
-            createElement('span', { key: 'hint', className: 'solar-workflow-studio__muted' }, '原 effect 已解析后只推进未执行阶段，不重跑全部流程。'),
+            createElement('span', { key: 'hint', className: 'solar-workflow-studio__quota-warning' }, '可能使用所选模型额度；会先核对原请求，再继续未执行阶段，仍使用原执行身份。'),
           ]),
         createElement('details', { key: 'details', className: 'solar-workflow-studio__evidence-details' }, [
           createElement('summary', { key: 'summary' }, '查看阶段状态与输出'),
@@ -596,6 +694,7 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
   const [notice, setNotice] = useState<Notice | undefined>()
   const [issues, setIssues] = useState<readonly string[]>([])
   const [loading, setLoading] = useState(false)
+  const [overviewError, setOverviewError] = useState<string | undefined>()
   const [saving, setSaving] = useState(false)
   const [busyCommands, setBusyCommands] = useState<ReadonlySet<string>>(() => new Set())
   const [resumingCommands, setResumingCommands] = useState<ReadonlySet<string>>(() => new Set())
@@ -645,6 +744,7 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
     const requestId = ++overviewRequestRef.current
     const initialGeneration = draftGenerationRef.current
     setLoading(true)
+    setOverviewError(undefined)
     try {
       const next = await api.overview({ sessionId: requestedSessionId })
       if (requestId !== overviewRequestRef.current || !isCurrentStudioOverview(requestedSessionId, activeSessionRef.current, next)) return
@@ -676,7 +776,9 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
       if (announce) setNotice({ tone: 'info', message: '已读取当前会话流程；刷新没有提交模型请求。' })
     } catch (caught) {
       if (requestId === overviewRequestRef.current && isCurrent(requestedSessionId)) {
-        setNotice({ tone: 'error', message: `无法读取当前会话流程：${messageFor(caught, '请求未完成。')}` })
+        const message = messageFor(caught, '请求未完成。')
+        setOverviewError(message)
+        setNotice({ tone: 'error', message: `无法读取当前会话流程：${message}` })
       }
     } finally {
       if (requestId === overviewRequestRef.current && isCurrent(requestedSessionId)) setLoading(false)
@@ -719,6 +821,7 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
     setSelectedEdgeId(undefined)
     setIssues([])
     setNotice(undefined)
+    setOverviewError(undefined)
     setPendingCommands({})
     setBusyCommands(new Set())
     setResumingCommands(new Set())
@@ -840,7 +943,7 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
     if (!lock(`resume:${key}`)) return
     const requestedSessionId = sessionId
     withResumeBusy(key, true)
-    setNotice({ tone: 'info', message: '正在继续原执行；它只会在原 effect 已解析后推进未执行阶段，可能使用模型额度。' })
+    setNotice({ tone: 'info', message: '正在继续原执行；会先核对原请求，再推进未执行阶段，可能使用模型额度。' })
     try {
       const run = await api.resume({
         sessionId: requestedSessionId,
@@ -974,46 +1077,101 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
       draft.expectedRevision,
     )
   const serviceError = visibleError(error, '流程服务暂不可用。')
+  const presentation = workflowStudioPresentation({
+    overview,
+    draft,
+    loading,
+    apiAvailable: api !== undefined,
+    hasServiceError: serviceError !== undefined,
+    hasOverviewError: overviewError !== undefined,
+  })
+  const draftSaveStatus = studioDraftSaveStatus(draft, overview, dirty)
+  const draftPersisted = draftSaveStatus?.startsWith('已保存') ?? false
+  const runRecords = overview?.runs ?? []
+  const runAction = workflowStudioRunAction(
+    dirty,
+    currentCommandId,
+    currentCommandId !== undefined && busyCommands.has(currentCommandId),
+  )
+  const unavailableMessage = api === undefined
+    ? '流程服务尚未连接，当前无法读取或编辑此会话的执行流程。'
+    : serviceError ?? overviewError ?? '当前无法读取会话执行流程。'
 
   return createElement('main', { className: 'solar-workflow-studio' }, [
     createElement(WorkflowStudioStyles, { key: 'styles' }),
     createElement('header', { key: 'intro', className: 'solar-workflow-studio__intro' }, [
       createElement('h1', { key: 'title' }, '执行流程'),
-      createElement('p', { key: 'summary', className: 'solar-workflow-studio__muted' }, '编辑、保存和刷新不启动模型；“按此草稿再次执行”或“继续原执行”可能使用所选模型额度。'),
+      createElement('p', { key: 'summary', className: 'solar-workflow-studio__muted' }, '用于查看本会话任务步骤并调整草稿；普通聊天不必创建流程。'),
       serviceError === undefined ? null : createElement('p', { key: 'error', className: 'solar-workflow-studio__error', role: 'alert' }, serviceError),
       notice === undefined ? null : createElement('p', { key: 'notice', className: notice.tone === 'error' ? 'solar-workflow-studio__error' : 'solar-workflow-studio__success', role: notice.tone === 'error' ? 'alert' : 'status' }, notice.message),
       issues.length === 0 ? null : createElement('ul', { key: 'issues', className: 'solar-workflow-studio__error' }, issues.map((issue, index) => createElement('li', { key: `${index}:${issue}` }, issue))),
     ]),
-    createElement('section', { key: 'toolbar', className: 'solar-workflow-studio__toolbar', 'aria-label': '流程操作' }, [
-      createElement('button', { key: 'refresh', type: 'button', disabled: api === undefined || loading, onClick: () => { void refreshCurrentFlow() } }, loading ? '正在刷新…' : draft?.sourceId === undefined ? '刷新当前会话' : '检查来源流程'),
-      createElement('button', { key: 'add', type: 'button', disabled: graph === undefined, onClick: addNode }, '新增阶段'),
-      createElement('button', {
-        key: 'delete-edge',
-        type: 'button',
-        'data-variant': 'danger',
-        disabled: graph === undefined || selectedEdgeId === undefined,
-        onClick: () => {
-          if (selectedEdgeId === undefined) return
-          changeDraft(current => withoutStudioEdges(current, new Set([selectedEdgeId])))
-          setSelectedEdgeId(undefined)
-        },
-      }, '删除选中依赖'),
-      createElement('button', { key: 'save', type: 'button', 'data-variant': 'primary', disabled: api === undefined || draft === undefined || saving, onClick: () => { void saveDraft() } }, saving ? '正在保存…' : dirty ? '保存草稿' : '草稿已保存'),
-      createElement('button', {
-        key: 'run',
-        type: 'button',
-        'data-variant': 'primary',
-        disabled: api === undefined || draft === undefined || (currentCommandId !== undefined && busyCommands.has(currentCommandId)),
-        onClick: () => { void runDraft() },
-      }, dirty ? '先保存草稿' : currentCommandId === undefined ? '按此草稿再次执行' : busyCommands.has(currentCommandId) ? '正在检查执行…' : '检查该次执行状态'),
-    ]),
-    createElement(FlowSources, { key: 'sources', overview, draft, onFork: selectSource, onChooseDraft: selectDraft }),
-    graph === undefined
-      ? createElement('section', { key: 'empty', className: 'solar-workflow-studio__panel' }, [
-        createElement('h2', { key: 'title' }, '尚未选择草稿'),
-        createElement('p', { key: 'message', className: 'solar-workflow-studio__muted' }, overview === undefined ? '正在读取当前会话流程。' : '从上方来源建立草稿，或选择已保存草稿后开始编辑。'),
+    presentation === 'loading'
+      ? createElement('section', { key: 'loading', className: 'solar-workflow-studio__empty-state', 'aria-live': 'polite' }, [
+        createElement('h2', { key: 'title' }, '正在读取当前会话流程'),
+        createElement('p', { key: 'message', className: 'solar-workflow-studio__muted' }, '读取完成后会显示当前会话的任务步骤或已保存草稿。'),
       ])
-      : createElement('div', { key: 'layout', className: 'solar-workflow-studio__layout' }, [
+      : presentation === 'unavailable'
+        ? createElement('section', { key: 'unavailable', className: 'solar-workflow-studio__empty-state' }, [
+          createElement('h2', { key: 'title' }, '当前无法读取执行流程'),
+          createElement('p', { key: 'message', className: 'solar-workflow-studio__muted' }, unavailableMessage),
+          api === undefined || serviceError !== undefined
+            ? null
+            : createElement('button', { key: 'refresh', type: 'button', onClick: () => { void refreshCurrentFlow() } }, '刷新当前会话流程'),
+        ])
+        : presentation === 'empty'
+          ? createElement('section', { key: 'empty', className: 'solar-workflow-studio__empty-state' }, [
+            createElement('h2', { key: 'title' }, '当前会话还没有执行流程'),
+            createElement('p', { key: 'message', className: 'solar-workflow-studio__muted' }, '当前会话还没有可查看的任务步骤。刷新可读取当前会话中新出现的来源流程或已保存草稿。'),
+            createElement('button', { key: 'refresh', type: 'button', disabled: loading, onClick: () => { void refreshCurrentFlow() } }, loading ? '正在刷新…' : '刷新当前会话流程'),
+          ])
+          : presentation === 'selection'
+            ? createElement(FlowSources, { key: 'sources', overview, draft, onFork: selectSource, onChooseDraft: selectDraft })
+            : graph === undefined
+              ? null
+              : [
+                createElement(FlowSources, { key: 'sources', overview, draft, onFork: selectSource, onChooseDraft: selectDraft }),
+                createElement('section', { key: 'draft-summary', className: 'solar-workflow-studio__draft-summary' }, [
+                  createElement('div', { key: 'identity' }, [
+                    createElement('span', { key: 'label', className: 'solar-workflow-studio__muted' }, '正在编辑草稿'),
+                    createElement('h2', { key: 'title' }, graphTitle(graph)),
+                    createElement('p', { key: 'status', className: 'solar-workflow-studio__draft-status', 'data-state': draftPersisted ? 'saved' : 'unsaved', role: 'status' }, draftSaveStatus),
+                  ]),
+                  createElement('p', { key: 'hint', className: 'solar-workflow-studio__muted' }, '编辑和保存不会启动模型。'),
+                ]),
+                createElement('section', { key: 'toolbar', className: 'solar-workflow-studio__toolbar', 'aria-label': '流程操作' }, [
+                  createElement('div', { key: 'observe', className: 'solar-workflow-studio__toolbar-group', 'aria-label': '读取流程状态' }, [
+                    createElement('button', { key: 'refresh', type: 'button', disabled: api === undefined || loading, onClick: () => { void refreshCurrentFlow() } }, loading ? '正在刷新…' : draft?.sourceId === undefined ? '刷新当前会话' : '检查来源流程'),
+                  ]),
+                  createElement('div', { key: 'edit', className: 'solar-workflow-studio__toolbar-group', 'aria-label': '编辑草稿' }, [
+                    createElement('button', { key: 'add', type: 'button', onClick: addNode }, '新增阶段'),
+                    createElement('button', {
+                      key: 'delete-edge',
+                      type: 'button',
+                      'data-variant': 'danger',
+                      disabled: selectedEdgeId === undefined,
+                      onClick: () => {
+                        if (selectedEdgeId === undefined) return
+                        changeDraft(current => withoutStudioEdges(current, new Set([selectedEdgeId])))
+                        setSelectedEdgeId(undefined)
+                      },
+                    }, '删除选中依赖'),
+                  ]),
+                  createElement('div', { key: 'save', className: 'solar-workflow-studio__toolbar-group', 'aria-label': '保存草稿' }, [
+                    createElement('button', { key: 'action', type: 'button', 'data-variant': 'primary', disabled: api === undefined || saving, onClick: () => { void saveDraft() } }, saving ? '正在保存…' : '保存草稿'),
+                  ]),
+                  createElement('div', { key: 'run', className: 'solar-workflow-studio__toolbar-group solar-workflow-studio__execution-action', 'aria-label': '执行草稿' }, [
+                    createElement('button', {
+                      key: 'action',
+                      type: 'button',
+                      'data-variant': 'primary',
+                      disabled: api === undefined || runAction.disabled,
+                      onClick: () => { void runDraft() },
+                    }, runAction.label),
+                    createElement('span', { key: 'hint', className: runAction.hintTone === 'warning' ? 'solar-workflow-studio__quota-warning' : 'solar-workflow-studio__muted' }, runAction.hint),
+                  ]),
+                ]),
+                createElement('div', { key: 'layout', className: 'solar-workflow-studio__layout' }, [
         createElement('div', { key: 'canvas-column', className: 'solar-workflow-studio__canvas-column' }, [
           createElement('div', { key: 'canvas', className: 'solar-workflow-studio__canvas' }, createElement(ReactFlow<StudioFlowNode, StudioFlowEdge>, {
             nodes: flowNodes,
@@ -1069,12 +1227,12 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
             ? null
             : createElement('p', { key: 'execution-state', className: executionStateLabel === '草稿已修改，尚未执行' ? 'solar-workflow-studio__error' : 'solar-workflow-studio__success', role: 'status' }, executionStateLabel),
           createElement(GraphInspector, { key: 'graph-inspector', graph, onChange: next => changeDraft(() => next) }),
-          draft?.sourceId === undefined
+          sourceForDraft?.run === undefined
             ? null
             : createElement(RunEvidencePanel, {
               key: 'source-run',
               title: '来源运行（对应原版本）',
-              description: '这是来源流程的观察结果，只对应捕获时的原版本，不表示当前草稿已执行。',
+              description: '这是来源流程的执行结果，只对应原版本，不表示当前草稿已执行。',
               graph: sourceForDraft?.graph ?? graph,
               run: sourceForDraft?.run,
               selectedNodeId,
@@ -1106,16 +1264,19 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
             setSelectedNodeId(undefined)
           },
         }),
-      ]),
-    createElement(RunList, {
-      key: 'runs',
-      records: overview?.runs ?? [],
-      onInspect: commandId => { void inspectRun(commandId) },
-      onResume: commandId => { void resumeOriginalRun(commandId) },
-      busyCommands,
-      resumingCommands,
-      resumeDisabled: api === undefined,
-    }),
+                ]),
+              ],
+    runRecords.length === 0
+      ? null
+      : createElement(RunList, {
+        key: 'runs',
+        records: runRecords,
+        onInspect: commandId => { void inspectRun(commandId) },
+        onResume: commandId => { void resumeOriginalRun(commandId) },
+        busyCommands,
+        resumingCommands,
+        resumeDisabled: api === undefined,
+      }),
   ])
 }
 

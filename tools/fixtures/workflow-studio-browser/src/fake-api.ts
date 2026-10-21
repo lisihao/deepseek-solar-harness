@@ -192,6 +192,8 @@ export interface WorkflowStudioFixtureCounters {
 
 export interface FakeStudioUiApiOptions {
   readonly deferredCompletionMs?: number
+  /** Fixture-only visual scenario: the current session has no captured workflow. */
+  readonly emptyOverview?: boolean
 }
 
 /** Browser-fixture-only in-memory API. It has no Host, network, or model integration. */
@@ -209,7 +211,7 @@ export class FakeStudioUiApi implements StudioUiApi {
     deferredCompletions: 0,
   }
 
-  private readonly sources = new Map(seededSources().map(source => [source.id, clone(source)]))
+  private readonly sources: Map<string, StudioSource>
   private readonly drafts = new Map<string, StudioDraft>()
   private readonly runs = new Map<string, StudioRunRecord>()
   private readonly continuingSources = new Set<string>()
@@ -221,6 +223,7 @@ export class FakeStudioUiApi implements StudioUiApi {
 
   constructor(options: FakeStudioUiApiOptions = {}) {
     this.deferredCompletionMs = options.deferredCompletionMs ?? 350
+    this.sources = new Map((options.emptyOverview ? [] : seededSources()).map(source => [source.id, clone(source)]))
   }
 
   subscribe = (listener: () => void): (() => void) => {

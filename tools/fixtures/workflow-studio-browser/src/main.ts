@@ -17,7 +17,9 @@ declare global {
   }
 }
 
-const api = new FakeStudioUiApi()
+const api = new FakeStudioUiApi({
+  emptyOverview: new URLSearchParams(window.location.search).get('empty') === '1',
+})
 
 function FixtureCounters(): ReactElement {
   useSyncExternalStore(api.subscribe, api.getVersion, api.getVersion)

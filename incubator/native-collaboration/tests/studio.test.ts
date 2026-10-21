@@ -154,7 +154,8 @@ describe('WorkflowStudio admission and observation', () => {
       ],
       edges: [{ id: 'one-two', source: 'one', target: 'two' }, { id: 'two-one', source: 'two', target: 'one' }],
     })
-    const { studio, execute } = await setup()
+    const execute = vi.fn(async (request: { readonly commandId: string }) => receipt(request.commandId, 'completed'))
+    const { studio } = await setup({ execute })
     await capturedDraft(studio, firstDraftId, cyclic)
     await expect(studio.run({ sessionId: 'session-a', draftId: firstDraftId, expectedRevision: 0, commandId: 'cycle-command' })).rejects.toThrow('依赖环')
     expect(execute).not.toHaveBeenCalled()
@@ -162,6 +163,7 @@ describe('WorkflowStudio admission and observation', () => {
     const fixed = { ...cyclic, edges: [{ id: 'one-two', source: 'one', target: 'two' }] }
     await studio.save({ sessionId: 'session-a', id: firstDraftId, expectedRevision: 0, graph: fixed, sourceId: 'source-a' })
     await studio.run({ sessionId: 'session-a', draftId: firstDraftId, expectedRevision: 1, commandId: 'cycle-command-fixed' })
+    await waitForRun(studio, 'cycle-command-fixed', 'completed')
     expect(execute).toHaveBeenCalledTimes(1)
   })
 

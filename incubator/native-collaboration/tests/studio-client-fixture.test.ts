@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { FakeStudioUiApi, SESSION_ID } from '../../../tools/fixtures/workflow-studio-browser/src/fake-api.js'
 
 describe('workflow studio browser fixture API', () => {
+  it('can expose a deterministic current-session empty state without starting a model', async () => {
+    const api = new FakeStudioUiApi({ emptyOverview: true })
+    const initial = await api.overview({ sessionId: SESSION_ID })
+
+    expect(initial.sources).toEqual([])
+    expect(initial.drafts).toEqual([])
+    expect(initial.runs).toEqual([])
+    expect(api.counters.modelStarts).toBe(0)
+    expect(api.counters.runs).toBe(0)
+  })
+
   it('keeps refresh, editable saves, validation, and mode selection free of model starts', async () => {
     const api = new FakeStudioUiApi({ deferredCompletionMs: 1 })
     const initial = await api.overview({ sessionId: SESSION_ID })
