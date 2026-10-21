@@ -19,6 +19,22 @@ function setup() {
   return { browser, busy, control: new ModelCatalogControl(new Context(), browser, busy) }
 }
 
+async function rejectedMessage(value: Promise<unknown>): Promise<string> {
+  try {
+    await value
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+  throw new Error('Expected catalog refresh to reject.')
+}
+
+function expectDiagnostic(message: string, stageCode: string, stageLabel: string, browserCode: string, hidden: string): void {
+  expect(message).toContain(stageCode)
+  expect(message).toContain(`模型目录${stageLabel}失败`)
+  expect(message).toContain(`错误码 ${browserCode}`)
+  expect(message).not.toContain(hidden)
+}
+
 describe('target browser model catalogue', () => {
   it('reads no browser on mount/read and returns a cloned fresh dynamic snapshot only after refresh', async () => {
     const { browser, control } = setup()
@@ -50,9 +66,59 @@ describe('target browser model catalogue', () => {
     const { browser, control } = setup()
     await control.refresh({})
     browser.catalog.mockRejectedValueOnce(new WebBrowserError('WEB_MODEL_SELECTION_UNAVAILABLE', 'not offered', false))
-    await expect(control.refresh({ modelLabel: 'Gone model' })).rejects.toThrow('not offered')
+    const message = await rejectedMessage(control.refresh({ modelLabel: 'Gone model' }))
+    expectDiagnostic(message, 'WEB_CATALOG_READ_FAILED', '读取', 'WEB_MODEL_SELECTION_UNAVAILABLE', 'not offered')
     expect(await control.read()).toEqual(snapshot)
     expect(browser.finish).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a create-stage code without leaking an adapter message, including generic failures', async () => {
+    const first = setup()
+    first.browser.create.mockRejectedValueOnce(new WebBrowserError('EGO_TIMEOUT', 'private stderr or page text', false))
+    const firstMessage = await rejectedMessage(first.control.refresh({}))
+    expectDiagnostic(firstMessage, 'WEB_CATALOG_CREATE_FAILED', '创建目标', 'EGO_TIMEOUT', 'private stderr or page text')
+    expect(first.browser.catalog).not.toHaveBeenCalled()
+    expect(first.browser.finish).not.toHaveBeenCalled()
+
+    const generic = setup()
+    generic.browser.create.mockRejectedValueOnce(new Error('arbitrary internal failure'))
+    const genericMessage = await rejectedMessage(generic.control.refresh({}))
+    expectDiagnostic(genericMessage, 'WEB_CATALOG_CREATE_FAILED', '创建目标', 'WEB_CATALOG_CREATE_FAILED', 'arbitrary internal failure')
+
+    for (const [unsafeCode, hidden] of [
+      [`EGO_${'A'.repeat(97)}`, 'private overlong frame code'],
+      ['external_frame_error', 'private external frame code'],
+    ] as const) {
+      const unsafe = setup()
+      unsafe.browser.create.mockRejectedValueOnce(new WebBrowserError(unsafeCode, hidden, false))
+      const unsafeMessage = await rejectedMessage(unsafe.control.refresh({}))
+      expectDiagnostic(unsafeMessage, 'WEB_CATALOG_CREATE_FAILED', '创建目标', 'WEB_CATALOG_CREATE_FAILED', hidden)
+      expect(unsafeMessage).not.toContain(unsafeCode)
+    }
+  })
+
+  it('keeps a catalog failure and a cleanup failure in one sanitized diagnostic', async () => {
+    const { browser, control } = setup()
+    browser.catalog.mockRejectedValueOnce(new WebBrowserError('WEB_MODEL_UNKNOWN', 'private page state', false))
+    browser.finish.mockRejectedValueOnce(new WebBrowserError('EGO_TIMEOUT', 'private cleanup stderr', false))
+
+    const message = await rejectedMessage(control.refresh({}))
+
+    expectDiagnostic(message, 'WEB_CATALOG_READ_FAILED', '读取', 'WEB_MODEL_UNKNOWN', 'private page state')
+    expectDiagnostic(message, 'WEB_CATALOG_CLEANUP_FAILED', '清理目标', 'EGO_TIMEOUT', 'private cleanup stderr')
+    expect(browser.finish).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports finish-stage failures without reopening or retrying the target', async () => {
+    const { browser, control } = setup()
+    browser.finish.mockRejectedValueOnce(new WebBrowserError('EGO_OUTPUT_TOO_LARGE', 'private process output', false))
+
+    const message = await rejectedMessage(control.refresh({}))
+
+    expectDiagnostic(message, 'WEB_CATALOG_FINISH_FAILED', '完成并清理', 'EGO_OUTPUT_TOO_LARGE', 'private process output')
+    expect(browser.create).toHaveBeenCalledTimes(1)
+    expect(browser.catalog).toHaveBeenCalledTimes(1)
+    expect(browser.finish).toHaveBeenCalledTimes(1)
   })
   it('rejects non-owner and malformed input before browser effects', async () => {
     const { browser, control } = setup()
@@ -69,10 +135,14 @@ describe('target browser model catalogue', () => {
     await expect(control.refresh({})).rejects.toThrow('WEB_CATALOG_BUSY')
     expect(browser.create).not.toHaveBeenCalled()
   })
-  it.each(['create', 'catalog'] as const)('does not retry or close unknown %s effects', async operation => {
+  it.each([
+    ['create', 'WEB_CATALOG_CREATE_FAILED', '创建目标'],
+    ['catalog', 'WEB_CATALOG_READ_FAILED', '读取'],
+  ] as const)('does not retry or close unknown %s effects', async (operation, stageCode, stageLabel) => {
     const { browser, control } = setup()
-    browser[operation].mockRejectedValueOnce(new WebBrowserError('WEB_PROCESS_UNKNOWN', 'unknown', true))
-    await expect(control.refresh({})).rejects.toThrow('unknown')
+    browser[operation].mockRejectedValueOnce(new WebBrowserError('WEB_PROCESS_UNKNOWN', 'unknown private effect', true))
+    const message = await rejectedMessage(control.refresh({}))
+    expectDiagnostic(message, stageCode, stageLabel, 'WEB_PROCESS_UNKNOWN', 'unknown private effect')
     await expect(control.refresh({})).rejects.toThrow('WEB_CATALOG_OBSERVATION_UNKNOWN')
     expect(browser.create).toHaveBeenCalledTimes(1)
     expect(browser.finish).not.toHaveBeenCalled()
@@ -81,7 +151,8 @@ describe('target browser model catalogue', () => {
   it('retains the original page if restoring a temporary selection could not be confirmed', async () => {
     const { browser, control } = setup()
     browser.catalog.mockRejectedValueOnce(new WebBrowserError('WEB_SELECTION_RESTORE_FAILED', 'restore unknown', false))
-    await expect(control.refresh({})).rejects.toThrow('restore unknown')
+    const message = await rejectedMessage(control.refresh({}))
+    expectDiagnostic(message, 'WEB_CATALOG_READ_FAILED', '读取', 'WEB_SELECTION_RESTORE_FAILED', 'restore unknown')
     await expect(control.refresh({})).rejects.toThrow('WEB_CATALOG_SELECTION_UNKNOWN')
     expect(browser.catalog).toHaveBeenCalledTimes(1)
     expect(browser.finish).not.toHaveBeenCalled()
