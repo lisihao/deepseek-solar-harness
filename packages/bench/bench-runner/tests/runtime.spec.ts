@@ -120,6 +120,17 @@ describe('BenchRuntime.run', () => {
     await expect(readFile(join(stale, 'leftover.txt'), 'utf8')).rejects.toThrow(/ENOENT/)
   })
 
+  it('lists ledgers and reads one back without modifying it', async () => {
+    await mount([task('t1', 'write:out.txt:yes')])
+    expect(await ctx.benchRuntime.experiments()).toEqual([])
+    await ctx.benchRuntime.run(experiment({ repetitions: 1 }))
+    expect(await ctx.benchRuntime.experiments()).toEqual(['exp'])
+    const snapshot = await ctx.benchRuntime.ledger('exp')
+    expect(snapshot?.experiment).toEqual(experiment({ repetitions: 1 }))
+    expect(snapshot?.records).toHaveLength(2)
+    expect(await ctx.benchRuntime.ledger('missing')).toBeUndefined()
+  })
+
   it('skips recorded cells when the same experiment runs again', async () => {
     await mount([task('t1', 'write:out.txt:yes')])
     await ctx.benchRuntime.run(experiment({ repetitions: 1 }))

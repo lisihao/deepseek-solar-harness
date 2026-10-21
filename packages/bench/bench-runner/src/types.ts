@@ -156,3 +156,137 @@ export interface RunProgress {
   /** Runs in the whole experiment. */
   total: number
 }
+
+/** Statistical settings of {@link analyzeExperiment}; every value is an explicit choice of the caller. */
+export interface AnalysisOptions {
+  /** Two-sided confidence level of the intervals. */
+  confidence: 0.9 | 0.95 | 0.99
+  /** Bootstrap resamples per interval. */
+  resamples: number
+  /** Seed of the bootstrap generator; equal inputs and seed give equal intervals. */
+  seed: number
+  /** Success-rate difference treated as practically zero, for the `equivalent` verdict. */
+  margin: number
+  /** Paired tasks below which a comparison is `insufficient`. At least 3. */
+  minTasks: number
+  /** Invalid-rate excess over the baseline above which a comparison is `unreliable`. */
+  invalidTolerance: number
+}
+
+/** A paired difference against the baseline, averaged over tasks. */
+export interface Estimate {
+  /** Mean over paired tasks of (variant − baseline). */
+  delta: number
+  /** Lower bound of the bootstrap percentile interval. */
+  low: number
+  /** Upper bound of the bootstrap percentile interval. */
+  high: number
+  /** Smallest difference detectable at 80% power with this many tasks and this spread; `null` below 2 tasks. */
+  mde: number | null
+  /** Tasks contributing a difference. */
+  tasks: number
+}
+
+/**
+ * How a variant's success rate compares with the baseline.
+ * - `improved` / `regressed`: the interval excludes 0.
+ * - `equivalent`: the interval lies inside ±margin.
+ * - `underpowered`: neither; more tasks or repetitions are needed.
+ * - `insufficient`: fewer paired tasks than `minTasks`.
+ * - `unreliable`: the variant invalidates runs more often than the baseline by more than `invalidTolerance`.
+ */
+export type Verdict = 'improved' | 'regressed' | 'equivalent' | 'underpowered' | 'insufficient' | 'unreliable'
+
+/** Time spent in one bucket summed over measured runs. */
+export interface TimeShare {
+  /** Model wait. */
+  llmMs: number
+  /** Slowest tool call per step. */
+  toolCriticalMs: number
+  /** Harness and plugin time. */
+  overheadMs: number
+}
+
+/** Per-tool totals over a variant's measured runs. */
+export interface ToolTotals extends ToolStats {
+  /** Tool name. */
+  name: string
+}
+
+/** One variant's runs, before any comparison. */
+export interface VariantSummary {
+  /** Variant key. */
+  variant: VariantId
+  /** Recorded runs. */
+  runs: number
+  /** Runs per terminal state. */
+  graded: number
+  /** Runs killed at the timeout; counted as failures. */
+  timeouts: number
+  /** Runs that could not be measured; excluded from success rates and reported here. */
+  invalid: number
+  /** `invalid / runs`. */
+  invalidRate: number
+  /** Passing runs over graded and timed-out runs; `null` when there are none. */
+  successRate: number | null
+  /** Tasks with at least one passing run, over tasks with a valid run. */
+  passAnyRate: number | null
+  /** Tasks whose every valid run passed, over tasks with a valid run. */
+  passAllRate: number | null
+  /** Mean cost over runs carrying `costUsd`. */
+  meanCostUsd: number | null
+  /** Runs carrying `costUsd`. */
+  pricedRuns: number
+  /** Mean of input + cache-read + output tokens over runs carrying metrics. */
+  meanTokens: number | null
+  /** Mean wall time over graded runs; timeouts are excluded because their time is truncated. */
+  meanWallMs: number | null
+  /** Time buckets summed over graded runs. */
+  time: TimeShare
+  /** Tools by descending total time. */
+  tools: readonly ToolTotals[]
+  /** Tasks whose valid runs disagree. */
+  flakyTasks: readonly BenchTaskId[]
+}
+
+/** One non-baseline variant against the baseline. */
+export interface Comparison {
+  /** The compared variant. */
+  variant: VariantId
+  /** Success-rate difference. */
+  success: Estimate
+  /** Cost difference in USD, over tasks priced on both sides; `null` when none are. */
+  costUsd: Estimate | null
+  /** Token difference. */
+  tokens: Estimate | null
+  /** Wall-time difference in milliseconds, over graded runs. */
+  wallMs: Estimate | null
+  /** Tasks without a valid run on both sides, left out of `success`. */
+  droppedTasks: readonly BenchTaskId[]
+  /** The success verdict. */
+  verdict: Verdict
+}
+
+/** The full analysis of one experiment. */
+export interface ExperimentAnalysis {
+  /** The baseline variant (the experiment's first). */
+  baseline: VariantId
+  /** Every variant, in experiment order. */
+  variants: readonly VariantSummary[]
+  /** Every non-baseline variant against the baseline. */
+  comparisons: readonly Comparison[]
+  /** Pass rate per task and variant; `null` where a variant has no valid run of the task. */
+  matrix: readonly { task: BenchTaskId; rates: Readonly<Record<string, number | null>> }[]
+  /** Variants not beaten on both success rate and mean cost by another priced variant. */
+  pareto: readonly VariantId[]
+  /** The settings used. */
+  options: AnalysisOptions
+}
+
+/** One experiment's ledger as read by a consumer. */
+export interface LedgerSnapshot {
+  /** The pinned definition. */
+  experiment: Experiment
+  /** Records in append order. */
+  records: RunRecord[]
+}

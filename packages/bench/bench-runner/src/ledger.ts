@@ -6,9 +6,9 @@
  * @module @deepseek-ai/dsh-bench-runner/ledger
  */
 
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { CellKey, Experiment, RunRecord } from './types.ts'
+import type { CellKey, Experiment, ExperimentId, RunRecord } from './types.ts'
 
 /** The ledger format version this build reads and writes. */
 export const LEDGER_FORMAT_VERSION = 1
@@ -73,10 +73,12 @@ export class ExperimentLedger {
 
   /**
    * Read every recorded run.
-   * @returns the records in append order; a torn final line from a crash is ignored.
+   * @param repair - truncate a torn final line from the file. Only the runtime that
+   *   appends may repair: for any other reader the last line may be an append in progress.
+   * @returns the records in append order; a torn final line is ignored.
    * @throws Error on a record with an unknown format version or a corrupt interior line.
    */
-  async records(): Promise<RunRecord[]> {
+  async records(repair: boolean): Promise<RunRecord[]> {
     const text = await readOptional(join(this.dir, RUNS_FILE)) ?? ''
     const lines = text.split('\n')
     // A crash mid-append leaves at most the last line without its newline.
@@ -95,7 +97,7 @@ export class ExperimentLedger {
       }
       records.push(record as RunRecord)
     }
-    if (torn !== '') await writeFile(join(this.dir, RUNS_FILE), lines.map(line => `${line}\n`).join(''))
+    if (repair && torn !== '') await writeFile(join(this.dir, RUNS_FILE), lines.map(line => `${line}\n`).join(''))
     return records
   }
 
@@ -106,4 +108,39 @@ export class ExperimentLedger {
   async append(record: RunRecord): Promise<void> {
     await appendFile(join(this.dir, RUNS_FILE), `${JSON.stringify(record)}\n`)
   }
+}
+
+/** Experiment ids that are safe directory names under the ledger root. */
+const EXPERIMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/**
+ * Read the pinned definition of one ledger without creating anything.
+ * @param root - absolute ledger root.
+ * @param id - experiment id; ids that are not safe directory names read as absent.
+ * @returns the definition, or `undefined` when no ledger exists under `id`.
+ */
+export async function readPinnedExperiment(root: string, id: string): Promise<Experiment | undefined> {
+  if (!EXPERIMENT_ID.test(id)) return undefined
+  const text = await readOptional(join(root, id, EXPERIMENT_FILE))
+  return text === undefined ? undefined : JSON.parse(text) as Experiment
+}
+
+/**
+ * List the experiment ids that have a pinned definition.
+ * @param root - absolute ledger root.
+ * @returns the ids in name order; empty when the root does not exist.
+ */
+export async function listExperimentIds(root: string): Promise<ExperimentId[]> {
+  let entries
+  try {
+    entries = await readdir(root, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  const ids: ExperimentId[] = []
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory() && await readPinnedExperiment(root, entry.name) !== undefined) ids.push(entry.name as ExperimentId)
+  }
+  return ids
 }

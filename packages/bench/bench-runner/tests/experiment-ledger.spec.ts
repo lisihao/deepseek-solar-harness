@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExperimentLedger, readExperiment } from '@deepseek-ai/dsh-bench-runner'
+import { listExperimentIds, readPinnedExperiment } from '../src/ledger.ts'
 import type { Experiment, RunRecord } from '@deepseek-ai/dsh-bench-runner'
 
 let dir: string
@@ -60,12 +61,12 @@ describe('ExperimentLedger', () => {
   it('appends records and reopens the same definition', async () => {
     const ledger = new ExperimentLedger(dir, experiment)
     await ledger.open()
-    expect(await ledger.records()).toEqual([])
+    expect(await ledger.records(true)).toEqual([])
     await ledger.append(record(0))
     await ledger.append(record(1))
     const reopened = new ExperimentLedger(dir, experiment)
     await reopened.open()
-    expect((await reopened.records()).map(entry => entry.cell.rep)).toEqual([0, 1])
+    expect((await reopened.records(true)).map(entry => entry.cell.rep)).toEqual([0, 1])
     await expect(new ExperimentLedger(dir, { ...experiment, repetitions: 2 }).open()).rejects.toThrow(/different definition/)
   })
 
@@ -74,12 +75,22 @@ describe('ExperimentLedger', () => {
     await ledger.open()
     const runs = join(ledger.dir, 'runs.jsonl')
     await writeFile(runs, `${JSON.stringify(record(0))}\n\n{"formatVer`)
-    expect(await ledger.records()).toHaveLength(1)
+    expect(await ledger.records(true)).toHaveLength(1)
     expect(await readFile(runs, 'utf8')).toBe(`${JSON.stringify(record(0))}\n\n`)
     await writeFile(runs, `${JSON.stringify({ ...record(0), formatVersion: 2 })}\n`)
-    await expect(ledger.records()).rejects.toThrow(/runs\.jsonl:1: run record format 2 is not readable/)
+    await expect(ledger.records(true)).rejects.toThrow(/runs\.jsonl:1: run record format 2 is not readable/)
     await writeFile(runs, '{bad\n')
-    await expect(ledger.records()).rejects.toThrow(/runs\.jsonl:1: corrupt run record/)
+    await expect(ledger.records(true)).rejects.toThrow(/runs\.jsonl:1: corrupt run record/)
+  })
+
+  it('leaves a torn final line in place when reading without repair', async () => {
+    const ledger = new ExperimentLedger(dir, experiment)
+    await ledger.open()
+    const runs = join(ledger.dir, 'runs.jsonl')
+    const text = `${JSON.stringify(record(0))}\n{"formatVer`
+    await writeFile(runs, text)
+    expect(await ledger.records(false)).toHaveLength(1)
+    expect(await readFile(runs, 'utf8')).toBe(text)
   })
 
   it('surfaces read errors other than a missing file', async () => {
@@ -89,5 +100,27 @@ describe('ExperimentLedger', () => {
     const { mkdir } = await import('node:fs/promises')
     await mkdir(join(ledger.dir, 'experiment.json'))
     await expect(ledger.open()).rejects.toThrow(/EISDIR/)
+  })
+})
+
+describe('ledger listing', () => {
+  it('lists pinned experiments in name order and reads one back', async () => {
+    expect(await listExperimentIds(join(dir, 'absent'))).toEqual([])
+    await new ExperimentLedger(dir, { ...experiment, id: 'b' as Experiment['id'] }).open()
+    await new ExperimentLedger(dir, experiment).open()
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(join(dir, 'unpinned'))
+    await writeFile(join(dir, 'stray.txt'), 'x')
+    await mkdir(join(dir, 'bad id'))
+    await writeFile(join(dir, 'bad id', 'experiment.json'), '{}')
+    expect(await listExperimentIds(dir)).toEqual(['b', 'exp'])
+    expect(await readPinnedExperiment(dir, 'exp')).toEqual(experiment)
+    expect(await readPinnedExperiment(dir, 'missing')).toBeUndefined()
+    expect(await readPinnedExperiment(dir, '../etc')).toBeUndefined()
+  })
+
+  it('surfaces a ledger root that is not a directory', async () => {
+    await writeFile(join(dir, 'file'), 'x')
+    await expect(listExperimentIds(join(dir, 'file'))).rejects.toThrow(/ENOTDIR/)
   })
 })

@@ -10,6 +10,7 @@ The benchmark capability measures what a plugin, plugin combination, or plugin-b
 2. `ctx.benchRuntime.run(experiment)` loads the suite's tasks and validates every grader spec before any run starts.
 3. Each pending cell gets a fresh workspace, private `$DSH_HOME`, and state directory. The child `dsh --profile <profile> [--patch …] <prompt>` runs the task as one turn.
 4. The runtime reads the child's sessions through the JSONL persistence backend, grades the workspace and root session log, folds metrics, and appends the `RunRecord`.
+5. [`dsh-bench-web`](../../packages/bench/bench-web/README.md) reads ledgers through `ctx.benchRuntime.ledger(id)` and serves them with `analyzeExperiment`: per-variant summaries and paired comparisons against the baseline with a verdict.
 
 Suites are added without touching the runtime ([cookbook](../cookbook/adding-a-benchmark.md)); [`dsh-bench-testkit`](../../packages/test-support/bench-testkit/README.md) checks that each grader separates a passing run from a failing one.
 
@@ -83,7 +84,20 @@ Runs benchmark experiments as isolated child processes.
  *   or when the ledger pins a different definition; the abort reason when cancelled.
  */
 async run(experiment: Experiment, options: RunOptions = {}): Promise<RunRecord[]>
+
+/**
+ * List the experiments that have a ledger.
+ * @returns their ids in name order.
+ */
+experiments(): Promise<ExperimentId[]>
+
+/**
+ * Read one experiment's pinned definition and records without modifying the ledger.
+ * @param id - experiment id.
+ * @returns the snapshot, or `undefined` when no ledger exists under `id`.
+ */
+async ledger(id: string): Promise<LedgerSnapshot | undefined>
 ```
 
-Source: [`packages/bench/bench-runner/src/index.ts:87`](../../packages/bench/bench-runner/src/index.ts)
+Source: [`packages/bench/bench-runner/src/index.ts:88`](../../packages/bench/bench-runner/src/index.ts)
 <!-- END GENERATED cordis-surface -->
