@@ -1,6 +1,6 @@
 # Prime RLM verification record
 
-Current evaluation checkpoint (2026-10-21): 600 admitted requests are closed, comprising 586 confirmed and 14 retained unknown, with no in-flight request. The user raised the hard ceiling to 700. The next [same-task four-condition protocol](prime-rlm-controlled-protocol.md) reserves at most 97 calls. The dated records below retain their original per-phase limits and outcomes; they do not reset the current prefix.
+Current evaluation checkpoint (2026-10-21): **676 = 662 confirmed + 14 retained unknown**, zero in flight. The user raised the cumulative hard cap to **800**. The [fixed four-condition result](prime-rlm-controlled-results.md) did not establish a recursive-plugin quality benefit. D and S0 completed at scores 0.75 and 0.5625; R/S failed native completion. Independent grading, accounting, S0 recorded-control and closure checks passed. Historical phase limits below do not reset this prefix.
 
 Date: 2026-10-21, Asia/Shanghai. PR: [#280](https://github.com/lisihao/deepseek-solar-harness/pull/280).
 
@@ -230,3 +230,12 @@ The eleven-call [operational recovery](prime-rlm-quality-recovery-results.md) cl
 The four-condition runner passed the local gate before real dispatch: build/typecheck, 162 Vitest tests, 46 ARC checks, 56 recursion checks, 37 quality checks, built-package disposable-profile behavior, and homepage/market-guide consistency. A subsequent proof-directory isolation fix changed only controlled.mjs; all six affected controlled-runner checks were rerun and passed. Actual zero-model R/S/S0 native proof remains a separate required gate. These checks consumed zero real model requests.
 
 The first four-condition zero-model proof stopped after the original R fixture completed eight scripted requests and cleanup: its declared rawJournal path was never generated, while actual ACP events were present in native-worker-events.jsonl. The verifier now binds that actual journal and checks ACP/root-session/shutdown events. Six affected runner tests passed again. The failed proof and independent closure (no owned process, retained socket refused, zero real requests) remain local; a fresh proof directory is required. No Prime or installed bytes changed.
+
+
+## Native continuation configuration repair (2026-10-21)
+
+The fixed Prime CLI independently defaults autonomous continuations and gate retries to three; maxTurns=32 does not raise either. Four initial zero-model child-bearing attempts wrote their fixture but exhausted three continuations and ended with ACP max_turn_requests. They remain rejected, even with a diagnostic grade. The adapter completion policy was not relaxed. The source now optionally passes positive gateMaxRetries and maxContinuations to their original flags, persists them and preserves omitted/older configurations. Prime source and the binary are unchanged.
+
+The simple joint-limit contrast passed with zero real model requests: original/plugin defaults stopped incomplete after five scripted requests and four deliberately failed gate turns; explicit-both-32 variants completed in seven. The latest-source R/S/S0 native proof then passed: R8 and S8 each include three actual child requests, persistent root/child state and settled collect; S0 uses two requests, no child and an actual rejected spawn. All three completed under strict native terminal validation, retained their receipts and physically cleaned up. The [bounded next-panel protocol](prime-rlm-gate-protocol.md) records source/proof hashes and the distinction from measured quality.
+
+The stable local gate passed build, strict typecheck, 165 Vitest tests, 46 ARC checks, 57 recursion checks, 37 quality checks, built-package disposable-profile acceptance and homepage/market-guide consistency. The separate native-worker configuration/sandbox check passed. No real model request was made in these checks; the closed evaluation prefix remains 676/800. The installed application still uses its earlier identified artifact; this repair has not been installed or released.

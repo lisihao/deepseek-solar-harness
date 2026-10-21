@@ -31,12 +31,20 @@ function journalLine(value: unknown): string {
 describe('native autonomous execution evidence', () => {
   it('round-trips a strict execution snapshot without changing gate bytes', async () => {
     const directory = await fixture()
-    const autonomous: NativeAutonomous = { maxTurns: 12, maxTokens: 34_567, gate: '  原样\tgate\n' }
+    const autonomous: NativeAutonomous = { maxTurns: 12, maxTokens: 34_567, gate: '  原样\tgate\n', gateMaxRetries: 32, maxContinuations: 32 }
 
     await saveExecution(directory, autonomous)
 
     expect(await loadExecution(directory)).toEqual(autonomous)
     expect(JSON.parse(await readFile(join(directory, 'execution.json'), 'utf8'))).toEqual({ formatVersion: 1, autonomous })
+  })
+
+  it('loads snapshots written before gate retry support', async () => {
+    const directory = await fixture()
+    const autonomous = { maxTurns: 12, maxTokens: 34_567, gate: '  原样\tgate\n' }
+    await writeFile(join(directory, 'execution.json'), JSON.stringify({ formatVersion: 1, autonomous }))
+
+    await expect(loadExecution(directory)).resolves.toEqual(autonomous)
   })
 
   it('refuses a duplicate snapshot and leaves the first value intact', async () => {
@@ -112,14 +120,46 @@ describe('native autonomous execution evidence', () => {
     ])
   })
 
+  it('appends an explicitly configured positive native gate retry limit', () => {
+    expect(executionArguments({ maxTurns: 7, maxTokens: 8, gateMaxRetries: 32 }, 9_000)).toEqual([
+      '--autonomous',
+      '--autonomous-max-turns',
+      '7',
+      '--autonomous-max-tokens',
+      '8',
+      '--autonomous-timeout-ms',
+      '9000',
+      '--autonomous-gate-retries',
+      '32',
+    ])
+
+  })
+
+  it('forwards an explicit continuation limit without changing omitted defaults', () => {
+    const base = { maxTurns: 7, maxTokens: 8, gateMaxRetries: 32 }
+    const args = executionArguments({ ...base, maxContinuations: 32 }, 9_000)
+    expect(args).toEqual([...executionArguments(base, 9_000), '--autonomous-max-continuations', '32'])
+    expect(executionArguments(base, 9_000)).not.toContain('--autonomous-max-continuations')
+    for (const maxContinuations of [0, -1, 1.5, 1_001]) {
+      expect(nativeAutonomousSchema.safeParse({ ...base, maxContinuations }).success).toBe(false)
+    }
+    for (const maxContinuations of [1, 1_000]) {
+      expect(nativeAutonomousSchema.safeParse({ ...base, maxContinuations }).success).toBe(true)
+    }
+  })
+
   it('enforces bounds, strict fields, and non-blank gate text', () => {
     expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1 }).success).toBe(true)
-    expect(nativeAutonomousSchema.safeParse({ maxTurns: 1_000, maxTokens: 1_000_000_000, gate: 'x'.repeat(4_096) }).success).toBe(true)
+    expect(nativeAutonomousSchema.safeParse({ maxTurns: 1_000, maxTokens: 1_000_000_000, gate: 'x'.repeat(4_096), gateMaxRetries: 1_000 }).success).toBe(true)
     expect(nativeAutonomousSchema.safeParse({ maxTurns: 0, maxTokens: 1 }).success).toBe(false)
     expect(nativeAutonomousSchema.safeParse({ maxTurns: 1_001, maxTokens: 1 }).success).toBe(false)
     expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1_000_000_001 }).success).toBe(false)
     expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1, gate: ' '.repeat(4_096) }).success).toBe(false)
     expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1, gate: 'x'.repeat(4_097) }).success).toBe(false)
+    expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1, gateMaxRetries: 0 }).success).toBe(false)
+    expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1, gateMaxRetries: -1 }).success).toBe(false)
+    expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1, gateMaxRetries: 1.5 }).success).toBe(false)
+    expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1, gateMaxRetries: 1_001 }).success).toBe(false)
     expect(nativeAutonomousSchema.safeParse({ maxTurns: 1, maxTokens: 1, unexpected: true }).success).toBe(false)
   })
 })

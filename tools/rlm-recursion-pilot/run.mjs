@@ -977,13 +977,14 @@ export async function executeCondition({
   const protocol = condition.protocol ?? 'recursion-ablation-v1'
   const qualityPilot = protocol === 'quality-pilot-v1'
   const qualityRecovery = protocol === 'quality-recovery-v1'
-  const qualityControl = protocol === 'quality-control-v1'
+  const qualityGate = protocol === 'quality-gate-control-v1'
+  const qualityControl = protocol === 'quality-control-v1' || qualityGate
   if (protocol !== 'recursion-ablation-v1' && !qualityPilot && !qualityRecovery && !qualityControl) fail('RLM_CONDITION_PROTOCOL', 'unsupported explicit condition protocol')
   if (qualityPilot && condition.arm !== 'R' && condition.arm !== 'S') fail('RLM_CONDITION_PROTOCOL', 'quality text task requires R or S')
   if (qualityRecovery && condition.arm !== 'S') fail('RLM_CONDITION_PROTOCOL', 'quality recovery requires S')
   if (qualityControl && !['R', 'S', 'S0'].includes(condition.arm)) fail('RLM_CONDITION_PROTOCOL', 'quality control requires R, S or S0')
   const nativeLimits = qualityControl
-    ? { protocol: 'quality-control-v1', requestLimit: 32, wallTimeMs: 1_200_000 }
+    ? { protocol, requestLimit: 32, wallTimeMs: 1_200_000 }
     : qualityRecovery
     ? { protocol: 'quality-recovery-v1', requestLimit: 11, wallTimeMs: 1_200_000 }
     : qualityPilot
@@ -1073,7 +1074,8 @@ export async function executeCondition({
   const childRoster = await readChildRosterEvidence(worker)
   const expectedDepth = qualityControl ? (condition.arm === 'S0' ? 0 : 1) : qualityPilot || qualityRecovery || condition.arm === 'S' ? 1 : 0
   const physicalCleanup = worker?.result?.physicalCleanup === true
-  const exitedCleanly = worker?.exit?.code === 0 && worker?.exit?.signal === null
+  const workerExited = Number.isInteger(worker?.exit?.code) && worker?.exit?.signal === null
+  const exitedCleanly = workerExited && worker.exit.code === 0
   const depthMatches = worker?.result?.nativeDepth === expectedDepth && worker?.result?.actualDepth === expectedDepth
   const executionCompleted = worker?.result?.state === 'completed' && physicalCleanup && exitedCleanly && depthMatches && inputsUnchanged && workerError === null
   return {
@@ -1109,7 +1111,7 @@ export async function executeCondition({
       unexpectedChildInS0: condition.arm === 'S0' && childRequests.length > 0,
     },
     executionCompleted,
-    cleanupComplete: physicalCleanup && exitedCleanly,
+    cleanupComplete: physicalCleanup && workerExited,
   }
 }
 

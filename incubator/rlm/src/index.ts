@@ -175,6 +175,8 @@ export function createRunTool(host: RlmHost, config: Config): ToolDefinition {
           maxTurns: { type: 'integer', required: true, description: '原生 assistant turn 上限（1-1000）。' },
           maxTokens: { type: 'integer', required: true, description: '原生 autonomous token 上限（1-1000000000），不是单次输出上限。' },
           gate: { type: 'string', description: '可选原生完成检查命令；在任务工作目录按 Prime 原始机制执行。' },
+          gateMaxRetries: { type: 'integer', description: '原生完成门禁重试上限（1-1000）；不增加整树模型请求预算。' },
+          maxContinuations: { type: 'integer', description: '原生自主续轮上限（1-1000）；省略时使用 Prime 默认值，不增加整树模型请求预算。' },
         },
       },
       maxModelRequests: { type: 'integer', required: true, description: `整个任务树的逻辑模型请求上限（1-${MAX_MODEL_REQUESTS}）。` },

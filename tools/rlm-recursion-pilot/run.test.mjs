@@ -314,10 +314,10 @@ test('quality text executor gives original and plugin the same 32-call native co
 })
 
 test('quality control keeps native budgets matched and allows depth-zero S0', async () => {
-  for (const arm of ['R', 'S', 'S0']) await withPreparedPanel(`quality-control-${arm}`, async ({ manifest }) => {
+  for (const protocol of ['quality-control-v1', 'quality-gate-control-v1']) for (const arm of ['R', 'S', 'S0']) await withPreparedPanel(`${protocol}-${arm}`, async ({ manifest }) => {
     const original = manifest.conditions.find(x => x.arm === 'S')
-    const condition = { ...original, arm, protocol: 'quality-control-v1',
-      autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -s answer.json' } }
+    const condition = { ...original, arm, protocol,
+      autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -s answer.json', ...(protocol === 'quality-gate-control-v1' ? { gateMaxRetries: 32, maxContinuations: 32 } : {}) } }
     const task = (await privateTasks(manifest))[condition.taskIndex]
     const ledger = await Ledger.open(join(condition.durableDirectory, 'quality-ledger.jsonl'), { total: 65, perRun: 32 })
     let start
@@ -333,7 +333,7 @@ test('quality control keeps native budgets matched and allows depth-zero S0', as
           exit: { code: 0, signal: null }, stdout: '', stderr: '', error: null }
       },
     })
-    assert.equal(start.protocol, 'quality-control-v1')
+    assert.equal(start.protocol, protocol)
     assert.equal(start.arm, arm)
     assert.equal(start.requestLimit, 32)
     assert.equal(start.wallTimeMs, 1_200_000)
@@ -382,4 +382,25 @@ test('explicit unknown quality protocol and unsupported arm fail before native e
       provider: {}, ledger: {}, relay: {}, spawnWorker: async () => { started = true } }), /RLM_CONDITION_PROTOCOL/)
     assert.equal(started, false)
   }
+})
+
+
+test('failed task exit remains incomplete while successful physical cleanup is recorded separately', async () => {
+  for (const physicalCleanup of [true, false]) await withPreparedPanel(`failed-cleanup-${physicalCleanup}`, async ({ manifest }) => {
+    const original = manifest.conditions.find(x => x.arm === 'S')
+    const condition = { ...original, arm: 'R', protocol: 'quality-control-v1',
+      autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -s answer.json' } }
+    const task = (await privateTasks(manifest))[condition.taskIndex]
+    const ledger = await Ledger.open(join(condition.durableDirectory, 'failed-quality-ledger.jsonl'), { total: 32, perRun: 32 })
+    const outcome = await executeCondition({ manifest, condition, task, ledger,
+      provider: { modelInfo: { name: 'fixture' }, setPhysicalAdmission() {} },
+      relay: { restoreOptions: async value => value }, grade: () => ({ primaryScore: 1, schemaValid: true, errors: [] }),
+      reservePort: async () => ({ port: 14001, releaseIpv4: async () => {}, close: async () => {} }),
+      sandboxBuilder: () => '(version 1)',
+      spawnWorker: async () => ({ result: { state: 'failed', nativeDepth: 1, actualDepth: 1, physicalCleanup },
+        exit: { code: 1, signal: null }, stdout: '', stderr: '', error: null }),
+    })
+    assert.equal(outcome.executionCompleted, false)
+    assert.equal(outcome.cleanupComplete, physicalCleanup)
+  })
 })

@@ -213,6 +213,7 @@ async function testConfigModes() {
     assert.equal(control.requestLimit, 32)
     assert.equal(control.wallTimeMs, 1_200_000)
     assert.deepEqual(control.autonomous, { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' })
+    assert.equal(Object.prototype.hasOwnProperty.call(control.autonomous, 'gateMaxRetries'), false)
     assert.equal(control.brokerSocket, undefined)
     assert.equal(control.brokerState, undefined)
     assert.equal(__test.defaultNativeDepth('quality-control-v1', arm), nativeDepth)
@@ -220,6 +221,62 @@ async function testConfigModes() {
   await assert.rejects(() => __test.normalizeConfig({ ...controlStart('S'), requestLimit: 31 }), /ARC_REQUEST_LIMIT_CHANGED/)
   await assert.rejects(() => __test.normalizeConfig({ ...controlStart('S'), requestLimit: 33 }), /ARC_REQUEST_LIMIT_CHANGED/)
   await assert.rejects(() => __test.normalizeConfig({ ...controlStart('unknown') }), /ARC_WORKER_CONFIG/)
+  await assert.rejects(() => __test.normalizeConfig({
+    ...controlStart('R'),
+    autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json', gateMaxRetries: 32 },
+  }), /ARC_AUTONOMOUS_CHANGED/)
+
+  const gateControlStart = arm => ({
+    ...fixture.base,
+    protocol: 'quality-gate-control-v1',
+    arm,
+    requestLimit: 32,
+    wallTimeMs: 1_200_000,
+    autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json', gateMaxRetries: 32, maxContinuations: 32 },
+  })
+  const gateControlR = await __test.normalizeConfig(gateControlStart('R'))
+  const gateControlS = await __test.normalizeConfig(gateControlStart('S'))
+  const gateControlS0 = await __test.normalizeConfig(gateControlStart('S0'))
+  for (const [control, arm, nativeDepth] of [[gateControlR, 'R', 1], [gateControlS, 'S', 1], [gateControlS0, 'S0', 0]]) {
+    assert.equal(control.protocol, 'quality-gate-control-v1')
+    assert.equal(control.arm, arm)
+    assert.equal(control.nativeDepth, nativeDepth)
+    assert.equal(control.requestLimit, 32)
+    assert.equal(control.wallTimeMs, 1_200_000)
+    assert.deepEqual(control.autonomous, { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json', gateMaxRetries: 32, maxContinuations: 32 })
+    assert.equal(control.brokerSocket, undefined)
+    assert.equal(control.brokerState, undefined)
+    assert.equal(__test.defaultNativeDepth('quality-gate-control-v1', arm), nativeDepth)
+  }
+  for (const gateMaxRetries of [null, 31, 33]) {
+    const autonomous = { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json', maxContinuations: 32 }
+    if (gateMaxRetries !== null) autonomous.gateMaxRetries = gateMaxRetries
+    await assert.rejects(() => __test.normalizeConfig({ ...gateControlStart('S'), autonomous }), /ARC_AUTONOMOUS_CHANGED/)
+  }
+
+  for (const maxContinuations of [undefined, 0, 31, 33]) {
+    const autonomous = { ...gateControlStart('S').autonomous }
+    if (maxContinuations === undefined) delete autonomous.maxContinuations
+    else autonomous.maxContinuations = maxContinuations
+    await assert.rejects(() => __test.normalizeConfig({ ...gateControlStart('S'), autonomous }), /ARC_AUTONOMOUS_CHANGED/)
+  }
+  await assert.rejects(() => __test.normalizeConfig({
+    ...controlStart('S'), autonomous: { ...controlStart('S').autonomous, maxContinuations: 32 },
+  }), /ARC_AUTONOMOUS_CHANGED/)
+
+  const oldArgs = __test.directLaunchArguments({
+    workspace: '/tmp/workspace',
+    wallTimeMs: 1_200_000,
+    autonomous: { maxTurns: 32, maxTokens: 4_000_000, gate: 'test -f answer.json' },
+  }, '/tmp/prime.sock')
+  assert.equal(oldArgs.includes('--autonomous-gate-retries'), false)
+  assert.equal(oldArgs.includes('--autonomous-max-continuations'), false)
+  const gateControlArgs = __test.directLaunchArguments({
+    workspace: '/tmp/workspace',
+    wallTimeMs: 1_200_000,
+    autonomous: gateControlR.autonomous,
+  }, '/tmp/prime.sock')
+  assert.deepEqual(gateControlArgs.slice(-4), ['--autonomous-gate-retries', '32', '--autonomous-max-continuations', '32'])
 
   const recursionStart = arm => ({
     ...fixture.base,

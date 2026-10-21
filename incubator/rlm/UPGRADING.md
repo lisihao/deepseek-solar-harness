@@ -54,6 +54,8 @@ The internal evaluation host can explicitly forward the original nonnegative `rl
 
 3. **ARC benchmark SDK facade (evaluation tools only).** The fixed author ARC broker calls action methods absent from its pinned Toolkit 0.9.9. `tools/fixtures/rlm-arc-prepare/sdk-step-adapter.py` delegates those method calls to the same pinned SDK's `step(GameAction, data=...)`. Original broker counts/reset/terminal logic remains unmodified; the original API failure and explicit compatibility flag remain in reports. This does not ship with the plugin, modify Prime, or justify exact author-result reproduction. See the [ARC protocol boundary](../../docs/testing/prime-rlm-arc-protocol.md).
 
+4. **Optional native autonomous limits (adapter only).** `src/execution.ts` validates and persists positive `gateMaxRetries` and `maxContinuations`, emitting the original `--autonomous-gate-retries` and `--autonomous-max-continuations` flags only when explicitly provided. The pinned CLI requires positive integers for both flags. Omission retains Prime's default. It does not change Prime, increase Solar's complete-tree request budget, or accept a failed gate. `tests/execution.test.ts` verifies persistence, old snapshots, exact argv and bounds. Actual original/plugin native gate controls are recorded separately from unit checks and measured quality.
+
 ## Current verification record
 
 See [the canonical verification record](../../docs/testing/prime-rlm-verification.md) for actual source, native, scratch-profile and installed-app evidence. A bounded isolated Codex subscription pilot is recorded there separately. General efficacy, paper reproduction and held-out continual improvement are not established by that pilot.

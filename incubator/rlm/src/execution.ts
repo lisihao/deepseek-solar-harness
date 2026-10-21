@@ -13,6 +13,8 @@ export const nativeAutonomousSchema = z.strictObject({
   maxTurns: z.number().int().min(1).max(1_000),
   maxTokens: z.number().int().min(1).max(1_000_000_000),
   gate: nonBlankGate.optional(),
+  gateMaxRetries: z.number().int().min(1).max(1_000).optional(),
+  maxContinuations: z.number().int().min(1).max(1_000).optional(),
 })
 
 export type NativeAutonomous = z.infer<typeof nativeAutonomousSchema>
@@ -195,5 +197,7 @@ export function executionArguments(autonomous: NativeAutonomous | null, maxWallT
     String(maxWallTimeMs),
   ]
   if (value.gate !== undefined) args.push('--autonomous-gate', value.gate)
+  if (value.gateMaxRetries !== undefined) args.push('--autonomous-gate-retries', String(value.gateMaxRetries))
+  if (value.maxContinuations !== undefined) args.push('--autonomous-max-continuations', String(value.maxContinuations))
   return args
 }

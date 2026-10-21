@@ -25,6 +25,7 @@ const RECURSION_ABLATION_PROTOCOL = 'recursion-ablation-v1'
 const QUALITY_PILOT_PROTOCOL = 'quality-pilot-v1'
 const QUALITY_RECOVERY_PROTOCOL = 'quality-recovery-v1'
 const QUALITY_CONTROL_PROTOCOL = 'quality-control-v1'
+const QUALITY_GATE_CONTROL_PROTOCOL = 'quality-gate-control-v1'
 const RECURSION_ABLATION_REQUEST_LIMIT = 14
 const RECURSION_ABLATION_WALL_TIME_MS = 1_200_000
 const RECURSION_ABLATION_AUTONOMOUS = Object.freeze({ maxTurns: 14, maxTokens: 4_000_000 })
@@ -37,6 +38,9 @@ const QUALITY_RECOVERY_AUTONOMOUS = Object.freeze({ maxTurns: 11, maxTokens: 4_0
 const QUALITY_CONTROL_REQUEST_LIMIT = 32
 const QUALITY_CONTROL_WALL_TIME_MS = 1_200_000
 const QUALITY_CONTROL_AUTONOMOUS = Object.freeze({ maxTurns: 32, maxTokens: 4_000_000 })
+const QUALITY_GATE_CONTROL_REQUEST_LIMIT = QUALITY_CONTROL_REQUEST_LIMIT
+const QUALITY_GATE_CONTROL_WALL_TIME_MS = QUALITY_CONTROL_WALL_TIME_MS
+const QUALITY_GATE_CONTROL_AUTONOMOUS = Object.freeze({ ...QUALITY_CONTROL_AUTONOMOUS, gateMaxRetries: 32, maxContinuations: 32 })
 const PRIME_META = 'ai.primeintellect.prime-agent'
 const MAX_HTTP_REQUEST_BYTES = 32 * 1024 * 1024
 const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024
@@ -145,14 +149,28 @@ function normalizedRoute(value) {
 }
 
 function normalizedAutonomous(value, fixed, detail) {
+  const hasGateMaxRetries = isRecord(value) && Object.prototype.hasOwnProperty.call(value, 'gateMaxRetries')
+  const gateMaxRetries = hasGateMaxRetries ? value.gateMaxRetries : undefined
+  const expectsGateMaxRetries = Object.prototype.hasOwnProperty.call(fixed, 'gateMaxRetries')
+  const hasMaxContinuations = isRecord(value) && Object.prototype.hasOwnProperty.call(value, 'maxContinuations')
+  const maxContinuations = hasMaxContinuations ? value.maxContinuations : undefined
+  const expectsMaxContinuations = Object.prototype.hasOwnProperty.call(fixed, 'maxContinuations')
   if (!isRecord(value)
     || value.maxTurns !== fixed.maxTurns
     || value.maxTokens !== fixed.maxTokens
     || typeof value.gate !== 'string'
-    || value.gate.trim().length === 0) {
+    || value.gate.trim().length === 0
+    || (expectsGateMaxRetries ? gateMaxRetries !== fixed.gateMaxRetries : hasGateMaxRetries)
+    || (expectsMaxContinuations ? maxContinuations !== fixed.maxContinuations : hasMaxContinuations)) {
     throw error('ARC_AUTONOMOUS_CHANGED', detail)
   }
-  return { maxTurns: value.maxTurns, maxTokens: value.maxTokens, gate: value.gate }
+  return {
+    maxTurns: value.maxTurns,
+    maxTokens: value.maxTokens,
+    gate: value.gate,
+    ...(expectsGateMaxRetries ? { gateMaxRetries: fixed.gateMaxRetries } : {}),
+    ...(expectsMaxContinuations ? { maxContinuations: fixed.maxContinuations } : {}),
+  }
 }
 
 async function normalizeConfig(message) {
@@ -163,12 +181,13 @@ async function normalizeConfig(message) {
   const qualityPilot = protocol === QUALITY_PILOT_PROTOCOL
   const qualityRecovery = protocol === QUALITY_RECOVERY_PROTOCOL
   const qualityControl = protocol === QUALITY_CONTROL_PROTOCOL
-  if (protocol !== ARC_PROTOCOL && !recursionAblation && !qualityPilot && !qualityRecovery && !qualityControl) throw error('ARC_WORKER_CONFIG', 'protocol must be arc-pilot-v1, recursion-ablation-v1, quality-pilot-v1, quality-recovery-v1, or quality-control-v1')
+  const qualityGateControl = protocol === QUALITY_GATE_CONTROL_PROTOCOL
+  if (protocol !== ARC_PROTOCOL && !recursionAblation && !qualityPilot && !qualityRecovery && !qualityControl && !qualityGateControl) throw error('ARC_WORKER_CONFIG', 'protocol must be arc-pilot-v1, recursion-ablation-v1, quality-pilot-v1, quality-recovery-v1, quality-control-v1, or quality-gate-control-v1')
   if (recursionAblation) {
     if (message.arm !== 'S0' && message.arm !== 'S') throw error('ARC_WORKER_CONFIG', 'recursion ablation arm must be S0 or S')
   } else if (qualityRecovery) {
     if (message.arm !== 'S') throw error('ARC_WORKER_CONFIG', 'quality recovery arm must be S')
-  } else if (qualityControl) {
+  } else if (qualityControl || qualityGateControl) {
     if (!['R', 'S', 'S0'].includes(message.arm)) throw error('ARC_WORKER_CONFIG', 'quality control arm must be R, S, or S0')
   } else if (message.arm !== 'R' && message.arm !== 'S') {
     throw error('ARC_WORKER_CONFIG', 'arm must be R or S')
@@ -179,17 +198,20 @@ async function normalizeConfig(message) {
     ? RECURSION_ABLATION_REQUEST_LIMIT
     : qualityPilot ? QUALITY_PILOT_REQUEST_LIMIT
       : qualityRecovery ? QUALITY_RECOVERY_REQUEST_LIMIT
-        : qualityControl ? QUALITY_CONTROL_REQUEST_LIMIT : FIXED_REQUEST_LIMIT
+        : qualityControl ? QUALITY_CONTROL_REQUEST_LIMIT
+          : qualityGateControl ? QUALITY_GATE_CONTROL_REQUEST_LIMIT : FIXED_REQUEST_LIMIT
   const wallTimeMs = recursionAblation
     ? RECURSION_ABLATION_WALL_TIME_MS
     : qualityPilot ? QUALITY_PILOT_WALL_TIME_MS
       : qualityRecovery ? QUALITY_RECOVERY_WALL_TIME_MS
-        : qualityControl ? QUALITY_CONTROL_WALL_TIME_MS : FIXED_WALL_TIME_MS
+        : qualityControl ? QUALITY_CONTROL_WALL_TIME_MS
+          : qualityGateControl ? QUALITY_GATE_CONTROL_WALL_TIME_MS : FIXED_WALL_TIME_MS
   const autonomous = recursionAblation
     ? RECURSION_ABLATION_AUTONOMOUS
     : qualityPilot ? QUALITY_PILOT_AUTONOMOUS
       : qualityRecovery ? QUALITY_RECOVERY_AUTONOMOUS
-        : qualityControl ? QUALITY_CONTROL_AUTONOMOUS : FIXED_AUTONOMOUS
+        : qualityControl ? QUALITY_CONTROL_AUTONOMOUS
+          : qualityGateControl ? QUALITY_GATE_CONTROL_AUTONOMOUS : FIXED_AUTONOMOUS
   if (message.requestLimit !== requestLimit) throw error('ARC_REQUEST_LIMIT_CHANGED', `expected ${String(requestLimit)}`)
   if (message.wallTimeMs !== wallTimeMs) throw error('ARC_WALL_TIME_CHANGED', `expected ${String(wallTimeMs)}`)
   if (!Number.isSafeInteger(message.bridgePort) || message.bridgePort < 1 || message.bridgePort > 65_535) {
@@ -204,7 +226,7 @@ async function normalizeConfig(message) {
   const shared = await requireDirectory(message.shared, 'shared')
   const compiled = await requireDirectory(message.compiled, 'compiled')
   const packageRoot = await requireDirectory(message.packageRoot, 'packageRoot')
-  const brokerOptional = recursionAblation || qualityPilot || qualityRecovery || qualityControl
+  const brokerOptional = recursionAblation || qualityPilot || qualityRecovery || qualityControl || qualityGateControl
   const brokerSocket = message.brokerSocket === undefined && brokerOptional ? undefined : absolute(message.brokerSocket, 'brokerSocket')
   const brokerState = message.brokerState === undefined && brokerOptional ? undefined : absolute(message.brokerState, 'brokerState')
   if ((brokerSocket !== undefined && !inside(directory, brokerSocket)) || (brokerState !== undefined && !inside(directory, brokerState))) {
@@ -222,12 +244,13 @@ async function normalizeConfig(message) {
     original,
     protocol,
     arm: message.arm,
-    nativeDepth: recursionAblation ? (message.arm === 'S0' ? 0 : 1) : qualityPilot || qualityRecovery ? 1 : qualityControl ? (message.arm === 'S0' ? 0 : 1) : 0,
+    nativeDepth: recursionAblation ? (message.arm === 'S0' ? 0 : 1) : qualityPilot || qualityRecovery ? 1 : qualityControl || qualityGateControl ? (message.arm === 'S0' ? 0 : 1) : 0,
     label: recursionAblation
       ? 'Recursion ablation text task'
       : qualityPilot ? 'Quality pilot text task'
         : qualityRecovery ? 'Quality recovery text task'
-          : qualityControl ? 'Quality control text task' : 'ARC fixed author task',
+          : qualityControl ? 'Quality control text task'
+            : qualityGateControl ? 'Quality gate-control text task' : 'ARC fixed author task',
     directory,
     workspace,
     home,
@@ -249,6 +272,8 @@ async function normalizeConfig(message) {
           ? 'worker accepts only the frozen 11-turn/4000000-token quality-recovery autonomous configuration'
           : qualityControl
             ? 'worker accepts only the frozen 32-turn/4000000-token quality-control autonomous configuration'
+            : qualityGateControl
+              ? 'worker accepts only the frozen 32-turn/4000000-token quality-gate-control autonomous configuration with gateMaxRetries=32 and maxContinuations=32'
         : 'worker accepts only the frozen 32-turn/4000000-token autonomous configuration'),
     brokerSocket,
     brokerState,
@@ -621,7 +646,7 @@ function classifyFailure(failure, controller) {
 function defaultNativeDepth(protocol, arm) {
   if (protocol === QUALITY_PILOT_PROTOCOL && (arm === 'R' || arm === 'S')) return 1
   if (protocol === QUALITY_RECOVERY_PROTOCOL && arm === 'S') return 1
-  if (protocol === QUALITY_CONTROL_PROTOCOL) return arm === 'S0' ? 0 : (arm === 'R' || arm === 'S' ? 1 : 0)
+  if (protocol === QUALITY_CONTROL_PROTOCOL || protocol === QUALITY_GATE_CONTROL_PROTOCOL) return arm === 'S0' ? 0 : (arm === 'R' || arm === 'S' ? 1 : 0)
   return protocol === RECURSION_ABLATION_PROTOCOL && arm === 'S' ? 1 : 0
 }
 
@@ -677,7 +702,7 @@ async function runShutdown(binary, env, cwd) {
 }
 
 function directLaunchArguments(config, socket) {
-  return [
+  const args = [
     '--mode', 'acp',
     '--offline',
     '--provider', 'solar-dsh',
@@ -691,6 +716,13 @@ function directLaunchArguments(config, socket) {
     '--autonomous-timeout-ms', String(config.wallTimeMs),
     '--autonomous-gate', config.autonomous.gate,
   ]
+  if (Object.prototype.hasOwnProperty.call(config.autonomous, 'gateMaxRetries')) {
+    args.push('--autonomous-gate-retries', String(config.autonomous.gateMaxRetries))
+  }
+  if (Object.prototype.hasOwnProperty.call(config.autonomous, 'maxContinuations')) {
+    args.push('--autonomous-max-continuations', String(config.autonomous.maxContinuations))
+  }
+  return args
 }
 
 async function readRequestBody(request) {
@@ -1133,4 +1165,4 @@ if (isDirectWorkerEntrypoint()) {
 // Kept deliberately small and side-effect free for the zero-model boundary
 // test. These helpers are not a parent/worker protocol surface.
 export { normalizeConfig }
-export const __test = { exactJson, inlineAttachment, inlineImage, createStopLatch, normalizeConfig, defaultNativeDepth }
+export const __test = { exactJson, inlineAttachment, inlineImage, createStopLatch, normalizeConfig, defaultNativeDepth, directLaunchArguments }
