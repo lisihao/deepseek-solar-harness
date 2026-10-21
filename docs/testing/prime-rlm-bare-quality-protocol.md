@@ -27,7 +27,7 @@ Run D then S once. The extra RLM computation is intentional: this comparison ask
 
 Continual Harness state starts fresh and refinement/Factory learning stays disabled equally for this quality comparison. This does not remove or rewrite those original mechanisms. The model chooses its decomposition; the parent supplies no gold-derived partition or successful solution strategy.
 
-The retained prefix is 506 charged requests, comprising 495 confirmed and 11 unknown. This phase admits at most 15 additional requests, reaching at most 521 under the user's unchanged cumulative cap of 522. Every admitted root or descendant call counts; transport unknowns are not refunded. New namespace, one-shot markers and prior closure receipts prevent accidental replay or budget reset. An unresolved external effect or failed cleanup stops subsequent admission.
+After the retained before-send failure described below, the prefix is 507 charged requests, comprising 495 confirmed and 12 unknown. The corrected v2 phase admits at most 15 additional requests, reaching at most 522 under the user's unchanged cumulative cap of 522. Every admitted root or descendant call counts; transport unknowns are not refunded. New namespace, one-shot markers and prior closure receipts prevent accidental replay or budget reset. An unresolved external effect or failed cleanup stops subsequent admission.
 
 ## Independent scoring and validity
 
@@ -46,3 +46,10 @@ Affected paths are `tools/rlm-quality-pilot/`, this protocol and its result repo
 Private artifacts retain source rows, gold, provider transcripts, credentials references and native state locally. Committed reports contain only the necessary sanitized provenance and measurements. No installed-app change, merge, release, market publication, Jev restoration or recurring automation is part of this experiment.
 
 The pre-dispatch `pnpm check` passed build, strict typecheck, existing unit/ARC/recursion checks, all eleven new quality checks, scratch-profile registration/runtime availability, and the generated homepage check. The new checks cover bare full-input/no-tools and EOF consumption, the raw bare answer's grading path, public native-start projection, preflight before provider loading, retained unknown/missing output, and the complete D1 plus fourteen-S hard limit. The separate official-scorer mutations passed exact, one-off, two-off and unparsable cases. The older full native self-test was not rerun; its hash-bound depth-one/sandbox evidence is reused for the unchanged mechanism.
+
+
+## Retained pre-send failure and corrected v2
+
+The original prepared run at source `5a66d484fc6b8d4fd3b10ff8709a1e876f18cde7` failed before a physical model POST: bare input was incorrectly passed as a wire-format string in DSH `GenerateOptions`, producing `content.some is not a function`. Its one admission remains unknown and charged. No native S worker started. Provider, attachment relay and network profile were closed; a separately retained closure binds the failed manifest, receipt, ledger, analysis and D result. The cumulative prefix therefore advances from 506/495/11 to 507/495/12 despite zero physical model requests in that attempt.
+
+The corrected parent uses the existing compiled `decodeChatRequest()` for bare input, just as the original host bridge does. A zero-model test runs the actual compiled decoder and stream encoder, verifies one user message containing exactly the original text in host content blocks, no tools, final answer preservation and settled EOF. The v2 namespace is allowed only after validating the exact before-send closure and zero-physical ledger; there is no automatic retry loop. The original failed attempt and unstarted comparator remain visible. With D1 plus at most fourteen S requests, the corrected attempt can reach the user's original 522 cap and cannot exceed it.

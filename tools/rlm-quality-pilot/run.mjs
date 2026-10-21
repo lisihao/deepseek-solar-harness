@@ -48,8 +48,8 @@ const execFile = promisify(execFileCallback)
 const TOOL_DIRECTORY = dirname(fileURLToPath(import.meta.url))
 const REPOSITORY_ROOT = resolve(TOOL_DIRECTORY, '../..')
 const DEFAULT_PRIOR_ROOT = '/Users/sihaoli/Projects/DeepSeek-Solar-Harness-V4/artifacts/rlm-recursion-20261021'
-const DEFAULT_OUTPUT = join(DEFAULT_PRIOR_ROOT, 'bare-quality-v1')
-const DEFAULT_TMP_ROOT = '/private/tmp/bq1'
+const DEFAULT_OUTPUT = join(DEFAULT_PRIOR_ROOT, 'bare-quality-v2')
+const DEFAULT_TMP_ROOT = '/private/tmp/bq2'
 const DEFAULT_PRIOR_CLOSURE = join(DEFAULT_PRIOR_ROOT, 'revalidation/no-reuse-v2/final-closure.json')
 const DEFAULT_PRIOR_CLOSURE_SHA256 = 'c3fd18c63b72a40176867bd311df274d05b2d22a653e3c4dd88b87b230d65593'
 const PREPARED_FILE = 'prepared.json'
@@ -71,9 +71,9 @@ const FIXED_LIMITS = Object.freeze({
   perRunRequests: 14,
   directRequests: 1,
   rlmRequests: 14,
-  priorCharged: 506,
+  priorCharged: 507,
   priorConfirmed: 495,
-  priorUnknown: 11,
+  priorUnknown: 12,
   globalCap: 522,
   wallTimeMs: 1_200_000,
   autonomousMaxTurns: 14,
@@ -386,10 +386,10 @@ async function validatePriorPhase({
   }
   const accounting = closure.accounting
   if (!isRecord(accounting) || accounting.newAdmitted !== 25 || accounting.physicalAdmitted !== 25
-    || accounting.cumulativeAdmitted !== FIXED_LIMITS.priorCharged
-    || accounting.cumulativeConfirmed !== FIXED_LIMITS.priorConfirmed
-    || accounting.cumulativeUnknown !== FIXED_LIMITS.priorUnknown || accounting.stopped !== false) {
-    fail('BQ_PRIOR_ACCOUNTING', 'prior closure does not retain the fixed 506 = 495 + 11 prefix')
+    || accounting.cumulativeAdmitted !== 506
+    || accounting.cumulativeConfirmed !== 495
+    || accounting.cumulativeUnknown !== 11 || accounting.stopped !== false) {
+    fail('BQ_PRIOR_ACCOUNTING', 'prior closure does not retain the fixed historical 506 = 495 + 11 prefix')
   }
   const closureDirectory = dirname(closureFile)
   const referenced = [
@@ -418,9 +418,9 @@ async function validatePriorPhase({
   }
   const receiptAccounting = receipt.accounting
   if (!isRecord(receiptAccounting) || receiptAccounting.newAdmitted !== 25 || receiptAccounting.physicalAdmitted !== 25
-    || receiptAccounting.cumulativeAdmitted !== FIXED_LIMITS.priorCharged
-    || receiptAccounting.cumulativeConfirmed !== FIXED_LIMITS.priorConfirmed
-    || receiptAccounting.cumulativeUnknown !== FIXED_LIMITS.priorUnknown || receiptAccounting.stopped !== false) {
+    || receiptAccounting.cumulativeAdmitted !== 506
+    || receiptAccounting.cumulativeConfirmed !== 495
+    || receiptAccounting.cumulativeUnknown !== 11 || receiptAccounting.stopped !== false) {
     fail('BQ_PRIOR_REFERENCE', 'prior run receipt has inconsistent cumulative accounting')
   }
   const ledger = await Ledger.open(artifacts.ledger.path, { total: 28, perRun: 14 })
@@ -429,12 +429,48 @@ async function validatePriorPhase({
     || ledgerReceipt.physicalAdmitted !== 25 || ledgerReceipt.stopped !== false) {
     fail('BQ_PRIOR_LEDGER', 'prior phase ledger is not the accepted 25 settled requests')
   }
+  Object.assign(artifacts, await validateBeforeSendFailure(root))
   return { root, closure: { path: closureFile, sha256: closureSha256, value: closure }, artifacts }
+}
+
+const BEFORE_SEND_CLOSURE_SHA256 = 'ee92b9d789dabee011009533e57028b329ea33ac0f2148784e128f9ef5bdf4f9'
+
+// One charged, retained host-schema failure preceded every physical model POST.
+// Only this closed failure authorizes the v2 namespace; this is not a retry loop.
+async function validateBeforeSendFailure(root) {
+  const phase = join(root, 'bare-quality-v1')
+  const path = await assertRegularFile(join(phase, 'final-closure.json'), 'before-send failure closure')
+  const sha256 = await sha256File(path)
+  if (root === resolve(DEFAULT_PRIOR_ROOT) && sha256 !== BEFORE_SEND_CLOSURE_SHA256) fail('BQ_RECOVERY_CLOSURE', 'before-send failure closure changed')
+  const closure = await readJson(path, 'before-send failure closure')
+  if (closure?.kind !== 'prime-rlm-bare-quality-before-send-closure-v1' || closure.formatVersion !== 1
+    || closure.modelHttpRequests !== 0 || closure.nativeConditionStarted !== false || closure.ownedProcessesAbsent !== true
+    || closure.providerClosed !== true || closure.relayClosed !== true || closure.networkProfileDisposed !== true
+    || closure.unknownChargeRetained !== true || closure.accounting?.cumulativeAdmitted !== 507
+    || closure.accounting?.cumulativeConfirmed !== 495 || closure.accounting?.cumulativeUnknown !== 12) {
+    fail('BQ_RECOVERY_CLOSURE', 'schema failure has not been closed with its charge retained')
+  }
+  const artifacts = { beforeSendClosure: { path, sha256 } }
+  for (const name of ['prepared.json', 'run-receipt.json', 'provider-ledger.jsonl', 'analysis.json', 'runs/D1/markers/result.json']) {
+    const reference = closure.artifacts?.[name]
+    const file = await assertRegularFile(join(phase, name), `before-send ${name}`)
+    const digest = await sha256File(file)
+    if (!SHA256.test(reference?.sha256 ?? '') || digest !== reference.sha256) fail('BQ_RECOVERY_REFERENCE', `before-send ${name} changed`)
+    artifacts[`beforeSend:${name}`] = { path: file, sha256: digest }
+  }
+  if (await exists(join(phase, 'runs/S14/markers/real-condition-started.json'))) fail('BQ_RECOVERY_NATIVE', 'failed phase unexpectedly started a native condition')
+  const ledger = await Ledger.open(join(phase, 'provider-ledger.jsonl'), { total: 15, perRun: 14 })
+  const receipt = await ledger.receipt()
+  if (receipt.newAdmitted !== 1 || receipt.settled !== 0 || receipt.unknown !== 1 || receipt.physicalAdmitted !== 0
+    || receipt.rows.filter(row => row.type === 'request-admitted').some(row => row.run !== 'D1')) {
+    fail('BQ_RECOVERY_LEDGER', 'failure is not the single retained pre-send D admission')
+  }
+  return artifacts
 }
 
 async function assertOutputScope({ output, priorRoot }) {
   const root = await assertDirectory(priorRoot, 'prior root')
-  const expected = join(root, 'bare-quality-v1')
+  const expected = join(root, 'bare-quality-v2')
   if (requireAbsolute(output, 'output') !== expected) fail('BQ_OUTPUT_SCOPE', `output must be the one-shot namespace ${expected}`)
   if (await exists(expected)) fail('BQ_OUTPUT_REPLAY', 'the one-shot output namespace already exists; never replay this comparison')
   return expected
@@ -505,8 +541,8 @@ async function createConditions({ output, tmpRoot, sharedRuntimeRoot, runtime, g
 }
 
 /**
- * Make the 15-request Ledger show the accepted 506-call prefix without
- * inventing 506 synthetic durable request records.  D1 is separately limited
+ * Make the 15-request Ledger show the accepted 507-call prefix without
+ * inventing 507 synthetic durable request records.  D1 is separately limited
  * to one logical/physical request; S14 retains the native tree limit of 14.
  */
 function qualityBudgetView(base, conditions) {
@@ -697,7 +733,7 @@ function taskMatchesManifest(task, manifest) {
 export async function assertPreparedFingerprint(manifest, { taskLoader = loadTask } = {}) {
   if (!isRecord(manifest)) fail('BQ_PREPARED_FORMAT', 'prepared manifest must be an object')
   const source = await assertDirectory(manifest.runner?.sourceRoot, 'prepared source root')
-  const expectedOutput = join(await assertDirectory(manifest.prior?.root, 'prepared prior root'), 'bare-quality-v1')
+  const expectedOutput = join(await assertDirectory(manifest.prior?.root, 'prepared prior root'), 'bare-quality-v2')
   if (manifest.output !== expectedOutput) fail('BQ_OUTPUT_SCOPE', 'prepared output is not the fixed one-shot namespace')
   const prior = await validatePriorPhase({
     priorRoot: manifest.prior.root,
@@ -882,10 +918,11 @@ export async function executeDirectCondition({
   const startedAt = Date.now()
   const base = createModelDispatcher({ condition, provider, relay, ledger })
   const dispatcher = serializeDispatcher(base)
-  const options = {
-    ...FIXED_ROUTE,
+  const wire = await modelWireLoader(manifest.shared.compiled.path)
+  const options = await wire.decodeChatRequest({
+    model: 'selected',
     messages: [{ role: 'user', content: condition.publicPrompt }],
-  }
+  }, FIXED_ROUTE)
   const chunks = []
   let answerText = null
   let runError = null
@@ -899,7 +936,6 @@ export async function executeDirectCondition({
     for await (const chunk of dispatcher.call('D1-root', options)) chunks.push(chunk)
     // The provider stream is now at EOF.  Only then may the compiled wire
     // assembler derive the authoritative final assistant message.
-    const wire = await modelWireLoader(manifest.shared.compiled.path)
     let finished
     for await (const _line of wire.encodeChatStream(capturedStream(chunks), {
       id: 'bare-quality-D1',
@@ -1245,9 +1281,9 @@ export function parseArgs(argv) {
 function usage() {
   return [
     'Usage:',
-    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --prepare --task <private-task-artifact> [--output <fixed-bare-quality-v1>] [--tmp-root /private/tmp/bq1]',
-    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --run --output <fixed-bare-quality-v1> --provider-module <private-module> --provider-sha256 <sha256> --provider-package <name> --credential-file <private-file> --acceptance-artifact <accepted-json> --acceptance-sha256 <sha256> --native-proof <accepted-native-json>',
-    '  node tools/rlm-quality-pilot/run.mjs --analyze [--output <fixed-bare-quality-v1>]',
+    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --prepare --task <private-task-artifact> [--output <fixed-bare-quality-v2>] [--tmp-root /private/tmp/bq2]',
+    '  /opt/homebrew/opt/node@22/bin/node tools/rlm-quality-pilot/run.mjs --run --output <fixed-bare-quality-v2> --provider-module <private-module> --provider-sha256 <sha256> --provider-package <name> --credential-file <private-file> --acceptance-artifact <accepted-json> --acceptance-sha256 <sha256> --native-proof <accepted-native-json>',
+    '  node tools/rlm-quality-pilot/run.mjs --analyze [--output <fixed-bare-quality-v2>]',
   ].join('\n')
 }
 

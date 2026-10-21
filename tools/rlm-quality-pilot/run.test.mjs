@@ -78,6 +78,19 @@ async function createPriorRoot(base) {
   }
   const closurePath = join(phase, 'final-closure.json')
   await writeJson(closurePath, closure)
+  const failed = join(root, 'bare-quality-v1')
+  await mkdir(join(failed, 'runs/D1/markers'), { recursive: true })
+  for (const name of ['prepared.json', 'run-receipt.json', 'analysis.json', 'runs/D1/markers/result.json']) await writeJson(join(failed, name), { fixture: true })
+  const failedLedger = await Ledger.open(join(failed, 'provider-ledger.jsonl'), { total: 15, perRun: 14 })
+  const failedId = await failedLedger.admit('D1', { fixture: true })
+  await failedLedger.settle(failedId, [], new Error('fixture before-send failure'))
+  const failureArtifacts = {}
+  for (const name of ['prepared.json', 'run-receipt.json', 'provider-ledger.jsonl', 'analysis.json', 'runs/D1/markers/result.json']) failureArtifacts[name] = { sha256: await fileSha(join(failed, name)) }
+  await writeJson(join(failed, 'final-closure.json'), {
+    formatVersion: 1, kind: 'prime-rlm-bare-quality-before-send-closure-v1', modelHttpRequests: 0, nativeConditionStarted: false,
+    ownedProcessesAbsent: true, providerClosed: true, relayClosed: true, networkProfileDisposed: true, unknownChargeRetained: true,
+    accounting: { cumulativeAdmitted: 507, cumulativeConfirmed: 495, cumulativeUnknown: 12 }, artifacts: failureArtifacts,
+  })
   return { root, closurePath, closureSha256: await fileSha(closurePath) }
 }
 
@@ -108,7 +121,7 @@ async function withPrepared(name, operation) {
       assert.equal(path, taskPath)
       return structuredClone(task)
     }
-    const output = join(prior.root, 'bare-quality-v1')
+    const output = join(prior.root, 'bare-quality-v2')
     // The native Prime socket path has a hard length boundary.  Keep this
     // test-only temporary root short just like the production /private/tmp/bq1.
     tmpRoot = join(BASE, `bq${process.pid}-${++temporaryOrdinal}`)
@@ -163,7 +176,7 @@ async function acceptanceFor({ base, manifest }) {
   return { acceptancePath, acceptanceSha256: await fileSha(acceptancePath), proofPath }
 }
 
-test('quality budget keeps the accepted 506 = 495 + 11 prefix and preserves an unknown stop', async () => {
+test('quality budget keeps the accepted 507 = 495 + 12 prefix and preserves an unknown stop', async () => {
   const root = await mkdtemp(join(BASE, 'bq-budget-'))
   try {
     const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: 15, perRun: 14 })
@@ -172,9 +185,9 @@ test('quality budget keeps the accepted 506 = 495 + 11 prefix and preserves an u
     view.admitPhysical({ runId: 'D1', logicalRequest: d, event: { fixture: true } })
     await view.settle(d, [], new Error('fixture transport loss'))
     const receipt = await view.receipt()
-    assert.equal(receipt.cumulativeAdmitted, 507)
+    assert.equal(receipt.cumulativeAdmitted, 508)
     assert.equal(receipt.cumulativeConfirmed, 495)
-    assert.equal(receipt.cumulativeUnknown, 12)
+    assert.equal(receipt.cumulativeUnknown, 13)
     assert.equal(receipt.stopped, true)
     await assert.rejects(() => view.admit('S14', { fixture: true }), /EXPERIMENT_STOPPED/)
   } finally {
@@ -211,6 +224,7 @@ test('D1 sends exactly one full public user message, drains EOF, and never suppl
       manifest: { shared: { compiled: { path: root } } }, condition, provider,
       relay: { restoreOptions: async value => value }, ledger,
       modelWireLoader: async () => ({
+        async decodeChatRequest(request, route) { return { ...route, messages: request.messages.map(message => ({ role: message.role, content: [{ type: 'text', text: message.content }] })) } },
         async *encodeChatStream(chunks, { onFinish }) {
           const observed = []
           for await (const chunk of chunks) observed.push(chunk)
@@ -224,7 +238,8 @@ test('D1 sends exactly one full public user message, drains EOF, and never suppl
     assert.equal(outcome.executionCompleted, true)
     assert.equal(outcome.answerText, 'Answer: [7]')
     assert.equal(receivedOptions.messages.length, 1)
-    assert.deepEqual(receivedOptions.messages, [{ role: 'user', content: 'context bytes\nquestion bytes' }])
+    assert.deepEqual(receivedOptions.messages, [{ role: 'user', content: [{type: 'text', text: 'context bytes\nquestion bytes'}] }])
+    assert.equal(Array.isArray(receivedOptions.messages[0].content), true)
     assert.equal(Object.hasOwn(receivedOptions, 'tools'), false)
     assert.equal(receivedOptions.messages.some(message => message.role === 'system'), false)
   } finally {
@@ -351,6 +366,39 @@ test('D1 plus all fourteen S calls cannot admit a sixteenth phase request', asyn
   const receipt = await view.receipt()
   assert.equal(receipt.newAdmitted, 15)
   assert.equal(receipt.physicalAdmitted, 15)
-  assert.equal(receipt.cumulativeAdmitted, 521)
-  assert.equal(receipt.cumulativeUnknown, 11)
+  assert.equal(receipt.cumulativeAdmitted, 522)
+  assert.equal(receipt.cumulativeUnknown, 12)
+})
+
+test('actual compiled wire decodes bare input to host content blocks and preserves the final answer', async t => {
+  const { compileCurrentSources } = await import('../rlm-arc-pilot/run.mjs')
+  const root = await mkdtemp(join(BASE, 'bq-wire-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const compiled = await compileCurrentSources({ sourceRoot: ROOT, packageRoot: join(ROOT, 'incubator/rlm'), shared: join(root, 'shared') })
+  const base = await Ledger.open(join(root, 'ledger.jsonl'), { total: 15, perRun: 14 })
+  const ledger = qualityBudgetView(base, [{ id: 'D1' }, { id: 'S14' }])
+  let admitPhysical
+  const provider = {
+    setPhysicalAdmission(callback) { admitPhysical = callback },
+    adapter: { async prepareCall() { return { async *stream(options) {
+      assert.equal(options.messages.length, 1)
+      assert.equal(options.messages[0].role, 'user')
+      assert.deepEqual(options.messages[0].content, [{ type: 'text', text: 'all material\noriginal question' }])
+      assert.equal(Object.hasOwn(options, 'tools'), false)
+      admitPhysical({ fixture: true })
+      yield { type: 'block-start', index: 0, blockType: 'text' }
+      yield { type: 'text-delta', index: 0, text: 'Answer: 7' }
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: 'Answer: 7' } }
+      yield { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    } } } },
+  }
+  const outcome = await executeDirectCondition({
+    manifest: { shared: { compiled: { path: compiled.compiled } } },
+    condition: { id: 'D1', arm: 'D', taskId: 'fixture', gameId: 'fixture', directory: root, publicPrompt: 'all material\noriginal question' },
+    provider, relay: { restoreOptions: async options => options }, ledger,
+  })
+  assert.equal(outcome.executionCompleted, true, outcome.answer.error)
+  assert.equal(outcome.answerText, 'Answer: 7')
+  assert.equal(outcome.resources.confirmedModelRequests, 1)
 })
