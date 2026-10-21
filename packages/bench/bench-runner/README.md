@@ -37,7 +37,7 @@ Copies request copy-on-write clones (`COPYFILE_FICLONE`). The `templateFiles` co
 
 ## Run records
 
-`<ledgerRoot>/<experiment>/experiment.json` pins the definition; reopening a ledger with a different definition is refused. `runs.jsonl` holds one record per line with `formatVersion: 1`; a reader refuses any other version, and a torn final line from a crash is dropped. A record carries `cell`, `status`, `grade` and `grader` (kind and version), `metrics`, `exitCode`, `error`, `models`, `suiteVersion`, `startedAt`, and `endedAt`.
+`<ledgerRoot>/<experiment>/experiment.json` pins the definition with `formatVersion: 1`; reopening a ledger with a different definition is refused, and reading one with another format version or a malformed definition fails with the file named. `runs.jsonl` holds one record per line with `formatVersion: 1`; a reader refuses any other version, and a torn final line from a crash is dropped. A record carries `cell`, `status`, `grade` and `grader` (kind and version), `metrics`, `exitCode`, `error`, `models`, `suiteVersion`, `startedAt`, and `endedAt`.
 
 | Status | Meaning |
 |---|---|

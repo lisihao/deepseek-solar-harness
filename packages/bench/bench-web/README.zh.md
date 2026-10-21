@@ -8,7 +8,7 @@ benchmark 能力的 Consumer：在 Host Web 服务器（`ctx.webServer`）上提
 
 | 路由 | 响应体 |
 |---|---|
-| `GET /api/bench/experiments` | `{ experiments }`：每个账本一项，含 `id`、`suite`、`variants`、`repetitions`、`runs` 和 `lastEndedAt`（第一次运行前为 `null`） |
+| `GET /api/bench/experiments` | `{ experiments, unreadable }`：每个可读账本一项，含 `id`、`suite`、`variants`、`repetitions`、`runs` 和 `lastEndedAt`（第一次运行前为 `null`）；文件读取失败的账本各一项，含 `id` 和 `message` |
 | `GET /api/bench/experiments/<id>` | `{ experiment, records, analysis }`，其中 `analysis` 是用本插件配置调用 `analyzeExperiment` 的结果 |
 
 请求的授权方式与其他 Host 面板相同：要么是 `Host` 和 `Origin` 都为回环地址的回环请求，要么是已配对设备通过 `ctx.remoteAuth` 校验的 bearer token。未授权的请求返回 `401 UNAUTHORIZED`；没有挂载 `remoteAuth` 服务时返回 `503 REMOTE_AUTH_UNAVAILABLE`。其他路径返回 `404 NOT_FOUND`，其他方法返回 `405 METHOD_NOT_ALLOWED`，账本读取失败返回 `500 READ_FAILED`。所有响应都带 `Cache-Control: no-store`。

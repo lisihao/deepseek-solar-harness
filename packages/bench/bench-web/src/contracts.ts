@@ -26,8 +26,10 @@ export interface BenchExperimentListItem {
 
 /** Body of `GET /api/bench/experiments`. */
 export interface BenchExperimentList {
-  /** Experiments in id order. */
+  /** Readable experiments in id order. */
   experiments: BenchExperimentListItem[]
+  /** Ledgers whose files could not be read, with the reason; listed instead of failing the whole response. */
+  unreadable: { id: string; message: string }[]
 }
 
 /** Body of `GET /api/bench/experiments/<id>`. */

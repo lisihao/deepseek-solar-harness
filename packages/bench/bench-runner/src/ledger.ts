@@ -8,10 +8,22 @@
 
 import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { z } from 'zod'
 import type { CellKey, Experiment, ExperimentId, RunRecord } from './types.ts'
 
-/** The ledger format version this build reads and writes. */
+/** The ledger format version this build reads and writes, in `experiment.json` and every run record. */
 export const LEDGER_FORMAT_VERSION = 1
+
+/** `experiment.json`: the pinned definition plus the ledger format version. */
+const pinnedFile = z.object({
+  formatVersion: z.literal(LEDGER_FORMAT_VERSION),
+  id: z.string(),
+  suite: z.string(),
+  profile: z.string(),
+  repetitions: z.number().int().min(1),
+  tasks: z.array(z.string()).optional(),
+  variants: z.array(z.object({ id: z.string(), patches: z.array(z.string()), env: z.record(z.string(), z.string()) }).strict()).min(1),
+}).strict()
 
 /** File pinning the experiment definition. */
 const EXPERIMENT_FILE = 'experiment.json'
@@ -60,7 +72,7 @@ export class ExperimentLedger {
    */
   async open(): Promise<void> {
     await mkdir(this.dir, { recursive: true })
-    const pinned = JSON.stringify(this.experiment, undefined, 2)
+    const pinned = JSON.stringify({ formatVersion: LEDGER_FORMAT_VERSION, ...this.experiment }, undefined, 2)
     const existing = await readOptional(join(this.dir, EXPERIMENT_FILE))
     if (existing === undefined) {
       await writeFile(join(this.dir, EXPERIMENT_FILE), `${pinned}\n`)
@@ -118,11 +130,28 @@ const EXPERIMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
  * @param root - absolute ledger root.
  * @param id - experiment id; ids that are not safe directory names read as absent.
  * @returns the definition, or `undefined` when no ledger exists under `id`.
+ * @throws Error when the file is malformed or carries another format version.
  */
 export async function readPinnedExperiment(root: string, id: string): Promise<Experiment | undefined> {
   if (!EXPERIMENT_ID.test(id)) return undefined
-  const text = await readOptional(join(root, id, EXPERIMENT_FILE))
-  return text === undefined ? undefined : JSON.parse(text) as Experiment
+  const file = join(root, id, EXPERIMENT_FILE)
+  const text = await readOptional(file)
+  if (text === undefined) return undefined
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch (error) {
+    throw new Error(`${file}: not valid JSON`, { cause: error })
+  }
+  const version = (json as { formatVersion?: unknown } | null)?.formatVersion
+  if (version !== LEDGER_FORMAT_VERSION) {
+    throw new Error(`${file}: ledger format ${String(version)} is not readable by this build (expects ${String(LEDGER_FORMAT_VERSION)})`)
+  }
+  const parsed = pinnedFile.safeParse(json)
+  if (!parsed.success) throw new Error(`${file}: ${z.prettifyError(parsed.error)}`)
+  const { formatVersion: _version, ...experiment } = parsed.data
+  // The schema checked every field; the brands only retag the validated id strings.
+  return experiment as unknown as Experiment
 }
 
 /**
@@ -140,7 +169,12 @@ export async function listExperimentIds(root: string): Promise<ExperimentId[]> {
   }
   const ids: ExperimentId[] = []
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isDirectory() && await readPinnedExperiment(root, entry.name) !== undefined) ids.push(entry.name as ExperimentId)
+    // Listing only checks presence; a malformed definition fails when that ledger is read.
+    const pinned = entry.isDirectory() && EXPERIMENT_ID.test(entry.name)
+      && await readOptional(join(root, entry.name, EXPERIMENT_FILE)) !== undefined
+    if (pinned) {
+      ids.push(entry.name as ExperimentId)
+    }
   }
   return ids
 }

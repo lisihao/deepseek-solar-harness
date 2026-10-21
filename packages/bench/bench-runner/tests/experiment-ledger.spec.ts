@@ -119,6 +119,25 @@ describe('ledger listing', () => {
     expect(await readPinnedExperiment(dir, '../etc')).toBeUndefined()
   })
 
+  it('refuses a pinned definition that is malformed or carries another format version', async () => {
+    const { mkdir } = await import('node:fs/promises')
+    const pin = async (id: string, text: string) => {
+      await mkdir(join(dir, id), { recursive: true })
+      await writeFile(join(dir, id, 'experiment.json'), text)
+    }
+    await pin('json', '{nope')
+    await pin('old', JSON.stringify({ ...experiment, id: 'old' }))
+    await pin('future', JSON.stringify({ ...experiment, id: 'future', formatVersion: 2 }))
+    await pin('shape', JSON.stringify({ formatVersion: 1, id: 'shape', suite: 's', profile: 'p', repetitions: 0, variants: [] }))
+    await pin('null', 'null')
+    await expect(readPinnedExperiment(dir, 'json')).rejects.toThrow(/experiment\.json: not valid JSON/)
+    await expect(readPinnedExperiment(dir, 'old')).rejects.toThrow(/ledger format undefined is not readable by this build \(expects 1\)/)
+    await expect(readPinnedExperiment(dir, 'future')).rejects.toThrow(/ledger format 2 is not readable/)
+    await expect(readPinnedExperiment(dir, 'shape')).rejects.toThrow(/repetitions/)
+    await expect(readPinnedExperiment(dir, 'null')).rejects.toThrow(/ledger format undefined/)
+    expect(await listExperimentIds(dir)).toEqual(['future', 'json', 'null', 'old', 'shape'])
+  })
+
   it('surfaces a ledger root that is not a directory', async () => {
     await writeFile(join(dir, 'file'), 'x')
     await expect(listExperimentIds(join(dir, 'file'))).rejects.toThrow(/ENOTDIR/)

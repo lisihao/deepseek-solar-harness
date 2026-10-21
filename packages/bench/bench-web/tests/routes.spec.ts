@@ -86,6 +86,7 @@ describe('real Loader composition over HTTP', () => {
     expect(listed.headers.get('cache-control')).toBe('no-store')
     expect(await listed.json()).toEqual({
       experiments: [{ id: 'exp', suite: 'dsh-native', variants: ['base', 'plus'], repetitions: 1, runs: 2, lastEndedAt: 20 }],
+      unreadable: [],
     } satisfies BenchExperimentList)
 
     const detail = await (await fetch(`${base}/experiments/exp`)).json() as BenchExperimentDetail
@@ -147,7 +148,10 @@ describe('bench-web routes', () => {
 
   it('skips a ledger that disappears between listing and reading, and reports no runs as null', async () => {
     const { body } = await call(mount(runtime), request('GET', '/api/bench/experiments'))
-    expect(body).toEqual({ experiments: [{ id: 'exp', suite: 'dsh-native', variants: ['base', 'plus'], repetitions: 1, runs: 0, lastEndedAt: null }] })
+    expect(body).toEqual({
+      experiments: [{ id: 'exp', suite: 'dsh-native', variants: ['base', 'plus'], repetitions: 1, runs: 0, lastEndedAt: null }],
+      unreadable: [],
+    })
   })
 
   it('refuses remote requests without a paired device, and without remote auth', async () => {
@@ -189,6 +193,17 @@ describe('bench-web routes', () => {
     const result = await call(mount(runtime), request('POST', '/api/bench/experiments/exp'))
     expect(result).toMatchObject({ status: 405, body: { error: 'METHOD_NOT_ALLOWED' } })
     expect(result.headers.get('Allow')).toBe('GET')
+  })
+
+  it('lists an unreadable ledger beside the readable ones', async () => {
+    const mixed = {
+      experiments: () => Promise.resolve(['bad', 'exp']),
+      ledger: (id: string) => id === 'bad' ? Promise.reject(new Error('ledger format 2 is not readable')) : Promise.resolve(snapshot),
+    }
+    const { status, body } = await call(mount(mixed), request('GET', '/api/bench/experiments'))
+    expect(status).toBe(200)
+    expect(body.unreadable).toEqual([{ id: 'bad', message: 'ledger format 2 is not readable' }])
+    expect((body.experiments as unknown[])).toHaveLength(1)
   })
 
   it('reports a failing ledger read as READ_FAILED', async () => {

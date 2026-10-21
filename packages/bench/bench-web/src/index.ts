@@ -73,8 +73,15 @@ function sendError(response: ServerResponse, status: number, error: BenchApiErro
 export function apply(ctx: Context, config: Config): void {
   const list = async (): Promise<BenchExperimentList> => {
     const experiments: BenchExperimentListItem[] = []
+    const unreadable: BenchExperimentList['unreadable'] = []
     for (const id of await ctx.benchRuntime.experiments()) {
-      const snapshot = await ctx.benchRuntime.ledger(id)
+      let snapshot
+      try {
+        snapshot = await ctx.benchRuntime.ledger(id)
+      } catch (error) {
+        unreadable.push({ id, message: (error as Error).message })
+        continue
+      }
       // A ledger removed between listing and reading is simply no longer listed.
       if (snapshot === undefined) continue
       const ends = snapshot.records.map(record => record.endedAt)
@@ -87,7 +94,7 @@ export function apply(ctx: Context, config: Config): void {
         lastEndedAt: ends.length === 0 ? null : Math.max(...ends),
       })
     }
-    return { experiments }
+    return { experiments, unreadable }
   }
 
   const detail = async (id: string): Promise<BenchExperimentDetail | undefined> => {

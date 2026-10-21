@@ -8,7 +8,7 @@ Consumer of the benchmark capability: a read-only HTTP API on the Host web serve
 
 | Route | Body |
 |---|---|
-| `GET /api/bench/experiments` | `{ experiments }`: per ledger, `id`, `suite`, `variants`, `repetitions`, `runs`, and `lastEndedAt` (`null` before the first run) |
+| `GET /api/bench/experiments` | `{ experiments, unreadable }`: per readable ledger, `id`, `suite`, `variants`, `repetitions`, `runs`, and `lastEndedAt` (`null` before the first run); per ledger whose files fail to read, `id` and `message` |
 | `GET /api/bench/experiments/<id>` | `{ experiment, records, analysis }`, where `analysis` is `analyzeExperiment` with this plugin's config |
 
 Requests are authorized like other Host dashboards: a loopback request with a loopback `Host` and `Origin`, or a paired device's bearer token through `ctx.remoteAuth`. Unauthorized requests get `401 UNAUTHORIZED`, or `503 REMOTE_AUTH_UNAVAILABLE` when no `remoteAuth` service is mounted. Other paths get `404 NOT_FOUND`, other methods `405 METHOD_NOT_ALLOWED`, and a failing ledger read `500 READ_FAILED`. Responses are `Cache-Control: no-store`.

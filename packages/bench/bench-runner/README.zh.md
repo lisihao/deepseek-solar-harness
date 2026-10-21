@@ -37,7 +37,7 @@ variants:                    # the first is the baseline
 
 ## 运行记录
 
-`<ledgerRoot>/<experiment>/experiment.json` 锁定实验定义；用不同的定义重新打开同一账本会被拒绝。`runs.jsonl` 每行一条记录，带 `formatVersion: 1`；读取方遇到其他版本一律拒绝，崩溃留下的残缺末行会被丢弃。每条记录包含 `cell`、`status`、`grade` 和 `grader`（kind 与版本）、`metrics`、`exitCode`、`error`、`models`、`suiteVersion`、`startedAt` 和 `endedAt`。
+`<ledgerRoot>/<experiment>/experiment.json` 以 `formatVersion: 1` 锁定实验定义；用不同的定义重新打开同一账本会被拒绝，读取格式版本不同或定义格式错误的文件会失败，并在报错中给出文件路径。`runs.jsonl` 每行一条记录，带 `formatVersion: 1`；读取方遇到其他版本一律拒绝，崩溃留下的残缺末行会被丢弃。每条记录包含 `cell`、`status`、`grade` 和 `grader`（kind 与版本）、`metrics`、`exitCode`、`error`、`models`、`suiteVersion`、`startedAt` 和 `endedAt`。
 
 | 状态 | 含义 |
 |---|---|
