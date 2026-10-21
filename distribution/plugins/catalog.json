@@ -1,0 +1,297 @@
+{
+  "formatVersion": 1,
+  "snapshotCapturedAt": "2026-10-21T09:01:05Z",
+  "packages": [
+    {
+      "id": "native-resident",
+      "name": "@lisihao/dsh-solar-native-resident",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "c83f9500c2c3d64ce07efa763180e6dfba05e1e6",
+      "artifact": {
+        "file": "native-resident/lisihao-dsh-solar-native-resident-0.1.0-dev.0.tgz",
+        "sha256": "73e1b3cccb2e2519e244b86edf79d5cdd063787280985ef10fc98ab07b9b5bef",
+        "size": 142743
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "LICENSE-Solar.txt",
+        "sha256": "d5bc9730436c45925d47805cf04a34a3223c5e1d70858d7e5f29a380b084fbc4",
+        "size": 1064
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "existing identified-artifact source checks, reused without model calls"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "existing published-baseline keyless built-package probes, not live provider execution"
+        },
+        "ui": {
+          "status": "observed",
+          "scope": "installed registration/diagnostic status; not full live native task acceptance"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "native-collaboration",
+      "name": "@lisihao/dsh-solar-native-collaboration",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "514f6ac188da54fbdb4692a310d00281230ac163",
+      "artifact": {
+        "file": "native-collaboration/lisihao-dsh-solar-native-collaboration-0.1.0-dev.0.tgz",
+        "sha256": "aadb3cd916669c89e57e9a60e0751f93c1e52e8092b9c50a6640b623e63b61a9",
+        "size": 474149
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "LICENSE-Solar.txt",
+        "sha256": "d5bc9730436c45925d47805cf04a34a3223c5e1d70858d7e5f29a380b084fbc4",
+        "size": 1064
+      },
+      "requiredPackageIds": [
+        "native-resident"
+      ],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "existing identified-artifact source checks, reused without model calls"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "existing published-baseline keyless built-package probes, not live provider execution"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "human-confirmed offline draft drag/rename/delete/save/reopen and wide/narrow layouts"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "model-handoff",
+      "name": "@lisihao/dsh-solar-model-handoff",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "73e92a6bc19df25f269e13c3378b48f8002db839",
+      "artifact": {
+        "file": "model-handoff/lisihao-dsh-solar-model-handoff-0.1.0-dev.0.tgz",
+        "sha256": "5ddcbb9a1014b9cd73c57c1cfa9ef1071913365cb47331ec20e01e13ba09439e",
+        "size": 75119
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "LICENSE-Solar.txt",
+        "sha256": "d5bc9730436c45925d47805cf04a34a3223c5e1d70858d7e5f29a380b084fbc4",
+        "size": 1064
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "existing identified-artifact source checks, reused without model calls"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "existing published-baseline keyless built-package probes, not live provider execution"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "human-confirmed notice dismissal, layouts, empty Web/Insight entry and native return choices; no live summary/result carry"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "chatgpt-web",
+      "name": "@lisihao/dsh-solar-chatgpt-web",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "c165a3aff116ec56f482419122441c6abf0473d2",
+      "artifact": {
+        "file": "chatgpt-web/c165a3a/lisihao-dsh-solar-chatgpt-web-0.1.0-dev.0.tgz",
+        "sha256": "afc08b64a428c3409e674c4153ea6243dd5ac72760319ef9c900379cd8c06d58",
+        "size": 419822
+      },
+      "historicalArtifacts": [
+        {
+          "sourceCommit": "2c338f9fc3e121d6142db6d1a1d74b602c3047c5",
+          "file": "chatgpt-web/2c338f9/lisihao-dsh-solar-chatgpt-web-0.1.0-dev.0.tgz",
+          "sha256": "525a60d4c514e57e0657c81c5a8c44d7d9385631d69492627ba8763c90f2be34",
+          "size": 415230,
+          "origin": "previously-installed-desktop-profile",
+          "installableCandidate": false
+        }
+      ],
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [
+        "native-resident",
+        "native-collaboration"
+      ],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "408 source tests, build/types and exact source CI 39574197415"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "source built-package keyless official CLI probes; no live browser submission"
+        },
+        "ui": {
+          "status": "not-run",
+          "scope": "c165a3a installed with 54 packed files verified and App/Host restarted; new button interaction not run; prior settings acceptance belongs to historical 2c338f9"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "rlm",
+      "name": "@lisihao/dsh-solar-rlm",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "6a47ed6afdc8e433f8748172322f93c8a56eb074",
+      "artifact": {
+        "parts": [
+          {
+            "file": "rlm/lisihao-dsh-solar-rlm-0.1.0-dev.0.tgz.part00",
+            "sha256": "9ec4b67730e31fb79d943d1ca2f5edbfacd5d1f1592d5fa8694c86e302d70a75",
+            "size": 41943040
+          },
+          {
+            "file": "rlm/lisihao-dsh-solar-rlm-0.1.0-dev.0.tgz.part01",
+            "sha256": "4a36e1651aa435faa78f80a0a221460b9e47b30681a6b1d3276a2cb651a07f3a",
+            "size": 41943040
+          },
+          {
+            "file": "rlm/lisihao-dsh-solar-rlm-0.1.0-dev.0.tgz.part02",
+            "sha256": "e8ae5ad0931173fbf2470e61c4458b7352a3d2d68903e19eab2e309d7edb73fe",
+            "size": 21989587
+          }
+        ],
+        "sha256": "5d64a1122d3c2afe8977178c4b90f4553063223da8d8dc1fbe0036bfc7684537",
+        "size": 105875667
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "provenance": {
+        "nestedPayload": {
+          "archive": "package/assets/runtime.tar.gz",
+          "sha256": "ffa9ef5854d625ee7f22dca0876867a78b886d1b249102f491e9a9ab56c1983d",
+          "sourceCommit": "7cbffa77b38facd7c87277fa3c82bcadbe816880",
+          "licenseEntries": [
+            "licenses/prime-agent-MIT.txt",
+            "prime/LICENSE"
+          ],
+          "licenseManifest": "package/runtime-lock/licenses.json"
+        }
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "existing identified-artifact source checks, reused without model calls"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "existing published-baseline keyless built-package probes, not live provider execution"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "earlier exact installed artifact UI and keyless local native self-test; not real-provider acceptance or general quality benefit"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "billion-context",
+      "name": "billion-context",
+      "version": "0.1.202-solar.1",
+      "sourceRepo": "https://github.com/lisihao/billion-context",
+      "sourceCommit": "ee8ad8c6cb5e0bdcb0ac998486df893faa1db6b8",
+      "artifact": {
+        "file": "billion-context/billion-context-0.1.202-solar.1.tgz",
+        "sha256": "12e0df4c6b5da2a3d6dd92b474ddc38e58d4ae6032fe54c63dcf7bac857d011d",
+        "size": 8849662
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "earlier calibration/tier repair checks; new 2026-10-21 context bloat report remains under investigation"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "existing native fake-upstream e2e; no live replay"
+        },
+        "ui": {
+          "status": "observed",
+          "scope": "installed startup/version only; new 664k-token estimate refusal is unresolved"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "dream-skin",
+      "name": "dsh-dream-skin",
+      "version": "10.21.2-folder.2f6929c",
+      "sourceRepo": "https://github.com/lisihao/dsh-dream-skin",
+      "sourceCommit": "2f6929c6010c8bdc215ab0a23bda1ce7d3e11c3a",
+      "artifact": {
+        "file": "dream-skin/dsh-dream-skin-10.21.2-folder.2f6929c.tgz",
+        "sha256": "3960ddd564049567453050152be3b5bb2854c87cfbee1e3de1be088ef751b522",
+        "size": 465008
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "provenance": {
+        "upstreamRepo": "https://github.com/RevolutionLA/dsh-dream-skin",
+        "archiveFindings": {
+          "personalWallpaperAssets": "not-found-by-name-or-raster-extension"
+        }
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "not-recorded-by-curation"
+        },
+        "scratch": {
+          "status": "not-recorded-by-curation"
+        },
+        "ui": {
+          "status": "not-recorded-by-curation"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    }
+  ],
+  "excludedPackages": []
+}
