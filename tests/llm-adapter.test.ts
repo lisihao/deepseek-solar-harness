@@ -376,6 +376,42 @@ describe('WebLlmAdapter', () => {
     expect(captures[0]?.prompt).toBe(serialized.prompt)
   })
 
+  it('excludes only the automatic solar skill discovery notice from Web and Insight prompts', () => {
+    const serialized = serializeConversationRequest(options({
+      messages: [
+        {
+          id: 'solar-skill-notice' as never,
+          role: 'user',
+          source: { kind: 'solar-skill-context', form: 'notice', policyVersion: 1 } as never,
+          content: [{ type: 'text', text: 'NATIVE SKILL NOTICE: use solar_skill_search.' }],
+        },
+        {
+          id: 'solar-skill-instructions' as never,
+          role: 'user',
+          source: { kind: 'solar-skill-context', form: 'instructions', policyVersion: 1 } as never,
+          content: [{ type: 'text', text: 'EXPLICIT SKILL INSTRUCTIONS: retain this text.' }],
+        },
+        {
+          id: 'ordinary-notice' as never,
+          role: 'user',
+          source: { kind: 'task', form: 'notice' } as never,
+          content: [{ type: 'text', text: 'USER TASK NOTICE: retain this text.' }],
+        },
+        {
+          id: 'ordinary-user' as never,
+          role: 'user',
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'USER QUESTION: retain this text.' }],
+        },
+      ] as GenerateOptions['messages'],
+    }))
+
+    expect(serialized.prompt).not.toContain('NATIVE SKILL NOTICE: use solar_skill_search.')
+    expect(serialized.prompt).toContain('EXPLICIT SKILL INSTRUCTIONS: retain this text.')
+    expect(serialized.prompt).toContain('USER TASK NOTICE: retain this text.')
+    expect(serialized.prompt).toContain('USER QUESTION: retain this text.')
+  })
+
   it('rejects images and files before controller admission', async () => {
     const fake = fakeController()
     const adapter = new WebLlmAdapter(fake)

@@ -146,9 +146,12 @@ function sourceForm(source: unknown): string | undefined {
 function omitBrowserBackgroundMessage(message: Record<string, unknown>): boolean {
   const kind = sourceKind(message.source)
   if (message.role === 'system' && kind === 'system-prompt') return true
-  return message.role === 'user'
-    && kind !== undefined
-    && AUTOMATIC_CONTEXT_SOURCE_KINDS.has(kind)
+  if (message.role !== 'user' || kind === undefined) return false
+  // The skill-context plugin's discovery notice is an automatic native-tool
+  // instruction. Match its exact source kind/form so ordinary user notices,
+  // explicit skill-context instructions, and other producers remain visible.
+  if (kind === 'solar-skill-context' && sourceForm(message.source) === 'notice') return true
+  return AUTOMATIC_CONTEXT_SOURCE_KINDS.has(kind)
     && AUTOMATIC_CONTEXT_FORMS.has(sourceForm(message.source) ?? '')
 }
 
