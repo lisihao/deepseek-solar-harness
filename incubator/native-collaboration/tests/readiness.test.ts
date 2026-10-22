@@ -1,20 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import type { Executor, GraphSnapshot, GraphStatus, NodeSnapshot } from '@lisihao/dsh-solar-native-resident/contracts'
-import { failureHint, latestNativeCheck, readinessRows, type ReadinessStatus } from '../src/client-helpers.js'
+import type { Executor, GraphSnapshot, GraphStatus, NodeSnapshot, NodeStatus } from '@lisihao/dsh-solar-native-resident/contracts'
+import {
+  activeGraphs,
+  collaborationAvailability,
+  executorReadiness,
+  explainFailure,
+  type AvailabilityStatus,
+} from '../src/client-helpers.js'
 
 const markers: Record<Executor, string> = { codex: 'SOLAR_CODEX_OK', 'claude-code': 'SOLAR_CLAUDE_OK' }
 
 function check(executor: Executor, status: GraphStatus, at: number, node: Partial<NodeSnapshot> = {}): GraphSnapshot {
   return {
     formatVersion: 1,
-    graph: {
-      formatVersion: 1,
-      id: `native-check-${executor}-${at}`,
-      label: 'check',
-      cwd: '/tmp/check',
-      maxParallel: 1,
-      nodes: [{ id: 'check', executor, prompt: 'check' }],
-    },
+    graph: { formatVersion: 1, id: `native-check-${executor}-${at}`, label: 'check', cwd: '/tmp/check', maxParallel: 1, nodes: [{ id: 'check', executor, prompt: 'check' }] },
     status,
     revision: 1,
     createdAt: at,
@@ -23,80 +22,112 @@ function check(executor: Executor, status: GraphStatus, at: number, node: Partia
   }
 }
 
-const ready: ReadinessStatus = {
-  resident: { available: true, message: 'ok' },
-  tools: ['solar_resident', 'solar_delegate', 'solar_coordinate', 'solar_wait'].map(name => ({ name, available: true })),
+function collaboration(at: number, status: GraphStatus, nodes: readonly { id: string; executor: Executor; status: NodeStatus; error?: string }[]): GraphSnapshot {
+  return {
+    formatVersion: 1,
+    graph: { formatVersion: 1, id: `collab-${at}`, label: 'collab', cwd: '/tmp/work', maxParallel: 2, nodes: nodes.map(node => ({ id: node.id, executor: node.executor, prompt: 'work' })) },
+    status,
+    revision: 1,
+    createdAt: at,
+    updatedAt: at + 5,
+    nodes: nodes.map(node => node.error === undefined
+      ? { id: node.id, status: node.status, attempt: 1 }
+      : { id: node.id, status: node.status, attempt: 1, error: { code: 'COMMAND_FAILED', message: node.error } }),
+  }
 }
 
 const time = (value: number): string => `t${value}`
+const tools = (available: boolean) => ['solar_resident', 'solar_delegate', 'solar_coordinate', 'solar_wait'].map(name => ({ name, available }))
+const of = (rows: ReturnType<typeof executorReadiness>, executor: Executor) => rows.find(row => row.executor === executor)
 
-function row(rows: ReturnType<typeof readinessRows>, key: string) {
-  return rows.find(item => item.key === key)
-}
-
-describe('readiness rows', () => {
-  it('reports a running scheduler, ready tools and untested executors', () => {
-    const rows = readinessRows(ready, [], time)
-    expect(rows.map(item => [item.key, item.tone, item.text])).toEqual([
-      ['resident', 'ok', '运行中'],
-      ['tools', 'ok', '已就绪'],
-      ['codex', 'unknown', '尚未测试'],
-      ['claude-code', 'unknown', '尚未测试'],
-    ])
+describe('collaboration availability', () => {
+  it('is usable when the scheduler runs and the three collaboration tools are loaded', () => {
+    expect(collaborationAvailability({ resident: { available: true, message: '' }, tools: tools(true) })).toEqual({ usable: true })
   })
 
-  it('names a stopped scheduler and each missing tool', () => {
-    const rows = readinessRows({
-      resident: { available: false, message: 'down' },
-      tools: [{ name: 'solar_coordinate', available: false }, { name: 'solar_wait', available: false }, { name: 'solar_resident', available: true }],
-    }, [], time)
-    expect(row(rows, 'resident')?.tone).toBe('error')
-    expect(row(rows, 'tools')).toMatchObject({ tone: 'error', text: '缺少：任务拆分提交、结果等待' })
+  it('names the fix when the scheduler is down', () => {
+    const result = collaborationAvailability({ resident: { available: false, message: '' }, tools: tools(true) })
+    expect(result.usable).toBe(false)
+    expect(result.action).toContain('重新打开')
   })
 
-  it('judges an executor by its most recent check only', () => {
-    const passedEarlier = check('codex', 'completed', 100, { output: markers.codex })
-    const failedLater = check('codex', 'failed', 200, { error: { code: 'COMMAND_FAILED', message: 'Codex native turn failed: boom' } })
-    expect(latestNativeCheck('codex', [failedLater, passedEarlier])).toBe(failedLater)
-    expect(row(readinessRows(ready, [failedLater, passedEarlier], time), 'codex')).toMatchObject({ tone: 'error', text: '上次测试失败（t205）：boom' })
-    const passedLatest = check('codex', 'completed', 300, { output: markers.codex })
-    expect(row(readinessRows(ready, [failedLater, passedLatest, passedEarlier], time), 'codex')).toMatchObject({ tone: 'ok', text: '上次测试通过（t305）' })
-  })
-
-  it('does not count a completed check without the exact marker as passed', () => {
-    const wrongOutput = check('codex', 'completed', 100, { output: 'something else' })
-    expect(row(readinessRows(ready, [wrongOutput], time), 'codex')).toMatchObject({ tone: 'error', text: '上次测试失败（t105）：连接测试失败：未收到预期标记' })
-  })
-
-  it('keeps executors apart and shows a running check as in progress', () => {
-    const claudeRunning = check('claude-code', 'running', 100)
-    const rows = readinessRows(ready, [claudeRunning], time)
-    expect(row(rows, 'claude-code')).toMatchObject({ tone: 'unknown', text: '测试进行中' })
-    expect(row(rows, 'codex')?.text).toBe('尚未测试')
-  })
-
-  it('attaches the matching hint to a failed check', () => {
-    const refused = check('claude-code', 'failed', 100, {
-      error: { code: 'COMMAND_FAILED', message: 'Claude native turn failed: API Error: Connection refused — a firewall or proxy may be blocking it (ConnectionRefused)' },
-    })
-    const result = row(readinessRows(ready, [refused], time), 'claude-code')
-    expect(result?.text).toBe('上次测试失败（t105）：API Error: Connection refused — a firewall or proxy may be blocking it (ConnectionRefused)')
-    expect(result?.hint).toContain('https_proxy')
+  it('blocks when a collaboration tool is missing but not when only single delegation is missing', () => {
+    const missingWait: AvailabilityStatus = { resident: { available: true, message: '' }, tools: tools(true).map(tool => tool.name === 'solar_wait' ? { ...tool, available: false } : tool) }
+    expect(collaborationAvailability(missingWait).usable).toBe(false)
+    const missingDelegate: AvailabilityStatus = { resident: { available: true, message: '' }, tools: tools(true).map(tool => tool.name === 'solar_delegate' ? { ...tool, available: false } : tool) }
+    expect(collaborationAvailability(missingDelegate).usable).toBe(true)
   })
 })
 
-describe('failure hints', () => {
-  it.each([
-    ['API Error: Connection refused', 'https_proxy'],
-    ['connect ECONNREFUSED 127.0.0.1:443', 'https_proxy'],
-    ["You've hit your weekly limit · resets Oct 21 at 1pm", '额度'],
-    ['401 Unauthorized', '登录'],
-  ])('maps %s to a hint mentioning %s', (message, expected) => {
-    expect(failureHint(message)).toContain(expected)
+describe('executor readiness', () => {
+  it('reports both executors as not yet verified without evidence', () => {
+    expect(executorReadiness([], time).map(row => [row.executor, row.state, row.text])).toEqual([
+      ['codex', 'untested', '还没验证过'],
+      ['claude-code', 'untested', '还没验证过'],
+    ])
   })
 
-  it('leaves an unknown failure without a hint', () => {
-    expect(failureHint('model produced no output')).toBeUndefined()
-    expect(failureHint('could not generate a separate answer')).toBeUndefined()
+  it('takes the newest evidence, whether a check or a real collaboration', () => {
+    const passedCheck = check('codex', 'completed', 100, { output: markers.codex })
+    const realRun = collaboration(300, 'completed', [{ id: 'a', executor: 'codex', status: 'succeeded' }])
+    expect(of(executorReadiness([realRun, passedCheck], time), 'codex')).toMatchObject({ state: 'ready', text: '可用 · t305 协同成功' })
+    const failedLaterCheck = check('codex', 'failed', 500, { error: { code: 'COMMAND_FAILED', message: 'Codex native turn failed: boom' } })
+    expect(of(executorReadiness([realRun, failedLaterCheck, passedCheck], time), 'codex')).toMatchObject({ state: 'failed', text: 't505 失败：boom' })
+  })
+
+  it('does not count a check without the exact marker as passed', () => {
+    const wrong = check('codex', 'completed', 100, { output: 'something else' })
+    expect(of(executorReadiness([wrong], time), 'codex')?.state).toBe('failed')
+  })
+
+  it('reads a collaboration node only for its own executor and reports its failure', () => {
+    const mixed = collaboration(200, 'failed', [
+      { id: 'a', executor: 'codex', status: 'succeeded' },
+      { id: 'b', executor: 'claude-code', status: 'failed', error: 'Claude native turn failed: You have hit your weekly limit' },
+    ])
+    const rows = executorReadiness([mixed], time)
+    expect(of(rows, 'codex')).toMatchObject({ state: 'ready', text: '可用 · t205 协同成功' })
+    expect(of(rows, 'claude-code')).toMatchObject({ state: 'failed', text: 't205 失败：订阅额度已用完', action: '等额度重置后重新测试。' })
+  })
+
+  it('shows a running check as testing', () => {
+    expect(of(executorReadiness([check('claude-code', 'running', 100)], time), 'claude-code')).toMatchObject({ state: 'testing', text: '测试中' })
+  })
+
+  it('keeps the raw failure only behind a known cause and shows an unknown cause directly', () => {
+    const refused = 'Claude native turn failed: API Error: Connection refused — a firewall or proxy may be blocking it (ConnectionRefused)'
+    const known = of(executorReadiness([check('claude-code', 'failed', 100, { error: { code: 'COMMAND_FAILED', message: refused } })], time), 'claude-code')
+    expect(known).toMatchObject({ text: 't105 失败：网络连不上', detail: refused })
+    expect(known?.action).toContain('https_proxy')
+    const unknown = of(executorReadiness([check('codex', 'failed', 100, { error: { code: 'COMMAND_FAILED', message: 'Codex native turn failed: model returned nothing' } })], time), 'codex')
+    expect(unknown).toMatchObject({ text: 't105 失败：model returned nothing' })
+    expect(unknown?.action).toBeUndefined()
+    expect(unknown?.detail).toBeUndefined()
+  })
+})
+
+describe('failure explanations', () => {
+  it.each([
+    ['API Error: Connection refused', '网络连不上'],
+    ['connect ECONNREFUSED 127.0.0.1:443', '网络连不上'],
+    ["You've hit your weekly limit · resets Oct 21 at 1pm", '订阅额度已用完'],
+    ['401 Unauthorized', '登录已失效'],
+  ])('explains %s as %s', (message, summary) => {
+    const explanation = explainFailure(message)
+    expect(explanation.summary).toBe(summary)
+    expect(explanation.action).toBeDefined()
+  })
+
+  it('keeps an unknown failure as its own text without an action', () => {
+    expect(explainFailure('could not generate a separate answer')).toEqual({ summary: 'could not generate a separate answer' })
+    expect(explainFailure('')).toEqual({ summary: '执行失败' })
+  })
+})
+
+describe('active graphs', () => {
+  it('lists only graphs that are not settled', () => {
+    const done = collaboration(1, 'completed', [{ id: 'a', executor: 'codex', status: 'succeeded' }])
+    const live = collaboration(2, 'running', [{ id: 'a', executor: 'codex', status: 'running' }])
+    expect(activeGraphs([done, live])).toEqual([live])
   })
 })

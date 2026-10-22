@@ -1,5 +1,6 @@
 import { createElement, useSyncExternalStore, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
+import { SettingsFixture } from './settings.js'
 import { SessionModeControl, WorkflowStudioPanel } from '../../../../incubator/native-collaboration/src/studio-client.js'
 import { FakeStudioUiApi, SESSION_ID, type WorkflowStudioFixtureCounters } from './fake-api.js'
 
@@ -97,4 +98,4 @@ window.__dshWorkflowStudioFixture = {
     return { outsideFlowStrokeDefault: sentinel === null ? undefined : getComputedStyle(sentinel).getPropertyValue('--xy-edge-stroke-default') || undefined }
   },
 }
-createRoot(root).render(createElement(FixtureApp))
+createRoot(root).render(createElement(new URLSearchParams(window.location.search).get('view') === 'settings' ? SettingsFixture : FixtureApp))

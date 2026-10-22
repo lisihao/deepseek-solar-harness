@@ -189,93 +189,121 @@ export function mergeGraphSnapshots(
   )
 }
 
-/** One plain-language row of the Settings readiness block. */
-export interface ReadinessRow {
-  readonly key: 'resident' | 'tools' | Executor
-  readonly title: string
-  readonly tone: 'ok' | 'error' | 'unknown'
-  readonly text: string
-  /** What the user can do about a failure, when the failure text names a known cause. */
-  readonly hint?: string
+/** Whether smart collaboration can be switched on, and what to do when it cannot. */
+export interface CollaborationAvailability {
+  readonly usable: boolean
+  readonly action?: string
 }
 
-/** Minimal status fields the readiness block reads. */
-export interface ReadinessStatus {
+/** Minimal status fields the Settings summary reads. */
+export interface AvailabilityStatus {
   readonly resident: { readonly available: boolean; readonly message: string }
   readonly tools: readonly { readonly name: string; readonly available: boolean }[]
 }
 
-const executorTitles: Readonly<Record<Executor, string>> = { codex: 'Codex', 'claude-code': 'Claude Code' }
-
-const toolTitles: Readonly<Record<string, string>> = {
-  solar_resident: '任务查询',
-  solar_coordinate: '任务拆分提交',
-  solar_wait: '结果等待',
-  solar_delegate: '单次委派',
+/** One executor as the Settings page presents it. */
+export interface ExecutorReadiness {
+  readonly executor: Executor
+  readonly title: string
+  readonly state: 'ready' | 'failed' | 'untested' | 'testing'
+  /** Short status phrase shown beside the state dot. */
+  readonly text: string
+  /** What the user can do, for a failure with a known cause. */
+  readonly action?: string
+  /** Raw failure text, kept for a collapsed detail. */
+  readonly detail?: string
 }
 
-/**
- * Map a native failure message to an action the user can take. Unknown
- * failures return undefined so the raw message stands alone.
- */
-export function failureHint(message: string): string | undefined {
-  if (/connection refused|econnrefused|proxy|firewall|enotfound|etimedout|network/i.test(message)) {
-    return '网络连不上服务。DSH 不读取系统代理：在 ~/.dsh/.env 写入 https_proxy=http://127.0.0.1:<端口>，然后完全退出并重启 DeepSeek Harness。'
+/** A failure message as a short phrase plus the action that fixes it. */
+export interface FailureExplanation {
+  readonly summary: string
+  readonly action?: string
+}
+
+const COLLABORATION_TOOLS = ['solar_resident', 'solar_coordinate', 'solar_wait']
+
+/** Smart mode needs the scheduler and its three tools; anything else is not a reason to block. */
+export function collaborationAvailability(status: AvailabilityStatus): CollaborationAvailability {
+  if (!status.resident.available) {
+    return { usable: false, action: '协同调度器没有运行。请完全退出并重新打开 DeepSeek Harness。' }
   }
-  if (/limit|quota|额度/i.test(message)) {
-    return '订阅额度已用完，等额度重置后再测试。'
+  const missing = COLLABORATION_TOOLS.filter(name => !status.tools.some(tool => tool.name === name && tool.available))
+  if (missing.length > 0) {
+    return { usable: false, action: '协同工具没有加载。请确认已启用 native-resident 插件，然后重新打开 DeepSeek Harness。' }
   }
-  if (/log ?in|auth|unauthori[sz]ed|401|credential/i.test(message)) {
-    return '登录状态失效，请先在终端重新登录该命令行工具。'
+  return { usable: true }
+}
+
+/** Explain a native failure by its cause; an unknown cause keeps the raw text as the summary. */
+export function explainFailure(message: string): FailureExplanation {
+  const text = message.replace(/^(Claude|Codex) native turn failed:\s*/i, '').trim()
+  if (/connection refused|econnrefused|proxy|firewall|enotfound|etimedout|network/i.test(text)) {
+    return { summary: '网络连不上', action: 'DSH 不读取系统代理：在 ~/.dsh/.env 写入 https_proxy=http://127.0.0.1:<端口>，再重新打开 DeepSeek Harness 后重新测试。' }
   }
+  if (/limit|quota|额度/i.test(text)) {
+    return { summary: '订阅额度已用完', action: '等额度重置后重新测试。' }
+  }
+  if (/log ?in|auth|unauthori[sz]ed|401|credential/i.test(text)) {
+    return { summary: '登录已失效', action: '在终端重新登录该命令行工具后重新测试。' }
+  }
+  return { summary: text.length > 0 ? text : '执行失败' }
+}
+
+interface ExecutorEvidence {
+  readonly at: number
+  readonly kind: 'passed' | 'failed' | 'pending'
+  readonly source: 'check' | 'collaboration'
+  readonly message?: string
+}
+
+function evidenceFor(executor: Executor, snapshot: GraphSnapshot): ExecutorEvidence | undefined {
+  if (nativeCheckExecutor(snapshot) === executor) {
+    const verdict = nativeCheckVerdict(snapshot)
+    if (verdict === undefined) return undefined
+    const message = snapshot.nodes.find(node => node.error !== undefined)?.error?.message ?? verdict.label
+    if (verdict.kind === 'passed') return { at: snapshot.updatedAt, kind: 'passed', source: 'check' }
+    if (verdict.kind === 'pending') return { at: snapshot.updatedAt, kind: 'pending', source: 'check' }
+    return { at: snapshot.updatedAt, kind: 'failed', source: 'check', message }
+  }
+  if (snapshot.graph.id.startsWith('native-check-')) return undefined
+  const ids = new Set(snapshot.graph.nodes.filter(node => node.executor === executor).map(node => node.id))
+  const nodes = snapshot.nodes.filter(node => ids.has(node.id))
+  const failed = nodes.find(node => node.status === 'failed')
+  if (failed !== undefined) return { at: snapshot.updatedAt, kind: 'failed', source: 'collaboration', message: failed.error?.message ?? '执行失败' }
+  if (nodes.some(node => node.status === 'succeeded')) return { at: snapshot.updatedAt, kind: 'passed', source: 'collaboration' }
   return undefined
 }
 
-/** The most recently created native check for one executor, if any. */
-export function latestNativeCheck(executor: Executor, snapshots: readonly GraphSnapshot[]): GraphSnapshot | undefined {
-  let latest: GraphSnapshot | undefined
-  for (const snapshot of snapshots) {
-    if (nativeCheckExecutor(snapshot) !== executor) continue
-    if (latest === undefined || snapshot.createdAt > latest.createdAt) latest = snapshot
-  }
-  return latest
-}
-
 /**
- * Readiness rows for Settings: scheduler, collaboration tools, and the last
- * connection check of each executor. Registration alone never counts as
- * usable; an executor is ready only after its latest check passed.
+ * Each executor's state from its newest evidence: a connection check or a
+ * node it ran in a real collaboration, whichever settled last. Registration
+ * alone is never evidence.
  */
-export function readinessRows(
-  status: ReadinessStatus,
+export function executorReadiness(
   snapshots: readonly GraphSnapshot[],
   formatTime: (value: number) => string,
-): readonly ReadinessRow[] {
-  const missingTools = status.tools.filter(tool => !tool.available).map(tool => toolTitles[tool.name] ?? '扩展工具')
-  const rows: ReadinessRow[] = [
-    status.resident.available
-      ? { key: 'resident', title: '协同调度器', tone: 'ok', text: '运行中' }
-      : { key: 'resident', title: '协同调度器', tone: 'error', text: '没有运行，智能协同无法开启。请完全退出并重启 DeepSeek Harness。' },
-    missingTools.length === 0
-      ? { key: 'tools', title: '协同工具', tone: 'ok', text: '已就绪' }
-      : { key: 'tools', title: '协同工具', tone: 'error', text: `缺少：${missingTools.join('、')}` },
-  ]
-  for (const executor of ['codex', 'claude-code'] as const) {
-    const title = executorTitles[executor]
-    const latest = latestNativeCheck(executor, snapshots)
-    const verdict = latest === undefined ? undefined : nativeCheckVerdict(latest)
-    if (latest === undefined || verdict === undefined) {
-      rows.push({ key: executor, title, tone: 'unknown', text: '尚未测试' })
-    } else if (verdict.kind === 'passed') {
-      rows.push({ key: executor, title, tone: 'ok', text: `上次测试通过（${formatTime(latest.updatedAt)}）` })
-    } else if (verdict.kind === 'pending') {
-      rows.push({ key: executor, title, tone: 'unknown', text: '测试进行中' })
-    } else {
-      const detail = latest.nodes.find(node => node.error !== undefined)?.error?.message.replace(/^Claude native turn failed:\s*|^Codex native turn failed:\s*/i, '').trim()
-      const text = `上次测试失败（${formatTime(latest.updatedAt)}）${detail ? `：${detail}` : `：${verdict.label}`}`
-      const hint = detail === undefined ? undefined : failureHint(detail)
-      rows.push(hint === undefined ? { key: executor, title, tone: 'error', text } : { key: executor, title, tone: 'error', text, hint })
+): readonly ExecutorReadiness[] {
+  return (['codex', 'claude-code'] as const).map(executor => {
+    const title = executor === 'codex' ? 'Codex' : 'Claude Code'
+    let latest: ExecutorEvidence | undefined
+    for (const snapshot of snapshots) {
+      const evidence = evidenceFor(executor, snapshot)
+      if (evidence !== undefined && (latest === undefined || evidence.at > latest.at)) latest = evidence
     }
-  }
-  return rows
+    if (latest === undefined) return { executor, title, state: 'untested', text: '还没验证过' }
+    if (latest.kind === 'pending') return { executor, title, state: 'testing', text: '测试中' }
+    const when = formatTime(latest.at)
+    if (latest.kind === 'passed') {
+      return { executor, title, state: 'ready', text: `可用 · ${when} ${latest.source === 'check' ? '测试通过' : '协同成功'}` }
+    }
+    const explanation = explainFailure(latest.message ?? '')
+    return explanation.action === undefined
+      ? { executor, title, state: 'failed', text: `${when} 失败：${explanation.summary}` }
+      : { executor, title, state: 'failed', text: `${when} 失败：${explanation.summary}`, action: explanation.action, detail: latest.message }
+  })
+}
+
+/** Graphs the user may still need to pause or cancel. */
+export function activeGraphs(snapshots: readonly GraphSnapshot[]): readonly GraphSnapshot[] {
+  return snapshots.filter(snapshot => !isTerminalGraphStatus(snapshot))
 }
