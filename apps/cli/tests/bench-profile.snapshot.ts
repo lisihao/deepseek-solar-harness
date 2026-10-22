@@ -44,12 +44,14 @@ describe.skipIf(!existsSync(dshBin))('dsh bench profile (built bin)', () => {
         timeout: 240_000,
         env: { DSH_HOME: home, DEEPSEEK_BASE_URL: server.baseURL, DEEPSEEK_API_KEY: 'mock-key' },
       })
+      // The suite version changes whenever its task contents do; the output contract here is the layout.
       const normalize = (text: string) => text.replaceAll(root, '{{root}}').replace(/\b\d+\.\ds\b/g, '{{s}}')
+        .replace(/(suite dsh-native) v\d+/g, '$1 v{{version}}')
 
       const plan = await run([])
       expect(plan.exitCode).toBe(2)
       expect(normalize(plan.stdout)).toMatchInlineSnapshot(`
-        "Experiment keyless-demo: suite dsh-native v1, 2 tasks × 2 variants × 1 repetitions = 4 runs (0 already recorded)
+        "Experiment keyless-demo: suite dsh-native v{{version}}, 2 tasks × 2 variants × 1 repetitions = 4 runs (0 already recorded)
           baseline baseline
           variant  retry-off: {{root}}/retry-off.yml
         No spending limit.
@@ -60,7 +62,7 @@ describe.skipIf(!existsSync(dshBin))('dsh bench profile (built bin)', () => {
       expect(result.stderr).toBe('')
       expect(result.exitCode).toBe(0)
       expect(normalize(result.stdout)).toMatchInlineSnapshot(`
-        "Experiment keyless-demo: suite dsh-native v1, 2 tasks × 2 variants × 1 repetitions = 4 runs (0 already recorded)
+        "Experiment keyless-demo: suite dsh-native v{{version}}, 2 tasks × 2 variants × 1 repetitions = 4 runs (0 already recorded)
           baseline baseline
           variant  retry-off: {{root}}/retry-off.yml
         No spending limit.
