@@ -31,6 +31,8 @@ RLM exceeds GitHub's regular per-blob size limit. Its tarball is stored in order
 
 The package installer installs archives only. A native dependency download by the official package manager remains a network operation and can fail independently. An exit code of zero is not a login or real-provider acceptance receipt. No automatic retry, fallback provider or quota purchase follows a failure.
 
+With the snapshot's community `dshmarket`, inspect **设置 → 插件市场 → 已安装** and search the package name from the catalog. Local preview archives need not appear in Discover, and their translated titles need not be searchable. The installed-package list and the remote Discover catalog are separate data sources; a catalog fetch error alone does not establish that a local package is missing. Retain the exact error and inspect the installed identity before reinstalling.
+
 ## Manual per-package installation
 
 For an Agent that downloads directly, read the same fixed catalog, download the listed relative archive files or ordered parts, verify all SHA-256 values and the complete archive size/hash, and retain the license notices. Then, with the App/Host quit and current profile files backed up, use:

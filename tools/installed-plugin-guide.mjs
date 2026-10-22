@@ -43,7 +43,7 @@ const body = [
   `### 社区原版：${community.length} 项`,
   '先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。安装成功不等于账号、外部依赖或真实执行已验收。`dsh-purge-community` 会修改官方 App runtime/CLI，与本项目保持官方 App 不变的 D1 约束不一致；该行仅记录已有安装，不构成推荐配置。', [header, ...community.map(p => row(p, purpose[p.name], `\`"$DSH_CLI" plugin --profile desktop add '${p.installSpec}'\``))].join('\n'),
   '### 官方内置：16 项',
-  '这些条目随已安装官方 App/运行环境提供；在「插件 → 已安装」或官方内置插件设置中按需启用。基础运行环境和原生 Web 界面不需要重复安装。下表官方版本按已发布 App 基线列出；不会用这些开关复制他人的账号或配置。', [header, ...official.map((p, index) => row(p, officialPurpose[index], index < 2 ? '随官方 App 提供' : '在官方插件设置中启用；按需完成其登录/依赖配置'))].join('\n'),
+  '这些条目随已安装官方 App/运行环境提供；在「设置 → 内置插件」中按需配置。基础运行环境和原生 Web 界面不需要重复安装。下表官方版本按已发布 App 基线列出；不会用这些开关复制他人的账号或配置。', [header, ...official.map((p, index) => row(p, officialPurpose[index], index < 2 ? '随官方 App 提供' : '在官方插件设置中启用；按需完成其登录/依赖配置'))].join('\n'),
 ].join('\n\n')
 const readmePath = `${root}README.md`
 const current = await readFile(readmePath, 'utf8')

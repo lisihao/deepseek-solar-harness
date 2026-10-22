@@ -6,7 +6,7 @@ V4 is built for the official DeepSeek Harness `0.2.1-rc.2` and does not rebuild 
 
 ## Install and restart
 
-Use the official Harness plugin manager and an exact package or tarball version. Back up the affected profile configuration before changing an installed profile, fully quit the app for an update, and relaunch it after the manager finishes. In the official UI the entry is **插件** (the official plugin manager). A profile that permits the bundled CLI can use:
+Use the official Harness plugin manager and an exact package or tarball version. Back up the affected profile configuration before changing an installed profile, fully quit the app for an update, and relaunch it after the manager finishes. With the community `dshmarket` version in this snapshot, open **设置 → 插件市场 → 已安装** to find installed packages. Search by package name; this view does not use a local package's translated `meta.title` as its search key. It is distinct from the sidebar **插件** entry and from **设置 → 内置插件**. A profile that permits the bundled CLI can use:
 
 ```sh
 dsh plugin --profile <profile> add <absolute-tarball>
@@ -39,7 +39,7 @@ The public source history is useful for provenance, but it is not a release chan
 
 ## On-demand skill context
 
-Install `skill-context`, relaunch, and confirm **Solar 技能按需上下文** in the installed-plugin list. No separate chat panel or model is added. The next normally authorized native request uses `solar_skill_search` for relevant names/descriptions, then the unchanged official `skill` loader for complete instructions. A few keywords or an exact skill name work; broad results expose `nextOffset`. Defaults are eight matches, at most 240 Unicode characters per description and 8,192 UTF-8 bytes per result JSON. Search itself does not call a model or execute a skill.
+Install `skill-context`, relaunch, and search **`skill-context`** in **设置 → 插件市场 → 已安装**. The package name is **`@lisihao/dsh-solar-skill-context`**; its Chinese locale title, **Solar 技能按需上下文**, is not guaranteed to appear in this list. A local preview archive need not have a Discover catalog entry. No separate chat panel or model is added. The next normally authorized native request uses `solar_skill_search` for relevant names/descriptions, then the unchanged official `skill` loader for complete instructions. A few keywords or an exact skill name work; broad results expose `nextOffset`. Defaults are eight matches, at most 240 Unicode characters per description and 8,192 UTF-8 bytes per result JSON. Search itself does not call a model or execute a skill.
 
 Old visible automatic catalogs leave the canonical request through individual standard Session replacements; original log events and already loaded skill bodies remain. Installing or opening the plugin does not retry an old request or rewrite every stored conversation. Cleanup runs when a subsequent native request is admitted. Agent policies permitting `skill` must also expose `solar_skill_search`; an incompatible allowlist stops with a named error before changing that Session. Disable removes the hook/search tool and leaves the official mechanism available. This repair does not shrink arbitrary system prompts, loaded documents or tool results, and does not guarantee any future request fits its model window. Source and isolated fake-model checks are separate from real-provider or real user-session restart acceptance.
 
