@@ -180,6 +180,57 @@ describe('HMR exact config paths', () => {
     }
   })
 
+  it('opens no config watch once a disposing tree has torn HMR down', { timeout: 20_000 }, async () => {
+    // A fast one-shot app can request exit while the launcher is still asking
+    // for its user-layer watches; those requests must not leave a watcher open.
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
+    writeFileSync(join(dir, 'profile.yml'), 'one')
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(dir).href + '/'
+    await ctx.plugin(Loader)
+    await ctx.plugin(Timer)
+    ctx.loader.internal = {
+      ...ctx.loader.internal!,
+      import: (specifier: string) => specifier === '@deepseek-ai/cordis-plugin-hmr'
+        ? Promise.resolve({ default: Hmr })
+        : Promise.reject(new Error(`unexpected import ${specifier}`)),
+    }
+    await ctx.loader.create({ name: '@deepseek-ai/cordis-plugin-hmr', config: { root: [], ignored: [], debounce: 0, usePolling: true } })
+    await ctx.loader.await()
+    const hmr = ctx.hmr
+    const settle = (pending: Promise<unknown>) => pending.then(() => 'registered', (error: unknown) => (error as { code?: string }).code)
+    try {
+      const during = settle(hmr.registerConfig(join(dir, 'profile.yml'), () => {}))
+      const disposal = ctx.fiber.dispose()
+      const after = settle(hmr.registerConfig(join(dir, 'home.yml'), () => {}))
+      expect(await during).toBe('INACTIVE_EFFECT')
+      expect(await after).toBe('INACTIVE_EFFECT')
+      await disposal
+      expect((hmr as unknown as { configs: Map<string, unknown> }).configs.size).toBe(0)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('releases a config watch whose watcher teardown closed before it was ready', { timeout: 20_000 }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
+    // Enough siblings that the polling watcher's initial scan outlasts the dispose below.
+    for (let index = 0; index < 3000; index += 1) writeFileSync(join(dir, `f${String(index)}`), '')
+    const ctx = await bootHmr(dir, [], true)
+    const hmr = ctx.hmr
+    const internals = hmr as unknown as { configs: Map<string, unknown> }
+    try {
+      const pending = hmr.registerConfig(join(dir, 'home.yml'), () => {}).then(() => 'registered', (error: unknown) => (error as { code?: string }).code)
+      while (internals.configs.size === 0) await new Promise(resolve => setImmediate(resolve))
+      await ctx.fiber.dispose()
+      expect(await pending).toBe('INACTIVE_EFFECT')
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('normalizes refresh failures and broadcasts them without escaping the watcher', { timeout: 20_000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
     const filename = join(dir, 'plugins.yml')
