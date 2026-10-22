@@ -271,7 +271,7 @@ def extract(plan_path, budget, executor=call_model):
         for s in plan["sessions"]:
             sid = s["sessionId"]
             if sid in ledger["calls"]:
-                if ledger["calls"][sid]["status"] == "complete":
+                if ledger["calls"][sid]["status"] in ("complete", "reconciled-no-replay"):
                     continue
                 raise ValueError("Prior attempt is incomplete/unknown; do not replay it")
             # Reserve the entire immutable plan, rather than releasing unused allowance
@@ -301,6 +301,92 @@ def extract(plan_path, budget, executor=call_model):
     return ledger
 
 
+def reconcile(plan_path, session_id):
+    """Explicit local reconciliation of a saved, normally-finished response.
+
+    Never repair text or replay a call: only independently complete JSON items
+    with valid verbatim evidence survive. A malformed tail remains quarantined.
+    """
+    plan_path = Path(plan_path)
+    plan = read_json(plan_path)
+    verify_plan(plan)
+    matches = [s for s in plan["sessions"] if s["sessionId"] == session_id]
+    if len(matches) != 1:
+        raise ValueError("Session is not in this frozen plan")
+    session = matches[0]
+    root = plan_path.parent
+    with (root / ".extract.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        ledger = read_json(root / "ledger.json")
+        call = ledger["calls"].get(session_id)
+        if ledger["planSha256"] != plan["planSha256"] or not call or call["requestSha256"] != session["requestSha256"]:
+            raise ValueError("Original call identity mismatch")
+        if call["status"] != "unknown-or-invalid":
+            raise ValueError("Only an unresolved saved original response can be reconciled")
+        response_path = root / (session_id + ".response.json")
+        raw = read_json(response_path)["response"]
+        choices = raw.get("choices")
+        if not isinstance(choices, list) or len(choices) != 1 or choices[0].get("finish_reason") != "stop":
+            raise ValueError("No normally completed original response; no reconciliation or replay")
+        content = choices[0]["message"]["content"]
+        rejected = []
+        try:
+            value = json.loads(content)
+            if not isinstance(value, dict) or set(value) != {"items"} or not isinstance(value["items"], list):
+                raise ValueError("Cannot recover an unexpected response envelope")
+            items = value["items"]
+        except json.JSONDecodeError:
+            opening = re.match(r'\s*\{\s*"items"\s*:\s*\[', content)
+            if opening is None:
+                raise ValueError("Cannot locate the strict items envelope") from None
+            cursor = opening.end()
+            items = []
+            while cursor < len(content):
+                while cursor < len(content) and content[cursor].isspace():
+                    cursor += 1
+                if cursor == len(content) or content[cursor] == "]":
+                    break
+                try:
+                    item, end = json.JSONDecoder().raw_decode(content, cursor)
+                except json.JSONDecodeError:
+                    rejected.append({"index": len(items) + 1, "reason": "malformed remaining JSON; not reconstructed",
+                                     "startCharacter": cursor, "remainingCharacters": len(content) - cursor})
+                    break
+                items.append(item)
+                cursor = end
+                while cursor < len(content) and content[cursor].isspace():
+                    cursor += 1
+                if cursor < len(content) and content[cursor] == ",":
+                    cursor += 1
+                elif cursor < len(content) and content[cursor] == "]":
+                    rejected.append({"reason": "invalid outer JSON suffix; complete prefix items only"})
+                    break
+                else:
+                    rejected.append({"reason": "invalid delimiter; remaining text not reconstructed"})
+                    break
+        if len(items) > 6:
+            raise ValueError("Too many candidates in original response")
+        accepted = []
+        for i, item in enumerate(items, 1):
+            try:
+                validate_result({"items": [item]}, session)
+                accepted.append(item)
+            except ValueError as error:
+                rejected.append({"index": i, "reason": str(error)})
+        receipt = usage_receipt(raw, session)
+        result = {"version": VERSION, "sessionId": session_id,
+                  "sourceSha256": session["sourceSha256"], "requestSha256": session["requestSha256"],
+                  "reviewStatus": "pending-human", "items": accepted,
+                  "localReconciliation": {"partial": bool(rejected), "rejected": rejected,
+                  "responseSha256": hashlib.sha256(response_path.read_bytes()).hexdigest(),
+                  "modelRequests": 0, "originalResponseUnchanged": True}}
+        write_json(root / (session_id + ".candidates.json"), result)
+        call.update(status="reconciled-no-replay", originalErrorType=call.get("errorType"),
+                    acceptedCandidates=len(accepted), rejected=rejected, **receipt)
+        write_json(root / "ledger.json", ledger)
+        return {"accepted": len(accepted), "rejected": rejected, "accountedCny": receipt["accountedCny"]}
+
+
 def report(plan_path):
     plan_path = Path(plan_path)
     plan = read_json(plan_path)
@@ -313,7 +399,7 @@ def report(plan_path):
              "只处理 DSH 导入登记中的 Codex/Claude 会话；没有读取原工具的凭据、思考块或个人记忆目录。",
              "长会话采用有界摘录，覆盖率如下；不能把未抽中的历史当作已经审核。", "",
              f"- 模型：{MODEL}；计划 SHA-256：`{plan['planSha256']}`",
-             f"- 完成调用：{sum(c['status'] == 'complete' for c in ledger['calls'].values())} / {len(plan['sessions'])}",
+             f"- 已取得并核对原回执：{sum(c['status'] in ('complete', 'reconciled-no-replay') for c in ledger['calls'].values())} / {len(plan['sessions'])}",
              f"- 全计划保守预留：¥{plan['reservedCny']:.4f}；授权上限：¥{ledger['budgetCny']:.2f}",
              f"- 用量按保守单价估算：¥{sum(c.get('accountedCny', c['reservedCny']) for c in ledger['calls'].values()):.4f}（不是结算账单；未知用量保留全额预留）", "",
              "## 样本与覆盖", "", "| 会话 | 来源 | 可见正文字符 | 本次选取字符 | 覆盖 |",
@@ -334,6 +420,9 @@ def report(plan_path):
         if candidates["requestSha256"] != s["requestSha256"]:
             raise ValueError("Candidate identity mismatch")
         validate_result({"items": candidates["items"]}, s)
+        reconciliation = candidates.get("localReconciliation")
+        if reconciliation:
+            lines += [f"原响应含损坏或不合格条目；本地只保留完整且证据通过的条目，未重发。拒收记录：{json.dumps(reconciliation['rejected'], ensure_ascii=False)}", ""]
         if not candidates["items"]:
             lines += ["没有足够可靠的记忆候选。"]
         for j, item in enumerate(candidates["items"], 1):
@@ -413,6 +502,9 @@ def main():
     p.add_argument("--plan", type=Path, required=True)
     p = sub.add_parser("preview")
     p.add_argument("--plan", type=Path, required=True)
+    p = sub.add_parser("reconcile")
+    p.add_argument("--plan", type=Path, required=True)
+    p.add_argument("--session-id", required=True)
     args = parser.parse_args()
     if args.command == "prepare":
         result = prepare(args.home, args.out, args.count)
@@ -422,8 +514,10 @@ def main():
         extract(args.plan, args.budget_cny)
     elif args.command == "report":
         print(report(args.plan))
-    else:
+    elif args.command == "preview":
         print(preview(args.plan))
+    else:
+        print(json.dumps(reconcile(args.plan, args.session_id), ensure_ascii=False))
 
 
 if __name__ == "__main__":

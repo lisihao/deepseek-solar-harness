@@ -34,6 +34,15 @@ The entire plan must fit the supplied cap before the first call. Admission reser
 
 Each call is durably marked started before submission. Completed calls are reused. A timeout, malformed answer, invalid quote, truncated completion or interrupted attempt stops the run and prevents automatic replay. Keep the ledger and original response to reconcile the original attempt; do not erase them to get another attempt. Missing usage retains the full allowance and is never treated as zero. A response reporting usage above its allowance stops subsequent calls. Reports label cost as an estimate, separate from a settled account bill.
 
+If a normally finished response was saved but its answer failed JSON or evidence validation, explicitly reconcile that original receipt locally:
+
+```sh
+python3 tools/session_memory/pilot.py reconcile \
+  --plan /absolute/private/pilot-directory/plan.json --session-id ORIGINAL_SESSION_ID
+```
+
+This sends no request and never repairs the model's text. Only independently complete candidate objects whose verbatim evidence passes are retained; malformed tails and invalid candidates remain recorded as rejected. A missing response or abnormal completion cannot be reconciled this way. After reconciliation, `extract` skips that original call and may continue the still-unattempted sessions in the same frozen plan and budget. It never retries the rejected output.
+
 Every candidate needs verbatim evidence from the selected session and remains `pending-human`. The report includes scope, uncertainties and excerpt coverage. Exact same-scope repeated rules are identified in the report; semantic duplicates, contradictions, stale facts and independence of incidents require review. There is deliberately no Hindsight import command in this pilot: user confirmation of the actual candidates is a separate boundary.
 
 ## Reference and verification

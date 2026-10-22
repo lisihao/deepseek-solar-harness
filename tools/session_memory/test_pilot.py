@@ -160,6 +160,33 @@ class PilotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             pilot.usage_receipt({"usage": {"prompt_tokens": 11, "completion_tokens": 1}}, s)
 
+    def test_local_reconciliation_keeps_complete_prefix_without_replaying(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = self.write_plan(root, 1)
+            def malformed(body):
+                result = self.fake(body)
+                item = json.dumps(self.answer()["items"][0], ensure_ascii=False)
+                result["choices"][0]["message"]["content"] = '{"items":[' + item + ',{"unfinished":"'
+                return result
+            with self.assertRaises(RuntimeError):
+                pilot.extract(path, 2, malformed)
+            original = (Path(root) / "sample-0.response.json").read_bytes()
+            result = pilot.reconcile(path, "sample-0")
+            self.assertEqual(result["accepted"], 1)
+            self.assertTrue(result["rejected"])
+            self.assertEqual(original, (Path(root) / "sample-0.response.json").read_bytes())
+            pilot.extract(path, 2, lambda _: self.fail("must not replay reconciled call"))
+
+    def test_reconciliation_cannot_turn_timeout_into_success(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = self.write_plan(root, 1)
+            def timeout(body):
+                raise TimeoutError()
+            with self.assertRaises(RuntimeError):
+                pilot.extract(path, 2, timeout)
+            with self.assertRaises(FileNotFoundError):
+                pilot.reconcile(path, "sample-0")
+
 
 if __name__ == "__main__":
     unittest.main()
