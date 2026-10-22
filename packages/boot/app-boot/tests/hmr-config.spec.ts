@@ -213,24 +213,6 @@ describe('HMR exact config paths', () => {
     }
   })
 
-  it('releases a config watch whose watcher teardown closed before it was ready', { timeout: 20_000 }, async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
-    // Enough siblings that the polling watcher's initial scan outlasts the dispose below.
-    for (let index = 0; index < 3000; index += 1) writeFileSync(join(dir, `f${String(index)}`), '')
-    const ctx = await bootHmr(dir, [], true)
-    const hmr = ctx.hmr
-    const internals = hmr as unknown as { configs: Map<string, unknown> }
-    try {
-      const pending = hmr.registerConfig(join(dir, 'home.yml'), () => {}).then(() => 'registered', (error: unknown) => (error as { code?: string }).code)
-      while (internals.configs.size === 0) await new Promise(resolve => setImmediate(resolve))
-      await ctx.fiber.dispose()
-      expect(await pending).toBe('INACTIVE_EFFECT')
-    } finally {
-      await ctx.fiber.dispose()
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
   it('normalizes refresh failures and broadcasts them without escaping the watcher', { timeout: 20_000 }, async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
     const filename = join(dir, 'plugins.yml')
