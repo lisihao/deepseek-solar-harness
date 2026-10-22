@@ -1,33 +1,11 @@
 {
-  "extends": "../../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "lib/types"
-  },
-  "include": [
-    "src"
-  ],
+  "files": [],
   "references": [
     {
-      "path": "../../../vendor/cosmokit"
+      "path": "./tsconfig.host.json"
     },
     {
-      "path": "../../../vendor/cordis"
-    },
-    {
-      "path": "../../../vendor/schemastery"
-    },
-    {
-      "path": "../../runtime-diagnostics/invariants"
-    },
-    {
-      "path": "../../host/webserver"
-    },
-    {
-      "path": "../../host/remote-auth"
-    },
-    {
-      "path": "../bench-runner"
+      "path": "./tsconfig.client.json"
     }
   ]
 }

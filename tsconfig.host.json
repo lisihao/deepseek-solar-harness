@@ -152,7 +152,7 @@
     { "path": "./packages/bench/bench" },
     { "path": "./packages/bench/bench-runner" },
     { "path": "./packages/bench/bench-suite-dsh-native" },
-    { "path": "./packages/bench/bench-web" },
+    { "path": "./packages/bench/bench-web/tsconfig.host.json" },
     { "path": "./packages/bundle/benchmarks" },
     { "path": "./packages/session-query/session-query" },
     { "path": "./packages/session-query/session-query-sqlite" },

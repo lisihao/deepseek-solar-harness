@@ -1110,6 +1110,9 @@ importers:
 
   packages/bench/bench-web:
     dependencies:
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: workspace:^
+        version: link:../../client/ui-primitives
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
@@ -1132,6 +1135,24 @@ importers:
       '@deepseek-ai/dsh-brand':
         specifier: workspace:^
         version: link:../../util/brand
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-client-locale':
+        specifier: workspace:^
+        version: link:../../client/locale
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: workspace:^
+        version: link:../../client/runtime
+      '@deepseek-ai/dsh-client-test-runtime':
+        specifier: workspace:^
+        version: link:../../test-support/client-runtime
+      '@deepseek-ai/dsh-client-ui-settings':
+        specifier: workspace:^
+        version: link:../../client/ui-settings
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: workspace:^
+        version: link:../../client/ui-slots
       '@deepseek-ai/dsh-host-remote-auth':
         specifier: workspace:^
         version: link:../../host/remote-auth
@@ -1141,6 +1162,15 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@testing-library/react':
+        specifier: ^16.3.2
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/react':
+        specifier: ~18.3.1
+        version: 18.3.31
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
 
   packages/boot/app-boot:
     dependencies:

@@ -45,6 +45,7 @@
       "@deepseek-ai/dsh-typert-registry/client": ["./packages/typert/registry/src/client/index.ts"],
       "@deepseek-ai/dsh-api-gateway": ["./packages/api/gateway/src/index.ts"],
       "@deepseek-ai/dsh-api-gateway/client": ["./packages/api/gateway/src/client/index.ts"],
+      "@deepseek-ai/dsh-bench-web/client": ["./packages/bench/bench-web/src/client/index.ts"],
       "@deepseek-ai/dsh-api-gateway/invariant": ["./packages/api/gateway/src/invariant.ts"],
       "@deepseek-ai/dsh-api-gateway/types": ["./packages/api/gateway/src/types.ts"],
       "@deepseek-ai/dsh-typert-protocol": ["./packages/typert/protocol/src/index.ts"],
