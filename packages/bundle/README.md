@@ -9,6 +9,7 @@ Profile bundles: npm packages whose manifest declares `"dsh": { "bundle": { "pat
 | [`base/`](base/README.md) | The shared dsh core every profile applies first | — (patch only) |
 | [`web-app/`](web-app/README.md) | Browser surface: web patch layer + runtime glue plugin | mounts rows |
 | [`headless/`](headless/README.md) | Direct one-shot task mode over base, with no Host or Web layer | mounts `headless-runner` |
+| [`benchmarks/`](benchmarks/README.md) | Opt-in one-shot benchmark command: plan, confirmed runs, spending limit, analysis | `ctx.benchRuntime` |
 | [`orchestrations/`](orchestrations/README.md) | Opt-in persistent TaskGraph compiler, daemon client, model tool, and browser projection | `ctx.orchestrations` |
 
 In-box bundles resolve from the dsh installation; out-of-tree bundles install into a profile through `dsh plugin --profile <name> add <package>`.

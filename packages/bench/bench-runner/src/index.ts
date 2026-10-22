@@ -14,12 +14,13 @@ import { join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type { BenchSuite, BenchTask, BenchTaskId } from '@deepseek-ai/dsh-bench'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import z from '@deepseek-ai/schemastery'
 import { cellEnv, prepareCell, readRunSessions, scrubTemplateFiles } from './cell.ts'
 import { cellKey, ExperimentLedger, LEDGER_FORMAT_VERSION, listExperimentIds, readPinnedExperiment } from './ledger.ts'
 import { foldRunMetrics } from './metrics.ts'
 import type { ModelPrice } from './metrics.ts'
-import type { CellKey, Experiment, ExperimentId, LedgerSnapshot, RunProgress, RunRecord, Variant } from './types.ts'
+import type { AnalysisOptions, CellKey, Experiment, ExperimentId, LedgerSnapshot, RunProgress, RunRecord, Variant } from './types.ts'
 
 export type * from './types.ts'
 export type { ModelPrice } from './metrics.ts'
@@ -39,7 +40,7 @@ export interface Config {
   command: string[]
   /** Absolute home whose `profiles/<profile>` seeds every run home. */
   templateHome: string
-  /** Home-relative files copied into every run home (credentials, settings) and deleted once its child exits. */
+  /** Home-relative files copied, when present, into every run home (credentials, settings) and deleted once its child exits. */
   templateFiles: string[]
   /** Absolute directory holding one ledger directory per experiment. */
   ledgerRoot: string
@@ -49,6 +50,13 @@ export interface Config {
   runTimeoutMs: number
   /** USD per million tokens, by model id; runs using an unlisted model get no cost. */
   prices: ModelPrice[]
+  /**
+   * Provider error codes that mean the model was unavailable rather than the
+   * task failed (bad key, no balance, exhausted quota). A root turn that ends
+   * with one of these makes the run `invalid`, so a broken credential cannot
+   * read as every variant failing every task.
+   */
+  providerFailureCodes: string[]
 }
 
 export const Config: z<Config> = z.object({
@@ -64,6 +72,17 @@ export const Config: z<Config> = z.object({
     output: z.number().min(0).required(),
     cacheRead: z.number().min(0),
   })).default([]),
+  providerFailureCodes: z.array(z.string()).default(['AUTH', 'INSUFFICIENT_BALANCE', 'QUOTA']),
+})
+
+/** Schemastery schema of {@link AnalysisOptions}, with defaults, for consumers that take analysis settings as config. */
+export const AnalysisConfig: z<AnalysisOptions> = z.object({
+  confidence: z.union([z.const(0.9), z.const(0.95), z.const(0.99)]).default(0.95),
+  resamples: z.natural().min(100).default(2000),
+  seed: z.natural().default(1),
+  margin: z.number().min(0).max(0.99).default(0.05),
+  minTasks: z.natural().min(3).default(10),
+  invalidTolerance: z.number().min(0).max(1).default(0.1),
 })
 
 /** Options of one {@link BenchRuntime.run} call. */
@@ -79,6 +98,19 @@ interface ChildExit {
   code: number | null
   timedOut: boolean
   output: string
+}
+
+/**
+ * The provider failure that ended the root session's last turn, when its code is listed.
+ * @param events - root session events.
+ * @param codes - provider error codes that mean the model was unavailable.
+ * @returns `CODE: message`, or `undefined` when the last turn did not end that way.
+ */
+function providerFailure(events: readonly SessionEvent[], codes: readonly string[]): string | undefined {
+  const last = events.findLast(event => event.type === 'turn/end')
+  if (last?.type !== 'turn/end' || last.data.reason.kind !== 'error') return undefined
+  const { code, message } = last.data.reason.error
+  return codes.includes(code) ? `${code}: ${message}` : undefined
 }
 
 /** Bytes of child output kept for error messages. */
@@ -221,6 +253,8 @@ export class BenchRuntime extends Service {
       return { ...base, status: 'invalid', models: [], error: `session log unreadable: ${(error as Error).message}\n${exit.output}`, endedAt: Date.now() }
     }
     const { metrics, models } = foldRunMetrics(sessions.root, sessions.children, this.config.prices)
+    const unavailable = providerFailure(sessions.root, this.config.providerFailureCodes)
+    if (unavailable !== undefined) return { ...base, status: 'invalid', metrics, models, error: `model unavailable: ${unavailable}`, endedAt: Date.now() }
     if (exit.timedOut) return { ...base, status: 'timeout', metrics, models, endedAt: Date.now() }
     const grader = this.ctx.benchmarks.grader(job.task.grader.kind)
     if (grader === undefined) {

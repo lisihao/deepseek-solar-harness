@@ -127,6 +127,7 @@ flowchart TD
   end
   subgraph group_bundle["packages/bundle"]
     pkg_base["base"]
+    pkg_benchmarks["benchmarks"]
     pkg_chatgpt_web_operator["chatgpt-web-operator"]
     pkg_ego_lite_browser["ego-lite-browser"]
     pkg_headless["headless"]
@@ -401,6 +402,7 @@ flowchart TD
   pkg_scope --> pkg_invariants
   pkg_cmdline --> pkg_invariants
   pkg_base --> pkg_invariants
+  pkg_benchmarks --> pkg_invariants
   pkg_chatgpt_web_operator --> pkg_invariants
   pkg_ego_lite_browser --> pkg_invariants
   pkg_orchestrations --> pkg_invariants
@@ -1814,6 +1816,7 @@ flowchart TD
 | [`scope`](../packages/core/scope) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`cmdline`](../packages/boot/cmdline) | `boot` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`base`](../packages/bundle/base) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`benchmarks`](../packages/bundle/benchmarks) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`chatgpt-web-operator`](../packages/bundle/chatgpt-web-operator) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`ego-lite-browser`](../packages/bundle/ego-lite-browser) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`orchestrations`](../packages/bundle/orchestrations) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |

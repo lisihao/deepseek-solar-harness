@@ -27,4 +27,4 @@
 
 ## 5. 运行
 
-在任何付费运行之前，先用无需密钥的 mock 模型跑一个小实验：启动 `pnpm run mock:llm`，把 `DEEPSEEK_BASE_URL` 指向它，然后用一次重复、两个 variant 调用 `ctx.benchRuntime.run`。确认每次运行的状态都是 `graded`，而不是 `invalid`。对真实模型的付费运行，必须先让成本预估获得批准。
+在任何付费运行之前，先用无需密钥的 mock 模型跑一个小实验：启动 `pnpm run mock:llm`，把 `DEEPSEEK_BASE_URL` 指向它，然后用一次重复、两个 variant，通过 [benchmark 命令](../../packages/bundle/benchmarks/README.md)（`node apps/cli/lib/bin.js --profile bench experiment.yml --yes`）运行实验。确认每次运行的结果都是通过或失败，而不是无法测量。对真实模型的付费运行，必须先让成本获得批准，并设置 `--max-usd`。

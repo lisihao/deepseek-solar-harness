@@ -57,7 +57,7 @@ describe('real Loader composition over HTTP', () => {
       `  config: { command: [node], templateHome: ${root}, templateFiles: [], ledgerRoot: ${ledgerRoot} }`,
       '- id: bench-web',
       "  name: '@deepseek-ai/dsh-bench-web'",
-      '  config: { minTasks: 3 }',
+      '  config: { analysis: { minTasks: 3 } }',
       '',
     ].join('\n'))
     context = new Context()
@@ -132,7 +132,8 @@ function mount(runtime: FakeRuntime, remoteAuth?: unknown): Handler {
     effect(callback: () => unknown) { callback() },
     get(name: string) { return name === 'remoteAuth' ? remoteAuth : undefined },
   }
-  Web.apply(ctx as unknown as Context, { confidence: 0.95, resamples: 100, seed: 1, margin: 0.05, minTasks: 3, invalidTolerance: 0.1 })
+  const analysis = { confidence: 0.95, resamples: 100, seed: 1, margin: 0.05, minTasks: 3, invalidTolerance: 0.1 } as const
+  Web.apply(ctx as unknown as Context, { analysis })
   return handler!
 }
 

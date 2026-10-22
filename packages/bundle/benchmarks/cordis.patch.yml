@@ -1,0 +1,39 @@
+# The opt-in benchmark bundle over dsh-base: `dsh --profile <profile>
+# <experiment.yml> --yes` runs one experiment as isolated child runs and
+# exits. Child runs boot their own profile (named by the experiment) from a
+# copy of this home; this layer mounts no Host, HTTP server, or browser.
+
+- id: hmr
+  disabled: true
+
+- insert:
+    - id: benchmarks
+      name: '@deepseek-ai/dsh-bench'
+
+    - id: bench-suite-dsh-native
+      name: '@deepseek-ai/dsh-bench-suite-dsh-native'
+
+    - id: bench-startup
+      name: '@deepseek-ai/dsh-benchmarks/startup'
+
+    # Child runs re-execute this process's built launcher (startup refuses a
+    # source launch) and copy the home's credential file when it exists.
+    - id: bench-runner
+      name: '@deepseek-ai/dsh-bench-runner'
+      inject: [benchStartup]
+      config:
+        command: !!js ctx.benchStartup.launcher
+        templateHome: !!js dshHomePath()
+        templateFiles: [.credentials.yaml]
+        ledgerRoot: !!js dshHomePath('bench')
+
+    - id: bench-cli
+      name: '@deepseek-ai/dsh-benchmarks'
+      inject: [benchStartup]
+      config:
+        experiment: !!js ctx.benchStartup.experiment
+        confirmed: !!js ctx.benchStartup.confirmed
+        maxUsd: !!js ctx.benchStartup.maxUsd
+        credentials:
+          env: [DEEPSEEK_API_KEY]
+          files: [!!js dshHomePath('.credentials.yaml')]

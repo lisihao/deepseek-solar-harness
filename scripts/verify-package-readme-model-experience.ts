@@ -54,6 +54,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/physical-operator/resident-operator': { kind: 'indirect', reason: 'The trusted control service delegates model execution and rendering to the physical-operator consumer.' },
   'packages/physical-operator/resident-operator-local': { kind: 'indirect', reason: 'The daemon provider delegates model rendering to dsh-tool-physical-operator.' },
   'packages/bundle/resident-operators': { kind: 'indirect', reason: 'The patch carrier mounts dsh-tool-physical-operator, which owns the model-facing schema and results.' },
+  'packages/bundle/benchmarks': { kind: 'indirect', reason: 'The patch carrier mounts dsh-bench-runner, whose child runs send each task prompt through dsh-headless.' },
   'packages/bundle/orchestrations': { kind: 'indirect', reason: 'The patch carrier mounts dsh-tool-orchestration, which owns the model-facing schema, policy, and bounded results.' },
   'packages/orchestration/scheduling-evidence': { kind: 'none', reason: 'The gateway reads collector documents for the scheduler and registers no prompt, tool, or session event.' },
   'packages/client/ui-settings-scheduling-evidence': { kind: 'none', reason: 'The page visualizes a Host-owned store and registers nothing model-facing.' },

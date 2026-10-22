@@ -41,11 +41,12 @@ async function mount(tasks: BenchTask[], config: Partial<Config> = {}): Promise<
   await ctx.plugin(BenchRuntime, {
     command: [process.execPath, fakeDsh],
     templateHome: join(root, 'template'),
-    templateFiles: ['credentials.yaml'],
+    templateFiles: ['credentials.yaml', 'absent.yaml'],
     ledgerRoot: join(root, 'ledger'),
     concurrency: 2,
     runTimeoutMs: 20_000,
     prices: [{ model: 'deepseek-v4-flash', input: 1, output: 2, cacheRead: 0.5 }],
+    providerFailureCodes: ['AUTH'],
     ...config,
   })
 }
@@ -153,6 +154,35 @@ describe('BenchRuntime.run', () => {
     expect(none.error).toMatch(/session log unreadable: expected one top-level session, found 0/)
   })
 
+  it('records a run whose model was unavailable as invalid, not as a task failure', async () => {
+    const authSessions = join(root, 'auth-sessions')
+    await writeSessions(authSessions, [{
+      id: 'root',
+      events: [
+        { type: 'turn/start', time: 1, data: { turn: 1 } },
+        { type: 'turn/end', time: 2, data: { turn: 1, reason: { kind: 'error', error: { code: 'AUTH', message: 'bad key' } } } },
+      ] as never,
+    }])
+    const ratelimited = join(root, 'rate-sessions')
+    await writeSessions(ratelimited, [{
+      id: 'root',
+      events: [
+        { type: 'turn/start', time: 1, data: { turn: 1 } },
+        { type: 'turn/end', time: 2, data: { turn: 1, reason: { kind: 'error', error: { code: 'RATE_LIMIT', message: 'slow down' } } } },
+      ] as never,
+    }])
+    await mount([task('t1', 'write:out.txt:yes')])
+    const records = await ctx.benchRuntime.run(experiment({
+      repetitions: 1,
+      variants: [
+        { id: 'auth' as VariantId, patches: [], env: { FAKE_DSH_SESSIONS: authSessions } },
+        { id: 'rate' as VariantId, patches: [], env: { FAKE_DSH_SESSIONS: ratelimited } },
+      ],
+    }))
+    expect(records.find(record => record.cell.variant === 'auth')).toMatchObject({ status: 'invalid', error: 'model unavailable: AUTH: bad key' })
+    expect(records.find(record => record.cell.variant === 'rate')).toMatchObject({ status: 'graded' })
+  })
+
   it('records a grader failure as invalid', async () => {
     const throwing: BenchGrader = { kind: 'throws', version: 1, validate: () => {}, grade: () => Promise.reject(new Error('kaboom')) }
     await mount([task('t1', 'write:out.txt:yes', { grader: { kind: 'throws' } })])
@@ -205,7 +235,8 @@ describe('BenchRuntime.run', () => {
     ctx = new Context()
     await ctx.plugin(BenchRegistry)
     await expect(ctx.plugin(BenchRuntime, {
-      command: [], templateHome: root, templateFiles: [], ledgerRoot: root, concurrency: 1, runTimeoutMs: 1, prices: [],
+      command: [], templateHome: root, templateFiles: [], ledgerRoot: root,
+      concurrency: 1, runTimeoutMs: 1, prices: [], providerFailureCodes: [],
     })).rejects.toThrow(/command must name the dsh launcher/)
   })
 })

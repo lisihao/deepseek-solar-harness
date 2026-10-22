@@ -15,16 +15,7 @@ Requests are authorized like other Host dashboards: a loopback request with a lo
 
 ## Configuration
 
-The config is the analysis settings applied to every served experiment ([`dsh-bench-runner`](../bench-runner/README.md#analysis)).
-
-| Key | Default |
-|---|---|
-| `confidence` | `0.95` (one of `0.9`, `0.95`, `0.99`) |
-| `resamples` | `2000` |
-| `seed` | `1` |
-| `margin` | `0.05` |
-| `minTasks` | `10` |
-| `invalidTolerance` | `0.1` |
+`analysis` holds the analysis settings applied to every served experiment ([`dsh-bench-runner`](../bench-runner/README.md#analysis)); omitted keys take their defaults: `confidence` 0.95, `resamples` 2000, `seed` 1, `margin` 0.05, `minTasks` 10, `invalidTolerance` 0.1.
 
 ```yaml
 - id: bench-web

@@ -400,7 +400,7 @@ export interface Config {
   command: string[]
   /** Absolute home whose `profiles/<profile>` seeds every run home. */
   templateHome: string
-  /** Home-relative files copied into every run home (credentials, settings) and deleted once its child exits. */
+  /** Home-relative files copied, when present, into every run home (credentials, settings) and deleted once its child exits. */
   templateFiles: string[]
   /** Absolute directory holding one ledger directory per experiment. */
   ledgerRoot: string
@@ -410,6 +410,13 @@ export interface Config {
   runTimeoutMs: number
   /** USD per million tokens, by model id; runs using an unlisted model get no cost. */
   prices: ModelPrice[]
+  /**
+   * Provider error codes that mean the model was unavailable rather than the
+   * task failed (bad key, no balance, exhausted quota). A root turn that ends
+   * with one of these makes the run `invalid`, so a broken credential cannot
+   * read as every variant failing every task.
+   */
+  providerFailureCodes: string[]
 }
 
 /** USD per million tokens for one model; `cacheRead` defaults to `input`. */
@@ -425,7 +432,7 @@ export interface ModelPrice {
 }
 ```
 
-Source: [`packages/bench/bench-runner/src/index.ts:37`](../packages/bench/bench-runner/src/index.ts)
+Source: [`packages/bench/bench-runner/src/index.ts:38`](../packages/bench/bench-runner/src/index.ts)
 
 <a id="deepseek-aidsh-bench-web"></a>
 
@@ -434,13 +441,47 @@ Source: [`packages/bench/bench-runner/src/index.ts:37`](../packages/bench/bench-
 Requires: `benchRuntime` · `webServer`
 
 ```ts config-catalog
-/** Analysis settings applied to every served experiment. */
-export type Config = AnalysisOptions
+/** Plugin config. */
+export interface Config {
+  /** Analysis settings applied to every served experiment. */
+  analysis: AnalysisOptions
+}
 ```
 
 Depends on: [`AnalysisOptions`](../packages/bench/bench-runner/src/index.ts)
 
 Source: [`packages/bench/bench-web/src/index.ts:30`](../packages/bench/bench-web/src/index.ts)
+
+<a id="deepseek-aidsh-benchmarks"></a>
+
+## `@deepseek-ai/dsh-benchmarks`
+
+Requires: `benchmarks` · `benchRuntime`
+
+```ts config-catalog
+/** Plugin config, resolved from the `benchStartup` provider and the bundle patch. */
+export interface Config {
+  /** Absolute experiment file path. */
+  experiment: string
+  /** Whether runs may start. */
+  confirmed: boolean
+  /** Spending ceiling in USD. */
+  maxUsd?: number
+  /** Where a model credential may come from; at least one must be present before runs start. */
+  credentials: {
+    /** Environment variables holding an API key. */
+    env: string[]
+    /** Absolute credential files copied into run homes. */
+    files: string[]
+  }
+  /** Analysis settings for the printed summary. */
+  analysis: AnalysisOptions
+}
+```
+
+Depends on: [`AnalysisOptions`](../packages/bench/bench-runner/src/index.ts)
+
+Source: [`packages/bundle/benchmarks/src/index.ts:27`](../packages/bundle/benchmarks/src/index.ts)
 
 <a id="deepseek-aidsh-browser"></a>
 

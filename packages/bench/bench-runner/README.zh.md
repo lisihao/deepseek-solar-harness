@@ -43,7 +43,7 @@ variants:                    # the first is the baseline
 |---|---|
 | `graded` | 子进程已退出，评分器已依据工作区和根会话日志评分。 |
 | `timeout` | 子进程超过 `runTimeoutMs` 被杀，不评分。若子进程已持久化会话，则带有 `metrics`。 |
-| `invalid` | 无法测量：home 中没有恰好一个顶层会话，或评分器抛错。不计入成功率。 |
+| `invalid` | 无法测量：home 中没有恰好一个顶层会话；或根轮次以 `providerFailureCodes` 中列出的 provider 错误结束（模型不可用，而非任务失败）；或评分器抛错。不计入成功率。 |
 
 指标来自经 JSONL 持久化后端读取的会话。token 和成本对全部会话求和，包括 subagent 子会话；`tokens.input` 不含缓存命中。轮数、步数、重试和工具统计只描述根会话。`timing` 把根会话墙钟时间拆成三部分：`llmMs`（`step/start` → `assistant/message`）、`toolCriticalMs`（每步最慢的那次工具调用，因为并行调用会重叠）和 `overheadMs`（其余时间，即 harness 和插件耗时）。只有用到的每个模型都在 `prices` 中有对应行时，记录才带 `costUsd`。
 
@@ -56,7 +56,7 @@ variants:                    # the first is the baseline
 - **判定**，按以下顺序：variant 与基线的 invalid 率相差（任一方向）超过 `invalidTolerance` 时为 `unreliable`（否则因 invalid 而少算失败的一方会显得更好）；配对任务数少于 `minTasks` 时为 `insufficient`；区间不含 0 时为 `improved` 或 `regressed`；区间完全落在 ±`margin` 之内时为 `equivalent`；其余为 `underpowered`。
 - **此外**：任务 × variant 的通过率 `matrix`，以及 `pareto` 集合，即在成功率和平均成本两方面都没有被其他有价格的 variant 同时超过的那些 variant。
 
-所有选项都必须显式给出：`confidence`（0.9、0.95 或 0.99）、`resamples`（≥ 100）、`seed`、`margin`（取值 [0, 1)）、`minTasks`（≥ 3）和 `invalidTolerance`（取值 [0, 1]）。相同的记录和种子会得到相同的区间。
+`AnalysisConfig` 是这些选项带默认值的 Schemastery schema，供以配置形式接收分析设置的消费方使用。所有选项都必须显式给出：`confidence`（0.9、0.95 或 0.99）、`resamples`（≥ 100）、`seed`、`margin`（取值 [0, 1)）、`minTasks`（≥ 3）和 `invalidTolerance`（取值 [0, 1]）。相同的记录和种子会得到相同的区间。
 
 ## 配置
 
@@ -64,11 +64,12 @@ variants:                    # the first is the baseline
 |---|---|---|
 | `command` | 必填 | 启动器 argv 前缀，例如 `[node, /abs/apps/cli/lib/bin.js]`。只能用构建产物，因为子进程以普通 Node 运行。 |
 | `templateHome` | 必填 | 用其 profile 为每个运行 home 播种的 home 目录。 |
-| `templateFiles` | 必填 | 复制进每个运行 home 供子进程使用的文件（相对 home），例如 `credentials.yaml`；子进程退出时删除。 |
+| `templateFiles` | 必填 | 存在时复制进每个运行 home 供子进程使用的文件（相对 home），例如 `.credentials.yaml`；子进程退出时删除。 |
 | `ledgerRoot` | 必填 | 存放各实验账本的目录，每个实验一个账本。 |
 | `concurrency` | `1` | 同时进行的运行数。 |
 | `runTimeoutMs` | `600000` | 单次运行的墙钟时限。 |
 | `prices` | `[]` | `{ model, input, output, cacheRead? }`，单位为美元每百万 token。 |
+| `providerFailureCodes` | `[AUTH, INSUFFICIENT_BALANCE, QUOTA]` | 使运行记为 `invalid`（而非任务失败）的 provider 错误码。 |
 
 ## 模型体验
 

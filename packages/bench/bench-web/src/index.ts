@@ -10,7 +10,7 @@
 
 import type { ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
-import { analyzeExperiment } from '@deepseek-ai/dsh-bench-runner'
+import { AnalysisConfig, analyzeExperiment } from '@deepseek-ai/dsh-bench-runner'
 import type { AnalysisOptions } from '@deepseek-ai/dsh-bench-runner'
 import { authorizeRemoteRequest } from '@deepseek-ai/dsh-host-remote-auth'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -26,16 +26,14 @@ export const name = 'bench-web'
 /** The runtime owns the ledgers; the web server carries the routes. */
 export const inject = ['benchRuntime', 'webServer']
 
-/** Analysis settings applied to every served experiment. */
-export type Config = AnalysisOptions
+/** Plugin config. */
+export interface Config {
+  /** Analysis settings applied to every served experiment. */
+  analysis: AnalysisOptions
+}
 
 export const Config: z<Config> = z.object({
-  confidence: z.union([z.const(0.9), z.const(0.95), z.const(0.99)]).default(0.95),
-  resamples: z.natural().min(100).default(2000),
-  seed: z.natural().default(1),
-  margin: z.number().min(0).max(0.99).default(0.05),
-  minTasks: z.natural().min(3).default(10),
-  invalidTolerance: z.number().min(0).max(1).default(0.1),
+  analysis: AnalysisConfig,
 })
 
 const EXPERIMENTS_PATH = `${BENCH_API_PATH}/experiments`
@@ -100,7 +98,7 @@ export function apply(ctx: Context, config: Config): void {
   const detail = async (id: string): Promise<BenchExperimentDetail | undefined> => {
     const snapshot = await ctx.benchRuntime.ledger(id)
     if (snapshot === undefined) return undefined
-    return { ...snapshot, analysis: analyzeExperiment(snapshot.experiment, snapshot.records, config) }
+    return { ...snapshot, analysis: analyzeExperiment(snapshot.experiment, snapshot.records, config.analysis) }
   }
 
   ctx.effect(() => ctx.webServer.register({
