@@ -42,6 +42,7 @@ interface Fixture {
   readonly disposeRequestGuards: ReturnType<typeof vi.fn>[]
   readonly resident: { protocolVersion: 1; list: ReturnType<typeof vi.fn> }
   readonly installation: ReturnType<typeof installSessionMode>
+  readonly tools: Map<string, unknown>
   readonly remove: () => void
 }
 
@@ -124,6 +125,7 @@ async function fixture(options: Partial<{
     disposeRequestGuards,
     resident,
     installation,
+    tools,
     remove: () => { installation(); removers.reverse().forEach(remove => remove()) },
   }
 }
@@ -234,6 +236,36 @@ describe('installSessionMode', () => {
       })
       expect(next).toHaveBeenCalledOnce()
       await expect(value.controller.read(value.agent.id)).resolves.toMatchObject({ mode: 'smart', revision: 1 })
+    } finally {
+      value.remove()
+    }
+  })
+
+  it('blocks a request when Smart stays selected but the Agent lost a collaboration tool', async () => {
+    const value = await fixture()
+    try {
+      await value.controller.select(value.agent.id, 'smart', 0)
+      value.tools.delete('solar_wait')
+      const next = vi.fn(async () => ({ provider: 'openai-codex', model: 'gpt' }))
+      await expect(value.requestListeners[0]!({ agent: value.agent }, next)).rejects.toMatchObject({
+        code: 'SMART_MODE_TOOLS_UNAVAILABLE',
+        message: expect.stringContaining('solar_wait'),
+      })
+      await expect(value.controller.read(value.agent.id)).resolves.toMatchObject({ mode: 'smart', revision: 1 })
+    } finally {
+      value.remove()
+    }
+  })
+
+  it('lets a Smart request through while its tools are present and ignores tools in ordinary mode', async () => {
+    const value = await fixture()
+    try {
+      const route = { provider: 'openai-codex', model: 'gpt' }
+      value.tools.clear()
+      await expect(value.requestListeners[0]!({ agent: value.agent }, async () => route)).resolves.toBe(route)
+      value.tools.set('solar_coordinate', {}).set('solar_resident', {}).set('solar_wait', {})
+      await value.controller.select(value.agent.id, 'smart', 0)
+      await expect(value.requestListeners[0]!({ agent: value.agent }, async () => route)).resolves.toBe(route)
     } finally {
       value.remove()
     }
