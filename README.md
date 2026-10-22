@@ -23,6 +23,12 @@
 
 **不要为“装齐”同时启用所有记忆、压缩、循环或浏览器插件。** 按实际需求选用，并分别完成各自要求的账号登录、浏览器或服务端配置。插件安装本身不授予 Agent 执行、文件写入或使用付费额度的任务权限。
 
+## 工具按需上下文（一期预览）
+
+新增的 `@lisihao/dsh-solar-tool-context` 将 TypeScript PTC 的完整工具声明改为按需发现和加载。工具能力、原有权限检查和原始日志保留；历史工具结果与记忆注入不在本期处理。原生工具呈现保持不变。
+
+Agent 先用 `solar_tool_search` 查找当前作用域的工具，再用 `solar_tool_load` 取得下一次请求中的完整参数与输出声明，随后仍调用原来的工具。搜索、加载说明本身不执行业务操作。配置、边界和验证说明见[插件指南](incubator/tool-context/README.md)及[一期契约](docs/tool-context-contract.md)。
+
 ## 安装 Solar 自研和维护包
 
 支持范围：**macOS arm64、官方 DeepSeek Harness `0.2.1-rc.2`、`desktop` profile**。先安装官方 App；本指令不安装 App。需要终端中的 `bash`、`curl`、`python3`，以及 App 自带的 `dsh` CLI。其他 App 或新版宿主不能据此视为兼容。

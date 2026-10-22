@@ -12,6 +12,7 @@ coverage/
 .build-types/
 incubator/*/lib/
 tools/tsconfig.build.json
+tools/fixtures/tool-context-probe/lib/
 
 # macOS metadata
 .DS_Store
