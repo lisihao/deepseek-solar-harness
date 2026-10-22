@@ -1,4 +1,5 @@
-import { describe } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { loadDeclarativeSuite } from '@deepseek-ai/dsh-bench'
 import { describeSuiteConformance } from '@deepseek-ai/dsh-bench-testkit'
@@ -9,6 +10,11 @@ const bashCall = { type: 'tool/call', seq: 0, time: 0, data: { turn: 1, step: 1,
 const suite = await loadDeclarativeSuite(SUITE_DIR)
 
 describe('dsh-native suite', () => {
+  // A fixture file matched by .gitignore (e.g. a `lib/` directory) exists locally but not in a checkout.
+  it('commits every fixture file', () => {
+    expect(execFileSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '.'], { cwd: SUITE_DIR, encoding: 'utf8' })).toBe('')
+  })
+
   describeSuiteConformance({
     suite,
     runs: {
@@ -63,10 +69,10 @@ describe('dsh-native suite', () => {
         fail: { files: { 'square.js': "export function square(value) {\n  if (typeof value !== 'number') throw new TypeError('expected a number')\n  return value * value\n}\n" } },
       },
       'locate-definition': {
-        pass: { files: { 'answer.txt': 'src/lib/http/headers.js\n' } },
+        pass: { files: { 'answer.txt': 'src/core/http/headers.js\n' } },
         fail: { files: { 'answer.txt': 'src/legacy/headers.old.js\n' } },
       },
-      'fix-import': { pass: { files: { 'main.js': "import { format } from './lib/format.js'\n\nconsole.log(format('ok'))\n" } }, fail: {} },
+      'fix-import': { pass: { files: { 'main.js': "import { format } from './src/format.js'\n\nconsole.log(format('ok'))\n" } }, fail: {} },
       'sort-by-age': {
         pass: { files: { 'sort.js': 'export function sortByAge(people) {\n  return [...people].sort((a, b) => a.age - b.age)\n}\n' } },
         fail: { files: { 'sort.js': 'export function sortByAge(people) {\n  return people.sort((a, b) => a.age - b.age)\n}\n' } },

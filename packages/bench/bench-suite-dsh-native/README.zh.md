@@ -19,7 +19,7 @@
 | `missing-await` | `code` | 在 `user.js` 中补上缺失的 `await` 后，`node test.js` 通过 |
 | `csv-sum` | `files` | `node check.js` 接受 `qty` 列之和（43） |
 | `validate-input` | `code` | `node test.js`：`square` 对非有限数输入抛出 `TypeError` |
-| `locate-definition` | `search`、`code` | 在干扰性提及中找出定义所在文件，`node check.js` 接受 `src/lib/http/headers.js` |
+| `locate-definition` | `search`、`code` | 在干扰性提及中找出定义所在文件，`node check.js` 接受 `src/core/http/headers.js` |
 | `fix-import` | `code` | `node check.js`：修复导入路径后 `node main.js` 输出 `[ok]` |
 | `sort-by-age` | `code` | 替换返回布尔值的比较函数后 `node test.js` 通过，且不修改输入 |
 

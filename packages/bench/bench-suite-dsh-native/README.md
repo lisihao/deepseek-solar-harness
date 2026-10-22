@@ -19,7 +19,7 @@ Function plugin registering the `dsh-native` benchmark suite in `ctx.benchmarks`
 | `missing-await` | `code` | `node test.js` after adding the missing `await` in `user.js` |
 | `csv-sum` | `files` | `node check.js` accepts the sum of the `qty` column (43) |
 | `validate-input` | `code` | `node test.js`: `square` throws `TypeError` for non-finite input |
-| `locate-definition` | `search`, `code` | `node check.js` accepts `src/lib/http/headers.js` among decoy mentions |
+| `locate-definition` | `search`, `code` | `node check.js` accepts `src/core/http/headers.js` among decoy mentions |
 | `fix-import` | `code` | `node check.js`: `node main.js` prints `[ok]` after fixing its import path |
 | `sort-by-age` | `code` | `node test.js` after replacing a boolean comparator, without mutating the input |
 
