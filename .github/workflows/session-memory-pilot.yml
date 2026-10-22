@@ -1,0 +1,24 @@
+name: Session memory pilot checks
+on:
+  pull_request:
+    paths:
+      - 'tools/session_memory/**'
+      - '.github/workflows/session-memory-pilot.yml'
+  push:
+    branches: ['codex/session-memory-pilot']
+    paths:
+      - 'tools/session_memory/**'
+      - '.github/workflows/session-memory-pilot.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check local dependencies
+        run: python3 --version && zstd --version
+      - name: Run keyless synthetic checks
+        run: python3 -m unittest discover -s tools/session_memory -p 'test_*.py' -v
+      - name: Check Python syntax
+        run: python3 -m py_compile tools/session_memory/*.py
