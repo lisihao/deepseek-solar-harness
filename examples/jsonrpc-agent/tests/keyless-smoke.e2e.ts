@@ -165,7 +165,8 @@ describe('jsonrpc-agent keyless smoke', () => {
       expect(log).toBeDefined()
       const compressed = await readFile(join(sessionsRoot, log!))
       expect(compressed.subarray(0, 4).toString('hex')).toBe('28b52ffd')
-      expect(JSON.parse((await decompress(compressed)).toString())).toMatchObject({ type: 'session', id: 'main' })
+      // zstdDecompress returns every frame on Node 24.22 (first frame only on 24.21); the header is the first line.
+      expect(JSON.parse((await decompress(compressed)).toString().split('\n', 1)[0] as string)).toMatchObject({ type: 'session', id: 'main' })
     } finally {
       // No-op after exit; reject: false settles on every outcome, so cleanup never races teardown.
       child.kill('SIGKILL')
