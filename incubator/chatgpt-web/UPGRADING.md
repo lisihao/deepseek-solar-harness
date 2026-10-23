@@ -23,3 +23,8 @@ New format-one Web/Insight records can contain optional observed `effortId`, sep
 ## Carried patches
 
 None. This plugin does not patch, vendor or monkey-patch Harness or Ego Lite. Its own DOM adapter replaces the legacy V3 private browser/physical-operator seams. Missing website controls cause a named failure, not a hidden provider/API fallback.
+
+
+## Local retirement of unknown Web records
+
+Format-one records now also accept the terminal `abandoned` stage. It means owner-confirmed termination of local tracking only: the remote result remains unknown, and all earlier revisions remain immutable. Older strict readers can reject this new stage; do not roll the plugin back over such a journal without accounting for that compatibility boundary. There is no automatic migration, pruning, retry, remote cancellation, or lease-age reclamation. `WebControl.abandon` is an owner-only, revision-checked action and is not exposed as an automatic model recovery tool.

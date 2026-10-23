@@ -465,6 +465,9 @@ function outputText(record: WebRunRecord): string {
   if (record.stage === 'completed' && record.output !== undefined && typeof record.output.markdown === 'string') {
     return record.output.markdown
   }
+  if (record.stage === 'abandoned') {
+    throw new LlmError('该网页任务已结束本地跟踪，远端结果仍未知；未自动重试。', 'WEB_REMOTE_OUTCOME_UNKNOWN')
+  }
   if (record.stage === 'cancelled') {
     throw new LlmError('ChatGPT Web 请求已取消；未自动重试。', 'WEB_RUN_ABORTED')
   }
@@ -478,7 +481,8 @@ function outputText(record: WebRunRecord): string {
   }
   if (record.stage === 'blocked') {
     const code = record.error?.code ?? 'WEB_RUN_BLOCKED'
-    throw new LlmError(`ChatGPT Web 请求被阻止（${code}）；未自动重试。`, code)
+    const guidance = code === 'WEB_BUSY' ? '旧网页任务尚未结清。请在网页任务记录中读取状态；无法恢复时确认结束本地跟踪。此请求尚未提交。' : ''
+    throw new LlmError(`ChatGPT Web 请求被阻止（${code}）；${guidance}未自动重试。`, code)
   }
   if (record.stage === 'completed') {
     throw new LlmError('ChatGPT Web 记录标记为 completed，但缺少完整 Markdown 输出。', 'WEB_OUTPUT_MISSING')
