@@ -78,6 +78,7 @@ describe('coordinate graph description', () => {
     expect(description.startsWith('TaskGraph JSON. Parallel rule: a node without scope')).toBe(true)
     for (const name of [...COORDINATE_GRAPH_FIELDS, ...COORDINATE_NODE_FIELDS]) expect(description).toContain(`${name} (`)
     expect(description).toContain('No other field is accepted.')
+    expect(description).toContain('A node that changes files must declare scope.write; otherwise its executor is read-only.')
   })
 
   it('lists the accepted node fields when a model guesses a wrong one', async () => {
