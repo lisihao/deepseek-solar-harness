@@ -101,6 +101,31 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
   const limits = validatedConfig(config)
   const pendingFlush = new WeakSet<Session>()
   const checkedSessions = new WeakSet<Session>()
+  const retireAndFlushHistoricalCatalogs = async (
+    agent: Agent,
+    position: { turn: number; step: number },
+    signal: AbortSignal,
+  ): Promise<void> => {
+    signal.throwIfAborted()
+    retireHistoricalCatalogs(agent.session, position, () => pendingFlush.add(agent.session))
+    // A failed flush must remain a barrier on the next admission even though
+    // the replaced nodes have already left the in-memory surface. Also check
+    // once after reload, when this plugin's in-memory bookkeeping is new.
+    if (pendingFlush.has(agent.session) || !checkedSessions.has(agent.session)) {
+      let persisted: boolean
+      try {
+        persisted = await ctx.sessions.flush(agent.session)
+      } catch (cause) {
+        throw new Error('SKILL_CONTEXT_FLUSH_FAILED: canonical catalog retirement durability listener failed; request stopped', { cause })
+      }
+      if (!persisted) {
+        throw new Error('SKILL_CONTEXT_FLUSH_FAILED: canonical catalog retirement could not be confirmed durable; request stopped')
+      }
+      pendingFlush.delete(agent.session)
+      checkedSessions.add(agent.session)
+    }
+    signal.throwIfAborted()
+  }
   const search = defineTool({
     name: 'solar_skill_search',
     description: 'Find available skills by a few keywords or an exact name. Returns a bounded page of names and summaries; use nextOffset to continue. Load the chosen full instructions with the official skill tool before acting.',
@@ -121,7 +146,7 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
     presentCall: () => ({ card: 'generic', kind: 'read', title: '按需查找技能' }),
   })
   ctx.effect(() => ctx.tools.register(search))
-  ctx.on('agent/pre-step', async ({ agent, signal, turn, step }, next) => {
+  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
     signal.throwIfAborted()
@@ -135,23 +160,6 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
     // The official listener still owns catalog production. Only its automatic
     // proposal is replaced; user messages and explicit /skill bodies remain.
     const messages = decision.messages.filter(message => catalogEntries(message) === undefined)
-    retireHistoricalCatalogs(agent.session, { turn, step }, () => pendingFlush.add(agent.session))
-    // A failed flush must remain a barrier on the next admission even though
-    // the replaced nodes have already left the in-memory surface. Also check
-    // once after reload, when this plugin's in-memory bookkeeping is new.
-    if (pendingFlush.has(agent.session) || !checkedSessions.has(agent.session)) {
-      let persisted: boolean
-      try {
-        persisted = await ctx.sessions.flush(agent.session)
-      } catch (cause) {
-        throw new Error('SKILL_CONTEXT_FLUSH_FAILED: canonical catalog retirement durability listener failed; request stopped', { cause })
-      }
-      if (!persisted) {
-        throw new Error('SKILL_CONTEXT_FLUSH_FAILED: canonical catalog retirement could not be confirmed durable; request stopped')
-      }
-      pendingFlush.delete(agent.session)
-      checkedSessions.add(agent.session)
-    }
     signal.throwIfAborted()
     const visibleNotice = agent.session.deriveMessages().some(isDiscoveryNotice)
     if (canLoad && canSearch && !visibleNotice && !messages.some(isDiscoveryNotice)) messages.push(createUserMessage({
@@ -159,5 +167,13 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
       source: { kind: 'solar-skill-context', form: 'notice', summary: '技能改为按需检索，完整指令仍由官方工具加载。', policyVersion: 1 },
     }))
     return { ...decision, messages }
+  }, { prepend: true })
+  // rc.2 admits this public waterfall after step/start and before it prepares
+  // or builds the model request. Retiring here keeps each replacement's
+  // turn/step position inside the official lifecycle and preserves the flush
+  // barrier before any request reaches an adapter.
+  ctx.on('agent/request', async ({ agent, signal, turn, step }, next) => {
+    await retireAndFlushHistoricalCatalogs(agent, { turn, step }, signal)
+    return await next()
   }, { prepend: true })
 }

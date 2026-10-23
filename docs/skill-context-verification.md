@@ -19,3 +19,11 @@ On 2026-10-22 (Asia/Hong_Kong), the App Host ran the corrected internal bundle a
 The isolated flush listener counts callbacks; it is not the installed filesystem backend. Seed replay and an isolated App Host check do not prove a real user's disk-backend restart or a future real-model request fits its window. Loaded skill bodies, arbitrary system prompts, documents and tool outputs remain outside this repair's compression scope. Installation does not replay the old failed request or proactively rewrite stored conversations: catalog retirement happens on the next ordinarily authorized native admission.
 
 Manual installed-plugin-list confirmation is pending. No Send, connection test, live Web/Insight request or real model acceptance was run.
+
+## Follow-up: strict step ordering
+
+A subsequent cold-read investigation found that the earlier source wrote retirement `developer/message` records from `agent/pre-step`, before the same step's `step/start`. The official strict Session reader rejects that event order. This is a source defect; the earlier in-memory request and isolated-Host successes did not prove strict cold-read correctness.
+
+The correction moves only canonical retirement and its durability barrier to the public `agent/request` waterfall, which rc.2 invokes after the official step opens and before request preparation/adapter execution. The pre-step proposal filter and bounded notice remain in place. A new regression checks event order, original-prefix retention, zero historical full catalogs in the native fake request, and strict restoration of the complete generated raw log. The same regression failed against the previous timing and passed with the correction. Real user logs are not edited by this follow-up.
+
+Source checks and the new installed artifact will be recorded separately. No real provider retry or model call is part of this correction.

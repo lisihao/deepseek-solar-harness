@@ -238,6 +238,52 @@ describe('published rc.2 AgentLoop skill-context integration', () => {
       .filter(event => event.type === 'developer/message')).toHaveLength(3)
   })
 
+  it('records retirement after step/start, preserves the raw prefix, and excludes catalogs before the native fake request', async () => {
+    const seed = historicalCatalogSeed()
+    let agent: Awaited<ReturnType<typeof createLoopAgent>> | undefined
+    let eventsAtNativeRequest: readonly SessionEvent[] | undefined
+    const fixture = await mountRequestHarness([
+      request => {
+        if (agent === undefined) throw new Error('fixture agent was not created before the fake request')
+        eventsAtNativeRequest = agent.agent.session.snapshotEvents() as readonly SessionEvent[]
+        expect(catalogs(request)).toHaveLength(0)
+        expect(notices(request)).toHaveLength(1)
+        return textResponse('step-order fake response')
+      },
+    ])
+    fixtures.push(fixture)
+    await fixture.ctx.plugin(SkillContext)
+    agent = await createLoopAgent(fixture, 'catalog-retirement-step-order', { seed })
+
+    await followLoopAgent(agent, 'admit a request only after canonical retirement')
+
+    expect(fixture.adapter.requests).toHaveLength(1)
+    expect(fixture.flushes.count).toBe(1)
+    const events = agent.agent.session.snapshotEvents() as readonly SessionEvent[]
+    expect(events.slice(0, seed.length)).toEqual(seed)
+    const retirements = events.filter((event): event is DeveloperMessageEvent => event.type === 'developer/message'
+      && event.data.message.source.kind === 'solar-skill-context'
+      && event.data.message.content.length === 0)
+    expect(retirements).toHaveLength(3)
+    expect(retirements.map(event => event.sourceEventSeqs)).toEqual(
+      seed.filter((event): event is UserMessageEvent => event.type === 'user/message' && event.data.source.kind === 'skill-catalog')
+        .map(event => [event.seq]),
+    )
+    for (const retirement of retirements) {
+      const stepStartIndex = events.findIndex(event => event.type === 'step/start'
+        && event.data.turn === retirement.data.turn && event.data.step === retirement.data.step)
+      const retirementIndex = events.findIndex(event => event.seq === retirement.seq)
+      expect(stepStartIndex).toBeGreaterThanOrEqual(0)
+      expect(retirementIndex).toBeGreaterThan(stepStartIndex)
+    }
+    expect(eventsAtNativeRequest).toBeDefined()
+    expect(eventsAtNativeRequest!.some(event => event.type === 'developer/message'
+      && event.data.message.source.kind === 'solar-skill-context')).toBe(true)
+
+    const restored = Session.create(SessionId('catalog-retirement-current-replay'), events)
+    expect(restored.snapshotEvents().slice(0, events.length)).toEqual(events)
+  })
+
   it('matches the Desktop preset when the official loader is scoped to the agent', async () => {
     const fixture = await mountRequestHarness([
       toolCallResponse('scoped-search-latest', 'solar_skill_search', { query: 'desktop-scoped-latest', offset: 0 }),
@@ -322,11 +368,25 @@ describe('published rc.2 AgentLoop skill-context integration', () => {
       if (attempts === 2) throw new Error('fixture persistence failure')
       return flush(session)
     })
-    const agent = await createLoopAgent(fixture, 'flush-retry', { seed: historicalCatalogSeed() })
+    const seed = historicalCatalogSeed()
+    const agent = await createLoopAgent(fixture, 'flush-retry', { seed })
 
     await followLoopAgent(agent, 'first admission must stop at failed flush')
     expect(fixture.adapter.requests).toHaveLength(0)
     expect(spy).toHaveBeenCalledTimes(1)
+    const firstFailedEvents = agent.agent.session.snapshotEvents() as readonly SessionEvent[]
+    expect(firstFailedEvents.slice(0, seed.length)).toEqual(seed)
+    const firstRetirement = firstFailedEvents.find((event): event is DeveloperMessageEvent => event.type === 'developer/message'
+      && event.data.message.source.kind === 'solar-skill-context'
+      && event.data.message.content.length === 0)
+    expect(firstRetirement).toBeDefined()
+    const firstStepStart = firstFailedEvents.findIndex(event => event.type === 'step/start'
+      && event.data.turn === firstRetirement!.data.turn && event.data.step === firstRetirement!.data.step)
+    const firstRetirementIndex = firstFailedEvents.findIndex(event => event.seq === firstRetirement!.seq)
+    expect(firstStepStart).toBeGreaterThanOrEqual(0)
+    expect(firstRetirementIndex).toBeGreaterThan(firstStepStart)
+    const restoredFailedAttempt = Session.create(SessionId('flush-retry-current-replay'), firstFailedEvents)
+    expect(restoredFailedAttempt.snapshotEvents().slice(0, firstFailedEvents.length)).toEqual(firstFailedEvents)
 
     await followLoopAgent(agent, 'second admission retries and must still stop when persistence throws')
     expect(fixture.adapter.requests).toHaveLength(0)
@@ -335,6 +395,7 @@ describe('published rc.2 AgentLoop skill-context integration', () => {
     await followLoopAgent(agent, 'third admission retries the still-pending flush successfully')
     expect(fixture.adapter.requests).toHaveLength(1)
     expect(spy).toHaveBeenCalledTimes(3)
+    expect(catalogs(fixture.adapter.requests[0]!)).toHaveLength(0)
     expect(notices(fixture.adapter.requests[0]!)).toHaveLength(1)
     spy.mockRestore()
   })
