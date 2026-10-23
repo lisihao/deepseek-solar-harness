@@ -15,7 +15,7 @@ import { AnalysisConfig, BenchRegistry, BenchRuntime, createLedgersApi, Experime
 import type { AnalysisOptions, Experiment, RunRecord } from '../src/index.js'
 import { io, main } from '../src/cli-main.js'
 import { en, zh } from '../src/locales.js'
-import { Detail } from '../src/view.js'
+import { Detail, ParetoChart } from '../src/view.js'
 import { translator } from '../src/client.js'
 
 const ANALYSIS: AnalysisOptions = { confidence: 0.95, resamples: 200, seed: 1, margin: 0.05, minTasks: 3, invalidTolerance: 0.1 }
@@ -178,6 +178,20 @@ describe('Settings page', () => {
       expect(html).toContain('75.0%')
       expect(html).not.toMatch(/verdict[A-Z]|explain[A-Z]|\{(delta|tasks|variant)\}/)
     }
+  })
+})
+
+describe('success versus cost chart', () => {
+  it('keeps the labels of coinciding variants apart', async () => {
+    const { formatVersion: _version, ...pinned } = legacyExperiment
+    const records = TASKS.flatMap(task => [graded('baseline', task, true, 0.02), graded('plugin', task, true, 0.0201)])
+    const { analyzeExperiment } = await import('../src/index.js')
+    const analysis = analyzeExperiment(pinned as unknown as Experiment, records, ANALYSIS)
+    const html = renderToStaticMarkup(createElement(ParetoChart, { analysis, t: key => en[key] }))
+    const labels = [...html.matchAll(/<text x="([\d.]+)" y="([\d.]+)"[^>]*>(baseline|plugin)<\/text>/g)].map(match => ({ x: Number(match[1]), y: Number(match[2]) }))
+    expect(labels).toHaveLength(2)
+    const [a, b] = labels as [{ x: number; y: number }, { x: number; y: number }]
+    expect(Math.abs(a.x - b.x) >= 60 || Math.abs(a.y - b.y) >= 12).toBe(true)
   })
 })
 

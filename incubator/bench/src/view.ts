@@ -78,14 +78,16 @@ export function ParetoChart({ analysis, t }: { readonly analysis: ExperimentAnal
       h('text', { key: 't1', x: pad - 6, y: y(1) + 4, textAnchor: 'end', ...tick }, '100%'),
       h('text', { key: 't0', x: pad - 6, y: y(0) + 4, textAnchor: 'end', ...tick }, '0%'),
       h('text', { key: 'tc', x: x(maxCost), y: height - pad + 16, textAnchor: 'end', ...tick }, dollars(maxCost)),
-      ...points.map((point) => {
+      ...points.map((point, index) => {
         const onFront = front.has(point.id)
         // Labels on the right half sit left of their point, so they stay inside the chart.
         const right = x(point.cost) > width / 2
+        // Variants with nearly equal success and cost would print their labels on top of each other; stack them instead.
+        const stacked = points.slice(0, index).filter(other => Math.abs(x(other.cost) - x(point.cost)) < 60 && Math.abs(y(other.success) - y(point.success)) < 12).length
         return h('g', { key: point.id }, [
           h('circle', { key: 'dot', cx: x(point.cost), cy: y(point.success), r: onFront ? 6 : 4, fill: onFront ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-tertiary)' },
             h('title', {}, `${point.id}: ${percent(point.success)}, ${dollars(point.cost)}${onFront ? ` · ${t('paretoFront')}` : ''}`)),
-          h('text', { key: 'label', x: right ? x(point.cost) - 10 : x(point.cost) + 10, y: y(point.success) + 4, textAnchor: right ? 'end' : 'start', fontSize: 11, fill: 'var(--dsw-alias-label-primary)' }, point.id),
+          h('text', { key: 'label', x: right ? x(point.cost) - 10 : x(point.cost) + 10, y: y(point.success) + 4 + stacked * 13, textAnchor: right ? 'end' : 'start', fontSize: 11, fill: 'var(--dsw-alias-label-primary)' }, point.id),
         ])
       }),
     ]),
