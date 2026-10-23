@@ -346,15 +346,15 @@
     },
     {
       "name": "@lisihao/dsh-solar-chatgpt-web",
-      "version": "0.1.0-dev.0",
+      "version": "0.1.0-dev.1",
       "category": "curated",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "license": "MIT",
       "versionEvidence": "installed-package",
       "packageId": "chatgpt-web",
       "repositoryEvidence": "identified Solar source repository; installed manifest omits repository",
-      "installedSourceCommit": "67cd3aa143b30fc97f19bd2b55c392b8f14145eb",
-      "installedArtifactSha256": "20eaacd5205864db4b88e8b735cb943943e9838a98bef4be5833f8a0ed9b5118"
+      "installedSourceCommit": "dacea6eac926f58bb65b683d56b028a4eaecfa57",
+      "installedArtifactSha256": "d74d6d99ba9670e9bebea0f83d0f34ac3656c4c82ff25014a8cdaf1d53fe4e71"
     },
     {
       "name": "@lisihao/dsh-solar-rlm",

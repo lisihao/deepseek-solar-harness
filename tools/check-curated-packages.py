@@ -454,7 +454,7 @@ def check_historical_artifacts(package, base, reporter, package_label, reference
         entry = require_mapping(entry, reporter, label)
         expect_keys(
             entry,
-            {"sourceCommit", "file", "sha256", "size", "origin", "installableCandidate"},
+            {"sourceCommit", "version", "file", "sha256", "size", "origin", "installableCandidate"},
             reporter,
             label,
         )
@@ -469,7 +469,13 @@ def check_historical_artifacts(package, base, reporter, package_label, reference
             continue
         referenced_files.add(path)
         check_digest_and_size(path, expected_sha, expected_size, reporter, label)
-        check_archive(path, package, base, reporter, f"{label}", referenced_files)
+        # Historical archives can predate the current package version. Keep
+        # legacy entries without a version compatible with the old catalog.
+        historical_package = package
+        if "version" in entry:
+            version = require_string(entry, "version", reporter, label)
+            historical_package = {**package, "version": version}
+        check_archive(path, historical_package, base, reporter, f"{label}", referenced_files)
 
 
 def validate_validation_scope(value, reporter, label):
