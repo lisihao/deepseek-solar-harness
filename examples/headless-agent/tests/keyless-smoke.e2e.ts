@@ -29,7 +29,8 @@ describe('headless-agent keyless smoke', () => {
         if (relativePath === undefined) return
         const compressed = await readFile(join(cwd, relativePath))
         expect(compressed.subarray(0, 4).toString('hex')).toBe('28b52ffd')
-        persistedHeader = JSON.parse((await decompress(compressed)).toString()) as Record<string, unknown>
+        // zstdDecompress returns every frame on Node 24.22 (first frame only on 24.21); the header is the first line.
+        persistedHeader = JSON.parse((await decompress(compressed)).toString().split('\n', 1)[0] as string) as Record<string, unknown>
       },
     })
     const lines = stdout.trimEnd().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
