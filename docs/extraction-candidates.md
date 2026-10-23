@@ -23,6 +23,7 @@ Status values: `unassessed`, `use-upstream`, `use-existing` (reuse an existing t
 | Output style | `core/output-style` | — | unassessed |
 | Remote access | `host/remote-auth`, `client/ui-remote-modules` | — | unassessed |
 | Basic Codex / Claude Code task delegation | edits to 10 upstream `subagent/*` source files listed in `distribution/upstream-source-edits.json` | Official `subagent-codex`, `subagent-claude-code`; user reports both installed and working | use-upstream |
+| Benchmarks (ablation experiments over isolated runs) | `bench/bench`, `bench/bench-runner`, `bench/bench-suite-dsh-native`, `bench/bench-web`, `bundle/benchmarks`, `test-support/bench-testkit` | — (rc.2 has no benchmark packages; `dsh-web-server`/`remote-auth` used by `bench-web` are absent, so the page reads through a Remote service) | porting: [bench](../incubator/bench/README.md); installed in the desktop profile and the Settings page checked on the real DSH 3.x ledger; no new paid experiment run |
 | Managed plugins | `plugins/managed/`: aegis, agent-teams, archify, better-sidebar, codegraph, genui, governance, llm-fallbacks, mnemon, plugin-check, plugin-console, synapse, tool-markdown, tool-regex, tool-stat, tool-time, web-billing, web-ui | varies | unassessed |
 | Vendored third-party | `dsh-web-billing`, `@linxin666/dsh-remote-web-ui`, `@ycp424c/dsh-luna-vision-bridge` | — | unassessed (already external packages) |
 
