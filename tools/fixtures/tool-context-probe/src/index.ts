@@ -4,7 +4,7 @@
  * The Host provides appReady and read-only preset/catalog metadata. All
  * execution under test runs in a newly created Cordis Context with rc.2
  * AgentLoop/ToolRuntime, an in-memory PTC substrate, and a fake LLM adapter.
- * No provider, browser, Host profile session, or credential is used.
+ * No provider/browser submission, Host session execution/write, or credential is used.
  */
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -51,19 +51,36 @@ interface InstalledPluginEvidence {
 }
 
 interface CatalogSnapshot {
-  readonly scope: 'real-agent' | 'ptc-preset' | 'global'
+  readonly scope: 'real-agent' | 'captured-real-agent' | 'ptc-preset' | 'global'
   readonly entries: readonly (ToolSchema & { output: JsonSchemaNode })[]
 }
 
 interface ProbeConfig {
   /** Optional read-only scope already loaded in the Host; never creates an Agent. */
   metadataSessionId?: string
+  /** Fixed private diagnostic capture, used only when explicitly configured. */
+  metadataSnapshotPath?: string
+  metadataSnapshotSha256?: string
   /** Optional installed pure rewrite module; never imports its startup entry. */
   sdkRewriteModule?: string
 }
 
 /** Read public metadata only; no Agent, request, or business call is created. */
 async function hostCatalog(ctx: Context, config: ProbeConfig): Promise<CatalogSnapshot> {
+  if (config.metadataSnapshotPath) {
+    const text = await readFile(config.metadataSnapshotPath, 'utf8')
+    assert(typeof config.metadataSnapshotSha256 === 'string' && createHash('sha256').update(text).digest('hex') === config.metadataSnapshotSha256,
+      'APP_PROBE_SNAPSHOT_HASH_MISMATCH: captured metadata identity was not confirmed')
+    const record: unknown = JSON.parse(text)
+    assert(isRecord(record) && record.formatVersion === 1 && record.kind === 'solar-tool-context-sdk-diagnostic' && record.ok === true
+      && isRecord(record.scope) && record.scope.kind === 'real-agent' && Array.isArray(record.catalog), 'APP_PROBE_SNAPSHOT_INVALID: expected a successful real-Agent diagnostic capture')
+    const entries = record.catalog.filter((entry: unknown) => {
+      assert(isRecord(entry) && typeof entry.name === 'string' && typeof entry.description === 'string' && isRecord(entry.parameters)
+        && isRecord(entry.output), 'APP_PROBE_SNAPSHOT_INVALID: malformed tool metadata')
+      return !['run_code', 'solar_tool_search', 'solar_tool_load', TARGET_TOOL].includes(entry.name)
+    }) as unknown as CatalogSnapshot['entries']
+    return { scope: 'captured-real-agent', entries: structuredClone(entries) }
+  }
   const tools = hostGet(ctx, 'tools') as {
     schemas(scope?: object): ToolSchema[]
     get(name: string, scope?: object): { output: { schema: JsonSchemaNode } } | undefined
