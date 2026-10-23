@@ -23,6 +23,8 @@ variants:                    # the first is the baseline
 
 `run(experiment, { signal, onProgress })` 在任何运行开始前，会拒绝未注册的套件、未知任务、未注册的评分器或不合法的评分器规格。之后它运行账本中尚无记录的每个 cell，排序依次按重复次、任务、variant，这样实验中途停止时各 variant 的完成量仍然均衡。返回值是账本中的全部记录。中止会杀掉正在运行的子进程；未完成的 cell 不记录，下次调用时继续运行。
 
+`experiments()` 列出已有账本的实验 id；`ledger(id)` 读取一个实验锁定的定义及其记录，且不修改任何文件。只有 `run` 会截掉残缺的末行，因为对其他读取方来说，这一行可能是正在进行的追加。不是安全目录名的 id 一律视为不存在。
+
 ## 运行隔离
 
 每次运行的目录 `<ledgerRoot>/<experiment>/cells/<variant>/<task>/<rep>/` 包含：
@@ -35,7 +37,7 @@ variants:                    # the first is the baseline
 
 ## 运行记录
 
-`<ledgerRoot>/<experiment>/experiment.json` 锁定实验定义；用不同的定义重新打开同一账本会被拒绝。`runs.jsonl` 每行一条记录，带 `formatVersion: 1`；读取方遇到其他版本一律拒绝，崩溃留下的残缺末行会被丢弃。每条记录包含 `cell`、`status`、`grade` 和 `grader`（kind 与版本）、`metrics`、`exitCode`、`error`、`models`、`suiteVersion`、`startedAt` 和 `endedAt`。
+`<ledgerRoot>/<experiment>/experiment.json` 以 `formatVersion: 1` 锁定实验定义；用不同的定义重新打开同一账本会被拒绝，读取格式版本不同或定义格式错误的文件会失败，并在报错中给出文件路径。`runs.jsonl` 每行一条记录，带 `formatVersion: 1`；读取方遇到其他版本一律拒绝，崩溃留下的残缺末行会被丢弃。每条记录包含 `cell`、`status`、`grade` 和 `grader`（kind 与版本）、`metrics`、`exitCode`、`error`、`models`、`suiteVersion`、`startedAt` 和 `endedAt`。
 
 | 状态 | 含义 |
 |---|---|
@@ -44,6 +46,17 @@ variants:                    # the first is the baseline
 | `invalid` | 无法测量：home 中没有恰好一个顶层会话，或评分器抛错。不计入成功率。 |
 
 指标来自经 JSONL 持久化后端读取的会话。token 和成本对全部会话求和，包括 subagent 子会话；`tokens.input` 不含缓存命中。轮数、步数、重试和工具统计只描述根会话。`timing` 把根会话墙钟时间拆成三部分：`llmMs`（`step/start` → `assistant/message`）、`toolCriticalMs`（每步最慢的那次工具调用，因为并行调用会重叠）和 `overheadMs`（其余时间，即 harness 和插件耗时）。只有用到的每个模型都在 `prices` 中有对应行时，记录才带 `costUsd`。
+
+## 分析
+
+`analyzeExperiment(experiment, records, options)` 是只依赖账本的纯函数。第一个 variant 是基线。
+
+- **每个 variant**：按状态统计的运行数、`invalidRate`、`successRate`（通过数除以已评分和超时的运行数：超时算失败，invalid 不计入）、按任务计的 `passAnyRate` 和 `passAllRate`、有价格运行的平均成本及 `pricedRuns`、平均 token、只按已评分运行计算的平均墙钟时间（超时的时间是被截断的）、各时间桶之和、按总耗时排序的工具，以及运行结果不一致的 `flakyTasks`。
+- **每个对比**：对成功率、成本、token 和墙钟时间，计算配对任务上（variant − 基线）的均值，这样每个任务的权重相同，与重复次数无关。两边没有都有效运行的任务列在 `droppedTasks` 中。每个估计都附带按任务做的带种子的百分位 bootstrap 区间，以及用 Student-t 分位数算出的 80% 功效下的 MDE；MDE 只用于展示，从不参与判定。
+- **判定**，按以下顺序：variant 与基线的 invalid 率相差（任一方向）超过 `invalidTolerance` 时为 `unreliable`（否则因 invalid 而少算失败的一方会显得更好）；配对任务数少于 `minTasks` 时为 `insufficient`；区间不含 0 时为 `improved` 或 `regressed`；区间完全落在 ±`margin` 之内时为 `equivalent`；其余为 `underpowered`。
+- **此外**：任务 × variant 的通过率 `matrix`，以及 `pareto` 集合，即在成功率和平均成本两方面都没有被其他有价格的 variant 同时超过的那些 variant。
+
+所有选项都必须显式给出：`confidence`（0.9、0.95 或 0.99）、`resamples`（≥ 100）、`seed`、`margin`（取值 [0, 1)）、`minTasks`（≥ 3）和 `invalidTolerance`（取值 [0, 1]）。相同的记录和种子会得到相同的区间。
 
 ## 配置
 
@@ -67,7 +80,7 @@ variants:                    # the first is the baseline
 
 ## 已知局限与延后工作
 
-- **尚无分析** — 记录只保存每次运行的原始数据；相对基线的配对差值、置信区间和瓶颈排名随分析层提供。
+- **小样本下的百分位区间** — 配对任务很少时 bootstrap 区间偏窄，由 `minTasks` 兜底；分析中没有精确的小样本检验。
 - **patch 内容未锁定** — `experiment.json` 锁定的是 patch 路径而非内容，因此在两次续跑之间修改 patch 文件，会让同一个 variant id 下混入两种组合。
 - **运行目录会保留** — 工作区和 home 留在磁盘上供检查，从不清理。若运行器在子进程运行期间崩溃，该次运行复制进 home 的 `templateFiles` 会残留下来。
 - **`$DSH_HOME` 之外的插件状态需要 variant `env` 条目** — 若插件写入 `~` 且没有覆盖变量（例如 `MNEMON_DATA_DIR`），其状态会在各次运行之间共享。

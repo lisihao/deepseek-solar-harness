@@ -9,5 +9,6 @@
 | [`bench/`](bench/README.md) | 定义套件、任务和评分器，并提供声明式套件格式与内置评分器 | `ctx.benchmarks` |
 | [`bench-runner/`](bench-runner/README.md) | 以隔离子进程运行实验并维护运行账本 | `ctx.benchRuntime` |
 | [`bench-suite-dsh-native/`](bench-suite-dsh-native/README.md) | 注册 `dsh-native` 编码套件 | 注册到 `ctx.benchmarks` |
+| [`bench-web/`](bench-web/README.md) | 通过 Host Web 服务器提供账本及其分析 | 读取 `ctx.benchRuntime` |
 
 套件测试使用的一致性工具包是 [`test-support/bench-testkit`](../test-support/bench-testkit/README.md)。设计决策见 [benchmark 账本决策](../../.agents/notes/implemented/architecture/2026-10-21-benchmark-ablation-ledger.md)。

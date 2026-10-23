@@ -427,6 +427,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'every record in the ledger after the run, earlier ones included.',
         throws: ['Error before any run starts when the suite, a task, or a grader spec is invalid, or when the ledger pins a different definition; the abort reason when cancelled.'],
       },
+      {
+        signature: 'experiments(): Promise<ExperimentId[]>',
+        description: 'List the experiments that have a ledger.',
+        parameters: [],
+        returns: 'their ids in name order.',
+      },
+      {
+        signature: 'async ledger(id: string): Promise<LedgerSnapshot | undefined>',
+        description: 'Read one experiment\'s pinned definition and records without modifying the ledger.',
+        parameters: [{ name: 'id', description: 'experiment id.' }],
+        returns: 'the snapshot, or `undefined` when no ledger exists under `id`.',
+      },
     ],
   },
   {
@@ -5202,6 +5214,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KvUnitDescriptor',
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n}',
+  },
+  {
+    name: 'LedgerSnapshot',
+    declaration: 'export interface LedgerSnapshot {\n    experiment: Experiment;\n    records: RunRecord[];\n}',
   },
   {
     name: 'LlmAdapter',

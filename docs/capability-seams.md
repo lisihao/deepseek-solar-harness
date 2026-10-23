@@ -154,6 +154,7 @@ flowchart LR
   pkg_bench_suite_dsh_native["bench-suite-dsh-native"]
   pkg_bench_runner["bench-runner"]
   svc_benchRuntime["ctx.benchRuntime<br/>Benchmark experiment runtime"]
+  pkg_bench_web["bench-web"]
   pkg_session_projection["session-projection"]
   svc_sessionProjections["ctx.sessionProjections<br/>Session projection units"]
   pkg_session_projection_cache["session-projection-cache"]
@@ -410,6 +411,7 @@ flowchart LR
   svc_approval --> pkg_tools
   svc_attachments --> pkg_host_runtime
   svc_attachments --> pkg_llm_pi_ai
+  svc_benchRuntime --> pkg_bench_web
   svc_benchmarks --> pkg_bench_runner
   svc_browser --> pkg_orchestration_local
   svc_browser --> pkg_tool_browser
@@ -592,7 +594,7 @@ flowchart LR
 | `ctx.agentPresets` | `core` | [`agent-presets`](../packages/preset/agent-presets) | - | - | - | Discovers preset directories over trusted and user-authored roots and mounts one preset cordis.yml under an agent scope during creation, rejecting a row that never activates or that publishes into the root service realm. |
 | `ctx.commands` | `core` | [`commands`](../packages/interaction/commands) | - | - | - | Plugins register direct human commands without sending invocations to the model. |
 | `ctx.benchmarks` | `seam` | [`bench`](../packages/bench/bench) | [`bench-suite-dsh-native`](../packages/bench/bench-suite-dsh-native) | [`bench-runner`](../packages/bench/bench-runner) | - | Suite plugins register tasks and graders; the runtime reads them to run experiments. |
-| `ctx.benchRuntime` | `core` | [`bench-runner`](../packages/bench/bench-runner) | - | - | - | Runs each (variant, task, repetition) as an isolated dsh child process and appends one run record per cell to the experiment ledger. |
+| `ctx.benchRuntime` | `core` | [`bench-runner`](../packages/bench/bench-runner) | - | [`bench-web`](../packages/bench/bench-web) | - | Runs each (variant, task, repetition) as an isolated dsh child process and appends one run record per cell to the experiment ledger. |
 | `ctx.sessionProjections` | `core` | [`session-projection`](../packages/session/session-projection) | - | [`tool-todo`](../packages/todo/tool-todo), [`session-title`](../packages/session/session-title), [`host-apiproxy`](../packages/host/apiproxy) | - | Domains register state-driven fold units; the eager drive keeps per-session watermark states and api-proxy serves baselines and pushes changed values. |
 | `ctx.sessionProjectionCache` | `core` | [`session-projection-cache`](../packages/session/session-projection-cache) | - | [`host-apiproxy`](../packages/host/apiproxy) | - | Durably checkpoints projection unit states per session (throttled + turn/end/detach mandatory points) and serves the cold-read ladder: cache row + persistence tail replay, so listings never load full logs. |
 | `ctx.skills` | `seam` | [`skill`](../packages/skill/skill) | [`skill-badge`](../packages/skill/skill-badge), [`skill-filesystem`](../packages/skill/skill-filesystem) | [`tool-skill`](../packages/skill/tool-skill) | - | Merges provider skill catalogs; tool-skill renders the session-prefix catalog and loads complete skill bodies. |

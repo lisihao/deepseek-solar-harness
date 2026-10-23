@@ -155,6 +155,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/session/session-projection-cache': { kind: 'none', reason: 'The persisted cache accelerates host-side cold reads of projection state and registers nothing model-facing.' },
   'packages/bench/bench': { kind: 'none', reason: 'The registry stores suite and grader definitions and grades finished runs offline; it registers nothing model-facing.' },
   'packages/bench/bench-runner': { kind: 'indirect', reason: 'Task prompts reach the model through dsh-headless in isolated child processes; the runtime registers no prompt or schema.' },
+  'packages/bench/bench-web': { kind: 'none', reason: 'The routes serve ledger data and analysis to trusted Host clients and register nothing model-facing.' },
   'packages/bench/bench-suite-dsh-native': { kind: 'indirect', reason: 'The suite task prompts reach the model through dsh-bench-runner as single user messages.' },
   'packages/test-support/bench-testkit': { kind: 'none', reason: 'The kit grades simulated runs in scratch directories and never builds a model request.' },
   'packages/session/session-stats': { kind: 'none', reason: 'The sessionStats unit folds already-logged step boundaries into a client-facing read model and registers nothing model-facing.' },

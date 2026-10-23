@@ -486,6 +486,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'bench-runner',
     title: 'Benchmark experiment runtime',
     mode: 'core',
+    consumers: ['bench-web'],
     note: 'Runs each (variant, task, repetition) as an isolated dsh child process and appends one run record per cell to the experiment ledger.',
   },
   {

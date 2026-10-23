@@ -10,6 +10,7 @@ benchmark 能力用于测量某个插件、插件组合或由插件搭成的流�
 2. `ctx.benchRuntime.run(experiment)` 加载套件的任务，并在任何运行开始前校验所有评分器规格。
 3. 每个待运行的 cell 都会获得全新的工作区、私有的 `$DSH_HOME` 和状态目录。子进程 `dsh --profile <profile> [--patch …] <prompt>` 以单轮方式运行该任务。
 4. 运行器通过 JSONL 持久化后端读取子进程的会话，依据工作区和根会话日志评分，折叠出指标，并追加一条 `RunRecord`。
+5. [`dsh-bench-web`](../../packages/bench/bench-web/README.md) 通过 `ctx.benchRuntime.ledger(id)` 读取账本，并结合 `analyzeExperiment` 对外提供：每个 variant 的汇总，以及相对基线的配对对比和判定。
 
 添加套件无需改动运行器（[cookbook](../cookbook/adding-a-benchmark.md)）；[`dsh-bench-testkit`](../../packages/test-support/bench-testkit/README.md) 负责检查每个评分器能否区分应通过的运行和应失败的运行。
 
@@ -83,7 +84,20 @@ Runs benchmark experiments as isolated child processes.
  *   or when the ledger pins a different definition; the abort reason when cancelled.
  */
 async run(experiment: Experiment, options: RunOptions = {}): Promise<RunRecord[]>
+
+/**
+ * List the experiments that have a ledger.
+ * @returns their ids in name order.
+ */
+experiments(): Promise<ExperimentId[]>
+
+/**
+ * Read one experiment's pinned definition and records without modifying the ledger.
+ * @param id - experiment id.
+ * @returns the snapshot, or `undefined` when no ledger exists under `id`.
+ */
+async ledger(id: string): Promise<LedgerSnapshot | undefined>
 ```
 
-Source: [`packages/bench/bench-runner/src/index.ts:87`](../../packages/bench/bench-runner/src/index.ts)
+Source: [`packages/bench/bench-runner/src/index.ts:88`](../../packages/bench/bench-runner/src/index.ts)
 <!-- END GENERATED cordis-surface -->
