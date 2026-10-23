@@ -1,5 +1,7 @@
 # Solar Prime RLM
 
+Current disposition: **frozen, installed development candidate; not released**. The [closeout and Argon/Opus research handoff](../../docs/testing/prime-rlm-closeout.md) separates passing scripted/native and GUI checks from unrun installed real-provider acceptance, retained quality results and upstream risks at the fixed Prime pin. No general or recursion-specific quality benefit is claimed. Further efficacy experiments are paused.
+
 An unreleased DSH V4 plugin that runs Prime Agent's original RLM and Continual Harness through its native ACP interface. Prime's Rust daemon, persistent Python kernel, recursive children, messaging, Factory, Harness state and refinement engine run unchanged. Solar supplies lifecycle controls, an existing DSH model route and traceable evidence.
 
 The fixed Prime source is `7cbffa77b38facd7c87277fa3c82bcadbe816880` (CLI 0.10.0, MIT). This package targets macOS arm64 and published DSH `0.2.1-rc.2` / Cordis `4.0.5`. It neither rebuilds the official app nor imports `~/.prime`, DSH 3.x data or other plugins' credentials. There are no Prime source patches.

@@ -99,6 +99,7 @@ V4 must not copy or move DSH 3.x source into this branch. A future plugin may as
 - [Prime RLM and Continual Harness candidate](incubator/rlm/README.md) — ordinary-conversation operator; Settings contains diagnostics and task maintenance.
 - [Prime integration architecture](docs/integrations/prime-agent-rlm.md)
 - [Prime verification and evaluation boundaries](docs/testing/prime-rlm-verification.md)
+- [Prime RLM candidate closeout and Argon/Opus research handoff](docs/testing/prime-rlm-closeout.md) — frozen installed candidate, measured outcomes, unresolved fidelity gaps and restart gates.
 
 Unreleased plugin work belongs in `incubator/<name>/`; only an authorized first release moves it to `plugins/<name>/`. Root workspace globs exclude these candidates from the market. Run `pnpm install --ignore-scripts`, then `pnpm check` for local source verification; scratch-profile tests require package-registry access and never call a model.
 

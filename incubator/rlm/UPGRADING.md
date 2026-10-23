@@ -58,6 +58,16 @@ The internal evaluation host can explicitly forward the original nonnegative `rl
 
 5. **Ordinary-conversation operator (adapter only).** `src/index.ts::createOperatorTool` registers `solar_rlm` on the published ToolRuntime, using the current Agent's provider/model and native initialization settings. `RlmHost.waitForResult` follows the native turn and any owned cancellation/cleanup promise; it never polls or repeats a prompt. Failed, cancelled, indeterminate and empty-answer rounds become tool errors. Admission checks the owner signal after persistence, late ACP responses cannot overwrite cancellation, and plugin disposal waits for detached cancellation receipts. A settled successful tool detaches its scoped owner listener without stopping Prime's retained idle kernel. The three existing asynchronous tools keep their receipt behavior. The browser now contributes only Settings. No Prime source or algorithm changed. Lifecycle tests cover the cancellation windows; the built-package scripted Agent fixture checks model schema, native execution and durable parent tool call/result. Real parent-model selection remains a separate unrun check for this UI/operator change.
 
+## Known upstream risks at the frozen pin (2026-10-23)
+
+The [closeout handoff](../../docs/testing/prime-rlm-closeout.md) records these read-only findings. They are not carried patches and do not authorize a runtime update.
+
+- Prime [PR #3708](https://github.com/PrimeIntellect-ai/prime-agent/pull/3708) moves child prompt admission after acknowledgement, preventing early collect from settling an unprompted child. The frozen pin contains the earlier ordering. The merged fix is present in the v0.10.1 release commit; occurrence in our historical real runs is not established.
+- [Discussion #3663](https://github.com/PrimeIntellect-ai/prime-agent/discussions/3663#discussioncomment-19097018) reports interim child text being latched instead of a later final answer. The frozen source has the reported first-nonempty capture condition; no local dynamic reproduction or maintainer-confirmed diagnosis of our traces is claimed.
+- [PR #3679](https://github.com/PrimeIntellect-ai/prime-agent/pull/3679), merged after the v0.10.1 release commit, adds typed ACP failure classification. A future target must be checked by commit ancestry; selecting v0.10.1 alone does not imply this fix is included. Failure typing does not itself improve semantic answers or make replay safe.
+
+Before changing the pin, distinguish these lifecycle/diagnostic risks from the completed semantic-quality comparisons, select an exact unmodified target, and follow the upgrade/fidelity/install gates above. No improvement claim follows from upgrading.
+
 ## Current verification record
 
 See [the canonical verification record](../../docs/testing/prime-rlm-verification.md) for actual source, native, scratch-profile and installed-app evidence. A bounded isolated Codex subscription pilot is recorded there separately. General efficacy, paper reproduction and held-out continual improvement are not established by that pilot.
