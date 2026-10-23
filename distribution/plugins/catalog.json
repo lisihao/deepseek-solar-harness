@@ -349,11 +349,11 @@
       "name": "@lisihao/dsh-solar-tool-context",
       "version": "0.1.0-dev.0",
       "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
-      "sourceCommit": "9e207cdcdf30106a1e6cd5e58440b97919270b89",
+      "sourceCommit": "b62f5311887add41bd8ea58e71e6b35d3f4b62fd",
       "artifact": {
-        "file": "tool-context/9e207cd/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
-        "sha256": "e5a79b125b7fe44c58f23f197396e6533518fba4177d4381480241f628224ce6",
-        "size": 25560
+        "file": "tool-context/b62f531/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
+        "sha256": "155964b36f65ef91653c483b62af873c48d1383ab6800caaf7c08f5ba5cc18e8",
+        "size": 26216
       },
       "license": {
         "spdx": "MIT",
@@ -365,19 +365,19 @@
       "validationScope": {
         "source": {
           "status": "passed",
-          "scope": "110 tests, types/build, swallowed-assembly-error and whitespace compatibility regressions; exact-source CI passed"
+          "scope": "114 tests, types/build; precise JSDoc rewrite and strict schema counterexamples; exact-source CI39890815700 passed"
         },
         "scratch": {
           "status": "passed",
-          "scope": "official rc.2 CLI tarball install; isolated PTC search/load/execute under repeated-horizontal-space rewrite; 25 catalog metadata tools"
+          "scope": "two official CLI keyless scratch probes; four isolated fake responses; inner and outer indentation rewrite"
         },
         "ui": {
           "status": "passed",
-          "scope": "official installed rc.2 Host: public PTC preset metadata (132 tools), isolated fake adapter search/load/subsequent-use under indentation rewrite; 12 production files matched; temporary probe removed; no custom frontend or real provider call"
+          "scope": "official installed rc.2 Host: explicit SHA-pinned real-Agent metadata capture (139 business tools), complete installed Purge inner/outer rewrite and four isolated fake responses; 12 production files matched; temporary probe removed; real provider unrun"
         },
         "live": {
           "status": "not-run",
-          "scope": "previous candidate failed: empty system prompt and tools; repaired user request pending"
+          "scope": "previous R2 failed twice before provider admission; repaired manual request pending"
         }
       },
       "historicalArtifacts": [
@@ -387,6 +387,14 @@
           "sha256": "718490e9b6ddcfd0a7e4f49e1dd5d83c69e714e3a2f1c1a13ca89fa1533c3b3a",
           "size": 24513,
           "origin": "previous-candidate-failed-native-composition-acceptance",
+          "installableCandidate": false
+        },
+        {
+          "sourceCommit": "9e207cdcdf30106a1e6cd5e58440b97919270b89",
+          "file": "tool-context/9e207cd/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
+          "sha256": "e5a79b125b7fe44c58f23f197396e6533518fba4177d4381480241f628224ce6",
+          "size": 25560,
+          "origin": "previous-candidate-failed-real-agent-documentation-rewrite",
           "installableCandidate": false
         }
       ]
