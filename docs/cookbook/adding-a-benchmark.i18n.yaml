@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/cookbook/adding-a-benchmark.md
-adding-a-benchmark.md: b8fadafec7858e164715f684ac9d1cb6df92c9f8
-adding-a-benchmark.zh.md: 6c87fad19a7b63925c40355ad60ef359b3e072ea
+adding-a-benchmark.md: c72863f9a54615a4ccfaf1e5059797c10d31f4e2
+adding-a-benchmark.zh.md: 0cf3e468903cde074725ff7dbe119daced27d927

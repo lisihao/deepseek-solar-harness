@@ -27,6 +27,7 @@
     "@deepseek-ai/dsh-agent-tool-presentation": "workspace:^",
     "@deepseek-ai/dsh-app-boot": "workspace:^",
     "@deepseek-ai/dsh-base": "workspace:^",
+    "@deepseek-ai/dsh-benchmarks": "workspace:^",
     "@deepseek-ai/dsh-cordis-client-runner": "workspace:^",
     "@deepseek-ai/dsh-client-ui-agent-preset": "workspace:^",
     "@deepseek-ai/dsh-client-ui-cordis": "workspace:^",

@@ -837,6 +837,11 @@
         "@deepseek-ai/.+"
       ]
     },
+    "packages/bundle/benchmarks": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-bench-suite-dsh-native"
+      ]
+    },
     "packages/bundle/ego-lite-browser": {
       "ignoreDependencies": [
         "@deepseek-ai/dsh-browser",

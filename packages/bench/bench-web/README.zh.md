@@ -15,16 +15,7 @@ benchmark 能力的 Consumer：在 Host Web 服务器（`ctx.webServer`）上提
 
 ## 配置
 
-配置项就是对每个返回的实验所使用的分析设置（[`dsh-bench-runner`](../bench-runner/README.md#analysis)）。
-
-| 键 | 默认值 |
-|---|---|
-| `confidence` | `0.95`（`0.9`、`0.95`、`0.99` 之一） |
-| `resamples` | `2000` |
-| `seed` | `1` |
-| `margin` | `0.05` |
-| `minTasks` | `10` |
-| `invalidTolerance` | `0.1` |
+`analysis` 是对每个返回的实验使用的分析设置（[`dsh-bench-runner`](../bench-runner/README.md#analysis)）；省略的键取默认值：`confidence` 0.95、`resamples` 2000、`seed` 1、`margin` 0.05、`minTasks` 10、`invalidTolerance` 0.1。
 
 ```yaml
 - id: bench-web

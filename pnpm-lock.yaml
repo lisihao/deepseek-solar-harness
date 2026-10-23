@@ -171,6 +171,9 @@ importers:
       '@deepseek-ai/dsh-base':
         specifier: workspace:^
         version: link:../../packages/bundle/base
+      '@deepseek-ai/dsh-benchmarks':
+        specifier: workspace:^
+        version: link:../../packages/bundle/benchmarks
       '@deepseek-ai/dsh-client-ui-agent-preset':
         specifier: workspace:^
         version: link:../../packages/client/ui-agent-preset
@@ -1511,6 +1514,46 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+
+  packages/bundle/benchmarks:
+    dependencies:
+      '@deepseek-ai/dsh-bench':
+        specifier: workspace:^
+        version: link:../../bench/bench
+      '@deepseek-ai/dsh-bench-runner':
+        specifier: workspace:^
+        version: link:../../bench/bench-runner
+      '@deepseek-ai/dsh-bench-suite-dsh-native':
+        specifier: workspace:^
+        version: link:../../bench/bench-suite-dsh-native
+      '@deepseek-ai/dsh-cmdline':
+        specifier: workspace:^
+        version: link:../../boot/cmdline
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      commander:
+        specifier: ^15.0.0
+        version: 15.0.0
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: workspace:^
+        version: link:../../../vendor/loader
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
 
   packages/bundle/chatgpt-web-operator:
     dependencies:

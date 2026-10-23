@@ -27,4 +27,4 @@ For an external dataset, record its source, revision, and license in the package
 
 ## 5. Run it
 
-Run a small experiment against the keyless mock model before any paid run: start `pnpm run mock:llm`, point `DEEPSEEK_BASE_URL` at it, and run `ctx.benchRuntime.run` with one repetition and two variants. Check that every run is `graded` rather than `invalid`. A paid run against a real model needs the cost estimate approved first.
+Run a small experiment against the keyless mock model before any paid run: start `pnpm run mock:llm`, point `DEEPSEEK_BASE_URL` at it, and run the experiment through the [benchmark command](../../packages/bundle/benchmarks/README.md) (`node apps/cli/lib/bin.js --profile bench experiment.yml --yes`) with one repetition and two variants. Check that every run is pass or fail rather than unmeasurable. A paid run against a real model needs its cost approved first; set `--max-usd`.

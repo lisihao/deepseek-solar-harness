@@ -43,7 +43,7 @@ Copies request copy-on-write clones (`COPYFILE_FICLONE`). The `templateFiles` co
 |---|---|
 | `graded` | The child exited and the grader scored the workspace and root session log. |
 | `timeout` | The child exceeded `runTimeoutMs` and was killed; ungraded. `metrics` are present if it had persisted a session. |
-| `invalid` | Not measurable: the home holds no single top-level session, or the grader threw. Excluded from success rates. |
+| `invalid` | Not measurable: the home holds no single top-level session, the root turn ended with a provider error listed in `providerFailureCodes` (the model was unavailable, not the task failed), or the grader threw. Excluded from success rates. |
 
 Metrics come from sessions read through the JSONL persistence backend. Tokens and cost sum over all sessions, subagent children included; `tokens.input` excludes cache reads. Turns, steps, retries, and tools describe the root session. `timing` splits root wall time into `llmMs` (`step/start` → `assistant/message`), `toolCriticalMs` (the slowest tool call per step, since parallel calls overlap), and `overheadMs` (the remainder: harness and plugin time). `costUsd` is present only when every model used has a row in `prices`.
 
@@ -56,7 +56,7 @@ Metrics come from sessions read through the JSONL persistence backend. Tokens an
 - **Verdict**, in order: `unreliable` when the variant's and the baseline's invalid rates differ by more than `invalidTolerance` in either direction (the side that loses failures to invalid runs would otherwise look better); `insufficient` below `minTasks` paired tasks; `improved` or `regressed` when the interval excludes 0; `equivalent` when it lies inside ±`margin`; otherwise `underpowered`.
 - **Also**: the task × variant pass-rate `matrix`, and the `pareto` set of priced variants not beaten on both success rate and mean cost.
 
-Options are all explicit: `confidence` (0.9, 0.95, or 0.99), `resamples` (≥ 100), `seed`, `margin` in [0, 1), `minTasks` (≥ 3), and `invalidTolerance` in [0, 1]. The same records and seed give the same intervals.
+`AnalysisConfig` is the Schemastery schema of these options with defaults, for consumers that take them as config. Options are all explicit: `confidence` (0.9, 0.95, or 0.99), `resamples` (≥ 100), `seed`, `margin` in [0, 1), `minTasks` (≥ 3), and `invalidTolerance` in [0, 1]. The same records and seed give the same intervals.
 
 ## Configuration
 
@@ -64,11 +64,12 @@ Options are all explicit: `confidence` (0.9, 0.95, or 0.99), `resamples` (≥ 10
 |---|---|---|
 | `command` | required | Launcher argv prefix, for example `[node, /abs/apps/cli/lib/bin.js]`. Built output only: the child runs under plain Node. |
 | `templateHome` | required | Home whose profile seeds every run home. |
-| `templateFiles` | required | Home-relative files copied into each run home for the child, for example `credentials.yaml`; deleted when the child exits. |
+| `templateFiles` | required | Home-relative files copied into each run home for the child when they exist, for example `.credentials.yaml`; deleted when the child exits. |
 | `ledgerRoot` | required | Directory holding one ledger per experiment. |
 | `concurrency` | `1` | Runs at once. |
 | `runTimeoutMs` | `600000` | Wall-time limit per run. |
 | `prices` | `[]` | `{ model, input, output, cacheRead? }` in USD per million tokens. |
+| `providerFailureCodes` | `[AUTH, INSUFFICIENT_BALANCE, QUOTA]` | Provider error codes that make a run `invalid` instead of a task failure. |
 
 ## Model Experience
 

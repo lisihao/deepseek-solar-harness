@@ -74,6 +74,7 @@ describe('BenchRuntime with a real dsh child', () => {
       concurrency: 1,
       runTimeoutMs: 120_000,
       prices: [],
+      providerFailureCodes: ['AUTH'],
     })
     const records = await ctx.benchRuntime.run({
       id: 'e2e' as ExperimentId,

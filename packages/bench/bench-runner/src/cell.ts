@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-bench-runner/cell
  */
 
-import { constants, cp, mkdir, rm } from 'node:fs/promises'
+import { constants, cp, mkdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore from '@deepseek-ai/dsh-session'
@@ -28,7 +28,7 @@ export interface CellDirs {
 export interface HomeTemplate {
   /** Absolute home whose `profiles/<profile>` directory and listed files are copied. */
   home: string
-  /** Home-relative files copied into each run home, such as credentials and settings. */
+  /** Home-relative files copied into each run home when present, such as credentials and settings. */
   files: readonly string[]
 }
 
@@ -50,7 +50,11 @@ export async function prepareCell(dir: string, fixture: string | undefined, temp
   if (fixture === undefined) await mkdir(dirs.workspace, { recursive: true })
   else await cp(fixture, dirs.workspace, copy)
   await cp(join(template.home, 'profiles', profile), join(dirs.home, 'profiles', profile), copy)
-  for (const file of template.files) await cp(join(template.home, file), join(dirs.home, file), copy)
+  for (const file of template.files) {
+    const source = join(template.home, file)
+    // An absent template file is allowed: credentials may come from the environment instead.
+    if (await stat(source).then(() => true, () => false)) await cp(source, join(dirs.home, file), copy)
+  }
   return dirs
 }
 
