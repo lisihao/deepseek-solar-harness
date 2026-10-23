@@ -102,6 +102,7 @@ function generatedSubmitFixture(
     readonly initialObservation?: AdapterObservation
     readonly initialPageUrl?: string
     readonly beforeSendDelayMs?: number
+    readonly requireLiteralPaste?: boolean
   } = {},
 ) {
   const prompt = request().prompt
@@ -147,7 +148,9 @@ function generatedSubmitFixture(
         sent = true
       }
     },
-    async fill() { filled = true },
+    async focus() {},
+    keyboard: { async paste(value: string) { if (value !== prompt) throw new Error("changed prompt"); filled = true } },
+    async fill() { if (fixtureOptions.requireLiteralPaste) throw new Error("rich editor fill changes serialized Markdown"); filled = true },
     async press() {},
   }
   const taskSpace = async () => ({ ownership: 'agent', spaceId: fixtureResource.spaceId, page: () => page })
@@ -654,7 +657,7 @@ describe('EgoWebAdapter', () => {
     }
   })
 
-  it('keeps non-catalog operations at the configured command timeout', async () => {
+  it('budgets prepare for navigation and selection while keeping other operations at the command timeout', async () => {
     const calls = vi.fn(async (invocation: Parameters<EgoProcessRunner>[0]) => {
       if (invocation.source.includes('const __operation = "create";')) return success({ spaceId: 3, pageLabel: 'p1' })
       if (invocation.source.includes('const __operation = "finish";')) return success({ finished: true })
@@ -672,7 +675,10 @@ describe('EgoWebAdapter', () => {
     await adapter.finish(created)
 
     expect(calls).toHaveBeenCalledTimes(5)
-    for (const [invocation] of calls.mock.calls) expect(invocation.timeoutMs).toBe(25_000)
+    for (const [invocation] of calls.mock.calls) {
+      expect(invocation.timeoutMs).toBe(invocation.source.includes('const __operation = "prepare";') ? 50_000 : 25_000)
+      if (invocation.source.includes('const __operation = "prepare";')) expect(invocation.source).toContain('"timeoutMs":25000')
+    }
   })
 
   it('names the catalog URL-boundary phase without returning the page URL', async () => {
@@ -725,9 +731,20 @@ describe('EgoWebAdapter', () => {
     expect(source).toContain('waitForSelector')
     expect(source).toContain('"Escape"')
     expect(source).toContain(JSON.stringify(request().prompt))
-    expect(source).toContain('clearFirst: true')
+    expect(source).toContain('__page.keyboard.paste(__input.request.prompt)')
+    expect(source).not.toContain('__page.fill(__composerSelector')
     await expect(adapter.submit(resource, request())).rejects.toMatchObject({ code: 'WEB_SUBMISSION_ALREADY_ATTEMPTED' })
     expect(fixture.calls).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses native literal paste in the rich editor instead of fill that reserializes Markdown', async () => {
+    const afterSubmit = { ...observation, userMessages: [request().prompt], userMessageCount: 1, generating: true }
+    const fixture = generatedSubmitFixture([afterSubmit], { requireLiteralPaste: true })
+    const adapter = new EgoWebAdapter(options, fixture.run)
+    await adapter.prepare(resource, request())
+    fixture.setConversationUrl()
+    await expect(adapter.submit(resource, request())).resolves.toEqual(afterSubmit)
+    expect(fixture.clicks.filter(value => value === 'button[data-testid="send-button"]')).toHaveLength(1)
   })
 
   it('executes the generated submit script through a keyless fake page roundtrip', async () => {
@@ -745,6 +762,8 @@ describe('EgoWebAdapter', () => {
     let modelView: 'simple' | 'advanced' = 'simple'
     let currentUrl = 'about:blank'
     const page = {
+      async focus() {},
+      keyboard: { async paste(value: string) { calls.fill.push({ selector: 'native-literal-paste', value }); filled = true } },
       async url() { return currentUrl },
       async goto() { currentUrl = 'https://chatgpt.com/' },
       async waitForSelector(selector: string) { calls.waitForSelector.push(selector) },
@@ -815,7 +834,7 @@ describe('EgoWebAdapter', () => {
     filled = false
     modelView = 'simple'
     await expect(adapter.submit(resource, request())).resolves.toEqual(expectedSubmit)
-    expect(calls.fill).toEqual([{ selector: 'textarea#prompt-textarea', value: prompt }])
+    expect(calls.fill).toEqual([{ selector: 'native-literal-paste', value: prompt }])
     expect(calls.click).toEqual([
       'button[aria-label="选择 ChatGPT 模型"]',
       '[data-model-picker-view-toggle="true"][role="menuitem"]',
@@ -1149,6 +1168,17 @@ describe('EgoWebAdapter', () => {
 
     await expect(adapter.prepare(resource, request())).rejects.toMatchObject({ code: 'WEB_MODEL_UNKNOWN' })
     expect(fixture.calls).toHaveBeenCalledOnce()
+  })
+
+  it('reads an observed provisional-to-final route without navigation but refuses final-to-final changes', async () => {
+    const provisional = 'https://chatgpt.com/c/local-chatgpt%3A1a05b507-0f37-46f5-87de-f72c9c7e71c2'
+    const finalUrl = 'https://chatgpt.com/c/6adaaf45-15a0-83e8-8ff4-724ca0549ae9'
+    const page = { url: async () => finalUrl, evaluate: async () => ({ ...observation, url: finalUrl }) }
+    const taskSpace = async () => ({ ownership: 'agent', spaceId: 3, page: () => page })
+    const run: EgoProcessRunner = vi.fn(async input => executeGeneratedSource(input.source, taskSpace))
+    const adapter = new EgoWebAdapter(options, run)
+    await expect(adapter.observe({ ...resource, conversationUrl: provisional })).resolves.toMatchObject({ url: finalUrl })
+    await expect(adapter.observe({ ...resource, conversationUrl: 'https://chatgpt.com/c/11111111-1111-4111-8111-111111111111' })).rejects.toMatchObject({ code: 'WEB_RESOURCE_CHANGED' })
   })
 
   it('stops on a changed resource without navigating or rebuilding it', async () => {

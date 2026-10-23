@@ -37,7 +37,7 @@ export interface ChatGptPageObservation {
   readonly composerText: string
   readonly hasAttachments: boolean
   readonly userMessageCount: number
-  /** Visible user-message text, CRLF-normalized but otherwise untrimmed. */
+  /** User receipt text with visible inline-code delimiters restored; CRLF-normalized and untrimmed. */
   readonly userMessages: readonly string[]
   readonly assistantMessages: readonly ChatGptAssistantMessage[]
   readonly generating: boolean
@@ -100,13 +100,24 @@ export function inspectChatGptPage(): ChatGptPageObservation {
       || tag === 'BUTTON' || tag === 'SVG' || tag === 'STYLE' || tag === 'SCRIPT'
   }
 
-  const visibleText = (node: BrowserNode): string => {
+  const visibleText = (node: BrowserNode, restoreInlineCode = false): string => {
     if (node.nodeType === 3) return node.textContent ?? ''
     if (node.nodeType !== 1) return ''
     const element = node as BrowserElement
     if (!visible(element) || ignored(element)) return ''
     if (element.tagName === 'BR') return newline
-    return Array.from(element.childNodes).map(visibleText).join('')
+    // A rendered code span omits its Markdown backticks from textContent.
+    // Restore those delimiters for user receipts without trimming surrounding
+    // text or changing the assistant's plain-text projection. PRE is not an
+    // inline span: do not invent inline delimiters inside a code block.
+    const inlineCode = restoreInlineCode && element.tagName === 'CODE'
+    const text = Array.from(element.childNodes)
+      .map((child) => visibleText(child, restoreInlineCode && !inlineCode && element.tagName !== 'PRE'))
+      .join('')
+    if (!inlineCode) return text
+    const longestTicks = Math.max(0, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length))
+    const fence = backtick.repeat(longestTicks + 1)
+    return `${fence}${text}${fence}`
   }
 
   // Controls are excluded from assistant-message extraction, but their own
@@ -416,7 +427,7 @@ export function inspectChatGptPage(): ChatGptPageObservation {
       '[role="alert"]',
       '[data-testid="error-message"]',
       '[data-testid="error"]',
-    ])).map(visibleText).map(normalizedLabel).filter(Boolean)
+    ])).map((element) => visibleText(element)).map(normalizedLabel).filter(Boolean)
     return errors.length === 0 ? undefined : errors.join(newline)
   }
 
@@ -438,6 +449,7 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     'button[aria-label="Stop generating"]',
     'button[aria-label="Stop streaming"]',
     'button[aria-label="停止生成"]',
+    'button[aria-label="停止"]',
     'button[aria-label="停止流式传输"]',
     '[role="button"][aria-label="Stop generating"]',
     '[role="button"][aria-label="停止生成"]',
@@ -445,7 +457,7 @@ export function inspectChatGptPage(): ChatGptPageObservation {
 
   const users = messageCandidates('user')
   const assistants = messageCandidates('assistant')
-  const userMessages = users.map((message) => normalizeNewlines(visibleText(message)))
+  const userMessages = users.map((message) => normalizeNewlines(visibleText(message, true)))
   const assistantMessages = assistants.flatMap((message) => {
     const body = assistantBody(message)
     if (body === undefined) return []

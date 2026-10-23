@@ -2,6 +2,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type { WebRunRecord } from './store.js'
 import type {
   ChatGptWebControlApi,
+  WebAbandonInput,
   WebIdInput,
   WebLaunchInput,
   WebUiStatus,
@@ -13,6 +14,7 @@ export interface WebUiWire {
   launch(input: WebLaunchInput): Promise<RemoteResult<{ readonly id: string }>>
   observe(input: WebIdInput): Promise<RemoteResult<WebRunRecord>>
   cancel(input: WebIdInput): Promise<RemoteResult<WebRunRecord>>
+  abandon(input: WebAbandonInput): Promise<RemoteResult<WebRunRecord>>
 }
 
 /**
@@ -33,5 +35,6 @@ export function createWebUiApi(wire: WebUiWire): ChatGptWebControlApi {
     launch: async input => unwrapWebRemote(await wire.launch(input)),
     observe: async input => unwrapWebRemote(await wire.observe(input)),
     cancel: async input => unwrapWebRemote(await wire.cancel(input)),
+    abandon: async input => unwrapWebRemote(await wire.abandon(input)),
   }
 }

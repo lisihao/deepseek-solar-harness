@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
 import type { WebController } from './controller.js'
-import type { WebIdInput, WebLaunchInput, WebUiStatus } from './ui-contract.js'
+import type { WebAbandonInput, WebIdInput, WebLaunchInput, WebUiStatus } from './ui-contract.js'
 import type { WebRunRequest, WebRunRecord } from './store.js'
 
 const idSchema = z.strictObject({ id: z.uuid() })
@@ -12,6 +12,11 @@ const requestSchema = z.strictObject({
   effortLabel: z.string().trim().min(1).max(120).optional(),
 })
 const launchSchema = z.strictObject({ id: z.uuid(), request: requestSchema })
+const abandonSchema = z.strictObject({
+  id: z.uuid(),
+  expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  acknowledgeUnknown: z.literal(true),
+})
 
 export class WebControl extends TypertRemoteService {
   private readonly pending = new Map<string, Promise<unknown>>()
@@ -49,6 +54,12 @@ export class WebControl extends TypertRemoteService {
   async observe(input: WebIdInput): Promise<WebRunRecord> { this.owner(); return this.controller.observe(idSchema.parse(input).id) }
   @Remote
   async cancel(input: WebIdInput): Promise<WebRunRecord> { this.owner(); return this.controller.cancel(idSchema.parse(input).id) }
+  @Remote
+  async abandon(input: WebAbandonInput): Promise<WebRunRecord> {
+    this.owner()
+    const value = abandonSchema.parse(input)
+    return this.controller.abandon(value.id, value.expectedRevision, value.acknowledgeUnknown)
+  }
 }
 
 declare module '@deepseek-ai/cordis' { interface Context { solarChatGptWebControl: WebControl } }
