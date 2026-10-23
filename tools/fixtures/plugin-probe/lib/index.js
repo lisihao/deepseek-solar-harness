@@ -2,6 +2,11 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 const RESIDENT_SERVICE = 'solarNativeResident'
+const NATIVE_CONTROL_SERVICE = 'solarNativeControl'
+const WORKFLOW_SERVICE = 'solarWorkflowStudio'
+const WORKFLOW_CONTROL_SERVICE = 'solarWorkflowControl'
+const COLLABORATION_RUNTIME = 'native-collaboration'
+const WORKFLOW_RPC_METHODS = ['overview', 'refreshSource', 'save', 'validate', 'run', 'inspect', 'resume', 'setMode']
 
 function expectedCollaboration() {
   const value = process.env.SOLAR_PROBE_EXPECT_COLLABORATION
@@ -47,15 +52,21 @@ async function runProbe(ctx) {
   const markerPath = requiredEnv('SOLAR_PLUGIN_PROBE_MARKER')
   const expectCollaboration = expectedCollaboration()
   const expectedTools = expectCollaboration
-    ? ['solar_delegate', 'solar_resident', 'solar_coordinate']
+    ? ['solar_delegate', 'solar_resident', 'solar_coordinate', 'solar_wait']
     : ['solar_resident']
   const checks = {
     tools: [],
+    baseProfileServices: [],
     service: false,
     listed: false,
+    waitTool: false,
+    workflowService: false,
+    workflowOwnerRpc: [],
+    workflowOverview: false,
     queued: false,
     paused: false,
     cancelled: false,
+    collaborationDisposed: false,
   }
   let resident
   let graphId
@@ -68,6 +79,18 @@ async function runProbe(ctx) {
     for (const tool of expectedTools) {
       assert(names.has(tool), `expected tool ${tool} is not registered`)
       checks.tools.push(tool)
+    }
+    if (expectCollaboration) {
+      assert(names.has('solar_wait'), 'solar_wait is absent from the tool schema catalog')
+      assert(typeof tools.get === 'function' && tools.get('solar_wait') !== undefined, 'solar_wait is not registered as a callable tool')
+      checks.waitTool = true
+      // The collaboration bundle now depends on these public base-profile
+      // services. Record their actual scratch-profile availability before
+      // touching any execution path.
+      for (const serviceName of ['agents', 'systemPrompt']) {
+        assert(ctx.get(serviceName) !== undefined, `base profile service ${serviceName} is unavailable`)
+        checks.baseProfileServices.push(serviceName)
+      }
     }
 
     resident = ctx.get(RESIDENT_SERVICE)
@@ -83,12 +106,30 @@ async function runProbe(ctx) {
     checks.listed = true
 
     if (expectCollaboration) {
-      const control = ctx.get('solarNativeControl')
+      const control = ctx.get(NATIVE_CONTROL_SERVICE)
       assert(control !== undefined && typeof control.status === 'function', 'native collaboration UI control is unavailable')
       const status = await control.status()
       assert(status.resident.available === true, 'UI status cannot reach Resident')
       assert(status.tools.every(tool => tool.available), 'UI status is missing a native tool')
       checks.uiStatus = true
+
+      const studio = ctx.get(WORKFLOW_SERVICE)
+      assert(studio !== undefined && typeof studio.register === 'function' && typeof studio.capture === 'function', 'workflow Studio service is unavailable')
+      checks.workflowService = true
+      const workflowControl = ctx.get(WORKFLOW_CONTROL_SERVICE)
+      assert(workflowControl !== undefined, 'workflow Studio owner control is unavailable')
+      const binding = workflowControl.typertRemote
+      assert(binding?.serviceKey === WORKFLOW_CONTROL_SERVICE && binding.namespace === WORKFLOW_CONTROL_SERVICE, 'workflow Studio owner control is not bound to its Typert namespace')
+      for (const method of WORKFLOW_RPC_METHODS) {
+        assert(typeof workflowControl[method] === 'function', `workflow Studio owner RPC ${method} is unavailable`)
+        checks.workflowOwnerRpc.push(method)
+      }
+      // Direct invocation carries no Remote peer and is therefore the local
+      // owner path. overview reads only durable state; it does not submit work.
+      const overview = await workflowControl.overview({ sessionId: `plugin-probe-session-${process.pid}` })
+      assert(overview?.sessionId === `plugin-probe-session-${process.pid}`, 'workflow Studio overview did not preserve the requested session')
+      assert(Array.isArray(overview.providers) && Array.isArray(overview.sources) && Array.isArray(overview.drafts) && Array.isArray(overview.runs), 'workflow Studio overview is incomplete')
+      checks.workflowOverview = true
     }
 
     const submitted = await resident.submit({ commandId: `plugin-probe-submit-${process.pid}`, graph: graphForProbe() })
@@ -113,6 +154,23 @@ async function runProbe(ctx) {
     })
     assert(cancelled.status === 'cancelled', `expected cancelled graph, got ${String(cancelled.status)}`)
     checks.cancelled = true
+
+    if (expectCollaboration) {
+      // Dispose only the collaboration bundle after all existing Resident
+      // queue/pause/cancel evidence has been collected. Resident itself stays
+      // available for the driver cleanup.
+      const runtimes = [...ctx.registry.values()].filter(runtime => runtime.name === COLLABORATION_RUNTIME)
+      assert(runtimes.length === 1 && runtimes[0].fibers.length === 1, 'native collaboration plugin owner fiber is not unique')
+      const [ownerFiber] = [...runtimes[0].fibers]
+      await ownerFiber.dispose()
+      assert(ctx.get(WORKFLOW_SERVICE) === undefined, 'workflow Studio service remained registered after collaboration dispose')
+      assert(ctx.get(WORKFLOW_CONTROL_SERVICE) === undefined, 'workflow Studio owner control remained registered after collaboration dispose')
+      assert(ctx.get(NATIVE_CONTROL_SERVICE) === undefined, 'native collaboration control remained registered after collaboration dispose')
+      for (const tool of ['solar_delegate', 'solar_coordinate', 'solar_wait']) {
+        assert(tools.get(tool) === undefined, `${tool} remained registered after collaboration dispose`)
+      }
+      checks.collaborationDisposed = true
+    }
   } catch (caught) {
     error = serialiseError(caught)
   }

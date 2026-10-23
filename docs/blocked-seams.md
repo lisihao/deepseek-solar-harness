@@ -13,3 +13,7 @@ The reviewed subscription plugin replaces a private search registry. A new Solar
 ## Tools after Host shutdown
 
 Native-only tasks can be independent of a disposable Host connection. DSH tool callbacks still need their owning live Agent and Host. A missing bridge prevents admission or returns an explicit transport failure; an uncertain tool effect is fenced. Keeping the daemon alive is not proof that stopped Host tools remain available.
+
+## V3 ChatGPT Web host integration
+
+The private V3 `ctx.browser.runProgram()`, physical-operator/model-worker registries and primary-menu hooks are absent from the published rc.2 browser-use registry. This does not prohibit a public main-conversation Web route: the baseline exports `LlmAdapter`, adapter/model registration and canonical model selection. The existing model-handoff plugin can handle that selection, and the official AgentPreset registry/new-session selector can expose a scoped Insight mode. The earlier independent panel was a narrower implementation, not evidence that the requested public route was blocked. See [the corrected conversation and Insight contract](chatgpt-web-conversation-contract.md). Registration, complete context projection and installed original-conversation behavior require their own implementation and acceptance.

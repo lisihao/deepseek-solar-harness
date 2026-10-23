@@ -45,7 +45,7 @@ export interface TaskNode {
   readonly executor: Executor
   readonly prompt: string
   readonly dependsOn?: readonly string[]
-  /** Optional predecessor references in the published Web peer contract; this declaration does not enable runtime handling. */
+  /** Complete outputs from these direct predecessors are appended to the native input. */
   readonly inputFrom?: readonly string[]
   readonly scope?: TaskScope
   /** Stable per-workspace native conversation, reused only after confirmed settlement. */

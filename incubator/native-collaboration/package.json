@@ -1,7 +1,7 @@
 {
   "name": "@lisihao/dsh-solar-native-collaboration",
   "version": "0.1.0-dev.0",
-  "description": "Explicit Codex and Claude Code handoff plus bounded advertised-model allocation through official DSH subagent services or the optional Solar Resident service.",
+  "description": "Conversation-scoped smart collaboration and editable execution flows with persistent native scheduling through Solar Resident.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -17,6 +17,10 @@
     },
     "./typert": {
       "default": "./lib/typert.js"
+    },
+    "./studio-contracts": {
+      "types": "./lib/types/studio-contract.d.ts",
+      "default": "./lib/studio-contract.js"
     }
   },
   "files": [
@@ -46,7 +50,8 @@
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-renderer"
       ]
     }
   },
@@ -64,8 +69,13 @@
     "@deepseek-ai/dsh-client-ui-conversation": "0.2.1-rc.2",
     "@deepseek-ai/dsh-api-remotes": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2",
-    "react": "^18.3.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.2"
+    "react": "~18.3.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "react-dom": "^18.3.1"
   },
   "peerDependenciesMeta": {
     "@lisihao/dsh-solar-native-resident": {
@@ -81,9 +91,15 @@
     "@lisihao/dsh-solar-native-resident": "workspace:*",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "react-dom": "18.3.1"
   },
   "dependencies": {
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@xyflow/react": "12.12.0"
   }
 }

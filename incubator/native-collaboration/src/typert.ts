@@ -1,7 +1,9 @@
 import { RPC_REMOTE } from './remote.js'
-/** Explicit public Typert descriptors; method input boundaries validate in NativeControl. */
 export const TYPERT = {
   package: RPC_REMOTE.package, face: 'host', schemas: [],
-  model: { services: [{ tags: [], key: 'solarNativeControl', exportName: 'NativeControl', description: 'Owner-only native collaboration controls', summary: 'Native collaboration UI', jsDoc: 'Read status and explicitly control native acceptance tasks.', members: RPC_REMOTE.descriptors.map(value => ({ name: value.method, kind: 'method', signature: '(input?: unknown): Promise<unknown>' })), types: [] }], events: [], objects: [] },
+  model: { services: [
+    { key: 'solarNativeControl', exportName: 'NativeControl' },
+    { key: 'solarWorkflowControl', exportName: 'StudioControl' },
+  ].map(service => ({ ...service, tags: [], description: 'Owner-only conversation workflow controls', summary: 'Conversation execution flow', jsDoc: 'Edit drafts and explicitly execute or observe the original workflow.', members: RPC_REMOTE.descriptors.filter(value => value.service === service.key).map(value => ({ name: value.method, kind: 'method', signature: '(input?: unknown): Promise<unknown>' })), types: [] })), events: [], objects: [] },
   invocations: RPC_REMOTE.descriptors,
 }

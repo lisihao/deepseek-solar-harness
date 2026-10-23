@@ -1,3 +1,4 @@
+import { STUDIO_RPC_REMOTE } from './studio-remote.js'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 const PKG = '@lisihao/dsh-solar-native-collaboration'
 const codec = (typeSymbol: string) => {
@@ -6,10 +7,10 @@ const codec = (typeSymbol: string) => {
 }
 export const RPC_REMOTE: TypertRemoteContribution = {
   package: PKG,
-  descriptors: ['status', 'inspect', 'control', 'test'].map(method => ({
+  descriptors: [...['status', 'inspect', 'control', 'test'].map(method => ({
     id: `${PKG}#solarNativeControl/${method}`, service: 'solarNativeControl', namespace: 'solarNativeControl', method,
     invocation: { kind: 'direct' as const },
     parameters: method === 'status' ? [] : [{ name: 'input', wire: 'input', source: 'json' as const, codec: codec('Input') }],
     result: codec('Result'),
-  })),
+  })), ...STUDIO_RPC_REMOTE.descriptors],
 }

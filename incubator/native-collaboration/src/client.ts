@@ -30,6 +30,25 @@ import {
   type GraphControlAction,
 } from './client-helpers.js'
 import { RPC_REMOTE } from './remote.js'
+import { WorkflowStudioPanel, SessionModeControl } from './studio-client.js'
+import type { StudioUiApi } from './studio-contract.js'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+
+type StudioWire = { [K in keyof StudioUiApi]: (...args: Parameters<StudioUiApi[K]>) => Promise<RemoteResult<Awaited<ReturnType<StudioUiApi[K]>>>> }
+function studioApi(wire: StudioWire): StudioUiApi {
+  const unwrap = <T,>(result: RemoteResult<T>): T => { if (result.ok) return result.value; throw result.error }
+  return {
+    overview: async input => unwrap(await wire.overview(input)),
+    refreshSource: async input => unwrap(await wire.refreshSource(input)),
+    save: async input => unwrap(await wire.save(input)),
+    validate: async input => unwrap(await wire.validate(input)),
+    run: async input => unwrap(await wire.run(input)),
+    inspect: async input => unwrap(await wire.inspect(input)),
+    resume: async input => unwrap(await wire.resume(input)),
+    setMode: async input => unwrap(await wire.setMode(input)),
+  }
+}
 import type {
   GraphQuery,
   NativeControlInput,
@@ -49,6 +68,7 @@ type NativeControlRemote = {
 
 interface RemoteAccessSnapshot {
   readonly api: NativeControlRemote | undefined
+  readonly studio?: StudioUiApi
   readonly error: string | undefined
 }
 
@@ -63,8 +83,8 @@ class RemoteAccessStore {
     return () => this.listeners.delete(listener)
   }
 
-  setApi(api: NativeControlRemote): void {
-    this.snapshot = { api, error: undefined }
+  setApi(api: NativeControlRemote, studio: StudioUiApi): void {
+    this.snapshot = { api, studio, error: undefined }
     this.publish()
   }
 
@@ -622,7 +642,9 @@ export function apply(ctx: Context): void {
         return
       }
       disposeRemote = disposer
-      remoteStore.setApi(api)
+      const studioWire = ctx.get('remote.solarWorkflowControl') as unknown as StudioWire | undefined
+      if (!studioWire) { await disposer(); remoteStore.setError('本机没有提供会话流程服务。'); return }
+      remoteStore.setApi(api, studioApi(studioWire))
     }).catch((error: unknown) => {
       if (!disposed) remoteStore.setError(errorMessage(error))
     })
@@ -633,17 +655,16 @@ export function apply(ctx: Context): void {
     }
   }, 'native-collaboration: remote')
 
-  const View = (): ReactElement => createElement(NativeCollaborationPanel, { remoteStore })
-  ctx.slots.inject('conversation.view', () => ctx.slots.register({
-    name: 'conversation.view',
-    id: 'solar-native-collaboration',
-    order: 45,
-    label: () => '智能协同',
-  }, View))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'solar-native-collaboration',
-    order: 45,
-    label: () => '智能协同',
-  }, View))
+  const Diagnostics = (): ReactElement => createElement(NativeCollaborationPanel, { remoteStore })
+  const FlowView = (props: PropsRuntime<'conversation.view'>): ReactElement => {
+    const remote = useRemoteAccess(remoteStore)
+    return createElement(WorkflowStudioPanel, { sessionId: String(props.sessionId), api: remote.studio, error: remote.error })
+  }
+  const ModeView = (props: PropsRuntime<'conversation.session.header.actions'>): ReactElement => {
+    const remote = useRemoteAccess(remoteStore)
+    return createElement(SessionModeControl, { sessionId: String(props.sessionId), api: remote.studio, error: remote.error })
+  }
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({ name: 'conversation.view', id: 'solar-native-collaboration', order: 45, label: () => '执行流程' }, FlowView))
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({ name: 'conversation.session.header.actions', id: 'solar-session-collaboration-mode', order: 45 }, ModeView))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'solar-native-collaboration', order: 45, label: () => '协同诊断' }, Diagnostics))
 }
