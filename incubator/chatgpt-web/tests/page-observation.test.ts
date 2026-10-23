@@ -418,6 +418,39 @@ describe('inspectChatGptPage', () => {
     expect(result.userMessages[0]).not.toContain('hidden duplicate')
   })
 
+  it('reconstructs inline-code delimiters in an otherwise literal user receipt', () => {
+    const children: Array<Child | string> = ['  leading\n']
+    let prompt = '  leading\n'
+    for (let index = 0; index < 15; index++) {
+      const code = `code_${index}`
+      children.push('before ', element('code', {}, code), ' after\n')
+      prompt += `before \`${code}\` after\n`
+    }
+    const suffix = '\n'.repeat(6) + 'tail  '
+    const padding = 'x'.repeat(8_675 - prompt.length - suffix.length)
+    children.push(padding, suffix)
+    prompt += padding + suffix
+    const result = inspect(element('main', {},
+      element('div', { 'data-content-search-unit-key': 'turn-1:user' },
+        element('div', { 'data-user-message-bubble': 'true' }, ...children)),
+    ))
+
+    expect(prompt.length).toBe(8_675)
+    expect(prompt.match(/`/g)).toHaveLength(30)
+    expect(result.userMessageCount).toBe(1)
+    expect(result.userMessages).toEqual([prompt])
+  })
+
+  it('keeps raw backticks literal and fences embedded ticks without trimming code', () => {
+    const result = inspect(element('main', {},
+      element('article', { 'data-message-author-role': 'user' },
+        'raw `ticks` and ', element('code', {}, 'a`b'), ' ', element('code', {}, ' padded '),
+        element('button', {}, 'Copy'), element('span', { hidden: true }, 'hidden')),
+    ))
+
+    expect(result.userMessages).toEqual(['raw `ticks` and ``a`b`` ` padded `'])
+  })
+
   it('preserves visible links, list structure, and fenced code in Markdown', () => {
     const result = inspect(element('main', {}, assistant(
       element('p', {}, 'Read ', element('a', { href: 'https://example.com/docs' }, 'the docs'), '.'),
