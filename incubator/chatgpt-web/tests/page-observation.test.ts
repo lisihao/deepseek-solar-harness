@@ -367,6 +367,12 @@ describe('inspectChatGptPage', () => {
     expect(result.generating).toBe(true)
   })
 
+  it('keeps a visible Chinese Stop control generating even if partial answer text exists', () => {
+    const result = inspect(element('main', {}, assistant('partial answer'), element('button', { 'aria-label': '停止' })))
+    expect(result.generating).toBe(true)
+    expect(result.assistantMessages[0]?.text).toBe('partial answer')
+  })
+
   it('does not collect hidden messages, hidden controls, or hidden errors', () => {
     const result = inspect(element('main', {},
       element('form', { hidden: true }, composer('hidden composer')),

@@ -14,6 +14,8 @@ Ordinary requests use native plain-text paste into the empty editor, followed by
 
 Request-audit notices remain in the session log but are excluded from the browser prompt and command identity. Native graph-memory snapshots and Mnemon tool instructions are also excluded by their exact source/form classification; explicit user text and Insight decisions remain. This prevents another plugin's error retry from turning the same logical request into a fresh browser submission. A globally installed retry hook can still repeat local error handling even when this provider advertises `maxRetries: 0`; durable command identity is the external-effect boundary.
 
+The observed optimistic `/c/local-chatgpt%3A<uuid>` URL may finalize to a same-origin `/c/<uuid>` on the original page only after the exact submission receipt and requested selections match. This also permits observation-only recovery of an already persisted optimistic URL. Other conversation changes remain a named failure.
+
 The browser is an external dependency. A task requires an available Ego Lite CLI, an agent-owned TaskSpace, and a logged-in empty ChatGPT conversation. Login prompts, user takeover, existing drafts/attachments/conversations, unknown model labels, and unavailable requested labels stop before submission. The plugin does not download the browser or copy browser credentials.
 
 ### `洞察分析`

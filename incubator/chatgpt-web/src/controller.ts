@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { matchesWebEffort } from './web-selection.js'
+import { canFinalizeChatGptRoute } from './conversation-route.js'
 import { chmod, link, lstat, open, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -611,6 +612,11 @@ export class WebController {
     }
     if (resource.conversationUrl !== undefined) {
       if (resource.conversationUrl !== observation.url) {
+        // Same TaskSpace/Page and exact original user receipt were checked
+        // above. Only the observed optimistic-id -> final UUID transition is legal.
+        if (canFinalizeChatGptRoute(resource.conversationUrl, observation.url)) {
+          return { resource: { ...resource, conversationUrl: observation.url } }
+        }
         return {
           resource,
           problem: { code: 'WEB_RESOURCE_MISMATCH', message: 'Observed page does not match the durable conversation URL' },

@@ -1170,6 +1170,17 @@ describe('EgoWebAdapter', () => {
     expect(fixture.calls).toHaveBeenCalledOnce()
   })
 
+  it('reads an observed provisional-to-final route without navigation but refuses final-to-final changes', async () => {
+    const provisional = 'https://chatgpt.com/c/local-chatgpt%3A1a05b507-0f37-46f5-87de-f72c9c7e71c2'
+    const finalUrl = 'https://chatgpt.com/c/6adaaf45-15a0-83e8-8ff4-724ca0549ae9'
+    const page = { url: async () => finalUrl, evaluate: async () => ({ ...observation, url: finalUrl }) }
+    const taskSpace = async () => ({ ownership: 'agent', spaceId: 3, page: () => page })
+    const run: EgoProcessRunner = vi.fn(async input => executeGeneratedSource(input.source, taskSpace))
+    const adapter = new EgoWebAdapter(options, run)
+    await expect(adapter.observe({ ...resource, conversationUrl: provisional })).resolves.toMatchObject({ url: finalUrl })
+    await expect(adapter.observe({ ...resource, conversationUrl: 'https://chatgpt.com/c/11111111-1111-4111-8111-111111111111' })).rejects.toMatchObject({ code: 'WEB_RESOURCE_CHANGED' })
+  })
+
   it('stops on a changed resource without navigating or rebuilding it', async () => {
     const fixture = runnerReturning(observation)
     const adapter = new EgoWebAdapter(options, fixture.run)

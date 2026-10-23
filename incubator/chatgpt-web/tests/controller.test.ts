@@ -150,6 +150,38 @@ class FakeBrowser implements WebBrowserAdapter {
 }
 
 describe('WebController', () => {
+  it('reconciles a persisted provisional route to its final UUID only with an exact original receipt', async () => {
+    const store = new WebRunStore(await makeRoot())
+    const browser = new FakeBrowser()
+    const id = randomUUID()
+    const provisional = 'https://chatgpt.com/c/local-chatgpt%3A1a05b507-0f37-46f5-87de-f72c9c7e71c2'
+    const finalUrl = 'https://chatgpt.com/c/6adaaf45-15a0-83e8-8ff4-724ca0549ae9'
+    let record = await store.create(id, request())
+    record = await store.transition(id, record.revision, { stage: 'ready', resource: { ...browser.resource, conversationUrl: provisional } })
+    record = await store.transition(id, record.revision, { stage: 'submission-unknown' })
+    record = await store.transition(id, record.revision, { stage: 'indeterminate' })
+    browser.fallback = answer('Recovered original answer', '**Recovered original answer**', { url: finalUrl })
+    const result = await new WebController(store, browser, options()).observe(id)
+    expect(result.stage).toBe('completed')
+    expect(result.resource?.conversationUrl).toBe(finalUrl)
+    expect(browser.createIds).toHaveLength(0)
+    expect(browser.submitResources).toHaveLength(0)
+  })
+
+  it('rejects provisional route reconciliation when original user text differs', async () => {
+    const store = new WebRunStore(await makeRoot())
+    const browser = new FakeBrowser()
+    const id = randomUUID()
+    let record = await store.create(id, request())
+    record = await store.transition(id, record.revision, { stage: 'ready', resource: { ...browser.resource, conversationUrl: 'https://chatgpt.com/c/local-chatgpt%3A1a05b507-0f37-46f5-87de-f72c9c7e71c2' } })
+    record = await store.transition(id, record.revision, { stage: 'submission-unknown' })
+    browser.fallback = answer('Wrong answer', 'Wrong answer', { url: 'https://chatgpt.com/c/6adaaf45-15a0-83e8-8ff4-724ca0549ae9', userMessages: ['different prompt'] })
+    const result = await new WebController(store, browser, options()).observe(id)
+    expect(result.stage).toBe('indeterminate')
+    expect(result.error?.code).toBe('WEB_SUBMISSION_MISMATCH')
+    expect(browser.submitResources).toHaveLength(0)
+  })
+
   it.each(['Pro plus', 'future-budget-id'])('accepts a future effort by exact label or id: %s', async requestedEffort => {
     const store = new WebRunStore(await makeRoot())
     const browser = new FakeBrowser()

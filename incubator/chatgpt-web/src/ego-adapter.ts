@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path'
+import { canFinalizeChatGptRoute } from './conversation-route.js'
 
 import { inspectChatGptPage, type ChatGptPageObservation } from './page-observation.js'
 import {
@@ -1391,7 +1392,10 @@ if (!__composerReady) {
 const __task = await taskSpace(__input.resource.spaceId);
 __assertAgent(__task);
 const __page = __task.page(__input.resource.pageLabel);
-if (__input.resource.conversationUrl && await __page.url() !== __input.resource.conversationUrl) {
+const __currentUrl = await __page.url();
+const __canFinalizeRoute = ${String(canFinalizeChatGptRoute)};
+if (__input.resource.conversationUrl && __currentUrl !== __input.resource.conversationUrl
+  && !__canFinalizeRoute(__input.resource.conversationUrl, __currentUrl)) {
   __throw("WEB_RESOURCE_CHANGED", "ChatGPT resource URL changed");
 }
 const __inspect = ${inspectSource};

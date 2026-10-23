@@ -438,6 +438,7 @@ export function inspectChatGptPage(): ChatGptPageObservation {
     'button[aria-label="Stop generating"]',
     'button[aria-label="Stop streaming"]',
     'button[aria-label="停止生成"]',
+    'button[aria-label="停止"]',
     'button[aria-label="停止流式传输"]',
     '[role="button"][aria-label="Stop generating"]',
     '[role="button"][aria-label="停止生成"]',
