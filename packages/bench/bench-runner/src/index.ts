@@ -36,7 +36,10 @@ declare module '@deepseek-ai/cordis' {
 
 /** Runtime configuration. */
 export interface Config {
-  /** Launcher argv prefix for `dsh`, for example `[node, /abs/apps/cli/lib/bin.js]`. */
+  /**
+   * Launcher argv prefix for `dsh`, for example `[node, /abs/apps/cli/lib/bin.js]`.
+   * Empty (the default), the runtime only reads ledgers and {@link BenchRuntime.run} refuses.
+   */
   command: string[]
   /** Absolute home whose `profiles/<profile>` seeds every run home. */
   templateHome: string
@@ -60,7 +63,7 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
-  command: z.array(z.string()).required(),
+  command: z.array(z.string()).default([]),
   templateHome: z.string().required(),
   templateFiles: z.array(z.string()).required(),
   ledgerRoot: z.string().required(),
@@ -128,7 +131,6 @@ export class BenchRuntime extends Service {
    */
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'benchRuntime')
-    if (config.command.length === 0) throw new Error('bench-runner: command must name the dsh launcher')
   }
 
   /**
@@ -138,10 +140,12 @@ export class BenchRuntime extends Service {
    * @param experiment - the experiment to run.
    * @param options - cancellation and progress.
    * @returns every record in the ledger after the run, earlier ones included.
-   * @throws Error before any run starts when the suite, a task, or a grader spec is invalid,
-   *   or when the ledger pins a different definition; the abort reason when cancelled.
+   * @throws Error before any run starts when `command` is empty, when the suite, a task,
+   *   or a grader spec is invalid, or when the ledger pins a different definition; the abort reason when cancelled.
    */
   async run(experiment: Experiment, options: RunOptions = {}): Promise<RunRecord[]> {
+    const { command } = this.config
+    if (command.length === 0) throw new Error('bench-runner: no command is configured, so this runtime only reads ledgers')
     const suite = this.ctx.benchmarks.suite(experiment.suite)
     if (suite === undefined) throw new Error(`benchmark suite ${JSON.stringify(experiment.suite)} is not registered`)
     const tasks = this.selectTasks(experiment, await suite.load(options.signal))
@@ -162,7 +166,7 @@ export class BenchRuntime extends Service {
     const worker = async (): Promise<void> => {
       for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
         options.signal?.throwIfAborted()
-        const record = await this.runCell(experiment, suite, ledger.dir, next, options.signal)
+        const record = await this.runCell(command, experiment, suite, ledger.dir, next, options.signal)
         options.signal?.throwIfAborted()
         await ledger.append(record)
         records.push(record)
@@ -218,6 +222,7 @@ export class BenchRuntime extends Service {
 
   /**
    * Execute, measure, and grade one cell.
+   * @param command - the launcher argv prefix.
    * @param experiment - the experiment.
    * @param suite - the experiment's suite.
    * @param ledgerDir - the experiment ledger directory.
@@ -226,6 +231,7 @@ export class BenchRuntime extends Service {
    * @returns the cell's record.
    */
   private async runCell(
+    command: readonly string[],
     experiment: Experiment,
     suite: BenchSuite,
     ledgerDir: string,
@@ -237,12 +243,12 @@ export class BenchRuntime extends Service {
     const template = { home: this.config.templateHome, files: this.config.templateFiles }
     const dirs = await prepareCell(dir, job.task.fixture, template, experiment.profile)
     const argv = [
-      ...this.config.command.slice(1),
+      ...command.slice(1),
       '--profile', experiment.profile,
       ...job.variant.patches.flatMap(patch => ['--patch', patch]),
       job.task.prompt,
     ]
-    const exit = await this.spawnChild(argv, dirs.workspace, cellEnv(process.env, dirs, job.variant), signal)
+    const exit = await this.spawnChild(command[0] as string, argv, dirs.workspace, cellEnv(process.env, dirs, job.variant), signal)
     await scrubTemplateFiles(dirs.home, this.config.templateFiles)
     const base = { formatVersion: LEDGER_FORMAT_VERSION as 1, cell: job.cell, exitCode: exit.code, suiteVersion: suite.version, startedAt }
     let sessions
@@ -272,15 +278,22 @@ export class BenchRuntime extends Service {
 
   /**
    * Run the dsh child to exit, killing it at the run timeout.
+   * @param launcher - the launcher executable.
    * @param argv - arguments after the launcher executable.
    * @param cwd - the run workspace.
    * @param env - the run environment.
    * @param signal - cancellation; kills the child.
    * @returns the exit outcome.
    */
-  private spawnChild(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv, signal: AbortSignal | undefined): Promise<ChildExit> {
+  private spawnChild(
+    launcher: string,
+    argv: readonly string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+    signal: AbortSignal | undefined,
+  ): Promise<ChildExit> {
     return new Promise((resolve, reject) => {
-      const child = spawn(this.config.command[0] as string, argv, { cwd, env, signal, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(launcher, argv, { cwd, env, signal, stdio: ['ignore', 'pipe', 'pipe'] })
       let output = ''
       let timedOut = false
       const collect = (chunk: Buffer): void => {

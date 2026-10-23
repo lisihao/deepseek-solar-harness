@@ -1,7 +1,7 @@
 /**
  * REAL-composition proof: the shipped YAML rows (registry, runtime with its
- * config, suite) boot through the vendored Loader, and a runtime row missing
- * a required config field fails to load.
+ * config, suite) boot through the vendored Loader, a row without a launcher
+ * mounts a read-only runtime, and a row missing a required field fails to load.
  */
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -68,8 +68,14 @@ describe('real Loader composition', () => {
     expect(ctx.benchmarks.suites().map(suite => suite.id)).toEqual(['dsh-native'])
   })
 
-  it('does not start a runtime whose config omits the launcher command', async () => {
-    const ctx = await boot(['templateHome: /abs/home', 'templateFiles: []', 'ledgerRoot: /abs/ledger']).catch(() => context!)
+  it('mounts a read-only runtime when the config omits the launcher command', async () => {
+    const ctx = await boot(['templateHome: /abs/home', 'templateFiles: []', 'ledgerRoot: /abs/ledger'])
+    const experiment = { id: 'e', suite: 'dsh-native', profile: 'headless', repetitions: 1, variants: [] } as unknown as Runner.Experiment
+    await expect(ctx.benchRuntime.run(experiment)).rejects.toThrow(/only reads ledgers/)
+  })
+
+  it('does not start a runtime whose config omits the ledger root', async () => {
+    const ctx = await boot(['templateHome: /abs/home', 'templateFiles: []']).catch(() => context!)
     expect(ctx.get('benchRuntime')).toBeUndefined()
   })
 })

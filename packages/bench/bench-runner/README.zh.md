@@ -62,7 +62,7 @@ variants:                    # the first is the baseline
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
-| `command` | 必填 | 启动器 argv 前缀，例如 `[node, /abs/apps/cli/lib/bin.js]`。只能用构建产物，因为子进程以普通 Node 运行。 |
+| `command` | `[]` | 启动器 argv 前缀，例如 `[node, /abs/apps/cli/lib/bin.js]`。只能用构建产物，因为子进程以普通 Node 运行。为空时运行器只读取账本，`run` 在创建任何目录之前就拒绝，适用于只展示结果的 Desktop。 |
 | `templateHome` | 必填 | 用其 profile 为每个运行 home 播种的 home 目录。 |
 | `templateFiles` | 必填 | 存在时复制进每个运行 home 供子进程使用的文件（相对 home），例如 `.credentials.yaml`；子进程退出时删除。 |
 | `ledgerRoot` | 必填 | 存放各实验账本的目录，每个实验一个账本。 |

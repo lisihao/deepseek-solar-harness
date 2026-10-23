@@ -80,8 +80,8 @@ Runs benchmark experiments as isolated child processes.
  * @param experiment - the experiment to run.
  * @param options - cancellation and progress.
  * @returns every record in the ledger after the run, earlier ones included.
- * @throws Error before any run starts when the suite, a task, or a grader spec is invalid,
- *   or when the ledger pins a different definition; the abort reason when cancelled.
+ * @throws Error before any run starts when `command` is empty, when the suite, a task,
+ *   or a grader spec is invalid, or when the ledger pins a different definition; the abort reason when cancelled.
  */
 async run(experiment: Experiment, options: RunOptions = {}): Promise<RunRecord[]>
 
@@ -99,5 +99,5 @@ experiments(): Promise<ExperimentId[]>
 async ledger(id: string): Promise<LedgerSnapshot | undefined>
 ```
 
-Source: [`packages/bench/bench-runner/src/index.ts:120`](../../packages/bench/bench-runner/src/index.ts)
+Source: [`packages/bench/bench-runner/src/index.ts:123`](../../packages/bench/bench-runner/src/index.ts)
 <!-- END GENERATED cordis-surface -->

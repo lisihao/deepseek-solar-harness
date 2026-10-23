@@ -425,7 +425,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Run every unrecorded cell of an experiment. Cells are ordered by repetition, then task, then variant, so a partial experiment stays balanced across variants.',
         parameters: [{ name: 'experiment', description: 'the experiment to run.' }, { name: 'options', description: 'cancellation and progress.' }],
         returns: 'every record in the ledger after the run, earlier ones included.',
-        throws: ['Error before any run starts when the suite, a task, or a grader spec is invalid, or when the ledger pins a different definition; the abort reason when cancelled.'],
+        throws: ['Error before any run starts when `command` is empty, when the suite, a task, or a grader spec is invalid, or when the ledger pins a different definition; the abort reason when cancelled.'],
       },
       {
         signature: 'experiments(): Promise<ExperimentId[]>',
