@@ -23,3 +23,18 @@ New format-one Web/Insight records can contain optional observed `effortId`, sep
 ## Carried patches
 
 None. This plugin does not patch, vendor or monkey-patch Harness or Ego Lite. Its own DOM adapter replaces the legacy V3 private browser/physical-operator seams. Missing website controls cause a named failure, not a hidden provider/API fallback.
+
+
+## Local retirement of unknown Web records
+
+Format-one records now also accept the terminal `abandoned` stage. It means owner-confirmed termination of local tracking only: the remote result remains unknown, and all earlier revisions remain immutable. Older strict readers can reject this new stage; do not roll the plugin back over such a journal without accounting for that compatibility boundary. There is no automatic migration, pruning, retry, remote cancellation, or lease-age reclamation. `WebControl.abandon` is an owner-only, revision-checked action and is not exposed as an automatic model recovery tool.
+
+## Live rich-editor and retry interaction — 2026-10-22
+
+The current ChatGPT rich editor exposes native plain-text paste as a literal-paste node. Generic contenteditable fill was observed to reserialize Markdown with escapes after submission even when the draft readback matched. Ordinary Web submission therefore uses public `page.focus` and `page.keyboard.paste`, keeping exact draft/receipt equality and the single-send boundary. The webpage-search insertion path is unchanged. Preparation now shares the bounded setup-process budget used by catalogue discovery; individual DOM waits are unchanged.
+
+The installed `dsh-purge-community@1.6.38` general request-error hook ignores the provider-owned no-retry policy. This plugin does not patch that dependency or change its global settings. Its own audit notices are excluded from prompt/canonical identity, with negative controls for real Insight decisions and other sources. Retries of the same visible conversation therefore encounter the original durable record rather than creating a new TaskSpace. The live failure and later acceptance must be reported separately.
+
+## Optimistic conversation URL finalization — 2026-10-22
+
+The live page first reported `/c/local-chatgpt%3A<uuid>` and then `/c/<uuid>` on the same original TaskSpace/Page. `src/conversation-route.ts` permits only this observed same-origin, query/fragment-free transition, with strict UUID syntax. The controller still requires exactly one unchanged original user message and the verified model/effort before updating the durable URL. A final URL changing to another final URL, a different origin, or a mismatched prompt remains unknown and cannot trigger submission. Previously persisted optimistic URLs can be reconciled by observing their original resource; no new model request is necessary.

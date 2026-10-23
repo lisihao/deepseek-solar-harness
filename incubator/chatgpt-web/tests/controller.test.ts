@@ -150,6 +150,38 @@ class FakeBrowser implements WebBrowserAdapter {
 }
 
 describe('WebController', () => {
+  it('reconciles a persisted provisional route to its final UUID only with an exact original receipt', async () => {
+    const store = new WebRunStore(await makeRoot())
+    const browser = new FakeBrowser()
+    const id = randomUUID()
+    const provisional = 'https://chatgpt.com/c/local-chatgpt%3A1a05b507-0f37-46f5-87de-f72c9c7e71c2'
+    const finalUrl = 'https://chatgpt.com/c/6adaaf45-15a0-83e8-8ff4-724ca0549ae9'
+    let record = await store.create(id, request())
+    record = await store.transition(id, record.revision, { stage: 'ready', resource: { ...browser.resource, conversationUrl: provisional } })
+    record = await store.transition(id, record.revision, { stage: 'submission-unknown' })
+    record = await store.transition(id, record.revision, { stage: 'indeterminate' })
+    browser.fallback = answer('Recovered original answer', '**Recovered original answer**', { url: finalUrl })
+    const result = await new WebController(store, browser, options()).observe(id)
+    expect(result.stage).toBe('completed')
+    expect(result.resource?.conversationUrl).toBe(finalUrl)
+    expect(browser.createIds).toHaveLength(0)
+    expect(browser.submitResources).toHaveLength(0)
+  })
+
+  it('rejects provisional route reconciliation when original user text differs', async () => {
+    const store = new WebRunStore(await makeRoot())
+    const browser = new FakeBrowser()
+    const id = randomUUID()
+    let record = await store.create(id, request())
+    record = await store.transition(id, record.revision, { stage: 'ready', resource: { ...browser.resource, conversationUrl: 'https://chatgpt.com/c/local-chatgpt%3A1a05b507-0f37-46f5-87de-f72c9c7e71c2' } })
+    record = await store.transition(id, record.revision, { stage: 'submission-unknown' })
+    browser.fallback = answer('Wrong answer', 'Wrong answer', { url: 'https://chatgpt.com/c/6adaaf45-15a0-83e8-8ff4-724ca0549ae9', userMessages: ['different prompt'] })
+    const result = await new WebController(store, browser, options()).observe(id)
+    expect(result.stage).toBe('indeterminate')
+    expect(result.error?.code).toBe('WEB_SUBMISSION_MISMATCH')
+    expect(browser.submitResources).toHaveLength(0)
+  })
+
   it.each(['Pro plus', 'future-budget-id'])('accepts a future effort by exact label or id: %s', async requestedEffort => {
     const store = new WebRunStore(await makeRoot())
     const browser = new FakeBrowser()
@@ -580,5 +612,88 @@ describe('WebController', () => {
     await internals.releaseAdmission(oldId)
 
     expect(JSON.parse(await readFile(lock, 'utf8'))).toEqual(newOwner)
+  })
+})
+
+
+describe('owner-confirmed retirement of an unresolved run', () => {
+  async function orphan() {
+    const root = await makeRoot()
+    const store = new WebRunStore(root)
+    const id = randomUUID()
+    let record = await store.create(id, request())
+    record = await store.transition(id, record.revision, { stage: 'indeterminate', resource: { spaceId: 8, pageLabel: 'p1' }, error: { code: 'WEB_SUBMISSION_MISMATCH', message: 'Unknown receipt' } })
+    const lock = join(root, '.chatgpt-web-admission.lock')
+    const fence = JSON.stringify({ formatVersion: 1, id, lease: randomUUID() })
+    await writeFile(lock, fence)
+    const browser = new FakeBrowser()
+    const controller = new WebController(store, browser, options())
+    return { root, store, id, record, lock, fence, browser, controller }
+  }
+
+  it('retains unknown history, releases its own fence, never touches the old browser and allows a new command', async () => {
+    const o = await orphan()
+    const before = await readFile(join(o.root, o.id, '1.json'), 'utf8')
+    const retired = await o.controller.abandon(o.id, o.record.revision, true)
+    expect(retired).toMatchObject({ stage: 'abandoned', error: { code: 'WEB_REMOTE_OUTCOME_UNKNOWN' }, request: o.record.request, resource: o.record.resource })
+    expect(await readFile(join(o.root, o.id, '1.json'), 'utf8')).toBe(before)
+    await expect(access(o.lock)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(o.browser.createIds).toHaveLength(0)
+    expect(o.browser.submitResources).toHaveLength(0)
+    expect(o.browser.observeResources).toHaveLength(0)
+    expect(o.browser.finishCalls).toBe(0)
+    const reopened = new WebController(new WebRunStore(o.root), o.browser, options())
+    expect(await reopened.start(o.id, request())).toEqual(retired)
+    expect(await reopened.observe(o.id)).toEqual(retired)
+    expect(await reopened.abandon(o.id, o.record.revision, true)).toEqual(retired)
+    expect(o.browser.createIds).toHaveLength(0)
+    o.browser.fallback = answer()
+    expect((await reopened.start(randomUUID(), request())).stage).toBe('completed')
+    expect(o.browser.submitResources).toHaveLength(1)
+  })
+
+  it('requires explicit acknowledgement and latest revision, and preserves a different fence owner', async () => {
+    const o = await orphan()
+    await expect(o.controller.abandon(o.id, o.record.revision, false as true)).rejects.toMatchObject({ code: 'WEB_RECOVERY_ACK_REQUIRED' })
+    await expect(o.controller.abandon(o.id, 0, true)).rejects.toMatchObject({ code: 'WEB_STATE_CONFLICT' })
+    const other = JSON.stringify({ formatVersion: 1, id: randomUUID(), lease: randomUUID() })
+    await writeFile(o.lock, other)
+    await expect(o.controller.abandon(o.id, o.record.revision, true)).rejects.toMatchObject({ code: 'WEB_BUSY' })
+    expect((await o.store.read(o.id))?.stage).toBe('indeterminate')
+    expect(await readFile(o.lock, 'utf8')).toBe(other)
+    expect(o.browser.submitResources).toHaveLength(0)
+  })
+
+  it('preserves a replacement lease for the same run during recovery', async () => {
+    const o = await orphan()
+    const replacement = JSON.stringify({ formatVersion: 1, id: o.id, lease: randomUUID() })
+    const transition = o.store.transition.bind(o.store)
+    o.store.transition = async (...args) => {
+      const record = await transition(...args)
+      await writeFile(o.lock, replacement)
+      return record
+    }
+    await expect(o.controller.abandon(o.id, o.record.revision, true)).rejects.toMatchObject({ code: 'WEB_ADMISSION_CHANGED' })
+    expect(await readFile(o.lock, 'utf8')).toBe(replacement)
+    expect((await o.store.read(o.id))?.stage).toBe('abandoned')
+    expect(o.browser.submitResources).toHaveLength(0)
+  })
+
+  it('refuses retirement while the original local operation is active', async () => {
+    const root = await makeRoot()
+    const store = new WebRunStore(root)
+    const browser = new FakeBrowser()
+    const pending = deferred<WebRunResource>()
+    browser.createResult = pending.promise
+    const controller = new WebController(store, browser, options())
+    const id = randomUUID()
+    const run = controller.start(id, request())
+    await waitUntil(() => browser.createIds.length === 1)
+    await expect(controller.abandon(id, 0, true)).rejects.toMatchObject({ code: 'WEB_RUN_ACTIVE' })
+    pending.resolve(browser.resource)
+    browser.fallback = answer()
+    expect((await run).stage).toBe('completed')
+    const completed = await store.read(id)
+    await expect(controller.abandon(id, completed!.revision, true)).rejects.toMatchObject({ code: 'WEB_RECOVERY_NOT_ALLOWED' })
   })
 })

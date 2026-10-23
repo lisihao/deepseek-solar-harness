@@ -242,6 +242,18 @@ describe('WebLlmAdapter', () => {
           content: [{ type: 'text', text: 'PLUGIN CATALOG MARKER' }],
         },
         {
+          id: 'graph-memory-snapshot' as never,
+          role: 'user',
+          source: { kind: 'plugin:graph-memory', form: 'snapshot', entries: ['graph-memory-entry-marker'] } as never,
+          content: [{ type: 'text', text: 'GRAPH MEMORY SNAPSHOT MARKER' }],
+        },
+        {
+          id: 'graph-memory-instructions' as never,
+          role: 'user',
+          source: { kind: 'plugin:graph-memory', form: 'instructions', entries: ['graph-memory-instruction-marker'] } as never,
+          content: [{ type: 'text', text: 'GRAPH MEMORY INSTRUCTIONS RETAIN MARKER' }],
+        },
+        {
           id: 'unknown-system' as never,
           role: 'system',
           source: { kind: 'unknown-system-producer', form: 'snapshot', sections: [{ name: 'unknown', text: 'unknown-source-section-marker' }] } as never,
@@ -255,7 +267,7 @@ describe('WebLlmAdapter', () => {
             form: 'instructions',
             entries: [{ id: 'instruction-entry-marker', text: 'unrelated source metadata' }],
           } as never,
-          content: [{ type: 'text', text: 'WORKSPACE INSTRUCTION: retain exact user constraints.' }],
+          content: [{ type: 'text', text: 'DSH MNEMON TOOL INSTRUCTION: filter this native instruction.' }],
         },
         {
           id: 'actual-user' as never,
@@ -325,7 +337,9 @@ describe('WebLlmAdapter', () => {
     expect(serialized.prompt).not.toContain('HINDSIGHT RECALL MARKER')
     expect(serialized.prompt).not.toContain('MNEMON RECALL MARKER')
     expect(serialized.prompt).not.toContain('PLUGIN CATALOG MARKER')
-    expect(serialized.prompt).toContain('WORKSPACE INSTRUCTION: retain exact user constraints.')
+    expect(serialized.prompt).not.toContain('GRAPH MEMORY SNAPSHOT MARKER')
+    expect(serialized.prompt).not.toContain('DSH MNEMON TOOL INSTRUCTION: filter this native instruction.')
+    expect(serialized.prompt).toContain('GRAPH MEMORY INSTRUCTIONS RETAIN MARKER')
     expect(serialized.prompt).toContain('UNKNOWN SYSTEM MESSAGE: retain this exact text.')
     expect(serialized.prompt).toContain('EXACT USER CONSTRAINT: answer in Chinese and preserve numbers.')
     expect(serialized.prompt).toContain('historical-tool')
@@ -336,9 +350,6 @@ describe('WebLlmAdapter', () => {
     expect(serialized.prompt).toContain('TASK RELAY: keep the assigned constraint.')
     expect(serialized.prompt).toContain('FINAL SHORT QUESTION: What is the next step?')
     expect(serialized.prompt).toContain('active-tool')
-    expect(serialized.prompt.indexOf('WORKSPACE INSTRUCTION: retain exact user constraints.')).toBeLessThan(
-      serialized.prompt.indexOf('EXACT USER CONSTRAINT: answer in Chinese and preserve numbers.'),
-    )
     expect(serialized.prompt.indexOf('EXACT USER CONSTRAINT: answer in Chinese and preserve numbers.')).toBeLessThan(
       serialized.prompt.indexOf('historical-tool'),
     )
@@ -361,6 +372,9 @@ describe('WebLlmAdapter', () => {
     expect(serialized.canonical).not.toContain('instruction-entry-marker')
     expect(serialized.canonical).not.toContain('hindsight-recall-entry-marker')
     expect(serialized.canonical).not.toContain('mnemon-recall-entry-marker')
+    expect(serialized.canonical).not.toContain('GRAPH MEMORY SNAPSHOT MARKER')
+    expect(serialized.canonical).not.toContain('DSH MNEMON TOOL INSTRUCTION: filter this native instruction.')
+    expect(serialized.canonical).toContain('GRAPH MEMORY INSTRUCTIONS RETAIN MARKER')
     expect(serialized.canonical).not.toContain('runtime-section-marker')
     expect(serialized.canonical).not.toContain('unknown-source-section-marker')
     expect(serialized.canonical).not.toContain('replay-state-marker')
@@ -410,6 +424,83 @@ describe('WebLlmAdapter', () => {
     expect(serialized.prompt).toContain('EXPLICIT SKILL INSTRUCTIONS: retain this text.')
     expect(serialized.prompt).toContain('USER TASK NOTICE: retain this text.')
     expect(serialized.prompt).toContain('USER QUESTION: retain this text.')
+  })
+
+  it('drops only the exact solar web-request audit notice and keeps decisions, other content, and other sources', async () => {
+    const actualUser = {
+      id: 'audit-question' as never,
+      role: 'user' as const,
+      source: { kind: 'user' },
+      content: [{ type: 'text' as const, text: 'AUDIT IDENTITY QUESTION: retain this user text.' }],
+    }
+    const webRequestAudit = {
+      id: 'web-request-audit' as never,
+      role: 'user' as const,
+      source: { kind: 'solar-web-context', form: 'notice' },
+      content: [{ type: 'text' as const, text: JSON.stringify({ kind: 'web-request', commandId: 'audit-1' }) }],
+    }
+    const insightAnswers = {
+      id: 'insight-answers-audit' as never,
+      role: 'user' as const,
+      source: { kind: 'solar-web-context', form: 'notice' },
+      content: [{ type: 'text' as const, text: JSON.stringify({ kind: 'insight-answers', answers: { choice: 'retain' } }) }],
+    }
+    const planDecision = {
+      id: 'plan-decision-audit' as never,
+      role: 'user' as const,
+      source: { kind: 'solar-web-context', form: 'notice' },
+      content: [{ type: 'text' as const, text: JSON.stringify({ kind: 'insight-plan-decision', confirmed: true }) }],
+    }
+    const multipleTextBlocks = {
+      id: 'multiple-text-audit' as never,
+      role: 'user' as const,
+      source: { kind: 'solar-web-context', form: 'notice' },
+      content: [
+        { type: 'text' as const, text: JSON.stringify({ kind: 'web-request', commandId: 'audit-2' }) },
+        { type: 'text' as const, text: 'EXPLICIT SECOND TEXT BLOCK' },
+      ],
+    }
+    const malformedJson = {
+      id: 'malformed-audit' as never,
+      role: 'user' as const,
+      source: { kind: 'solar-web-context', form: 'notice' },
+      content: [{ type: 'text' as const, text: '{"kind":"web-request"' }],
+    }
+    const otherSource = {
+      id: 'other-source-audit' as never,
+      role: 'user' as const,
+      source: { kind: 'task', form: 'notice' },
+      content: [{ type: 'text' as const, text: JSON.stringify({ kind: 'web-request', commandId: 'other-1' }) }],
+    }
+    const base = serializeConversationRequest(options({ messages: [actualUser] as GenerateOptions['messages'] }))
+    const withAudit = serializeConversationRequest(options({
+      messages: [actualUser, webRequestAudit, insightAnswers, planDecision, multipleTextBlocks, malformedJson, otherSource] as GenerateOptions['messages'],
+    }))
+    const withOnlyWebRequestAudit = serializeConversationRequest(options({
+      messages: [actualUser, webRequestAudit] as GenerateOptions['messages'],
+    }))
+
+    expect(withOnlyWebRequestAudit.id).toBe(base.id)
+    expect(withOnlyWebRequestAudit.canonical).toBe(base.canonical)
+    expect(withOnlyWebRequestAudit.prompt).toBe(base.prompt)
+    expect(withAudit.prompt).not.toContain('audit-1')
+    expect(withAudit.prompt).toContain('insight-answers')
+    expect(withAudit.prompt).toContain('insight-plan-decision')
+    expect(withAudit.prompt).toContain('EXPLICIT SECOND TEXT BLOCK')
+    expect(withAudit.prompt).toContain('{"kind":"web-request"')
+    expect(withAudit.prompt).toContain('other-1')
+    expect(withAudit.canonical).not.toContain('audit-1')
+    expect(withAudit.canonical).toContain('insight-answers')
+    expect(withAudit.canonical).toContain('insight-plan-decision')
+    expect(withAudit.canonical).toContain('other-1')
+
+    const fake = fakeController()
+    const adapter = new WebLlmAdapter(fake)
+    await collect(adapter.stream(options({ messages: [actualUser] as GenerateOptions['messages'] })))
+    await collect(adapter.stream(options({ messages: [actualUser, webRequestAudit] as GenerateOptions['messages'] })))
+    expect(fake.start).toHaveBeenCalledOnce()
+    expect(fake.observe).toHaveBeenCalledOnce()
+    expect(fake.start.mock.calls[0]?.[0]).toBe(fake.observe.mock.calls[0]?.[0])
   })
 
   it('rejects images and files before controller admission', async () => {
