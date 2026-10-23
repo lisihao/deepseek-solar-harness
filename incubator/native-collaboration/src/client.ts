@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type CSSProperties,
   type ReactElement,
 } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
@@ -14,7 +13,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { Executor, GraphSnapshot, NodeSnapshot } from '@lisihao/dsh-solar-native-resident/contracts'
+import type { Executor, GraphSnapshot } from '@lisihao/dsh-solar-native-resident/contracts'
 import {
   availableGraphActionsForSnapshot,
   canStartGraphControl,
@@ -24,8 +23,9 @@ import {
   isSettledNativeCheck,
   mergeGraphSnapshots,
   nativeCheckGraphId,
-  nativeCheckVerdict,
-  nodeStatusLabel,
+  activeGraphs,
+  collaborationAvailability,
+  executorReadiness,
   upsertGraphSnapshot,
   type GraphControlAction,
 } from './client-helpers.js'
@@ -72,7 +72,8 @@ interface RemoteAccessSnapshot {
   readonly error: string | undefined
 }
 
-class RemoteAccessStore {
+/** Remote handles shared by the client views; exported for the browser fixture. */
+export class RemoteAccessStore {
   private snapshot: RemoteAccessSnapshot = { api: undefined, error: undefined }
   private readonly listeners = new Set<() => void>()
 
@@ -115,63 +116,6 @@ interface Notice {
   readonly message: string
 }
 
-const panelStyle: CSSProperties = {
-  display: 'grid',
-  gap: 16,
-  minWidth: 0,
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: 16,
-  color: 'var(--dsw-alias-label-primary)',
-  background: 'var(--dsw-alias-bg-base)',
-}
-
-const sectionStyle: CSSProperties = {
-  display: 'grid',
-  gap: 10,
-  minWidth: 0,
-  padding: 14,
-  border: '1px solid var(--dsw-alias-settings-card-stroke)',
-  borderRadius: 10,
-  background: 'var(--dsw-alias-settings-card-fill)',
-}
-
-const actionRowStyle: CSSProperties = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: 8,
-  alignItems: 'center',
-}
-
-const buttonStyle: CSSProperties = {
-  minHeight: 32,
-  maxWidth: '100%',
-  padding: '6px 10px',
-  border: '1px solid var(--dsw-alias-settings-card-stroke)',
-  borderRadius: 6,
-  background: 'var(--dsw-alias-bg-module-platform)',
-  color: 'inherit',
-  cursor: 'pointer',
-  overflowWrap: 'anywhere',
-}
-
-const mutedStyle: CSSProperties = {
-  margin: 0,
-  color: 'var(--dsw-alias-label-secondary)',
-  overflowWrap: 'anywhere',
-}
-
-const preStyle: CSSProperties = {
-  margin: 0,
-  maxHeight: '18rem',
-  overflow: 'auto',
-  whiteSpace: 'pre-wrap',
-  overflowWrap: 'anywhere',
-  padding: 10,
-  borderRadius: 6,
-  background: 'var(--dsw-alias-bg-module-platform)',
-}
-
 function useRemoteAccess(store: RemoteAccessStore): RemoteAccessSnapshot {
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
 }
@@ -211,13 +155,6 @@ function timeLabel(value: string | undefined): string | undefined {
   return date.toLocaleString('zh-CN')
 }
 
-function toolLabel(name: string, index: number): string {
-  if (name === 'solar_resident') return 'Resident 调度器'
-  if (name === 'solar_delegate') return '单次原生委派'
-  if (name === 'solar_coordinate') return '协同任务图'
-  return `扩展工具 ${index + 1}`
-}
-
 function actionLabel(action: GraphControlAction): string {
   if (action === 'pause') return '暂停后续调度'
   if (action === 'resume') return '继续调度'
@@ -230,100 +167,7 @@ function testLabel(executor: Executor): string {
     : 'Claude Code 原生连接测试'
 }
 
-function waitReasonLabel(reason: string): string {
-  const labels: Readonly<Record<string, string>> = {
-    failed: '执行失败', cancelled: '已取消',
-    'cancellation-requested': '正在请求中断，尚未确认停止',
-    'shutdown-cancellation-requested': '服务退出时已请求中断，尚未确认停止',
-    'owner-retry': '所有者已明确允许再次尝试',
-    'owner-failed': '所有者已将未确认结果裁决为失败',
-    'owner-resolution-required': '执行结果未确认，需要所有者处理',
-    'recovery-ready': '恢复后等待调度',
-    BRIDGE_UNAVAILABLE: 'DSH 工具桥暂不可用',
-    'session-busy': '原生会话正在执行其他任务',
-    'session-fenced': '原生会话有未确认结果，暂不能继续',
-    'scope-conflict': '相同文件范围正在被其他任务使用',
-    'scope-conflict-indeterminate': '相同文件范围被未确认任务占用',
-    'failed-dependency': '前置任务失败，当前节点不会执行',
-    'admission-conflict': '执行身份冲突，需要检查任务记录',
-    'retry-delay': '正在等待已配置的再次尝试时间',
-  }
-  return labels[reason] ?? '执行条件尚未满足，详细原因请查看任务记录。'
-}
-
-function GraphNode({ node, index }: { readonly node: NodeSnapshot; readonly index: number }): ReactElement {
-  return createElement('details', { style: { minWidth: 0, padding: '8px 0' } }, [
-    createElement('summary', { key: 'summary', style: { cursor: 'pointer', overflowWrap: 'anywhere' } }, `节点 ${index + 1} · ${nodeStatusLabel(node.status)}`),
-    node.waitReason === undefined
-      ? null
-      : createElement('p', { key: 'wait', style: mutedStyle }, `任务说明：${waitReasonLabel(node.waitReason)}`),
-    node.output === undefined
-      ? null
-      : createElement('div', { key: 'output', style: { display: 'grid', gap: 6, marginTop: 8 } }, [
-        createElement('strong', { key: 'label' }, '输出'),
-        createElement('pre', { key: 'value', style: preStyle }, node.output),
-      ]),
-    node.error === undefined
-      ? null
-      : createElement('div', { key: 'error', role: 'alert', style: { display: 'grid', gap: 6, marginTop: 8, color: 'var(--dsw-alias-state-error-primary)' } }, [
-        createElement('strong', { key: 'label' }, '错误详情'),
-        createElement('pre', { key: 'value', style: preStyle }, node.error.message),
-      ]),
-  ])
-}
-
-interface GraphCardProps {
-  readonly snapshot: GraphSnapshot
-  readonly pendingGraphIds: ReadonlySet<string>
-  readonly inspectionRequiredGraphIds: ReadonlySet<string>
-  readonly onControl: (snapshot: GraphSnapshot, action: GraphControlAction) => Promise<void>
-}
-
-function GraphCard({ snapshot, pendingGraphIds, inspectionRequiredGraphIds, onControl }: GraphCardProps): ReactElement {
-  const actions = availableGraphActionsForSnapshot(snapshot)
-  const blockedForInspection = inspectionRequiredGraphIds.has(snapshot.graph.id)
-  const busy = pendingGraphIds.has(snapshot.graph.id)
-  const verdict = nativeCheckVerdict(snapshot)
-  return createElement('article', { style: sectionStyle }, [
-    createElement('div', { key: 'header', style: { display: 'grid', gap: 4, minWidth: 0 } }, [
-      createElement('strong', { key: 'label', style: { overflowWrap: 'anywhere' } }, graphLabel(snapshot)),
-      createElement('span', { key: 'status', style: mutedStyle }, graphStatusLabel(snapshot.status)),
-    ]),
-    blockedForInspection
-      ? createElement('p', { key: 'inspection', style: mutedStyle }, '上一次控制请求的结果尚未确认。请先在下方检查该任务状态；界面不会自动重试。')
-      : null,
-    verdict === undefined
-      ? null
-      : createElement('p', {
-        key: 'verdict',
-        style: {
-          ...mutedStyle,
-          color: verdict.kind === 'passed'
-            ? 'var(--dsw-alias-state-success-primary)'
-            : verdict.kind === 'failed' || verdict.kind === 'unconfirmed'
-              ? 'var(--dsw-alias-state-error-primary)'
-              : mutedStyle.color,
-        },
-      }, `连接测试：${verdict.label}`),
-    actions.length === 0
-      ? null
-      : createElement('div', { key: 'actions', style: actionRowStyle }, actions.map(action => createElement('button', {
-        key: action,
-        type: 'button',
-        disabled: busy || blockedForInspection || !canStartGraphControl(snapshot, action, pendingGraphIds, inspectionRequiredGraphIds),
-        onClick: () => { void onControl(snapshot, action) },
-        style: buttonStyle,
-      }, actionLabel(action)))),
-    snapshot.nodes.length === 0
-      ? createElement('p', { key: 'empty', style: mutedStyle }, '任务图尚未返回节点详情。')
-      : createElement('div', { key: 'nodes', style: { display: 'grid', gap: 4, minWidth: 0 } }, [
-        createElement('strong', { key: 'title' }, '节点详情'),
-        ...snapshot.nodes.map((node, index) => createElement(GraphNode, { key: `${snapshot.graph.id}:${index}`, node, index })),
-      ]),
-  ])
-}
-
-function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: RemoteAccessStore }): ReactElement {
+export function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: RemoteAccessStore }): ReactElement {
   const remote = useRemoteAccess(remoteStore)
   const [status, setStatus] = useState<NativeUiStatus | undefined>()
   const [graphs, setGraphs] = useState<readonly GraphSnapshot[]>([])
@@ -526,101 +370,144 @@ function NativeCollaborationPanel({ remoteStore }: { readonly remoteStore: Remot
 
   const checkedAt = timeLabel(status?.checkedAt)
   const resident = status?.resident
-  const codexCheckAvailable = canStartNativeCheck('codex', graphs, pendingTests, inspectionTargets)
-  const claudeCodeCheckAvailable = canStartNativeCheck('claude-code', graphs, pendingTests, inspectionTargets)
-  return createElement('main', { style: panelStyle }, [
-    createElement('header', { key: 'header', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
-      createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.25rem' } }, '智能协同'),
-      createElement('p', { key: 'summary', style: mutedStyle }, '这里显示本机能力注册和 Resident 任务图。已注册不等于已登录或真实执行通过。'),
-    ]),
+  const availability = status === undefined ? undefined : collaborationAvailability(status)
+  const executors = status === undefined ? undefined : executorReadiness(graphs, shortTime)
+  const running = activeGraphs(graphs)
+  const testAvailable = (executor: Executor): boolean => remote.api !== undefined
+    && resident?.available === true
+    && canStartNativeCheck(executor, graphs, pendingTests, inspectionTargets)
+  const dot = (tone: 'ok' | 'error' | 'muted' | 'busy') => createElement('span', { key: 'dot', className: `solar-collab-settings__dot solar-collab-settings__dot--${tone}`, 'aria-hidden': true })
+  return createElement('main', { className: 'solar-collab-settings' }, [
+    createElement('style', { key: 'style' }, settingsCss),
+    createElement('h2', { key: 'title', className: 'solar-collab-settings__heading' }, '智能协同'),
+    createElement('p', { key: 'intro', className: 'solar-collab-settings__intro' }, '让主模型把复杂任务拆给本机的 Codex、Claude Code 去做。在对话输入框左侧打开「智能协同」。'),
     remote.error === undefined
       ? null
-      : createElement('p', { key: 'mount-error', role: 'alert', style: { ...sectionStyle, color: 'var(--dsw-alias-state-error-primary)' } }, `无法连接智能协同控制通道：${remote.error}`),
+      : createElement('p', { key: 'mount-error', role: 'alert', className: 'solar-collab-settings__alert' }, `无法连接智能协同服务：${remote.error}`),
     notice === undefined
       ? null
-      : createElement('p', {
-        key: 'notice',
-        role: notice.tone === 'error' ? 'alert' : 'status',
-        style: { ...sectionStyle, color: notice.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'inherit' },
-      }, notice.message),
-    createElement('section', { key: 'registration', style: sectionStyle }, [
-      createElement('div', { key: 'heading', style: { display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap' } }, [
-        createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '已注册的本机能力'),
+      : createElement('p', { key: 'notice', role: notice.tone === 'error' ? 'alert' : 'status', className: notice.tone === 'error' ? 'solar-collab-settings__alert' : 'solar-collab-settings__note' }, notice.message),
+    createElement('section', { key: 'status', className: 'solar-collab-settings__card', 'aria-label': '智能协同状态' }, [
+      createElement('div', { key: 'overall', className: 'solar-collab-settings__row' }, [
+        dot(availability === undefined ? 'muted' : availability.usable ? 'ok' : 'error'),
+        createElement('div', { key: 'main', className: 'solar-collab-settings__main' }, [
+          createElement('span', { key: 'name', className: 'solar-collab-settings__name' }, availability === undefined ? '正在读取状态…' : availability.usable ? '可以使用' : '暂时不能用'),
+          availability?.action === undefined ? null : createElement('span', { key: 'action', className: 'solar-collab-settings__text' }, availability.action),
+        ]),
         createElement('button', {
           key: 'refresh',
           type: 'button',
+          className: 'solar-collab-settings__button',
+          title: checkedAt === undefined ? '重新读取状态，不会调用模型' : `状态读取于 ${checkedAt}；重新读取不会调用模型`,
           disabled: remote.api === undefined || refreshing,
           onClick: () => { void refresh(true) },
-          style: buttonStyle,
-        }, refreshing ? '正在刷新…' : '刷新注册和任务状态'),
+        }, refreshing ? '刷新中…' : '刷新'),
       ]),
-      status === undefined
-        ? createElement('p', { key: 'loading', style: mutedStyle }, remote.api === undefined ? '正在连接本机控制通道…' : '正在读取本机注册状态…')
-        : createElement('div', { key: 'data', style: { display: 'grid', gap: 8, minWidth: 0 } }, [
-          createElement('p', { key: 'resident', style: mutedStyle }, `Resident：${status.resident.available ? '已连接' : '未连接'}。${displayMessage(status.resident.message, '未返回说明。')}`),
-          checkedAt === undefined ? null : createElement('p', { key: 'checked-at', style: mutedStyle }, `上次读取：${checkedAt}`),
-          createElement('div', { key: 'providers', style: { display: 'grid', gap: 4 } }, [
-            createElement('strong', { key: 'title' }, '官方单次委派提供方注册'),
-            ...status.providers.map(provider => createElement('div', { key: provider.name, style: mutedStyle }, `${provider.label}：${provider.available ? '已注册' : '未注册'}`)),
-          ]),
-          createElement('div', { key: 'tools', style: { display: 'grid', gap: 4 } }, [
-            createElement('strong', { key: 'title' }, '工具注册'),
-            ...status.tools.map((tool, index) => createElement('div', { key: tool.name, style: mutedStyle }, `${toolLabel(tool.name, index)}：${tool.available ? '已注册' : '未注册'}`)),
+      ...(executors ?? []).map(item => createElement('div', { key: item.executor, className: 'solar-collab-settings__row' }, [
+        dot(item.state === 'ready' ? 'ok' : item.state === 'failed' ? 'error' : item.state === 'testing' ? 'busy' : 'muted'),
+        createElement('div', { key: 'main', className: 'solar-collab-settings__main' }, [
+          createElement('span', { key: 'name', className: 'solar-collab-settings__name' }, item.title),
+          createElement('span', { key: 'text', className: 'solar-collab-settings__text' }, item.text),
+          item.action === undefined ? null : createElement('span', { key: 'action', className: 'solar-collab-settings__hint' }, item.action),
+          item.detail === undefined ? null : createElement('details', { key: 'detail', className: 'solar-collab-settings__detail' }, [
+            createElement('summary', { key: 'summary' }, '原始错误'),
+            createElement('code', { key: 'code' }, item.detail),
           ]),
         ]),
-    ]),
-    createElement('section', { key: 'tests', style: sectionStyle }, [
-      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '原生执行连接测试'),
-      createElement('p', { key: 'copy', style: mutedStyle }, '以下操作只会在你点击后提交一项测试，并使用相应的订阅额度。测试请求原生执行器不使用工具、不修改文件，也不接入 DSH 工具桥；运行时自身记录不在此承诺范围内。加载页面和刷新状态不会调用模型。'),
-      createElement('div', { key: 'buttons', style: actionRowStyle }, [
         createElement('button', {
-          key: 'codex',
+          key: 'test',
           type: 'button',
-          disabled: remote.api === undefined || resident?.available !== true || !codexCheckAvailable,
-          onClick: () => { void runTest('codex') },
-          style: buttonStyle,
-        }, pendingTests.has('codex') ? 'Codex 测试正在提交…' : '测试 Codex（使用订阅额度）'),
-        createElement('button', {
-          key: 'claude',
-          type: 'button',
-          disabled: remote.api === undefined || resident?.available !== true || !claudeCodeCheckAvailable,
-          onClick: () => { void runTest('claude-code') },
-          style: buttonStyle,
-        }, pendingTests.has('claude-code') ? 'Claude Code 测试正在提交…' : '测试 Claude Code（使用订阅额度）'),
-      ]),
+          className: 'solar-collab-settings__button',
+          title: `向 ${item.title} 发一条只回复固定标记的测试，会消耗少量订阅额度`,
+          disabled: !testAvailable(item.executor),
+          onClick: () => { void runTest(item.executor) },
+        }, pendingTests.has(item.executor) ? '测试中…' : item.state === 'untested' ? '测试' : '重新测试'),
+      ])),
     ]),
+    createElement('p', { key: 'foot', className: 'solar-collab-settings__foot' }, '「测试」会让对应工具回复一个固定标记，消耗少量订阅额度；打开本页和刷新不会调用模型。'),
     inspectionTargets.length === 0
       ? null
-      : createElement('section', { key: 'inspection', style: sectionStyle }, [
-        createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, '待确认的任务状态'),
-        createElement('p', { key: 'copy', style: mutedStyle }, '这些请求没有得到可用回执。请先读取状态；界面不会自动重试提交或控制操作。'),
-        ...inspectionTargets.map(target => createElement('div', { key: target.graphId, style: { display: 'grid', gap: 6, minWidth: 0 } }, [
-          createElement('strong', { key: 'label', style: { overflowWrap: 'anywhere' } }, target.label),
-          createElement('p', { key: 'reason', style: mutedStyle }, displayMessage(target.reason, '上一次请求的结果尚未确认。')),
-          createElement('div', { key: 'actions', style: actionRowStyle }, [
-            createElement('button', {
-              key: 'inspect',
-              type: 'button',
-              disabled: remote.api === undefined || pendingInspectionIds.has(target.graphId),
-              onClick: () => { void inspectGraph(target) },
-              style: buttonStyle,
-            }, pendingInspectionIds.has(target.graphId) ? '正在检查状态…' : '检查该任务状态'),
+      : createElement('section', { key: 'inspection', className: 'solar-collab-settings__card solar-collab-settings__block' }, [
+        createElement('h3', { key: 'title', className: 'solar-collab-settings__subheading' }, '有请求没有得到回执'),
+        createElement('p', { key: 'copy', className: 'solar-collab-settings__text' }, '请先查看它的状态再决定下一步；界面不会自动重试。'),
+        ...inspectionTargets.map(target => createElement('div', { key: target.graphId, className: 'solar-collab-settings__row' }, [
+          dot('error'),
+          createElement('div', { key: 'main', className: 'solar-collab-settings__main' }, [
+            createElement('span', { key: 'label', className: 'solar-collab-settings__name' }, target.label),
+            createElement('span', { key: 'reason', className: 'solar-collab-settings__text' }, displayMessage(target.reason, '上一次请求的结果尚未确认。')),
           ]),
+          createElement('button', {
+            key: 'inspect',
+            type: 'button',
+            className: 'solar-collab-settings__button',
+            disabled: remote.api === undefined || pendingInspectionIds.has(target.graphId),
+            onClick: () => { void inspectGraph(target) },
+          }, pendingInspectionIds.has(target.graphId) ? '查看中…' : '查看状态'),
         ])),
       ]),
-    createElement('section', { key: 'graphs', style: { display: 'grid', gap: 10, minWidth: 0 } }, [
-      createElement('h2', { key: 'title', style: { margin: 0, fontSize: '1rem' } }, 'Resident 任务图'),
-      graphs.length === 0
-        ? createElement('p', { key: 'empty', style: mutedStyle }, '尚未观察到本机任务图。')
-        : createElement('div', { key: 'list', style: { display: 'grid', gap: 10, minWidth: 0 } }, graphs.map(snapshot => createElement(GraphCard, {
-          key: snapshot.graph.id,
-          snapshot,
-          pendingGraphIds,
-          inspectionRequiredGraphIds,
-          onControl: controlGraph,
-        }))),
-    ]),
+    running.length === 0
+      ? null
+      : createElement('section', { key: 'running', className: 'solar-collab-settings__card solar-collab-settings__block' }, [
+        createElement('h3', { key: 'title', className: 'solar-collab-settings__subheading' }, '正在运行的协同任务'),
+        ...running.map(snapshot => createElement('div', { key: snapshot.graph.id, className: 'solar-collab-settings__row' }, [
+          dot('busy'),
+          createElement('div', { key: 'main', className: 'solar-collab-settings__main' }, [
+            createElement('span', { key: 'name', className: 'solar-collab-settings__name' }, runningTitle(snapshot)),
+            createElement('span', { key: 'text', className: 'solar-collab-settings__text' }, `${shortTime(snapshot.createdAt)} 开始 · ${graphStatusLabel(snapshot.status)}`),
+          ]),
+          ...availableGraphActionsForSnapshot(snapshot).map(action => createElement('button', {
+            key: action,
+            type: 'button',
+            className: 'solar-collab-settings__button',
+            disabled: pendingGraphIds.has(snapshot.graph.id)
+              || inspectionRequiredGraphIds.has(snapshot.graph.id)
+              || !canStartGraphControl(snapshot, action, pendingGraphIds, inspectionRequiredGraphIds),
+            onClick: () => { void controlGraph(snapshot, action) },
+          }, actionLabel(action))),
+        ])),
+      ]),
   ])
+}
+
+const settingsCss = `
+.solar-collab-settings { display: flex; flex-direction: column; gap: 12px; max-width: 760px; min-width: 0; color: var(--dsw-alias-label-primary); }
+.solar-collab-settings__heading { margin: 0; font-size: 18px; font-weight: 600; }
+.solar-collab-settings__subheading { margin: 0; font-size: 14px; font-weight: 600; }
+.solar-collab-settings__intro, .solar-collab-settings__foot { margin: 0; font-size: 13px; color: var(--dsw-alias-label-tertiary); }
+.solar-collab-settings__foot { font-size: 12px; }
+.solar-collab-settings__card { border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; overflow: hidden; }
+.solar-collab-settings__block { display: grid; gap: 8px; }
+.solar-collab-settings__block.solar-collab-settings__card { padding: 12px 0 0; }
+.solar-collab-settings__block.solar-collab-settings__card > h3, .solar-collab-settings__block.solar-collab-settings__card > p { padding: 0 14px; }
+.solar-collab-settings__row { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; min-width: 0; }
+.solar-collab-settings__row + .solar-collab-settings__row { border-top: 1px solid var(--dsw-alias-border-l2); }
+.solar-collab-settings__dot { flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--dsw-alias-label-tertiary); }
+.solar-collab-settings__dot--ok { background: var(--dsw-alias-state-success-primary, #2ea043); }
+.solar-collab-settings__dot--error { background: var(--dsw-alias-state-error-primary, #d93026); }
+.solar-collab-settings__dot--busy { background: var(--dsw-alias-brand-primary, #4d6bfe); }
+.solar-collab-settings__main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.solar-collab-settings__name { font-size: 14px; font-weight: 500; }
+.solar-collab-settings__text { margin: 0; font-size: 13px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.solar-collab-settings__hint { font-size: 12px; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; }
+.solar-collab-settings__detail { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.solar-collab-settings__detail summary { cursor: pointer; width: fit-content; }
+.solar-collab-settings__detail code { display: block; margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--dsw-font-mono, ui-monospace, monospace); }
+.solar-collab-settings__button { flex: none; height: 28px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.solar-collab-settings__button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.solar-collab-settings__button:disabled { cursor: default; opacity: .5; }
+.solar-collab-settings__alert { margin: 0; font-size: 13px; color: var(--dsw-alias-state-error-primary); }
+.solar-collab-settings__note { margin: 0; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+`
+
+/** A coordinated graph carries the generic tool label; show it as a plain task title. */
+function runningTitle(snapshot: GraphSnapshot): string {
+  const label = snapshot.graph.label.trim()
+  return label.length === 0 || label === 'Solar coordinated collaboration' ? '协同任务' : label
+}
+
+function shortTime(value: number): string {
+  const date = new Date(value)
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 /** Mount the owner-only Remote namespace once, then contribute the same view to both official slots. */
@@ -660,11 +547,11 @@ export function apply(ctx: Context): void {
     const remote = useRemoteAccess(remoteStore)
     return createElement(WorkflowStudioPanel, { sessionId: String(props.sessionId), api: remote.studio, error: remote.error })
   }
-  const ModeView = (props: PropsRuntime<'conversation.session.header.actions'>): ReactElement => {
+  const ModeView = (props: PropsRuntime<'conversation.input.left'>): ReactElement => {
     const remote = useRemoteAccess(remoteStore)
     return createElement(SessionModeControl, { sessionId: String(props.sessionId), api: remote.studio, error: remote.error })
   }
   ctx.slots.inject('conversation.view', () => ctx.slots.register({ name: 'conversation.view', id: 'solar-native-collaboration', order: 45, label: () => '执行流程' }, FlowView))
-  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({ name: 'conversation.session.header.actions', id: 'solar-session-collaboration-mode', order: 45 }, ModeView))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'solar-native-collaboration', order: 45, label: () => '协同诊断' }, Diagnostics))
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({ name: 'conversation.input.left', id: 'solar-session-collaboration-mode', order: 45, label: () => '智能协同' }, ModeView))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'solar-native-collaboration', order: 45, label: () => '智能协同' }, Diagnostics))
 }

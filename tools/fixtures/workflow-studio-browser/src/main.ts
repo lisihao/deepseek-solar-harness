@@ -1,5 +1,6 @@
 import { createElement, useSyncExternalStore, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
+import { SettingsFixture } from './settings.js'
 import { SessionModeControl, WorkflowStudioPanel } from '../../../../incubator/native-collaboration/src/studio-client.js'
 import { FakeStudioUiApi, SESSION_ID, type WorkflowStudioFixtureCounters } from './fake-api.js'
 
@@ -19,6 +20,9 @@ declare global {
 
 const api = new FakeStudioUiApi({
   emptyOverview: new URLSearchParams(window.location.search).get('empty') === '1',
+  ...new URLSearchParams(window.location.search).get('smartBlocked') === '1'
+    ? { smartBlockedMessage: 'Resident 调度器未运行，不能启用智能协同。' }
+    : {},
 })
 
 function FixtureCounters(): ReactElement {
@@ -50,13 +54,31 @@ function FlowStyleContainmentSentinel(): ReactElement {
   ])
 }
 
+/** Approximates the composer tool row so the mode toggle is inspected beside its real neighbours. */
+function ComposerToolRow(): ReactElement {
+  const neighbour = { color: '#aeb9c9', fontSize: 13, padding: '0 8px', height: 28, display: 'inline-flex', alignItems: 'center' }
+  return createElement('div', {
+    'data-fixture-composer': 'true',
+    style: { margin: '48px 16px 8px', padding: '10px 12px', border: '1px solid #2c3442', borderRadius: 16, background: '#1c222c', display: 'grid', gap: 10 },
+  }, [
+    createElement('div', { key: 'editor', style: { color: '#6f7b8c', fontSize: 14 } }, '输入消息…'),
+    createElement('div', { key: 'tools', style: { display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 } }, [
+      createElement('span', { key: 'plus', style: neighbour }, '+'),
+      createElement('span', { key: 'permission', style: neighbour }, '完全权限 ▾'),
+      createElement(SessionModeControl, { key: 'mode', sessionId: SESSION_ID, api }),
+      createElement('span', { key: 'spacer', style: { flex: 1 } }),
+      createElement('span', { key: 'model', style: neighbour }, 'GPT-6-Sol ▾'),
+    ]),
+  ])
+}
+
 function FixtureApp(): ReactElement {
   return createElement('div', { style: { minWidth: 0 } }, [
     createElement('header', { key: 'header', style: { padding: '16px 16px 4px', color: '#f1f5fb' } }, [
       createElement('h1', { key: 'title', style: { margin: 0, fontSize: '1.2rem' } }, 'Workflow Studio local browser fixture'),
       createElement('p', { key: 'summary', style: { margin: '6px 0 0', color: '#aeb9c9' } }, '仅使用内存假 API；不会访问网络、安装应用或调用真实模型。'),
-      createElement(SessionModeControl, { key: 'mode', sessionId: SESSION_ID, api }),
     ]),
+    createElement(ComposerToolRow, { key: 'composer' }),
     createElement(FixtureCounters, { key: 'counters' }),
     createElement(FlowStyleContainmentSentinel, { key: 'flow-sentinel' }),
     createElement(WorkflowStudioPanel, { key: 'panel', sessionId: SESSION_ID, api }),
@@ -76,4 +98,4 @@ window.__dshWorkflowStudioFixture = {
     return { outsideFlowStrokeDefault: sentinel === null ? undefined : getComputedStyle(sentinel).getPropertyValue('--xy-edge-stroke-default') || undefined }
   },
 }
-createRoot(root).render(createElement(FixtureApp))
+createRoot(root).render(createElement(new URLSearchParams(window.location.search).get('view') === 'settings' ? SettingsFixture : FixtureApp))

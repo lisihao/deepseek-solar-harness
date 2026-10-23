@@ -1280,10 +1280,18 @@ export function WorkflowStudioPanel({ sessionId, api, error }: WorkflowStudioPan
   ])
 }
 
-/** A small session-scoped mode control for a header or composer slot. It never starts an execution. */
+/** Hover text of the composer toggle; it states what the mode changes and that selecting it runs nothing. */
+export const SESSION_MODE_TOGGLE_TITLE = '智能协同：开启后，主模型会把适合拆分的复杂任务交给 Codex 或 Claude Code 协同执行。切换本身不会调用模型。'
+
+/**
+ * The session's collaboration mode as one composer toggle. Pressed means
+ * `smart`. A failed read or selection is shown in a popover above the toggle
+ * until the next click; a successful selection shows nothing besides the
+ * pressed state. It never starts an execution.
+ */
 export function SessionModeControl({ sessionId, api, error }: WorkflowStudioPanelProps): ReactElement {
   const [overview, setOverview] = useState<StudioOverview | undefined>()
-  const [notice, setNotice] = useState<string | undefined>()
+  const [failure, setFailure] = useState<string | undefined>()
   const [pending, setPending] = useState(false)
   const activeSessionRef = useRef(sessionId)
   const requestRef = useRef(0)
@@ -1293,43 +1301,60 @@ export function SessionModeControl({ sessionId, api, error }: WorkflowStudioPane
     const requestedSessionId = sessionId
     const requestId = ++requestRef.current
     setOverview(undefined)
-    setNotice(undefined)
+    setFailure(undefined)
     if (api === undefined) return
     void api.overview({ sessionId: requestedSessionId }).then(next => {
       if (requestId !== requestRef.current || !isCurrentStudioOverview(requestedSessionId, activeSessionRef.current, next)) return
       setOverview(next)
     }).catch(caught => {
       if (requestId === requestRef.current && activeSessionRef.current === requestedSessionId) {
-        setNotice(`无法读取协同模式：${messageFor(caught, '请求未完成。')}`)
+        setFailure(`无法读取智能协同状态：${messageFor(caught, '请求未完成。')}`)
       }
     })
   }, [api, sessionId])
 
-  const choose = useCallback(async (mode: 'ordinary' | 'smart'): Promise<void> => {
-    if (api === undefined || overview === undefined || pending || overview.mode.mode === mode) return
+  const toggle = useCallback(async (): Promise<void> => {
+    setFailure(undefined)
+    if (api === undefined || overview === undefined || pending) return
+    const mode = overview.mode.mode === 'smart' ? 'ordinary' : 'smart'
     const requestedSessionId = sessionId
     setPending(true)
     try {
       const next = await api.setMode({ sessionId: requestedSessionId, mode, expectedRevision: overview.mode.revision })
       if (activeSessionRef.current !== requestedSessionId || next.sessionId !== requestedSessionId) return
       setOverview(current => current === undefined ? current : { ...current, mode: next })
-      setNotice(mode === 'smart' ? '已选择智能协同；选择模式本身不会执行流程。' : '已选择普通模式；选择模式本身不会执行流程。')
     } catch (caught) {
-      if (activeSessionRef.current === requestedSessionId) setNotice(`无法更新协同模式：${messageFor(caught, '请求未完成。')}`)
+      if (activeSessionRef.current === requestedSessionId) {
+        setFailure(`${mode === 'smart' ? '无法开启' : '无法关闭'}智能协同：${messageFor(caught, '请求未完成。')}`)
+      }
     } finally {
       if (activeSessionRef.current === requestedSessionId) setPending(false)
     }
   }, [api, overview, pending, sessionId])
 
-  const mode = overview?.mode.mode
-  const serviceError = visibleError(error, '协同模式服务暂不可用。')
-  return createElement('div', { className: 'solar-session-mode', 'aria-label': '当前会话协同模式' }, [
+  const smart = overview?.mode.mode === 'smart'
+  const message = visibleError(error, '智能协同服务暂不可用。') ?? failure
+  return createElement('span', { className: 'solar-session-mode' }, [
     createElement(SessionModeStyles, { key: 'styles' }),
-    createElement('span', { key: 'label', className: 'solar-session-mode__label' }, '协同模式'),
-    createElement('button', { key: 'ordinary', type: 'button', disabled: api === undefined || pending || mode === undefined, 'aria-pressed': mode === 'ordinary', onClick: () => { void choose('ordinary') } }, '普通'),
-    createElement('button', { key: 'smart', type: 'button', disabled: api === undefined || pending || mode === undefined, 'aria-pressed': mode === 'smart', onClick: () => { void choose('smart') } }, '智能协同'),
-    serviceError === undefined && notice === undefined
+    createElement('button', {
+      key: 'toggle',
+      type: 'button',
+      className: 'solar-session-mode__toggle',
+      title: SESSION_MODE_TOGGLE_TITLE,
+      disabled: api === undefined || pending || overview === undefined,
+      'aria-pressed': smart,
+      onClick: () => { void toggle() },
+    }, [
+      createElement('svg', { key: 'icon', viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round' }, [
+        createElement('circle', { key: 'a', cx: 4, cy: 4, r: 2 }),
+        createElement('circle', { key: 'b', cx: 12, cy: 4, r: 2 }),
+        createElement('circle', { key: 'c', cx: 8, cy: 12, r: 2 }),
+        createElement('path', { key: 'ab', d: 'M6 4h4M5 5.7l2 4.6M11 5.7l-2 4.6' }),
+      ]),
+      createElement('span', { key: 'label' }, '智能协同'),
+    ]),
+    message === undefined
       ? null
-      : createElement('span', { key: 'notice', className: 'solar-session-mode__error', role: serviceError === undefined ? 'status' : 'alert' }, serviceError ?? notice),
+      : createElement('span', { key: 'failure', className: 'solar-session-mode__popover', role: 'alert' }, message),
   ])
 }

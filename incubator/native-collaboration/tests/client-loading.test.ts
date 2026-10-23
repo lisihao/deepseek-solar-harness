@@ -5,7 +5,7 @@ import { expect, test, vi } from 'vitest'
 
 const require = createRequire(import.meta.url)
 
-test('built browser bundle registers an rc.2 module factory and contributes flow, mode, and diagnostics slots', async () => {
+test('built browser bundle registers an rc.2 module factory and contributes the flow view, the composer mode toggle, and the settings section', async () => {
   let contribution: { id: string; factory: (require: (id: string) => unknown) => { name: string; inject: string[]; apply: (ctx: unknown) => void } } | undefined
   const load = vi.fn((value: NonNullable<typeof contribution>) => { contribution = value })
   const source = await readFile(new URL('../lib/client.cjs', import.meta.url), 'utf8')
@@ -31,13 +31,14 @@ test('built browser bundle registers an rc.2 module factory and contributes flow
   })
   await Promise.resolve()
   const slots = register.mock.calls.map(call => call[0] as { name: string; id: string; label?: () => string })
-  expect(slots.map(slot => slot.name)).toEqual(['conversation.view', 'conversation.session.header.actions', 'settings.section'])
+  expect(slots.map(slot => slot.name)).toEqual(['conversation.view', 'conversation.input.left', 'settings.section'])
   expect(slots).toEqual(expect.arrayContaining([
     expect.objectContaining({ id: 'solar-native-collaboration', label: expect.any(Function) }),
     expect.objectContaining({ id: 'solar-session-collaboration-mode' }),
   ]))
   expect(slots.find(slot => slot.id === 'solar-native-collaboration')?.label?.()).toBe('执行流程')
-  expect(slots.find(slot => slot.name === 'settings.section')?.label?.()).toBe('协同诊断')
+  expect(slots.find(slot => slot.name === 'conversation.input.left')?.label?.()).toBe('智能协同')
+  expect(slots.find(slot => slot.name === 'settings.section')?.label?.()).toBe('智能协同')
   expect(mount).toHaveBeenCalledTimes(1)
   cleanup?.()
   await Promise.resolve()
