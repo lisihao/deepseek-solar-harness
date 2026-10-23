@@ -374,10 +374,21 @@ export function installSessionMode(
     const dispose = agent.ctx.on('agent/request', async (_payload, next) => {
       const resolved = await next()
       const state = await controller.read(sessionId)
-      if (state.mode === 'smart' && resolved.provider === CHATGPT_WEB_PROVIDER) {
+      if (state.mode !== 'smart') return resolved
+      if (resolved.provider === CHATGPT_WEB_PROVIDER) {
         throw new SessionModeError(
           'SMART_MODE_WEB_ROUTE_UNSUPPORTED',
           '当前会话仍处于智能协同模式，但 ChatGPT 网页主会话路由不支持 DSH 工具调用。请改为普通模式，或切换到支持 DSH 工具的主模型后重试。',
+        )
+      }
+      // The selection-time check ran against an earlier Agent; a later preset
+      // or plugin change can leave Smart selected without its tools.
+      const tools = toolLookup(agent)
+      const missing = [toolNames.coordinate, toolNames.resident, toolNames.wait].filter(name => tools?.get(name) === undefined)
+      if (missing.length > 0) {
+        throw new SessionModeError(
+          'SMART_MODE_TOOLS_UNAVAILABLE',
+          `当前会话仍处于智能协同模式，但当前 Agent 没有它需要的工具：${missing.join('、')}。请在输入框左侧关闭「智能协同」，或切换到包含这些工具的模式后重试。`,
         )
       }
       return resolved
