@@ -9540,6 +9540,7 @@ __metadata:
     "@deepseek-ai/dsh-sdk-protocol": "file:vendor/dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-session": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session-persistence": "file:vendor/dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz"
+    "@deepseek-ai/dsh-session-persistence-jsonl": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session-projection": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session-projection-cache": "file:vendor/dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-session-query": "npm:0.1.0-rc.6"
