@@ -1,0 +1,3 @@
+- insert:
+    - id: solar-tool-context
+      name: '@lisihao/dsh-solar-tool-context'

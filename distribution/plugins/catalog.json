@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "snapshotCapturedAt": "2026-10-21T09:01:05Z",
+  "snapshotCapturedAt": "2026-10-23T00:00:33Z",
   "packages": [
     {
       "id": "native-resident",
@@ -305,11 +305,11 @@
       "name": "@lisihao/dsh-solar-skill-context",
       "version": "0.1.0-dev.0",
       "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
-      "sourceCommit": "9fb931bb39913463fce79ad2955a160934a368d3",
+      "sourceCommit": "5ea10c7250e79dada031612bffb6b7c91c48196a",
       "artifact": {
-        "file": "skill-context/9fb931b/lisihao-dsh-solar-skill-context-0.1.0-dev.0.tgz",
-        "sha256": "4c75036ce7a910c1d1c3660199ed149e2ba4d578791c030c4b5d9265754992c4",
-        "size": 15196
+        "file": "skill-context/5ea10c7/lisihao-dsh-solar-skill-context-0.1.0-dev.0.tgz",
+        "sha256": "8183880b3c43b44a5850f187f90b7666c94d86bb3a8673330bed470bcb97503c",
+        "size": 16047
       },
       "license": {
         "spdx": "MIT",
@@ -319,20 +319,85 @@
       "validationScope": {
         "source": {
           "status": "passed",
-          "scope": "97-test stable local gate plus affected 10-case AgentLoop suite including Desktop-scoped loader, types/build, independent review and exact follow-up CI 39642142906"
+          "scope": "99 full-gate tests; 22 affected tests; previous step-order regression fails and corrected strict raw Session recovery passes"
         },
         "scratch": {
           "status": "passed",
-          "scope": "packed profile and installed App Host isolated rc.2 AgentLoop with fake adapter; 1477 skills, three retired catalogs, search and official scoped load pass; no real provider/user-session writes"
+          "scope": "published rc.2 keyless built CLI and fake native AgentLoop checks"
         },
         "ui": {
-          "status": "not-run",
-          "scope": "11 installed packed files verified; App Host isolated check passed; manual installed-plugin UI confirmation not run; not real user-session persistence or provider acceptance"
+          "status": "passed",
+          "scope": "official App Host isolated fake-adapter check against all 11 verified installed files; no custom frontend"
         },
         "live": {
           "status": "not-run"
         }
-      }
+      },
+      "historicalArtifacts": [
+        {
+          "sourceCommit": "9fb931bb39913463fce79ad2955a160934a368d3",
+          "file": "skill-context/9fb931b/lisihao-dsh-solar-skill-context-0.1.0-dev.0.tgz",
+          "sha256": "4c75036ce7a910c1d1c3660199ed149e2ba4d578791c030c4b5d9265754992c4",
+          "size": 15196,
+          "origin": "previously-installed-before-step-order-correction",
+          "installableCandidate": false
+        }
+      ]
+    },
+    {
+      "id": "tool-context",
+      "name": "@lisihao/dsh-solar-tool-context",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "b62f5311887add41bd8ea58e71e6b35d3f4b62fd",
+      "artifact": {
+        "file": "tool-context/b62f531/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
+        "sha256": "155964b36f65ef91653c483b62af873c48d1383ab6800caaf7c08f5ba5cc18e8",
+        "size": 26216
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "LICENSE-Solar.txt",
+        "sha256": "d5bc9730436c45925d47805cf04a34a3223c5e1d70858d7e5f29a380b084fbc4",
+        "size": 1064
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "114 tests, types/build; precise JSDoc rewrite and strict schema counterexamples; exact-source CI39890815700 passed"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "two official CLI keyless scratch probes; four isolated fake responses; inner and outer indentation rewrite"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "official installed rc.2 Host: explicit SHA-pinned real-Agent metadata capture (139 business tools), complete installed Purge inner/outer rewrite and four isolated fake responses; 12 production files matched; temporary probe removed; real provider unrun"
+        },
+        "live": {
+          "status": "not-run",
+          "scope": "previous R2 failed twice before provider admission; repaired manual request pending"
+        }
+      },
+      "historicalArtifacts": [
+        {
+          "sourceCommit": "211726f5f32c8a5c88503869081916d3525f96a0",
+          "file": "tool-context/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
+          "sha256": "718490e9b6ddcfd0a7e4f49e1dd5d83c69e714e3a2f1c1a13ca89fa1533c3b3a",
+          "size": 24513,
+          "origin": "previous-candidate-failed-native-composition-acceptance",
+          "installableCandidate": false
+        },
+        {
+          "sourceCommit": "9e207cdcdf30106a1e6cd5e58440b97919270b89",
+          "file": "tool-context/9e207cd/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
+          "sha256": "e5a79b125b7fe44c58f23f197396e6533518fba4177d4381480241f628224ce6",
+          "size": 25560,
+          "origin": "previous-candidate-failed-real-agent-documentation-rewrite",
+          "installableCandidate": false
+        }
+      ]
     }
   ],
   "excludedPackages": []

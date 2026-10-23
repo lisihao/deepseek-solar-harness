@@ -3,13 +3,17 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.31.0",
-  "engines": { "node": "^22.19 || >=24" },
-  "workspaces": ["plugins/*"],
+  "engines": {
+    "node": "^22.19 || >=24"
+  },
+  "workspaces": [
+    "plugins/*"
+  ],
   "scripts": {
     "build": "node tools/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:plugin": "node tools/plugin-test.mjs",
+    "test:plugin": "node tools/plugin-test.mjs && node tools/tool-context-plugin-test.mjs",
     "homepage": "node tools/homepage.mjs",
     "homepage:check": "node tools/homepage.mjs --check && node tools/installed-plugin-guide.mjs --check && python3 tools/check-curated-packages.py && bash tools/tests/curated-installer.test.sh",
     "check": "pnpm build && pnpm typecheck && pnpm test && pnpm test:plugin && pnpm homepage:check"
@@ -31,6 +35,10 @@
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-query": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2"
   }
 }

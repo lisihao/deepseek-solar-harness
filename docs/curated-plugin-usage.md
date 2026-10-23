@@ -2,7 +2,7 @@
 
 This guide is the public, English-language usage reference for the Solar plugin set described by the V4 homepage. Chinese labels below are the labels used by the candidate UI. The guide records the evidence boundary as of 2026-10-22 (Asia/Hong_Kong); a source checkout, a packed artifact, an enabled plugin, and a successful live task are separate facts.
 
-V4 is built for the official DeepSeek Harness `0.2.1-rc.2` and does not rebuild or modify the official app. The Solar market has not been published yet, so there is no Discover index URL to add. The six Solar plugins remain development candidates. Exact preview archives and maintained forks are distributed in `distribution/plugins/`, independently of a market release. Do not present an incubator package as a market release.
+V4 is built for the official DeepSeek Harness `0.2.1-rc.2` and does not rebuild or modify the official app. The Solar market has not been published yet, so there is no Discover index URL to add. The seven Solar plugins remain development candidates. Exact preview archives and maintained forks are distributed in `distribution/plugins/`, independently of a market release. Do not present an incubator package as a market release.
 
 ## Install and restart
 
@@ -33,9 +33,18 @@ The public source history is useful for provenance, but it is not a release chan
 | `@lisihao/dsh-solar-native-collaboration` | `协同模式`, `执行流程`, native handoff/allocation, and Resident coordination | Editing and save/read paths are bounded and can be model-free. Execution and quota-labelled canaries require a deliberate provider action. |
 | `@lisihao/dsh-solar-chatgpt-web` | `ChatGPT 网页算子`, `洞察分析`, Web model discovery, and provider snapshots | Web and Insight remain experimental. A real attempt with the installed `2c338f9` artifact ended in `WEB_SUBMISSION_MISMATCH`; the newer `67cd3aa` distribution candidate passed source/keyless checks and was installed with all 54 packed files verified; its live answer path remains untested. The original TaskSpace was absent from a later task list although the user reported no intervention, so recovery must inspect the original status without resubmitting and the outcome is unknown. No successful live Web/Insight run is claimed. |
 | `@lisihao/dsh-solar-rlm@0.1.0-dev.0` | The exact packed artifact built from source commit `6a47ed6` | Installed self-tests are keyless and local. Real-provider acceptance inside the installed App remains unrun. Separate source/evaluator experiments do not establish a general quality benefit. Later source changes are not assumed to be in this installed artifact. |
-| `@lisihao/dsh-solar-skill-context` | Bounded discovery and canonical retirement of old full catalogs | 11 installed files verified; source/fake-model and isolated App Host checks pass, including the official Desktop-scoped loader. Manual plugin-list confirmation, real user-session disk restart and provider execution are separate/unrun. |
+| `@lisihao/dsh-solar-skill-context` | Bounded discovery and canonical retirement of old full catalogs | Corrected source `5ea10c7` writes replacements after `step/start`; strict raw replay, 99 full-gate tests and installed-Host fake checks pass. All 11 installed files matched. No live provider retry was run. |
+| `@lisihao/dsh-solar-tool-context` | On-demand TypeScript PTC tool discovery and complete declaration loading | Source `211726f`, 104 full-gate tests and installed-Host fake checks pass; all 12 files matched. Native presentation and original dispatch remain. Historical tool results/memory and real-model quality/token measurements are outside this phase. |
 | `billion-context@0.1.202-solar.1` | Installed Solar-maintained fork with the preflight repair | The fork's source and fake/native checks pass at its stated boundary. A real long-session replay and model-quality or token-savings claim are not established. It is a context layer, not a second handoff or scheduler. |
 | Dream Skin local-folder candidate | Source commit `2f6929c`, the exact packed version `10.21.2-folder.2f6929c` | The source snapshot's package metadata still reports `10.21.1`; `10.21.2` is not presented as a published release. User wallpaper folders are read at runtime when selected and are not included in the package. |
+
+## On-demand tool context (phase 1)
+
+Install `tool-context` and relaunch the official App. **Solar 工具按需上下文** has no separate chat panel. Under TypeScript PTC presentation, the initial SDK contains `solar_tool_search` and `solar_tool_load`. Search by relevant keywords or an exact tool name, load the selected complete declarations for the next request, then call the original tool binding. Loading a declaration does not execute that tool or grant permission.
+
+Defaults are eight search results, 240 Unicode description characters, 8192 UTF-8 bytes per JSON page, sixteen loaded descriptions, and 32768 UTF-8 bytes for the selected SDK. Schemas remain complete; an oversized group is rejected with a named error. Description eviction does not disable a tool. Existing Native wire tool declarations are unchanged.
+
+Successful standard PTC receipts recover the selection; registry changes invalidate stale declarations. Original session records remain available. This phase does not reduce historical tool results or memory injections. Published-AgentLoop fake-adapter, strict recovery, packed CLI and installed-Host checks are separate from real-model tool-choice accuracy or provider-token measurements. See [the source guide](../incubator/tool-context/README.md) and [verification contract](tool-context-contract.md).
 
 ## On-demand skill context
 

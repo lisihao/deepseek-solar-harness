@@ -5,8 +5,8 @@
 这里给出本机已安装插件的固定版本快照、可复制的安装指令，以及我们开发或修改的插件验证包。**Solar 的 `0.1.0-dev.0` 包与维护 fork 是预览分发，不是稳定市场 Release。** 同版本的不同构建按完整源码提交和 SHA-256 区分；不要仅凭版本号判断是否相同。
 
 - [精选包与校验目录](distribution/plugins/) · [机器可读包目录](distribution/plugins/catalog.json)
-- [如何使用这八个插件](docs/curated-plugin-usage.md) · [安装、备份和恢复说明](docs/curated-plugin-installation.md)
-- [全部已安装插件快照](docs/installed-plugins-2026-10-22.json) · [旧的 2026-10-19 快照](docs/installed-plugins-2026-10-19.json)
+- [如何使用这些插件](docs/curated-plugin-usage.md) · [安装、备份和恢复说明](docs/curated-plugin-installation.md)
+- [全部已安装插件快照](docs/installed-plugins-2026-10-22-tool-context.json) · [旧的 2026-10-19 快照](docs/installed-plugins-2026-10-19.json)
 
 ## 先选需要的插件
 
@@ -22,6 +22,12 @@
 | 壁纸列表/本地文件夹轮换 | `dream-skin` | Solar 维护 fork；个人图片不随包分发 |
 
 **不要为“装齐”同时启用所有记忆、压缩、循环或浏览器插件。** 按实际需求选用，并分别完成各自要求的账号登录、浏览器或服务端配置。插件安装本身不授予 Agent 执行、文件写入或使用付费额度的任务权限。
+
+## 工具按需上下文（一期预览）
+
+新增的 `@lisihao/dsh-solar-tool-context` 将 TypeScript PTC 的完整工具声明改为按需发现和加载。工具能力、原有权限检查和原始日志保留；历史工具结果与记忆注入不在本期处理。原生工具呈现保持不变。
+
+Agent 先用 `solar_tool_search` 查找当前作用域的工具，再用 `solar_tool_load` 取得下一次请求中的完整参数与输出声明，随后仍调用原来的工具。搜索、加载说明本身不执行业务操作。固定验证包的安装 id 为 `tool-context`（见[包目录](distribution/plugins/catalog.json)）；配置、边界和验证说明见[插件指南](incubator/tool-context/README.md)及[一期契约](docs/tool-context-contract.md)。
 
 ## 安装 Solar 自研和维护包
 
@@ -68,11 +74,11 @@ done
 安装快照中的 LoopX 使用了本机已有的兼容性许可；本仓库不会复制该许可或绕过宿主版本检查。若安装时报告版本不兼容，请停止并核对作者支持范围，不能把本机已安装当作其他环境可直接启用的保证。
 
 <!-- SOLAR-INSTALLED-PLUGINS:START -->
-核对日期：2026-10-22（Asia/Hong_Kong）。profile 配置共 **50 个 bundle**：16 个官方、26 个社区原版、8 个本仓库精选验证包（6 个 Solar 自研、2 个维护 fork）。这是配置和已安装包元数据快照；不表示本轮逐个验证了 GUI 开关或真实功能，也不表示最新版本。
+核对日期：2026-10-22（America/Toronto）。profile 配置共 **53 个 bundle**：16 个官方、28 个社区原版、9 个本仓库精选验证包（7 个 Solar 自研、2 个维护 fork）。这是配置和已安装包元数据快照；不表示本轮逐个验证了 GUI 开关或真实功能，也不表示最新版本。
 
-[机器可读清单](docs/installed-plugins-2026-10-22.json)不包含账号、配置值、会话或本机安装路径。
+[机器可读清单](docs/installed-plugins-2026-10-22-tool-context.json)不包含账号、配置值、会话或本机安装路径。
 
-### 自研与维护包：8 项
+### 自研与维护包：9 项
 
 | 插件 | 快照版本 | 用途 | 安装或启用方式 |
 |---|---|---|---|
@@ -84,10 +90,11 @@ done
 | [`@lisihao/dsh-solar-chatgpt-web`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | ChatGPT 网页算子和洞察分析；实验性 | `bash "$work/install.sh" --ref "$ref" chatgpt-web` |
 | [`@lisihao/dsh-solar-rlm`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 原始 Prime RLM/Continual Harness 适配；实验性 | `bash "$work/install.sh" --ref "$ref" rlm` |
 | [`@lisihao/dsh-solar-skill-context`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 技能按需检索；旧完整目录退出请求、原日志保留 | `bash "$work/install.sh" --ref "$ref" skill-context` |
+| [`@lisihao/dsh-solar-tool-context`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 工具声明按需发现和加载；保留原权限与原始日志 | `bash "$work/install.sh" --ref "$ref" tool-context` |
 
-### 社区原版：26 项
+### 社区原版：28 项
 
-先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。安装成功不等于账号、外部依赖或真实执行已验收。`dsh-purge-community` 会修改官方 App runtime/CLI，与本项目保持官方 App 不变的 D1 约束不一致；该行仅记录已有安装，不构成推荐配置。
+先完成上方的退出与备份步骤，并设置 `DSH_CLI`。以下每一行只安装对应插件；不需要全部执行。已确认的公开来源为作者的 npm 包、固定 Git 提交或版本化 Release，不由本仓库重新打包。两项本地包尚未确认公开来源，因此不提供安装命令。安装成功不等于账号、外部依赖或真实执行已验收。`dsh-purge-community` 会修改官方 App runtime/CLI，与本项目保持官方 App 不变的 D1 约束不一致；该行仅记录已有安装，不构成推荐配置。
 
 | 插件 | 快照版本 | 用途 | 安装或启用方式 |
 |---|---|---|---|
@@ -104,7 +111,6 @@ done
 | [`dsh-deepseek-web-login`](https://github.com/cv-superding/dsh-deepseek-web-login) | `1.0.3` | 非官方 DeepSeek 网页接入；另需登录 | `"$DSH_CLI" plugin --profile desktop add 'dsh-deepseek-web-login@1.0.3'` |
 | [`dsh-codex-subscription`](https://github.com/WSL043/dsh-codex-subscription) | `3.1.1` | 以现有 ChatGPT/Codex 订阅接入主对话 | `"$DSH_CLI" plugin --profile desktop add 'dsh-codex-subscription@3.1.1'` |
 | [`dsh-cost-meter`](https://github.com/Han-1413141/dsh-cost-meter) | `1.9.11` | Token 和费用估算；不是账单 | `"$DSH_CLI" plugin --profile desktop add 'dsh-cost-meter@1.9.11'` |
-| [`dsh-chat-import`](https://github.com/Nwflower/dsh-chat-import) | `0.26.1` | 从其他工具导入会话 | `"$DSH_CLI" plugin --profile desktop add 'dsh-chat-import@0.26.1'` |
 | [`dsh-synapse`](https://github.com/liangmianya/dsh-synapse) | `0.4.2` | 非线性会话工作区 | `"$DSH_CLI" plugin --profile desktop add 'github:liangmianya/dsh-synapse#847b712b14579ca5e5c5fcf414f4559589c44d93'` |
 | [`dsh-agent-persona`](https://github.com/Awoodwhale/dsh-agent-persona) | `0.1.4` | 按工作区或会话配置人设 | `"$DSH_CLI" plugin --profile desktop add 'dsh-agent-persona@0.1.4'` |
 | [`dsh-mnemon`](https://github.com/omdsh-dev/dsh-mnemon) | `0.5.32` | 可组合记忆来源与视图 | `"$DSH_CLI" plugin --profile desktop add 'dsh-mnemon@0.5.32'` |
@@ -117,6 +123,9 @@ done
 | [`dsh-univer-office`](https://github.com/dream-num/dsh-univer-office) | `0.3.7` | Univer 文档预览与协作工作区 | `"$DSH_CLI" plugin --profile desktop add 'dsh-univer-office@0.3.7'` |
 | [`dsh-research-report`](https://github.com/PerryLink/dsh-research-report) | `0.3.29` | 带证据账本和验证信息的研究报告 | `"$DSH_CLI" plugin --profile desktop add 'dsh-research-report@0.3.29'` |
 | [`dsh-industry-research`](https://github.com/PerryLink/dsh-industry-research) | `0.3.23` | 行业/公司研究工具与方法技能 | `"$DSH_CLI" plugin --profile desktop add 'dsh-industry-research@0.3.23'` |
+| [`dsh-grok-subscription`](https://github.com/BaronCyrus/dsh-grok-subscription) | `2.0.9` | 以现有 Grok 订阅接入；另需登录配置 | `"$DSH_CLI" plugin --profile desktop add 'dsh-grok-subscription@2.0.9'` |
+| `dsh-subscription-hub` | `0.1.1` | 本机订阅设置分组；公开安装来源待确认 | 本机本地包；公开来源与可复现安装方式尚未确认，暂不提供命令 |
+| `dsh-purge-rightbar` | `0.1.0` | 本机 Purge 右侧栏入口；公开安装来源待确认 | 本机本地包；公开来源与可复现安装方式尚未确认，暂不提供命令 |
 
 ### 官方内置：16 项
 

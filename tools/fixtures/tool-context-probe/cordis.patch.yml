@@ -1,0 +1,5 @@
+# Internal-only installed-host acceptance probe. Install it only in a disposable
+# scratch profile or an explicitly authorized temporary Host check.
+- insert:
+    - id: solar-tool-context-probe
+      name: '@lisihao/dsh-solar-tool-context-probe'
