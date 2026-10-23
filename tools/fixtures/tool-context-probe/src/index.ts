@@ -14,6 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { defineTool, renderToolsSdk, type JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import {
   createLoopAgent,
   followLoopAgent,
@@ -50,25 +51,42 @@ interface InstalledPluginEvidence {
 }
 
 interface CatalogSnapshot {
-  readonly scope: 'ptc-preset' | 'global'
+  readonly scope: 'real-agent' | 'ptc-preset' | 'global'
   readonly entries: readonly (ToolSchema & { output: JsonSchemaNode })[]
 }
 
+interface ProbeConfig {
+  /** Optional read-only scope already loaded in the Host; never creates an Agent. */
+  metadataSessionId?: string
+  /** Optional installed pure rewrite module; never imports its startup entry. */
+  sdkRewriteModule?: string
+}
+
 /** Read public metadata only; no Agent, request, or business call is created. */
-async function hostCatalog(ctx: Context): Promise<CatalogSnapshot> {
+async function hostCatalog(ctx: Context, config: ProbeConfig): Promise<CatalogSnapshot> {
   const tools = hostGet(ctx, 'tools') as {
     schemas(scope?: object): ToolSchema[]
     get(name: string, scope?: object): { output: { schema: JsonSchemaNode } } | undefined
   }
+  let agent: object | undefined
+  if (config.metadataSessionId) {
+    const agents = hostGet(ctx, 'agents') as { get(id: string): object | undefined } | undefined
+    for (let attempt = 0; attempt < 40 && agent === undefined; attempt++) {
+      agent = agents?.get(config.metadataSessionId)
+      if (agent === undefined) await new Promise(resolve => setTimeout(resolve, 250))
+    }
+    assert(agent !== undefined, 'APP_PROBE_AGENT_NOT_LOADED: requested read-only metadata scope is unavailable; no Agent was created')
+  }
   const presets = hostGet(ctx, 'agentPresets') as { acquireScope(id: string): Promise<{ key: object; [Symbol.asyncDispose](): Promise<void> }> } | undefined
-  const lease = presets === undefined ? undefined : await presets.acquireScope('ptc')
+  const lease = agent !== undefined || presets === undefined ? undefined : await presets.acquireScope('ptc')
+  const scope = agent ?? lease?.key
   try {
-    const entries = tools.schemas(lease?.key).filter(schema => !['run_code', 'solar_tool_search', 'solar_tool_load', TARGET_TOOL].includes(schema.name)).map(schema => {
-      const definition = tools.get(schema.name, lease?.key)
+    const entries = tools.schemas(scope).filter(schema => !['run_code', 'solar_tool_search', 'solar_tool_load', TARGET_TOOL].includes(schema.name)).map(schema => {
+      const definition = tools.get(schema.name, scope)
       assert(definition !== undefined, `APP_PROBE_CATALOG_CHANGED: ${schema.name} disappeared`)
       return structuredClone({ ...schema, output: definition.output.schema })
     })
-    return { scope: lease === undefined ? 'global' : 'ptc-preset', entries }
+    return { scope: agent !== undefined ? 'real-agent' : lease === undefined ? 'global' : 'ptc-preset', entries }
   } finally {
     await lease?.[Symbol.asyncDispose]()
   }
@@ -181,7 +199,15 @@ function runCodeResponse(call: string, binding: string, args: object) {
   })
 }
 
-async function runIsolatedAcceptance(signal: AbortSignal, catalog: CatalogSnapshot): Promise<UnknownRecord> {
+async function runIsolatedAcceptance(signal: AbortSignal, catalog: CatalogSnapshot, config: ProbeConfig): Promise<UnknownRecord> {
+  const module = config.sdkRewriteModule ? await import(config.sdkRewriteModule) as { rewritePromptAssembly?: (assembly: PromptAssembly, fallback: string, options: { capabilityProtocol: boolean }) => PromptAssembly } : undefined
+  assert(module === undefined || typeof module.rewritePromptAssembly === 'function', 'APP_PROBE_REWRITE_EXPORT_MISSING: configured pure rewrite is unavailable')
+  let rewriteCalls = 0
+  const rewrite = (assembly: PromptAssembly): PromptAssembly => {
+    rewriteCalls++
+    if (module?.rewritePromptAssembly) return module.rewritePromptAssembly(assembly, '', { capabilityProtocol: false })
+    return { ...assembly, sections: assembly.sections.map(section => section.name === 'tools:sdk' ? { ...section, text: section.text.replace(/[ \t]{2,}/g, ' ').replace(/ \n/g, '\n').trim() } : section) }
+  }
   const harness = await mountRequestHarness([
     runCodeResponse('probe-search', 'solar_tool_search', { query: TARGET_TOOL }),
     runCodeResponse('probe-load', 'solar_tool_load', { names: [TARGET_TOOL] }),
@@ -205,17 +231,16 @@ async function runIsolatedAcceptance(signal: AbortSignal, catalog: CatalogSnapsh
         async execute() { throw new Error('APP_PROBE_METADATA_ONLY: a real catalog tool must never execute') },
       })
     }
-    // Reproduce the observed repeated-horizontal-space rewrite without
-    // importing or patching that plugin. A changed quoted value must fail.
+    // Inner waterfall rewrite, followed below by an outer post-processing
+    // rewrite. The optional module exercises the installed pure transformation.
     harness.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
-      const assembly = await next()
-      return { ...assembly, sections: assembly.sections.map(section => section.name === 'tools:sdk' ? { ...section, text: section.text.replace(/[ \t]{2,}/g, ' ').replace(/ \n/g, '\n').trim() } : section) }
+      return rewrite(await next())
     })
     harness.ctx.systemPrompt.section({ name: 'probe:standing-policy', text: 'PROBE_STANDING_POLICY_RETAINED', order: 0 })
     let businessCalls = 0
     harness.ctx.tools.register(defineTool({
       name: TARGET_TOOL,
-      description: TARGET_MARKER,
+      description: `${TARGET_MARKER}. A policy denial: do not retry another way.`,
       parameters: { value: { type: 'string', required: true } },
       output: {
         schema: {
@@ -232,6 +257,7 @@ async function runIsolatedAcceptance(signal: AbortSignal, catalog: CatalogSnapsh
     }))
     const installed = await installedToolContext()
     await harness.ctx.plugin(installed.plugin)
+    harness.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => rewrite(await next()), { prepend: true })
     const agent = await createLoopAgent(harness, 'tool-context-installed-probe')
     await followLoopAgent(agent, 'Exercise only the isolated keyless tool-context path.')
     signal.throwIfAborted()
@@ -243,6 +269,7 @@ async function runIsolatedAcceptance(signal: AbortSignal, catalog: CatalogSnapsh
     assert(requests.every(request => systemText(request).includes('PROBE_STANDING_POLICY_RETAINED')), 'APP_PROBE_STANDING_POLICY_MISSING: a non-SDK policy disappeared')
     assert(!systemText(requests[0]!).includes(TARGET_MARKER), 'APP_PROBE_BOOTSTRAP_LEAK: business schema appeared before loading')
     assert(systemText(requests[2]!).includes(TARGET_MARKER), 'APP_PROBE_SELECTED_SCHEMA_MISSING: loaded schema did not reach the next request')
+    assert(module === undefined || systemText(requests[2]!).includes('continue the original task'), 'APP_PROBE_DOC_REWRITE_MISSING: configured rewrite did not exercise the observed documentation change')
     assert(businessCalls === 1, `APP_PROBE_BUSINESS_CALL_COUNT: expected one body call, got ${businessCalls}`)
     assert(harness.ptc.bindingCalls.map(call => call.name).join(',') === `solar_tool_search,solar_tool_load,${TARGET_TOOL}`,
       'APP_PROBE_PTC_BINDINGS: unexpected PTC binding dispatch sequence')
@@ -260,6 +287,9 @@ async function runIsolatedAcceptance(signal: AbortSignal, catalog: CatalogSnapsh
       },
       fakeModelCalls: requests.length,
       indentationRewrite: true,
+      installedPureRewrite: module !== undefined,
+      rewriteCalls,
+      finalDescriptionRewritten: systemText(requests[2]!).includes('continue the original task'),
       nonSdkPromptPreserved: true,
       catalogScope: catalog.scope,
       metadataOnlyToolCount: catalog.entries.length,
@@ -298,7 +328,7 @@ async function withDeadline<T>(parent: AbortSignal, action: (signal: AbortSignal
   }
 }
 
-async function runAndRecord(ctx: Context, lifecycleSignal: AbortSignal): Promise<void> {
+async function runAndRecord(ctx: Context, lifecycleSignal: AbortSignal, config: ProbeConfig): Promise<void> {
   const startedAt = new Date().toISOString()
   let target: ReturnType<typeof receiptPath> | undefined
   let host: UnknownRecord | undefined
@@ -308,7 +338,7 @@ async function runAndRecord(ctx: Context, lifecycleSignal: AbortSignal): Promise
     lifecycleSignal.throwIfAborted()
     host = verifyHostTools(ctx)
     target = receiptPath(ctx)
-    checks = await withDeadline(lifecycleSignal, async signal => runIsolatedAcceptance(signal, await hostCatalog(ctx)))
+    checks = await withDeadline(lifecycleSignal, async signal => runIsolatedAcceptance(signal, await hostCatalog(ctx, config), config))
   } catch (error) {
     failure = serialiseError(error)
     try {
@@ -359,7 +389,7 @@ async function runAndRecord(ctx: Context, lifecycleSignal: AbortSignal): Promise
 export const name = 'solar-tool-context-probe'
 export const inject = ['appReady']
 
-export function apply(ctx: Context): () => void {
+export function apply(ctx: Context, config: ProbeConfig = {}): () => void {
   const ready = hostGet(ctx, 'appReady') as AppReady | undefined
   if (ready === undefined || typeof ready.onReady !== 'function') {
     throw new Error('APP_PROBE_APP_READY_UNAVAILABLE: appReady service is unavailable')
@@ -370,7 +400,7 @@ export function apply(ctx: Context): () => void {
     if (started) return
     started = true
     lifecycle = new AbortController()
-    void runAndRecord(ctx, lifecycle.signal).catch(error => {
+    void runAndRecord(ctx, lifecycle.signal, config).catch(error => {
       process.stdout.write(`${JSON.stringify({
         formatVersion: 1,
         kind: 'solar-tool-context-app-keyless-acceptance',

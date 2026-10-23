@@ -29,12 +29,26 @@ interface State {
   pendingPrompt?: string
 }
 
-// Cooperative prompt plugins may reindent generated declarations. Ignore only
-// leading horizontal indentation and outer whitespace, never text inside a
-// line (including quoted enum/property values and declaration descriptions).
+// Cooperative prompt plugins may reindent the SDK or rewrite generated JSDoc.
+// Identify its executable/type contract independently of those one-line docs;
+// quoted names/values, declaration lines and the usage preamble remain exact.
 function sameSdkText(expected: string, actual: string): boolean {
-  const unindent = (text: string) => text.trim().split('\n').map(line => line.replace(/^[ \t]+/, '')).join('\n')
-  return expected.trim().length > 0 && unindent(expected) === unindent(actual)
+  const comparable = (text: string): string | undefined => {
+    const trimmed = text.trim()
+    const start = trimmed.lastIndexOf('\n```ts\n')
+    if (start === -1 || !trimmed.endsWith('\n```')) return undefined
+    const lines = (value: string) => value.split('\n').map(line => line.replace(/^[ \t]+/, ''))
+    // The public renderer emits descriptions as complete, single-line JSDoc
+    // comments. Restrict this exemption to the final declaration fence: prose,
+    // examples, incomplete comments and comment-like schema literals retain
+    // their original comparison semantics.
+    const prefix = lines(trimmed.slice(0, start)).join('\n')
+    const declaration = lines(trimmed.slice(start + '\n```ts\n'.length, -'\n```'.length))
+      .filter(line => !(line.startsWith('/** ') && line.endsWith(' */') && !line.slice(4, -3).includes('*/'))).join('\n')
+    return `${prefix}\n\`\`\`ts\n${declaration}\n\`\`\``
+  }
+  const left = comparable(expected)
+  return left !== undefined && left === comparable(actual)
 }
 
 async function waitForCommit(committed: Promise<boolean>, signal: AbortSignal): Promise<boolean> {
