@@ -29,6 +29,14 @@ interface State {
   pendingPrompt?: string
 }
 
+// Cooperative prompt plugins may reindent generated declarations. Ignore only
+// leading horizontal indentation and outer whitespace, never text inside a
+// line (including quoted enum/property values and declaration descriptions).
+function sameSdkText(expected: string, actual: string): boolean {
+  const unindent = (text: string) => text.trim().split('\n').map(line => line.replace(/^[ \t]+/, '')).join('\n')
+  return expected.trim().length > 0 && unindent(expected) === unindent(actual)
+}
+
 async function waitForCommit(committed: Promise<boolean>, signal: AbortSignal): Promise<boolean> {
   signal.throwIfAborted()
   return new Promise<boolean>((resolve, reject) => {
@@ -44,16 +52,17 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
     if (!Number.isSafeInteger(limits[key]) || limits[key] < min || limits[key] > max) throw new Error(`TOOL_CONTEXT_CONFIG_INVALID: ${key} must be an integer from ${min} to ${max}`)
   }
   const states = new WeakMap<Session, State>()
-  const assembled = new WeakMap<Agent, { digest: string; state: State }>()
+  const assembled = new WeakMap<Agent, { digest: string; state: State; wireTools: string }>()
+  // Some installed prompt wrappers catch assemble errors and return an empty
+  // composition. Retain the original failure until the admission boundary,
+  // outside that wrapper, rather than letting a stripped request proceed.
+  const assemblyErrors = new WeakMap<Agent, unknown>()
   const formats = new WeakMap<Agent, ProgramFormat>()
   // A binding promise may settle before its asynchronous PTC log copy. Keep
   // accepted outcomes only for composing sibling loads in that same program;
   // admission still reads committed session receipts, never this staging map.
   const staged = new WeakMap<Agent, { rootCallId: string; receipt: LoadReceipt; committed: Promise<boolean> }>()
   const committing = new WeakMap<Session, { callId: string; receipt: LoadReceipt; resolve: (accepted: boolean) => void }>()
-  let promptEpoch = 0
-  const checkedCompositions = new WeakMap<Agent, { digest: string; epoch: number }>()
-  ctx.on('system-prompt/change', () => { promptEpoch += 1 })
   const stateFor = (session: Session): State => {
     let state = states.get(session)
     if (!state) { state = { pendingFlush: false }; states.set(session, state) }
@@ -152,57 +161,74 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
     }
   })
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
-    const assembly = await next()
-    if (!assembly.tools.some(tool => tool.name === 'run_code')) {
-      // These helpers are an owned PTC presentation contribution, not two new
-      // Native wire functions. Existing Native tool declarations stay exact.
-      assembly.tools = assembly.tools.filter(tool => !(tool.name === SEARCH_NAME && ctx.tools.get(SEARCH_NAME, context.scope) === search) && !(tool.name === LOAD_NAME && ctx.tools.get(LOAD_NAME, context.scope) === load))
-      if (context.agent) { assembled.delete(context.agent); formats.delete(context.agent) }
-      return assembly
-    }
-    const sections = assembly.sections.filter(section => section.name === 'tools:sdk')
-    if (sections.length !== 1) throw new Error('TOOL_CONTEXT_PRESENTATION_UNSUPPORTED: TypeScript PTC requires one cooperative tools:sdk section; complete prompts are not supported')
     const agent = context.agent
-    if (context.scope !== agent && context.scope !== undefined) throw new Error('TOOL_CONTEXT_SCOPE_UNSUPPORTED: this PTC assembly has no matching agent scope')
-    const entries = catalog(agent)
-    if (ctx.tools.get(SEARCH_NAME, agent) !== search || ctx.tools.get(LOAD_NAME, agent) !== load) throw new Error('TOOL_CONTEXT_DISCOVERY_UNAVAILABLE: caller policy must allow solar_tool_search and solar_tool_load; no allowlist was changed')
-    const section = sections[0]!
-    const format = (['function-body', 'repl'] as const).find(value => renderToolsSdk([...entries], value) === section.text)
-    if (!format) throw new Error('TOOL_CONTEXT_PRESENTATION_UNSUPPORTED: SDK does not match the published TypeScript renderer; original declarations were not guessed')
-    const state: State = agent ? await hydrate(agent.session, context.signal) : { pendingFlush: false }
-    const chosen = selection(state, entries, format)
-    const text = renderSelection(entries, chosen, format)
-    if (Buffer.byteLength(renderSelection(entries, [], format)) > 8192) throw new Error('TOOL_CONTEXT_BOOTSTRAP_TOO_LARGE: discovery declarations exceed 8192 UTF-8 bytes')
-    section.text = text
-    section.interpolate = false
-    if (agent) {
-      const digest = createHash('sha256').update(text).digest('hex')
-      state.pendingSdk = { text, digest }
-      state.pendingPrompt = renderPrompt(assembly)
-      formats.set(agent, format)
-      assembled.set(agent, { digest, state })
+    try {
+      const assembly = await next()
+      if (!assembly.tools.some(tool => tool.name === 'run_code')) {
+        if (ctx.tools.schemas(context.scope).some(tool => tool.name === 'run_code')) {
+          throw new Error('TOOL_CONTEXT_PRESENTATION_UNSUPPORTED: the PTC caller still has run_code but the prompt composition removed its transport; no request was admitted')
+        }
+        // These helpers are an owned PTC presentation contribution, not two new
+        // Native wire functions. Existing Native tool declarations stay exact.
+        assembly.tools = assembly.tools.filter(tool => !(tool.name === SEARCH_NAME && ctx.tools.get(SEARCH_NAME, context.scope) === search) && !(tool.name === LOAD_NAME && ctx.tools.get(LOAD_NAME, context.scope) === load))
+        if (agent) { assembled.delete(agent); formats.delete(agent); assemblyErrors.delete(agent) }
+        return assembly
+      }
+      const sections = assembly.sections.filter(section => section.name === 'tools:sdk')
+      if (sections.length !== 1) throw new Error('TOOL_CONTEXT_PRESENTATION_UNSUPPORTED: TypeScript PTC requires one cooperative tools:sdk section; complete prompts are not supported')
+      if (context.scope !== agent && context.scope !== undefined) throw new Error('TOOL_CONTEXT_SCOPE_UNSUPPORTED: this PTC assembly has no matching agent scope')
+      const entries = catalog(agent)
+      if (ctx.tools.get(SEARCH_NAME, agent) !== search || ctx.tools.get(LOAD_NAME, agent) !== load) throw new Error('TOOL_CONTEXT_DISCOVERY_UNAVAILABLE: caller policy must allow solar_tool_search and solar_tool_load; no allowlist was changed')
+      const section = sections[0]!
+      const format = (['function-body', 'repl'] as const).find(value => sameSdkText(renderToolsSdk([...entries], value), section.text))
+      if (!format) throw new Error('TOOL_CONTEXT_PRESENTATION_UNSUPPORTED: SDK does not match the published TypeScript renderer; original declarations were not guessed')
+      const state: State = agent ? await hydrate(agent.session, context.signal) : { pendingFlush: false }
+      const chosen = selection(state, entries, format)
+      const text = renderSelection(entries, chosen, format)
+      if (Buffer.byteLength(renderSelection(entries, [], format)) > 8192) throw new Error('TOOL_CONTEXT_BOOTSTRAP_TOO_LARGE: discovery declarations exceed 8192 UTF-8 bytes')
+      section.text = text
+      section.interpolate = false
+      if (agent) {
+        const digest = createHash('sha256').update(text).digest('hex')
+        state.pendingSdk = { text, digest }
+        state.pendingPrompt = renderPrompt(assembly)
+        formats.set(agent, format)
+        assembled.set(agent, { digest, state, wireTools: JSON.stringify(assembly.tools) })
+        assemblyErrors.delete(agent)
+      }
+      return assembly
+    } catch (error) {
+      if (agent) assemblyErrors.set(agent, error)
+      throw error
     }
-    return assembly
   }, { prepend: true })
   ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
+    if (assemblyErrors.has(agent)) throw assemblyErrors.get(agent)
     const current = assembled.get(agent)
-    if (!current) return decision
+    if (!current) {
+      if (ctx.tools.schemas(agent).some(tool => tool.name === 'run_code')) {
+        throw new Error('TOOL_CONTEXT_PRESENTATION_UNSUPPORTED: the PTC caller has no verified discovery composition; no request was admitted')
+      }
+      return decision
+    }
     // The verification assembly may re-evaluate dynamic providers. It must
     // not replace the first assembly that AgentLoop will actually commit.
     const requestPrompt = current.state.pendingPrompt
     const requestSdk = current.state.pendingSdk?.text
     signal.throwIfAborted()
-    const checked = checkedCompositions.get(agent)
-    if (checked?.digest !== current.digest || checked.epoch !== promptEpoch) {
-      // complete:true providers are restored AFTER the cooperative waterfall.
-      // Verify that final public composition rather than assuming our SDK won.
+    {
+      // This public reassembly catches stable post-waterfall changes (including
+      // complete:true), and retained errors catch an inner failure swallowed by
+      // an outer wrapper. It does not replace AgentLoop's first assembly.
       const final = await ctx.systemPrompt.assemble({ agent, scope: agent, signal })
-      if (!final.sections.some(section => section.name === 'tools:sdk' && section.text === requestSdk)) {
+      if (assemblyErrors.has(agent)) throw assemblyErrors.get(agent)
+      const sections = final.sections.filter(section => section.name === 'tools:sdk')
+      if (sections.length !== 1 || requestSdk === undefined || !sameSdkText(requestSdk, sections[0]!.text)
+        || !renderPrompt(final).trim() || JSON.stringify(final.tools) !== current.wireTools) {
         throw new Error('TOOL_CONTEXT_PRESENTATION_UNSUPPORTED: a complete system prompt displaced the discovery SDK; no optimized request was admitted')
       }
-      checkedCompositions.set(agent, { digest: current.digest, epoch: promptEpoch })
     }
     if (current.state.pendingFlush) {
       let persisted: boolean

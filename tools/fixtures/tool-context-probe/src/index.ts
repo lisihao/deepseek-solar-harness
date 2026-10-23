@@ -12,7 +12,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, renderToolsSdk, type JsonSchemaNode } from '@deepseek-ai/dsh-tools'
+import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import {
   createLoopAgent,
   followLoopAgent,
@@ -46,6 +47,31 @@ interface InstalledPluginEvidence {
   readonly importPath: string
   readonly libIndexSha256: string
   readonly rc2Dependencies: Readonly<Record<string, string>>
+}
+
+interface CatalogSnapshot {
+  readonly scope: 'ptc-preset' | 'global'
+  readonly entries: readonly (ToolSchema & { output: JsonSchemaNode })[]
+}
+
+/** Read public metadata only; no Agent, request, or business call is created. */
+async function hostCatalog(ctx: Context): Promise<CatalogSnapshot> {
+  const tools = hostGet(ctx, 'tools') as {
+    schemas(scope?: object): ToolSchema[]
+    get(name: string, scope?: object): { output: { schema: JsonSchemaNode } } | undefined
+  }
+  const presets = hostGet(ctx, 'agentPresets') as { acquireScope(id: string): Promise<{ key: object; [Symbol.asyncDispose](): Promise<void> }> } | undefined
+  const lease = presets === undefined ? undefined : await presets.acquireScope('ptc')
+  try {
+    const entries = tools.schemas(lease?.key).filter(schema => !['run_code', 'solar_tool_search', 'solar_tool_load', TARGET_TOOL].includes(schema.name)).map(schema => {
+      const definition = tools.get(schema.name, lease?.key)
+      assert(definition !== undefined, `APP_PROBE_CATALOG_CHANGED: ${schema.name} disappeared`)
+      return structuredClone({ ...schema, output: definition.output.schema })
+    })
+    return { scope: lease === undefined ? 'global' : 'ptc-preset', entries }
+  } finally {
+    await lease?.[Symbol.asyncDispose]()
+  }
 }
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -155,7 +181,7 @@ function runCodeResponse(call: string, binding: string, args: object) {
   })
 }
 
-async function runIsolatedAcceptance(signal: AbortSignal): Promise<UnknownRecord> {
+async function runIsolatedAcceptance(signal: AbortSignal, catalog: CatalogSnapshot): Promise<UnknownRecord> {
   const harness = await mountRequestHarness([
     runCodeResponse('probe-search', 'solar_tool_search', { query: TARGET_TOOL }),
     runCodeResponse('probe-load', 'solar_tool_load', { names: [TARGET_TOOL] }),
@@ -170,6 +196,22 @@ async function runIsolatedAcceptance(signal: AbortSignal): Promise<UnknownRecord
   })
   try {
     signal.throwIfAborted()
+    // Reuse the installed caller-visible catalog as inert metadata, avoiding
+    // the earlier fixture's single-tool catalog coverage gap.
+    for (const entry of catalog.entries) {
+      harness.ctx.tools.register({
+        ...entry,
+        output: { schema: entry.output, render: () => [] },
+        async execute() { throw new Error('APP_PROBE_METADATA_ONLY: a real catalog tool must never execute') },
+      })
+    }
+    // Reproduce the observed repeated-horizontal-space rewrite without
+    // importing or patching that plugin. A changed quoted value must fail.
+    harness.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+      const assembly = await next()
+      return { ...assembly, sections: assembly.sections.map(section => section.name === 'tools:sdk' ? { ...section, text: section.text.replace(/[ \t]{2,}/g, ' ').replace(/ \n/g, '\n').trim() } : section) }
+    })
+    harness.ctx.systemPrompt.section({ name: 'probe:standing-policy', text: 'PROBE_STANDING_POLICY_RETAINED', order: 0 })
     let businessCalls = 0
     harness.ctx.tools.register(defineTool({
       name: TARGET_TOOL,
@@ -198,6 +240,7 @@ async function runIsolatedAcceptance(signal: AbortSignal): Promise<UnknownRecord
     assert(requests.length === 4, `APP_PROBE_FAKE_PLAN_MISMATCH: expected 4 fake requests, got ${requests.length}`)
     assert(requests.every(request => request.tools?.map(tool => tool.name).join(',') === 'run_code'), 'APP_PROBE_PTC_SURFACE: a request exposed a direct tool schema')
     assert(Buffer.byteLength(systemText(requests[0]!), 'utf8') <= 8_192, 'APP_PROBE_BOOTSTRAP_TOO_LARGE: bootstrap exceeds 8192 bytes')
+    assert(requests.every(request => systemText(request).includes('PROBE_STANDING_POLICY_RETAINED')), 'APP_PROBE_STANDING_POLICY_MISSING: a non-SDK policy disappeared')
     assert(!systemText(requests[0]!).includes(TARGET_MARKER), 'APP_PROBE_BOOTSTRAP_LEAK: business schema appeared before loading')
     assert(systemText(requests[2]!).includes(TARGET_MARKER), 'APP_PROBE_SELECTED_SCHEMA_MISSING: loaded schema did not reach the next request')
     assert(businessCalls === 1, `APP_PROBE_BUSINESS_CALL_COUNT: expected one body call, got ${businessCalls}`)
@@ -216,6 +259,11 @@ async function runIsolatedAcceptance(signal: AbortSignal): Promise<UnknownRecord
         exports: { apply: true, name: installed.plugin.name },
       },
       fakeModelCalls: requests.length,
+      indentationRewrite: true,
+      nonSdkPromptPreserved: true,
+      catalogScope: catalog.scope,
+      metadataOnlyToolCount: catalog.entries.length,
+      fullCatalogSdkBytes: Buffer.byteLength(renderToolsSdk([...catalog.entries]), 'utf8'),
       ptcBindings: harness.ptc.bindingCalls.map(call => call.name),
       isolatedSessionEventCount: events.length,
       flushCount: harness.flushes.count,
@@ -260,7 +308,7 @@ async function runAndRecord(ctx: Context, lifecycleSignal: AbortSignal): Promise
     lifecycleSignal.throwIfAborted()
     host = verifyHostTools(ctx)
     target = receiptPath(ctx)
-    checks = await withDeadline(lifecycleSignal, runIsolatedAcceptance)
+    checks = await withDeadline(lifecycleSignal, async signal => runIsolatedAcceptance(signal, await hostCatalog(ctx)))
   } catch (error) {
     failure = serialiseError(error)
     try {

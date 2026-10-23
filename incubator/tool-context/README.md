@@ -16,6 +16,8 @@ Selection receipts use standard successful `tool/ptc-dispatch` records. Recovery
 
 Native tool presentation is unchanged. Python/custom SDK renderers, non-agent scoped PTC assemblies, hidden discovery helpers, and complete-system-prompt compositions are unsupported and produce named diagnostics. No private registry or runtime mutation is used. Disable this plugin to restore ordinary tool presentation.
 
+Cooperative prompt plugins may change the SDK's leading indentation or outer whitespace. The renderer check permits only those presentation differences; inline text, quoted values and declaration content remain exact. PTC admission rechecks the public composition and transport. Own assembly failures are retained through wrappers that swallow exceptions, then surfaced at the pre-step boundary instead of sending the empty fallback. A later successful assembly clears that agent's failure state. A second assembly cannot prove that an arbitrary external wrapper returned the same object the first time; the plugin does not modify the official runtime to intercept that private boundary.
+
 ## Configuration
 
 | Field | Default | Meaning |
