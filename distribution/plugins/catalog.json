@@ -349,11 +349,11 @@
       "name": "@lisihao/dsh-solar-tool-context",
       "version": "0.1.0-dev.0",
       "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
-      "sourceCommit": "211726f5f32c8a5c88503869081916d3525f96a0",
+      "sourceCommit": "9e207cdcdf30106a1e6cd5e58440b97919270b89",
       "artifact": {
-        "file": "tool-context/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
-        "sha256": "718490e9b6ddcfd0a7e4f49e1dd5d83c69e714e3a2f1c1a13ca89fa1533c3b3a",
-        "size": 24513
+        "file": "tool-context/9e207cd/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
+        "sha256": "e5a79b125b7fe44c58f23f197396e6533518fba4177d4381480241f628224ce6",
+        "size": 25560
       },
       "license": {
         "spdx": "MIT",
@@ -365,20 +365,31 @@
       "validationScope": {
         "source": {
           "status": "passed",
-          "scope": "104 tests, types/build, strict Session recovery; no real provider calls"
+          "scope": "110 tests, types/build, swallowed-assembly-error and whitespace compatibility regressions; exact-source CI passed"
         },
         "scratch": {
           "status": "passed",
-          "scope": "official rc.2 CLI tarball install; isolated published AgentLoop fake adapter and original PTC pipeline"
+          "scope": "official rc.2 CLI tarball install; isolated PTC search/load/execute under repeated-horizontal-space rewrite; 25 catalog metadata tools"
         },
         "ui": {
           "status": "passed",
-          "scope": "official App Host isolated fake-adapter PTC search/load/execute check against all 12 verified installed files; no custom frontend"
+          "scope": "official installed rc.2 Host: public PTC preset metadata (132 tools), isolated fake adapter search/load/subsequent-use under indentation rewrite; 12 production files matched; temporary probe removed; no custom frontend or real provider call"
         },
         "live": {
-          "status": "not-run"
+          "status": "not-run",
+          "scope": "previous candidate failed: empty system prompt and tools; repaired user request pending"
         }
-      }
+      },
+      "historicalArtifacts": [
+        {
+          "sourceCommit": "211726f5f32c8a5c88503869081916d3525f96a0",
+          "file": "tool-context/lisihao-dsh-solar-tool-context-0.1.0-dev.0.tgz",
+          "sha256": "718490e9b6ddcfd0a7e4f49e1dd5d83c69e714e3a2f1c1a13ca89fa1533c3b3a",
+          "size": 24513,
+          "origin": "previous-candidate-failed-native-composition-acceptance",
+          "installableCandidate": false
+        }
+      ]
     }
   ],
   "excludedPackages": []

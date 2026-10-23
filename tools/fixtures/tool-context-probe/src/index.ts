@@ -1,8 +1,8 @@
 /**
  * Installed-host acceptance probe for tool-context.
  *
- * The Host only loads this bundle and provides appReady. All behavior under
- * test runs in a newly created Cordis Context with the published rc.2
+ * The Host provides appReady and read-only preset/catalog metadata. All
+ * execution under test runs in a newly created Cordis Context with rc.2
  * AgentLoop/ToolRuntime, an in-memory PTC substrate, and a fake LLM adapter.
  * No provider, browser, Host profile session, or credential is used.
  */
