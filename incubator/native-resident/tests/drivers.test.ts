@@ -12,7 +12,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ResidentError, type DriverRequest, type NativeToolBridge } from '../src/contracts.js'
-import { ClaudeNativeDriver, type ClaudeMcpFactory } from '../src/drivers/claude.js'
+import { ClaudeNativeDriver, claudeAllowedTools, type ClaudeMcpFactory } from '../src/drivers/claude.js'
 import type { CodexChildProcess } from '../src/drivers/codex.js'
 import { CodexNativeDriver } from '../src/drivers/codex.js'
 import { DRIVER_ERROR_CODE } from '../src/drivers/errors.js'
@@ -132,6 +132,7 @@ function requestFixture(overrides: Partial<Omit<DriverRequest, 'signal' | 'onSes
       commandId: 'command-1',
       cwd: '/tmp/dsh-native-driver-workspace',
       prompt: 'inspect the workspace',
+      access: 'read-only',
       signal: controller.signal,
       onSession: (sessionId) => sessions.push(sessionId),
       ...overrides,
@@ -234,7 +235,7 @@ describe('CodexNativeDriver', () => {
           return
         case 'thread/start':
           expect(message.params).toMatchObject({ cwd, ephemeral: false, approvalPolicy: 'never' })
-          expect(message.params).not.toHaveProperty('sandbox')
+          expect(message.params).toMatchObject({ sandbox: 'read-only' })
           fake.respond(message.id, { thread: { id: 'codex-thread-1' }, cwd })
           return
         case 'turn/start':
@@ -277,6 +278,7 @@ describe('CodexNativeDriver', () => {
           threadId: 'codex-existing',
           cwd,
           approvalPolicy: 'never',
+          sandbox: 'read-only',
           excludeTurns: true,
         })
         return fake.respond(message.id, { thread: { id: 'codex-existing' }, cwd })
@@ -511,6 +513,7 @@ describe('CodexNativeDriver', () => {
           cwd,
           ephemeral: false,
           approvalPolicy: 'never',
+          sandbox: 'read-only',
           model: 'gpt-test',
         })
         return fake.respond(message.id, { thread: { id: 'codex-profile-thread' }, cwd })
@@ -648,6 +651,34 @@ describe('CodexNativeDriver', () => {
   })
 })
 
+describe('CodexNativeDriver write access', () => {
+  it.each([
+    ['thread/start', undefined],
+    ['thread/resume', 'codex-existing'],
+  ] as const)('sends sandbox workspace-write on %s for a workspace-write node', async (method, nativeSessionId) => {
+    const cwd = '/tmp/dsh-native-driver-workspace'
+    const seen: Array<Record<string, unknown>> = []
+    const child = new FakeCodexChild((message, fake) => {
+      if (message.method === 'initialize') return fake.respond(message.id, {})
+      if (message.method === 'thread/start' || message.method === 'thread/resume') {
+        seen.push(message.params as Record<string, unknown>)
+        return fake.respond(message.id, { thread: { id: nativeSessionId ?? 'codex-new' }, cwd })
+      }
+      if (message.method === 'turn/start') {
+        fake.respond(message.id, { turn: { id: 'codex-turn-w' } })
+        fake.notify('item/agentMessage/delta', { threadId: nativeSessionId ?? 'codex-new', turnId: 'codex-turn-w', delta: 'ok' })
+        fake.notify('turn/completed', { threadId: nativeSessionId ?? 'codex-new', turn: { id: 'codex-turn-w', status: 'completed' } })
+      }
+    })
+    const driver = new CodexNativeDriver({ executable: '/fake/codex', spawn: () => child })
+    const fixture = requestFixture({ access: 'workspace-write', ...(nativeSessionId ? { nativeSessionId } : {}) })
+    await driver.execute(fixture.request)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ sandbox: 'workspace-write' })
+    expect(method === 'thread/resume' ? seen[0]!.threadId : seen[0]!.ephemeral).toBe(method === 'thread/resume' ? 'codex-existing' : false)
+  })
+})
+
 describe('ClaudeNativeDriver', () => {
   it('uses the published query API with a persistent session and no bypass mode', async () => {
     const fake = new FakeClaudeQuery([initMessage('claude-session-1'), successMessage('claude-session-1', 'completed')])
@@ -672,6 +703,22 @@ describe('ClaudeNativeDriver', () => {
     expect(options).not.toHaveProperty('allowedTools')
     expect(options).not.toHaveProperty('allowDangerouslySkipPermissions')
     expect(fake.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('auto-allows the editing tools only for a workspace-write node and keeps bridged tools', () => {
+    expect(claudeAllowedTools('read-only', [])).toEqual({})
+    expect(claudeAllowedTools('read-only', ['mcp__solar__bash'])).toEqual({ allowedTools: ['mcp__solar__bash'] })
+    expect(claudeAllowedTools('workspace-write', [])).toEqual({ allowedTools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] })
+    expect(claudeAllowedTools('workspace-write', ['mcp__solar__bash'])).toEqual({ allowedTools: ['mcp__solar__bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'] })
+  })
+
+  it('passes the editing approvals to the SDK query for a workspace-write node', async () => {
+    const fake = new FakeClaudeQuery([initMessage('claude-writer'), successMessage('claude-writer', 'written')])
+    const query = vi.fn((_request: { prompt: string | AsyncIterable<SDKUserMessage>; options?: ClaudeOptions }) => fake as unknown as Query)
+    const driver = new ClaudeNativeDriver({ query })
+    const fixture = requestFixture({ access: 'workspace-write' })
+    await expect(driver.execute(fixture.request)).resolves.toMatchObject({ output: 'written' })
+    expect(query.mock.calls[0]?.[0].options).toMatchObject({ permissionMode: 'dontAsk', allowedTools: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] })
   })
 
   it('passes an existing native session as resume and retains that identity', async () => {

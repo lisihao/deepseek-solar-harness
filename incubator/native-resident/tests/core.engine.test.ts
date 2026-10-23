@@ -215,6 +215,27 @@ describe('ResidentEngine durable graph scheduler', () => {
     await eventually(async () => expect((await engine.inspect('parallel')).status).toBe('completed'))
   })
 
+  it.each([
+    ['a declared write scope', { scope: { read: ['README.md'], write: ['src/a.js'] } }, 'workspace-write'],
+    ['a read-only scope', { scope: { read: ['.'] } }, 'read-only'],
+    ['no scope', {}, 'read-only'],
+  ] as const)('hands the driver %s as its file access', async (name, extra, access) => {
+    const databasePath = await temporaryDatabasePath()
+    const calls: DriverRequest[] = []
+    const engine = await openEngine(databasePath, {
+      codex: {
+        async execute(request) {
+          calls.push(request)
+          request.onSession('session-access')
+          return { output: 'done' }
+        },
+      },
+    })
+    await engine.submit({ commandId: `submit-access-${name.replaceAll(' ', '-')}`, graph: graph('access', [node('only', 'work', extra)], await temporaryDirectory()) })
+    await eventually(async () => expect((await engine.inspect('access')).status).toBe('completed'))
+    expect(calls.map(call => call.access)).toEqual([access])
+  })
+
   it('compares declared scopes as absolute paths across nested workspace roots', async () => {
     const databasePath = await temporaryDatabasePath()
     const root = await temporaryDirectory()

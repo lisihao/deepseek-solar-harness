@@ -115,10 +115,19 @@ export interface ResidentApi {
   bindBridge?(bridgeId: string, owner: object, allowedTools?: readonly string[]): Promise<void>
 }
 
+/**
+ * File access a native executor receives for one node. A node that declares
+ * scope.write gets workspace-write (the executor may write anywhere under cwd;
+ * scope is a scheduling declaration, not a sandbox); every other node is
+ * read-only.
+ */
+export type NativeAccess = 'read-only' | 'workspace-write'
+
 export interface DriverRequest {
   readonly commandId: string
   readonly cwd: string
   readonly prompt: string
+  readonly access: NativeAccess
   readonly nativeSessionId?: string
   readonly profile?: NativeProfile
   readonly bridge?: NativeToolBridge

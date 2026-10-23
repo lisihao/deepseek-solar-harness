@@ -13,6 +13,7 @@ import { resolve as resolvePath } from 'node:path'
 import { z, type ZodType } from 'zod/v4'
 
 import type {
+  NativeAccess,
   DriverRequest,
   NativeDriver,
   NativeModel,
@@ -99,12 +100,8 @@ export class ClaudeNativeDriver implements NativeDriver {
         ...(request.nativeSessionId ? { resume: request.nativeSessionId } : {}),
         ...(profile.model ? { model: profile.model } : {}),
         ...(profile.reasoningEffort ? { effort: profile.reasoningEffort } : {}),
-        ...(bridgeServer
-          ? {
-              mcpServers: { [CLAUDE_BRIDGE_SERVER_NAME]: bridgeServer.server as McpServerConfig },
-              allowedTools: [...bridgeServer.allowedTools],
-            }
-          : {}),
+        ...(bridgeServer ? { mcpServers: { [CLAUDE_BRIDGE_SERVER_NAME]: bridgeServer.server as McpServerConfig } } : {}),
+        ...claudeAllowedTools(request.access, bridgeServer?.allowedTools ?? []),
         ...(this.#executable ? { pathToClaudeCodeExecutable: this.#executable } : {}),
       }
 
@@ -586,4 +583,20 @@ function isInit(message: SDKMessage): message is Extract<SDKMessage, { type: 'sy
 
 function normalizeCwd(cwd: string): string {
   return resolvePath(cwd)
+}
+
+/** Claude Code file-editing tools auto-allowed for a workspace-write node. */
+export const CLAUDE_EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
+
+/**
+ * Tools auto-allowed under permissionMode 'dontAsk': the bridged DSH tools,
+ * plus the editing tools when the node may write. allowedTools only adds
+ * approvals; it does not restrict the read tools.
+ * @param access - the node's file access.
+ * @param bridged - bridged MCP tool names.
+ * @returns an options fragment, empty when nothing is auto-allowed.
+ */
+export function claudeAllowedTools(access: NativeAccess, bridged: readonly string[]): { allowedTools?: string[] } {
+  const tools = [...bridged, ...(access === 'workspace-write' ? CLAUDE_EDIT_TOOLS : [])]
+  return tools.length === 0 ? {} : { allowedTools: tools }
 }
