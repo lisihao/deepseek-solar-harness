@@ -32,7 +32,7 @@ export function webRecordToStudio(record: WebRunRecord, sessionId: string): Stud
   const status = record.stage === 'completed' ? 'completed'
     : record.stage === 'blocked' || record.stage === 'failed' ? 'failed'
       : record.stage === 'cancelled' ? 'cancelled'
-        : record.stage === 'indeterminate' || record.stage === 'submission-unknown' ? 'unknown' : 'running'
+        : record.stage === 'indeterminate' || record.stage === 'submission-unknown' || record.stage === 'abandoned' ? 'unknown' : 'running'
   return {
     id: record.id, sessionId, providerId: 'web', status,
     createdAt: record.createdAt, updatedAt: record.updatedAt,

@@ -14,6 +14,7 @@ export type WebRunStage =
   | 'indeterminate'
   | 'failed'
   | 'cancelled'
+  | 'abandoned'
 
 export interface WebRunRequest {
   readonly prompt: string
@@ -91,6 +92,7 @@ const STAGES = new Set<WebRunStage>([
   'indeterminate',
   'failed',
   'cancelled',
+  'abandoned',
 ])
 
 type JsonRecord = Record<string, unknown>

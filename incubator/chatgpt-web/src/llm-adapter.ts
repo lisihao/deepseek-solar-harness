@@ -143,16 +143,38 @@ function sourceForm(source: unknown): string | undefined {
   return isRecord(source) && typeof source.form === 'string' ? source.form : undefined
 }
 
+function isSolarWebRequestAudit(message: Record<string, unknown>): boolean {
+  if (message.role !== 'user') return false
+  const source = message.source
+  if (sourceKind(source) !== 'solar-web-context' || sourceForm(source) !== 'notice') return false
+  if (!Array.isArray(message.content) || message.content.length !== 1) return false
+  const block = message.content[0]
+  if (!isRecord(block) || block.type !== 'text' || typeof block.text !== 'string') return false
+  try {
+    const parsed = JSON.parse(block.text) as unknown
+    return isRecord(parsed) && parsed.kind === 'web-request'
+  } catch {
+    return false
+  }
+}
+
+function isAutomaticNativeBackground(kind: string, form: string | undefined): boolean {
+  if (kind === 'plugin:graph-memory' && form === 'snapshot') return true
+  if (kind === 'dsh-mnemon' && form === 'instructions') return true
+  return AUTOMATIC_CONTEXT_SOURCE_KINDS.has(kind)
+    && AUTOMATIC_CONTEXT_FORMS.has(form ?? '')
+}
+
 function omitBrowserBackgroundMessage(message: Record<string, unknown>): boolean {
   const kind = sourceKind(message.source)
   if (message.role === 'system' && kind === 'system-prompt') return true
   if (message.role !== 'user' || kind === undefined) return false
+  if (isSolarWebRequestAudit(message)) return true
   // The skill-context plugin's discovery notice is an automatic native-tool
   // instruction. Match its exact source kind/form so ordinary user notices,
   // explicit skill-context instructions, and other producers remain visible.
   if (kind === 'solar-skill-context' && sourceForm(message.source) === 'notice') return true
-  return AUTOMATIC_CONTEXT_SOURCE_KINDS.has(kind)
-    && AUTOMATIC_CONTEXT_FORMS.has(sourceForm(message.source) ?? '')
+  return isAutomaticNativeBackground(kind, sourceForm(message.source))
 }
 
 /**
@@ -465,6 +487,9 @@ function outputText(record: WebRunRecord): string {
   if (record.stage === 'completed' && record.output !== undefined && typeof record.output.markdown === 'string') {
     return record.output.markdown
   }
+  if (record.stage === 'abandoned') {
+    throw new LlmError('该网页任务已结束本地跟踪，远端结果仍未知；未自动重试。', 'WEB_REMOTE_OUTCOME_UNKNOWN')
+  }
   if (record.stage === 'cancelled') {
     throw new LlmError('ChatGPT Web 请求已取消；未自动重试。', 'WEB_RUN_ABORTED')
   }
@@ -478,7 +503,8 @@ function outputText(record: WebRunRecord): string {
   }
   if (record.stage === 'blocked') {
     const code = record.error?.code ?? 'WEB_RUN_BLOCKED'
-    throw new LlmError(`ChatGPT Web 请求被阻止（${code}）；未自动重试。`, code)
+    const guidance = code === 'WEB_BUSY' ? '旧网页任务尚未结清。请在网页任务记录中读取状态；无法恢复时确认结束本地跟踪。此请求尚未提交。' : ''
+    throw new LlmError(`ChatGPT Web 请求被阻止（${code}）；${guidance}未自动重试。`, code)
   }
   if (record.stage === 'completed') {
     throw new LlmError('ChatGPT Web 记录标记为 completed，但缺少完整 Markdown 输出。', 'WEB_OUTPUT_MISSING')

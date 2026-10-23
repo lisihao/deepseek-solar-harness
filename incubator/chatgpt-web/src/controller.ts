@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { matchesWebEffort } from './web-selection.js'
+import { canFinalizeChatGptRoute } from './conversation-route.js'
 import { chmod, link, lstat, open, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -118,7 +119,7 @@ function unresolved(stage: WebRunRecord['stage']): boolean {
 }
 
 function releasesAdmission(stage: WebRunRecord['stage']): boolean {
-  return stage === 'completed' || stage === 'blocked' || stage === 'failed' || stage === 'cancelled'
+  return stage === 'completed' || stage === 'blocked' || stage === 'failed' || stage === 'cancelled' || stage === 'abandoned'
 }
 
 function outputBytes(output: OutputCandidate): number {
@@ -203,6 +204,7 @@ function admissionReadError(owner: AdmissionOwner): WebBrowserError | undefined 
 export class WebController {
   private readonly options: WebControllerOptions
   private readonly active = new Map<string, ActiveOperation>()
+  private readonly abandoning = new Set<string>()
   private readonly ownedResources = new Map<string, WebRunResource>()
   private readonly finishes = new Map<string, Promise<void>>()
   private disposed = false
@@ -232,6 +234,7 @@ export class WebController {
 
   start(id: string, request: WebRunRequest, signal?: AbortSignal): Promise<WebRunRecord> {
     if (this.disposed) return Promise.reject(new WebBrowserError('WEB_CONTROLLER_DISPOSED', 'Web controller was disposed'))
+    if (this.abandoning.has(id)) return Promise.reject(new WebBrowserError('WEB_RUN_ACTIVE', 'Local recovery is still in progress'))
     const snapshot = requestSnapshot(request)
     const current = this.active.get(id)
     if (current?.promise) {
@@ -251,6 +254,7 @@ export class WebController {
 
   observe(id: string, signal?: AbortSignal): Promise<WebRunRecord> {
     if (this.disposed) return Promise.reject(new WebBrowserError('WEB_CONTROLLER_DISPOSED', 'Web controller was disposed'))
+    if (this.abandoning.has(id)) return Promise.reject(new WebBrowserError('WEB_RUN_ACTIVE', 'Local recovery is still in progress'))
     const current = this.active.get(id)
     if (current?.promise) return current.promise
 
@@ -288,6 +292,44 @@ export class WebController {
     })
   }
 
+  /** Owner-confirmed local retirement. Never infers remote cancellation or retries a request. */
+  async abandon(id: string, expectedRevision: number, acknowledgeUnknown: true): Promise<WebRunRecord> {
+    if (this.disposed) throw new WebBrowserError('WEB_CONTROLLER_DISPOSED', 'Web controller was disposed')
+    if (acknowledgeUnknown !== true || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new WebBrowserError('WEB_RECOVERY_ACK_REQUIRED', 'Explicit acknowledgement and a valid revision are required')
+    }
+    if (this.active.has(id) || this.abandoning.has(id)) {
+      throw new WebBrowserError('WEB_RUN_ACTIVE', 'Stop or reconcile the active local operation before ending tracking')
+    }
+    this.abandoning.add(id)
+    try {
+      const record = await this.store.read(id)
+      if (!record) throw new WebBrowserError('WEB_RUN_NOT_FOUND', 'Web run was not found')
+      // Retrying an acknowledged local recovery may release its own remaining fence,
+      // but must never append another retirement or touch any browser resource.
+      if (record.stage === 'abandoned') return this.returnCurrent(record)
+      if (record.revision !== expectedRevision) throw new WebBrowserError('WEB_STATE_CONFLICT', 'Read the latest run before ending tracking')
+      if (record.stage !== 'indeterminate') throw new WebBrowserError('WEB_RECOVERY_NOT_ALLOWED', 'Only an idle indeterminate run can end tracking')
+      const owner = await this.readAdmissionOwner()
+      const invalid = admissionReadError(owner)
+      if (invalid) throw invalid
+      if (owner.kind === 'owned' && owner.id !== id) throw new WebBrowserError('WEB_BUSY', 'Another web run owns the admission fence')
+      // Use strict CAS rather than apply(): a concurrent reconciliation must not
+      // silently turn into an acknowledgement of a different revision.
+      const retired = await this.store.transition(id, expectedRevision, {
+        stage: 'abandoned',
+        error: {
+          code: 'WEB_REMOTE_OUTCOME_UNKNOWN',
+          message: '本机所有者已确认结束本地跟踪。远端是否执行及其结果仍未知；未取消远端，也未重新提交。原请求与修订记录保留。',
+        },
+      })
+      await this.releaseAdmission(id, owner)
+      return retired
+    } finally {
+      this.abandoning.delete(id)
+    }
+  }
+
   dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise
     this.disposed = true
@@ -309,7 +351,7 @@ export class WebController {
       if (earlier) {
         return this.settleKnown(record, {
           stage: 'blocked',
-          error: { code: 'WEB_BUSY', message: 'Another web run is unresolved' },
+          error: { code: 'WEB_BUSY', message: '旧网页任务尚未结清。请在网页任务记录中先读取状态；无法恢复时，可确认结束本地跟踪。此请求尚未提交，未自动重试。' },
         })
       }
 
@@ -570,6 +612,11 @@ export class WebController {
     }
     if (resource.conversationUrl !== undefined) {
       if (resource.conversationUrl !== observation.url) {
+        // Same TaskSpace/Page and exact original user receipt were checked
+        // above. Only the observed optimistic-id -> final UUID transition is legal.
+        if (canFinalizeChatGptRoute(resource.conversationUrl, observation.url)) {
+          return { resource: { ...resource, conversationUrl: observation.url } }
+        }
         return {
           resource,
           problem: { code: 'WEB_RESOURCE_MISMATCH', message: 'Observed page does not match the durable conversation URL' },
@@ -775,8 +822,11 @@ export class WebController {
     if (admission === 'busy') return
   }
 
-  private async releaseAdmission(id: string): Promise<void> {
+  private async releaseAdmission(id: string, expectedOwner?: AdmissionOwner): Promise<void> {
     const owner = await this.readAdmissionOwner()
+    if (expectedOwner !== undefined && !(expectedOwner.kind === 'absent' && owner.kind === 'absent') && !sameAdmission(expectedOwner, owner)) {
+      throw new WebBrowserError('WEB_ADMISSION_CHANGED', 'Admission ownership changed during local recovery; its fence was preserved')
+    }
     if (owner.kind !== 'owned' || owner.id !== id) return
     const claim = join(this.store.root, `.${ADMISSION_LOCK_NAME}.release-${owner.lease}`)
     let ownsClaim = false
