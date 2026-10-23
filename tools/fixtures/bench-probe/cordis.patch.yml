@@ -1,0 +1,5 @@
+# Test-only row. This package is installed only into an ephemeral profile by
+# tools/bench-plugin-test.mjs and is not a Solar release bundle.
+- insert:
+    - id: bench-plugin-probe
+      name: '@lisihao/dsh-solar-bench-probe'

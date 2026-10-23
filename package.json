@@ -13,7 +13,7 @@
     "build": "node tools/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:plugin": "node tools/plugin-test.mjs && node tools/chatgpt-web-plugin-test.mjs",
+    "test:plugin": "node tools/plugin-test.mjs && node tools/chatgpt-web-plugin-test.mjs && node tools/bench-plugin-test.mjs",
     "homepage": "node tools/homepage.mjs",
     "homepage:check": "node tools/homepage.mjs --check && node tools/installed-plugin-guide.mjs --check && python3 tools/check-curated-packages.py && bash tools/tests/curated-installer.test.sh && python3 tools/tests/curated-history.test.py",
     "check": "pnpm build && pnpm typecheck && pnpm test && pnpm test:plugin && pnpm homepage:check",
@@ -56,6 +56,9 @@
     "@types/react": "18.3.31",
     "@deepseek-ai/dsh-client-ui-session": "0.2.1-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
-    "@xyflow/react": "12.12.0"
+    "@xyflow/react": "12.12.0",
+    "@deepseek-ai/dsh-session-persistence": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.2.1-rc.2",
+    "yaml": "2.9.1"
   }
 }

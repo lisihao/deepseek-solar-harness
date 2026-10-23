@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const packages = []
-for (const name of ['native-resident', 'native-collaboration', 'chatgpt-web']) {
+for (const name of ['native-resident', 'native-collaboration', 'chatgpt-web', 'bench']) {
   try { await stat(join(root, 'incubator', name, 'package.json')); packages.push(name) }
   catch (error) { if (error.code !== 'ENOENT') throw error }
 }
@@ -17,7 +17,8 @@ for (const name of packages) {
   await build({
     entryPoints: name === 'native-resident'
       ? ['src/index.ts', 'src/daemon.ts', 'src/client.ts', 'src/contracts.ts']
-      : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts'] : ['src/index.ts', 'src/typert.ts', 'src/studio-contract.ts'],
+      : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts']
+        : name === 'bench' ? ['src/index.ts', 'src/typert.ts', 'src/cli-main.ts'] : ['src/index.ts', 'src/typert.ts', 'src/studio-contract.ts'],
     absWorkingDir: directory,
     outdir: 'lib',
     bundle: true,
@@ -27,6 +28,8 @@ for (const name of packages) {
     format: 'esm',
     sourcemap: true,
   })
+  // The CLI bootstrap must register its resolve hook before any bundled import runs, so it is transpiled alone.
+  if (name === 'bench') await build({ entryPoints: ['src/cli.ts'], absWorkingDir: directory, outfile: 'lib/cli.js', bundle: false, platform: 'node', target: 'node22', format: 'esm', banner: { js: '#!/usr/bin/env node' }, sourcemap: true })
   if (name !== 'native-resident') {
     await build({ entryPoints: ['src/client.ts'], absWorkingDir: directory, outfile: 'lib/client.cjs', bundle: true, platform: 'browser', target: 'es2022', format: 'cjs', loader: { '.css': 'text' }, external: ['@deepseek-ai/*', 'react', 'react-dom'], banner: { js: `window.__ModuleLoader__.load({ id: "@lisihao/dsh-solar-${name}", factory: (require) => { var module = { exports: {} }; var exports = module.exports;` }, footer: { js: 'return module.exports; } });' }, sourcemap: true })
   }
