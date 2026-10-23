@@ -97,6 +97,7 @@
     { "path": "./packages/client/ui-settings-models" },
     { "path": "./packages/client/ui-task-template" },
     { "path": "./packages/client/ui-settings-scheduling-evidence" },
+    { "path": "./packages/bench/bench-web/tsconfig.client.json" },
     { "path": "./packages/client/ui-settings-plugin-inventory" },
     { "path": "./packages/client/locale" },
     { "path": "./packages/client/web" },
