@@ -22,6 +22,7 @@ import {
   type TaskGraph,
   type TaskNode,
   type TaskResult,
+  type NativeAccess,
   type TaskScope,
 } from '../contracts.js'
 
@@ -90,6 +91,7 @@ interface ActiveExecution {
   readonly executor: Executor
   readonly cwd: string
   readonly prompt: string
+  readonly access: NativeAccess
   readonly sessionKey?: string
   readonly profile?: NativeProfile
   readonly profileJson: string
@@ -1144,6 +1146,7 @@ export class ResidentEngine implements ResidentApi {
       executor: candidate.node.executor,
       cwd: candidate.graph.cwd,
       prompt,
+      access: nodeAccess(candidate.node.scope),
       ...(candidate.node.sessionKey ? { sessionKey: candidate.node.sessionKey } : {}),
       ...(candidate.node.profile ? { profile: candidate.node.profile } : {}),
       profileJson,
@@ -1234,6 +1237,7 @@ export class ResidentEngine implements ResidentApi {
         commandId: active.commandId,
         cwd: active.cwd,
         prompt: active.prompt,
+        access: active.access,
         ...(active.nativeSessionId ? { nativeSessionId: active.nativeSessionId } : {}),
         ...(active.profile ? { profile: active.profile } : {}),
         ...(active.bridge ? { bridge: active.bridge } : {}),
@@ -2399,6 +2403,11 @@ function normalizeDriverError(error: unknown): { code: string; message: string }
     return { code, message }
   }
   return { code: 'DRIVER_ERROR', message: 'Native driver failed' }
+}
+
+/** Only a declared write scope grants write access; see NativeAccess. */
+export function nodeAccess(scope: TaskScope | undefined): NativeAccess {
+  return (scope?.write?.length ?? 0) > 0 ? 'workspace-write' : 'read-only'
 }
 
 function scopesConflict(left: TaskScope | undefined, leftCwd: string, right: TaskScope | undefined, rightCwd: string): boolean {

@@ -433,6 +433,7 @@ export class CodexNativeDriver implements NativeDriver {
             threadId: request.nativeSessionId,
             cwd: request.cwd,
             approvalPolicy: 'never',
+            sandbox: request.access,
             excludeTurns: true,
             ...profile.thread,
           }))
@@ -440,6 +441,7 @@ export class CodexNativeDriver implements NativeDriver {
             cwd: request.cwd,
             ephemeral: false,
             approvalPolicy: 'never',
+            sandbox: request.access,
             ...(bridge ? { dynamicTools: bridge.dynamicTools } : {}),
             ...profile.thread,
           }))
