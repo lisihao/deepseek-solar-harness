@@ -50,7 +50,7 @@ const numStyle: CSSProperties = { ...cellStyle, textAlign: 'right', fontVariantN
 const SEGMENTS = [
   { key: 'llmMs', label: 'timeModel', color: 'var(--dsw-alias-brand-primary)' },
   { key: 'toolCriticalMs', label: 'timeTools', color: 'var(--dsw-alias-state-success-primary)' },
-  { key: 'overheadMs', label: 'timeHarness', color: 'var(--dsw-alias-state-warning-primary)' },
+  { key: 'overheadMs', label: 'timeHarness', color: 'var(--dsw-alias-state-warn-primary, #e8a33d)' },
 ] as const
 
 function card(key: string, title: string, children: ReactNode): ReactElement {
@@ -237,7 +237,7 @@ export function BenchPage({ api, mountError, t }: { readonly api: BenchLedgersAp
     list === undefined
       ? (failure === undefined ? h('p', { key: 'loading', role: 'status', style: mutedStyle }, t('loading')) : null)
       : h('div', { key: 'body', style: { display: 'grid', gap: 14, minWidth: 0 } }, [
-        list.unreadable.length === 0 ? null : h('div', { key: 'unreadable', role: 'note', style: { ...cardStyle, borderColor: 'var(--dsw-alias-state-warning-primary)' } }, [
+        list.unreadable.length === 0 ? null : h('div', { key: 'unreadable', role: 'note', style: { ...cardStyle, borderColor: 'var(--dsw-alias-state-warn-primary, #e8a33d)' } }, [
           h('p', { key: 'title', style: { margin: 0 } }, t('unreadable')),
           h('ul', { key: 'list', style: { margin: 0, paddingLeft: 18 } }, list.unreadable.map(entry => h('li', { key: entry.id, style: { overflowWrap: 'anywhere' } }, [h('code', { key: 'id' }, entry.id), ` — ${entry.message}`]))),
         ]),

@@ -41,11 +41,16 @@ class RemoteStore {
   }
 }
 
-/** The page's dictionary follows the app's document language. */
-function translator(): BenchT {
-  const language = (globalThis.document?.documentElement.lang || globalThis.navigator?.language || 'en').toLowerCase()
-  const dictionary = language.startsWith('zh') ? zh : en
-  return key => dictionary[key]
+/**
+ * The page's dictionary follows the app's document language, read on every
+ * call: in the installed app a read at apply time chose English although
+ * `<html lang>` was `zh-CN` when the page rendered.
+ */
+export function translator(): BenchT {
+  return (key) => {
+    const language = (globalThis.document?.documentElement.lang || globalThis.navigator?.language || 'en').toLowerCase()
+    return (language.startsWith('zh') ? zh : en)[key]
+  }
 }
 
 /** Mount the owner-only Remote namespace, then register the Settings → Benchmarks page. */

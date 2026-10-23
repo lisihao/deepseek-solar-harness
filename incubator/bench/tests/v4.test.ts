@@ -16,6 +16,7 @@ import type { AnalysisOptions, Experiment, RunRecord } from '../src/index.js'
 import { io, main } from '../src/cli-main.js'
 import { en, zh } from '../src/locales.js'
 import { Detail } from '../src/view.js'
+import { translator } from '../src/client.js'
 
 const ANALYSIS: AnalysisOptions = { confidence: 0.95, resamples: 200, seed: 1, margin: 0.05, minTasks: 3, invalidTolerance: 0.1 }
 
@@ -176,6 +177,21 @@ describe('Settings page', () => {
       expect(html).toContain('ablation-1')
       expect(html).toContain('75.0%')
       expect(html).not.toMatch(/verdict[A-Z]|explain[A-Z]|\{(delta|tasks|variant)\}/)
+    }
+  })
+})
+
+describe('page language', () => {
+  it('follows the document language at render time, not at registration', () => {
+    const t = translator()
+    const root = globalThis as { document?: unknown }
+    try {
+      root.document = { documentElement: { lang: '' } }
+      expect(t('nav')).toBe(en.nav)
+      root.document = { documentElement: { lang: 'zh-CN' } }
+      expect(t('nav')).toBe('基准测试')
+    } finally {
+      delete root.document
     }
   })
 })
