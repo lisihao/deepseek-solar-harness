@@ -9,5 +9,6 @@ Measures whether plugins, plugin combinations, and plugin-built flows improve DS
 | [`bench/`](bench/README.md) | Defines suites, tasks, and graders; ships the declarative suite format and built-in graders | `ctx.benchmarks` |
 | [`bench-runner/`](bench-runner/README.md) | Runs experiments as isolated child processes and keeps the run ledger | `ctx.benchRuntime` |
 | [`bench-suite-dsh-native/`](bench-suite-dsh-native/README.md) | Registers the `dsh-native` coding suite | registers on `ctx.benchmarks` |
+| [`bench-web/`](bench-web/README.md) | Serves ledgers and their analysis over the Host web server | reads `ctx.benchRuntime` |
 
 The conformance kit for suite tests is [`test-support/bench-testkit`](../test-support/bench-testkit/README.md). The [benchmark ledger decision](../../.agents/notes/implemented/architecture/2026-10-21-benchmark-ablation-ledger.md) records the design.

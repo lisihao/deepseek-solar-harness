@@ -16,13 +16,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { BenchSuite, BenchTask, BenchTaskId } from '@deepseek-ai/dsh-bench'
 import z from '@deepseek-ai/schemastery'
 import { cellEnv, prepareCell, readRunSessions, scrubTemplateFiles } from './cell.ts'
-import { cellKey, ExperimentLedger, LEDGER_FORMAT_VERSION } from './ledger.ts'
+import { cellKey, ExperimentLedger, LEDGER_FORMAT_VERSION, listExperimentIds, readPinnedExperiment } from './ledger.ts'
 import { foldRunMetrics } from './metrics.ts'
 import type { ModelPrice } from './metrics.ts'
-import type { CellKey, Experiment, RunProgress, RunRecord, Variant } from './types.ts'
+import type { CellKey, Experiment, ExperimentId, LedgerSnapshot, RunProgress, RunRecord, Variant } from './types.ts'
 
 export type * from './types.ts'
 export type { ModelPrice } from './metrics.ts'
+export { analyzeExperiment } from './analysis.ts'
 export { readExperiment } from './experiment.ts'
 export { ExperimentLedger, LEDGER_FORMAT_VERSION } from './ledger.ts'
 
@@ -114,7 +115,7 @@ export class BenchRuntime extends Service {
     const tasks = this.selectTasks(experiment, await suite.load(options.signal))
     const ledger = new ExperimentLedger(this.config.ledgerRoot, experiment)
     await ledger.open()
-    const records = await ledger.records()
+    const records = await ledger.records(true)
     const done = new Set(records.map(record => cellKey(record.cell)))
     const pending: { cell: CellKey; task: BenchTask; variant: Variant }[] = []
     for (let rep = 0; rep < experiment.repetitions; rep += 1) {
@@ -140,6 +141,25 @@ export class BenchRuntime extends Service {
     const settled = await Promise.allSettled(workers)
     for (const result of settled) if (result.status === 'rejected') throw result.reason
     return records
+  }
+
+  /**
+   * List the experiments that have a ledger.
+   * @returns their ids in name order.
+   */
+  experiments(): Promise<ExperimentId[]> {
+    return listExperimentIds(this.config.ledgerRoot)
+  }
+
+  /**
+   * Read one experiment's pinned definition and records without modifying the ledger.
+   * @param id - experiment id.
+   * @returns the snapshot, or `undefined` when no ledger exists under `id`.
+   */
+  async ledger(id: string): Promise<LedgerSnapshot | undefined> {
+    const experiment = await readPinnedExperiment(this.config.ledgerRoot, id)
+    if (experiment === undefined) return undefined
+    return { experiment, records: await new ExperimentLedger(this.config.ledgerRoot, experiment).records(false) }
   }
 
   /**

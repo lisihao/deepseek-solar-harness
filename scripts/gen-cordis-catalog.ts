@@ -728,6 +728,8 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   Experiment: 'benchmark experiment definition is documented in packages/bench/bench-runner/README.md',
   RunOptions: 'benchmark run options are documented in packages/bench/bench-runner/README.md',
   RunRecord: 'benchmark run record format is documented in packages/bench/bench-runner/README.md',
+  ExperimentId: 'benchmark experiment id is documented in packages/bench/bench-runner/README.md',
+  LedgerSnapshot: 'benchmark ledger read is documented in packages/bench/bench-runner/README.md',
   ModelCatalogSource: 'discovery source registration is owned by packages/llm/model-catalog-local/README.md',
   ModelCatalogSnapshot: 'durable catalog inventory is owned by packages/llm/model-catalog-local/README.md',
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',

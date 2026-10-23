@@ -23,6 +23,8 @@ variants:                    # the first is the baseline
 
 `run(experiment, { signal, onProgress })` refuses an unregistered suite, an unknown task, an unregistered grader, or an invalid grader spec before any run starts. It then runs every cell without a ledger record, ordered by repetition, then task, then variant, so a partial experiment stays balanced across variants. It returns every record in the ledger. Aborting kills running children; unfinished cells stay unrecorded and run on the next call.
 
+`experiments()` lists the ids that have a ledger, and `ledger(id)` reads one pinned definition with its records without modifying the files: only `run` truncates a torn final line, since for any other reader that line may be an append in progress. An id that is not a safe directory name reads as absent.
+
 ## Run isolation
 
 Each run directory, `<ledgerRoot>/<experiment>/cells/<variant>/<task>/<rep>/`, holds:
@@ -35,7 +37,7 @@ Copies request copy-on-write clones (`COPYFILE_FICLONE`). The `templateFiles` co
 
 ## Run records
 
-`<ledgerRoot>/<experiment>/experiment.json` pins the definition; reopening a ledger with a different definition is refused. `runs.jsonl` holds one record per line with `formatVersion: 1`; a reader refuses any other version, and a torn final line from a crash is dropped. A record carries `cell`, `status`, `grade` and `grader` (kind and version), `metrics`, `exitCode`, `error`, `models`, `suiteVersion`, `startedAt`, and `endedAt`.
+`<ledgerRoot>/<experiment>/experiment.json` pins the definition with `formatVersion: 1`; reopening a ledger with a different definition is refused, and reading one with another format version or a malformed definition fails with the file named. `runs.jsonl` holds one record per line with `formatVersion: 1`; a reader refuses any other version, and a torn final line from a crash is dropped. A record carries `cell`, `status`, `grade` and `grader` (kind and version), `metrics`, `exitCode`, `error`, `models`, `suiteVersion`, `startedAt`, and `endedAt`.
 
 | Status | Meaning |
 |---|---|
@@ -44,6 +46,17 @@ Copies request copy-on-write clones (`COPYFILE_FICLONE`). The `templateFiles` co
 | `invalid` | Not measurable: the home holds no single top-level session, or the grader threw. Excluded from success rates. |
 
 Metrics come from sessions read through the JSONL persistence backend. Tokens and cost sum over all sessions, subagent children included; `tokens.input` excludes cache reads. Turns, steps, retries, and tools describe the root session. `timing` splits root wall time into `llmMs` (`step/start` → `assistant/message`), `toolCriticalMs` (the slowest tool call per step, since parallel calls overlap), and `overheadMs` (the remainder: harness and plugin time). `costUsd` is present only when every model used has a row in `prices`.
+
+## Analysis
+
+`analyzeExperiment(experiment, records, options)` is a pure function of the ledger. The first variant is the baseline.
+
+- **Per variant**: run counts by status, `invalidRate`, `successRate` (passes over graded and timed-out runs; timeouts count as failures, invalid runs are excluded), `passAnyRate` and `passAllRate` over tasks, mean cost over priced runs with `pricedRuns`, mean tokens, mean wall time over graded runs only (a timeout's time is truncated), summed time buckets, tools by total time, and `flakyTasks` whose runs disagree.
+- **Per comparison**: the mean over paired tasks of (variant − baseline) for success rate, cost, tokens, and wall time, so each task weighs the same whatever its repetitions. Tasks without a valid run on both sides are listed in `droppedTasks`. Each estimate carries a seeded percentile-bootstrap interval over tasks and an MDE at 80% power using Student-t quantiles; the MDE is reported, never used for the verdict.
+- **Verdict**, in order: `unreliable` when the variant's and the baseline's invalid rates differ by more than `invalidTolerance` in either direction (the side that loses failures to invalid runs would otherwise look better); `insufficient` below `minTasks` paired tasks; `improved` or `regressed` when the interval excludes 0; `equivalent` when it lies inside ±`margin`; otherwise `underpowered`.
+- **Also**: the task × variant pass-rate `matrix`, and the `pareto` set of priced variants not beaten on both success rate and mean cost.
+
+Options are all explicit: `confidence` (0.9, 0.95, or 0.99), `resamples` (≥ 100), `seed`, `margin` in [0, 1), `minTasks` (≥ 3), and `invalidTolerance` in [0, 1]. The same records and seed give the same intervals.
 
 ## Configuration
 
@@ -67,7 +80,7 @@ No direct invalidation; every run is an independent session in its own process, 
 
 ## Known Limitations and Deferred Work
 
-- **No analysis yet** — records hold raw per-run data; paired deltas against the baseline, confidence intervals, and bottleneck ranking come with the analysis layer.
+- **Percentile intervals at small samples** — with few paired tasks the bootstrap interval is too narrow, which `minTasks` guards against; the analysis has no exact small-sample test.
 - **Patch contents are not pinned** — `experiment.json` pins patch paths, not their content, so editing a patch file between resumed runs mixes two compositions under one variant id.
 - **Run directories are kept** — workspaces and homes stay on disk for inspection and are never pruned. A runner crash while a child runs leaves that run's copied `templateFiles` in its home.
 - **Plugin state outside `$DSH_HOME` needs a variant `env` entry** — a plugin that writes under `~` without an override (for example `MNEMON_DATA_DIR`) is shared across runs.

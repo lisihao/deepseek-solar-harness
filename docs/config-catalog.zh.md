@@ -427,7 +427,22 @@ export interface ModelPrice {
 }
 ```
 
-来源： [`packages/bench/bench-runner/src/index.ts:36`](../packages/bench/bench-runner/src/index.ts)
+来源： [`packages/bench/bench-runner/src/index.ts:37`](../packages/bench/bench-runner/src/index.ts)
+
+<a id="deepseek-aidsh-bench-web"></a>
+
+## `@deepseek-ai/dsh-bench-web`
+
+需要：`benchRuntime` · `webServer`
+
+```ts config-catalog
+/** Analysis settings applied to every served experiment. */
+export type Config = AnalysisOptions
+```
+
+依赖：[`AnalysisOptions`](../packages/bench/bench-runner/src/index.ts)
+
+来源： [`packages/bench/bench-web/src/index.ts:30`](../packages/bench/bench-web/src/index.ts)
 
 <a id="deepseek-aidsh-browser"></a>
 
