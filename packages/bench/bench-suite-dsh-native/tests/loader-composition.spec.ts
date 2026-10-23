@@ -54,6 +54,6 @@ describe('real Loader composition', () => {
     await context.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
     await context.loader.await()
     const suite = context.benchmarks.suite('dsh-native' as BenchSuiteId)
-    expect((await suite!.load()).map(task => task.id)).toEqual(['fix-sum-bug', 'count-lines', 'shell-listing'])
+    expect((await suite!.load()).map(task => task.id)).toEqual(['fix-sum-bug', 'count-lines', 'shell-listing', 'rename-function', 'fix-range', 'json-port', 'count-todos', 'is-palindrome', 'missing-await', 'csv-sum', 'validate-input', 'locate-definition', 'fix-import', 'sort-by-age'])
   })
 })
