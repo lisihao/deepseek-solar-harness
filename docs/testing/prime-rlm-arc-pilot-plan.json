@@ -1,0 +1,146 @@
+{
+  "formatVersion": 1,
+  "status": "completed",
+  "kind": "arc-full-harness-exploratory-pilot",
+  "sourceCommit": "398d4dd63cf01d00adbea41c13437ba0b8ad40fc",
+  "primeCommit": "7cbffa77b38facd7c87277fa3c82bcadbe816880",
+  "model": {
+    "provider": "openai-codex",
+    "id": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "maxOutputTokens": 16384
+  },
+  "cases": [
+    {
+      "gameId": "ls20-9607627b",
+      "seed": 0,
+      "files": {
+        "ls20.py": "298c810da2850d557c95d92a2cbd846df29a45d7134e20888617bedf5dafcd92",
+        "metadata.json": "9899f5ff0c001cadea7650786fe240ce5caeefc8e63f51fc04f795f52ad74646"
+      }
+    },
+    {
+      "gameId": "cd82-fb555c5d",
+      "seed": 0,
+      "files": {
+        "cd82.py": "dafeabff60a3a99b5c93629f8da0d8f555b873ef16a522247d6197b1b3addbcb",
+        "metadata.json": "ea165d304383be0f0769e513789e04fac5b6b20316bf504b9f9f14992114016e"
+      }
+    },
+    {
+      "gameId": "sp80-589a99af",
+      "seed": 0,
+      "files": {
+        "metadata.json": "5daf9a9fe900e1422fb0fd1f13c5055a9f704b9cbaf453c01743748f1ee393d6",
+        "sp80.py": "2306d62311a3cc027250217d86cb4e012898edc7647a7c291ade23f36c9b9715"
+      }
+    },
+    {
+      "gameId": "lp85-305b61c3",
+      "seed": 0,
+      "files": {
+        "lp85.py": "7d10baec7dd29d07e574bd47ee1ec7912542a72632077a5446798221f41c4ae9",
+        "metadata.json": "2c357bca60b893d7cddc8a81c3c378ebd61c825661e2fc0d8ed455198af8ca5e"
+      }
+    }
+  ],
+  "selection": {
+    "rule": "First four SHA-256(game ID) values with fixed prefix solar-prime-arc-pilot-v1|, excluding the ar25 game used only in keyless environment smoke. No model response or author score used for selection.",
+    "eligibleCount": 24
+  },
+  "arms": {
+    "B": {
+      "definition": "Same model with structured observe/status/act tools and conversation history; no Prime, Python REPL, descendants or retained cross-game state.",
+      "systemPrompt": "You are playing exactly one ARC-AGI-3 game through the provided observe, status and act tools. Discover its rules from frames and actions. Do not access source code, other games, prior runs or external information. The first operation is observe, followed by one genuine non-RESET action, followed by one more genuine non-RESET action if the game remains ACTIVE. Thereafter you may observe, read status, or submit 1 to 20 actions at a time. The broker resets after GAME_OVER and counts that reset. Stop only on WIN or ACTION_CAP, or an explicit resource/error stop. The game action limit is 500 and the whole condition model-request limit is 32. A textual claim of winning does not count; the broker determines the result."
+    },
+    "R": {
+      "definition": "Original fixed Prime ACP binary launched directly with a bounded local DSH-provider relay; provider codec is shared with S and is not an independent provider-private protocol control.",
+      "guidanceSha256": "050f18a3bc8e5b4198d2c4d296f44cc9b649fd74330c242af2a6fecafb9e6571",
+      "initialPromptSha256": "c114fc4ca2a3dbbdb60cfc94abcac6adf00356b979df6153c8efb3f0d239f3f4",
+      "autonomous": {
+        "maxTurns": 32,
+        "maxTokens": 4000000,
+        "gate": "fixed one-game broker terminal-gate"
+      },
+      "maxDepth": 0
+    },
+    "S": {
+      "definition": "Same original Prime through the repaired Solar plugin, with identical Prime guidance, initial prompt, engine, native settings and limits as R.",
+      "autonomous": {
+        "maxTurns": 32,
+        "maxTokens": 4000000,
+        "gate": "fixed one-game broker terminal-gate"
+      },
+      "maxDepth": 0
+    }
+  },
+  "commonLimits": {
+    "environmentActionsPerCondition": 500,
+    "maxActionsPerBatch": 20,
+    "physicalModelRequestsPerTree": 32,
+    "wallTimeMsPerCondition": 3600000,
+    "concurrentPhysicalModelRequests": 1,
+    "factoryEnabled": false,
+    "harnessRefinements": false,
+    "crossGameLearning": false
+  },
+  "metrics": {
+    "primary": "Trusted broker-confirmed WIN count out of the four fixed cases. Preserve a confirmed WIN even if a later model/cleanup step fails; report execution completion and protocol/unknown errors separately. A text claim or an unconfirmed action never proves WIN. All four cases stay in each arm denominator.",
+    "secondary": [
+      "levels completed",
+      "actual environment actions",
+      "model requests",
+      "known/unknown token usage",
+      "elapsed time",
+      "native/protocol/resource errors"
+    ],
+    "notReported": [
+      "RHAE without a pinned official scorer",
+      "universal reasoning gain",
+      "recursion-specific gain",
+      "exact historical-model reproduction"
+    ]
+  },
+  "contrasts": {
+    "S_vs_B": "Full Prime workflow comparison for this fixed model and small game panel; includes authored behavioral guidance, persistent Python and autonomous execution. The ordinary B system prompt is separately frozen and is not prompt-matched, so this contrast cannot isolate the causal effect of the execution engine or recursion.",
+    "S_vs_R": "Plugin-versus-original execution fidelity under the shared provider relay; stochastic outcomes do not prove equivalence."
+  },
+  "budget": {
+    "previousCharged": 138,
+    "currentlyAuthorizedCumulativeCap": 522,
+    "currentlyUnspent": 384,
+    "proposedNewPanelMaximum": 384,
+    "proposedCumulativeMaximum": 522,
+    "approved": true,
+    "unknownRequestsRemainCharged": true,
+    "paidApiFallback": false,
+    "extraCredits": false,
+    "previousAuthorizedCumulativeCap": 146,
+    "authorization": "Direct user approval: 批准：新增最多 384 次，累计上限 522 次（推荐）"
+  },
+  "launchGates": [
+    "Native built-package positive and negative acceptance",
+    "Original/plugin scripted differential acceptance",
+    "Explicit SDK step facade and original failure retained",
+    "Real game observe/two-step/status smoke",
+    "B/R/S scripted runner and independent scorer mutation checks",
+    "Actual native parent isolation denies corpus/other-game/history access and direct network; own guarded broker and model relay remain available",
+    "Whole-tree physical admission and unknown-effect cleanup accepted",
+    "User approves revised cumulative model-request cap"
+  ],
+  "stopRule": "Execute each frozen case/arm once. Retain all failures, ties, unknowns and adverse results. Do not substitute cases, replay failed games or continue sampling until a favorable result. No real launch before every gate is met.",
+  "completion": {
+    "date": "2026-10-21",
+    "timezone": "Asia/Shanghai",
+    "conditionsAttemptedOnce": 12,
+    "newModelRequests": 325,
+    "cumulativeModelRequests": 463,
+    "confirmedRequests": 456,
+    "unknownChargedRequests": 7,
+    "unusedAuthorizationRequests": 59,
+    "budgetFieldsDescribe": "Original pre-launch authorization snapshot, not remaining spend after completion.",
+    "newExperimentRequiresExplicitApproval": true,
+    "originalApprovedPlanSha256": "256608c1f9424dace9e13b4690ad1e29174b91a1567889fbe7da1c938405672a",
+    "results": "prime-rlm-arc-results.md"
+  }
+}

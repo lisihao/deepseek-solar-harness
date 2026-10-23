@@ -1,0 +1,124 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-q03-retrospective-bare-comparison-v1",
+  "recordedAt": "2026-10-21T05:30:35.372601+00:00",
+  "taskId": "oolong-multinli-70017-q03",
+  "design": "One retrospective bare baseline added to a previously completed recursive S result; no S resampling.",
+  "observedGainOnFrozenPrimaryMetric": true,
+  "generalQualityImprovementEstablished": false,
+  "causalRecursionBenefitEstablished": false,
+  "originalPaperReproduction": false,
+  "route": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "configuredMaxOutputTokens": 16384,
+    "hardOutputTokenCeilingEstablished": false
+  },
+  "publicInputs": {
+    "inputs/records.jsonl": "b880b3cf6d792262aaf929f2095e2c30ebfd76ad490315025589a7a9ce3925a2",
+    "inputs/rules.md": "a19338fb17ea894044bc6d4f73f4349a166a83447ffb853085a2a5d76a8f6488"
+  },
+  "compiledHash": "7c4aa9fa77bd6514f13deaa5a6a10607bb60efdc526feb91e6b7f3e49415c2a3",
+  "conditions": {
+    "D": {
+      "executionCompleted": true,
+      "cleanupComplete": true,
+      "schemaValid": true,
+      "labelsCompleteUnique": true,
+      "recordCount": 438,
+      "labelCorrect": 408,
+      "labelAccuracy": 0.9315068493150684,
+      "pairTP": 7,
+      "pairFP": 28,
+      "pairFN": 26,
+      "pairPrecision": 0.2,
+      "pairRecall": 0.21212121212121213,
+      "pairF1": 0.2058823529411765,
+      "countsExact": false,
+      "pairsExact": false,
+      "requests": 1,
+      "childRequests": 0,
+      "resources": {
+        "modelRequests": 1,
+        "physicalModelRequests": 1,
+        "confirmedModelRequests": 1,
+        "unknownModelRequests": 0,
+        "requestsWithKnownUsage": 1,
+        "requestsWithoutKnownUsage": 0,
+        "knownUsageTotals": {
+          "inputTokens": 23685,
+          "outputTokens": 18502,
+          "totalTokens": 42187
+        },
+        "elapsedMs": 341544
+      }
+    },
+    "S": {
+      "executionCompleted": true,
+      "cleanupComplete": true,
+      "schemaValid": true,
+      "labelsCompleteUnique": true,
+      "recordCount": 438,
+      "labelCorrect": 404,
+      "labelAccuracy": 0.9223744292237442,
+      "pairTP": 9,
+      "pairFP": 33,
+      "pairFN": 24,
+      "pairPrecision": 0.21428571428571427,
+      "pairRecall": 0.2727272727272727,
+      "pairF1": 0.23999999999999996,
+      "countsExact": false,
+      "pairsExact": false,
+      "requests": 14,
+      "childRequests": 8,
+      "resources": {
+        "modelRequests": 14,
+        "physicalModelRequests": 14,
+        "confirmedModelRequests": 14,
+        "unknownModelRequests": 0,
+        "requestsWithKnownUsage": 14,
+        "requestsWithoutKnownUsage": 0,
+        "knownUsageTotals": {
+          "inputTokens": 117274,
+          "outputTokens": 11575,
+          "totalTokens": 231633
+        },
+        "elapsedMs": 343696
+      }
+    }
+  },
+  "comparison": {
+    "primaryMetric": "pairF1",
+    "differenceSMinusD": 0.034117647058823475,
+    "labelCorrectDifferenceSMinusD": -4,
+    "bothLabelsCorrect": 401,
+    "bothLabelsWrong": 27,
+    "onlyDBareCorrect": 7,
+    "onlySRecursiveCorrect": 3
+  },
+  "cumulativeAccounting": {
+    "newAdmitted": 1,
+    "confirmed": 1,
+    "unknown": 0,
+    "cumulativeAdmitted": 523,
+    "cumulativeConfirmed": 510,
+    "cumulativeUnknown": 13
+  },
+  "currentAuthorizedCap": 600,
+  "evidence": {
+    "preparedSha256": "733a4c53725626eba5485c4505af1ee575f4f3e963cd1d5ea7cb4557051edf4f",
+    "finalClosureSha256": "783b0e13ae525c1d89fec912c5cf463445ada3a4766ac50b31a01f7db054dbc2",
+    "bareAnswerSha256": "f08a64e70fd67cd53651a936678f8cc25c5c7243055b5f94bc91c81fa037909b",
+    "recursiveAnswerSha256": "aea45c44d06c1d32b9c4db4ca523aa301e30443a75bf73c10144bdb4d90aba22"
+  },
+  "independentReadOnlyRegrade": "Both complete final answers regraded with the same arm-blind grader; all metrics and 438-record coverage matched retained results.",
+  "limitations": [
+    "One retrospective sample; no randomization, repetition or variance estimate.",
+    "Custom Q03 aggregation query, not an original paper question.",
+    "Text final versus file output and unequal compute are declared interface differences.",
+    "The existing S0 comparison remains negative: pair F1 0.307692 versus S 0.240000.",
+    "S primary pair F1 is higher than bare D, while per-record label accuracy is lower.",
+    "Provider receives maxTokens configuration but its Codex SDK does not serialize max_output_tokens; actual usage is authoritative."
+  ]
+}

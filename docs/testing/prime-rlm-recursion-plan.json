@@ -1,0 +1,76 @@
+{
+  "formatVersion": 1,
+  "status": "approved-keyless-pending",
+  "kind": "native-recursion-ablation-v1",
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "authorization": "你把递归关了还怎么验证RLM？换适合递归的任务，做启用递归和禁用递归的公平对照，继续查清为什么没有质量提升。仍用gpt-6.1-sol high，累计不要超过522次。",
+  "model": {
+    "provider": "openai-codex",
+    "id": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "maxOutputTokens": 16384
+  },
+  "primeCommit": "7cbffa77b38facd7c87277fa3c82bcadbe816880",
+  "arms": {
+    "S0": {
+      "maxDepth": 0
+    },
+    "S": {
+      "maxDepth": 1
+    }
+  },
+  "limits": {
+    "perTreeRequests": 14,
+    "newPanelRequests": 56,
+    "cumulativeCap": 522,
+    "wallTimeMs": 1200000,
+    "autonomousMaxTurns": 14,
+    "autonomousMaxTokens": 4000000,
+    "physicalConcurrency": 1,
+    "factoryEnabled": false,
+    "harnessRefinements": false,
+    "crossTaskLearning": false
+  },
+  "prior": {
+    "charged": 463,
+    "confirmed": 456,
+    "unknown": 7,
+    "evidence": "docs/testing/prime-rlm-arc-results.json",
+    "evidenceSha256": "8137f1224b211622ec941cabf49375b6f9bf5817750728b2e0b1a792a3abcd57",
+    "rawLedgerCurrentlyAvailable": false,
+    "policy": "Historical aggregate is retained, not reconstructed into invented individual request identities. New ledger records only added calls; cumulative counters add this verified prefix."
+  },
+  "tasks": [
+    {
+      "rowId": 715070021,
+      "window": 70016,
+      "records": 438,
+      "kind": "Q02",
+      "primaryMetric": "complete-schema per-record label accuracy",
+      "order": [
+        "S0",
+        "S"
+      ]
+    },
+    {
+      "rowId": 715070046,
+      "window": 70017,
+      "records": 438,
+      "kind": "Q03",
+      "primaryMetric": "complete-schema user-pair set F1",
+      "order": [
+        "S",
+        "S0"
+      ]
+    }
+  ],
+  "dataset": {
+    "repo": "oolongbench/oolong-synth",
+    "revision": "81d2f8d9349f6ff329d695f9be494051e9f05cb9",
+    "customQuery": true,
+    "paperExactReproduction": false
+  },
+  "fairness": "Within each task, identical input bytes/task/output schema/tools/budgets/runtime/model. Only original native maxDepth changes; native capability and child-system scaffolding differences are retained and disclosed. No forced decomposition or host-supplied answer.",
+  "stopRule": "Each of four conditions once. No failed-condition replay, new task selection, optional stopping on a favorable answer, paid fallback, or extra credits. If S has no actual child model call, it is capability-enabled evidence only, not observed recursive-effect evidence."
+}

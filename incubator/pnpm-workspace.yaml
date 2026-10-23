@@ -1,3 +1,4 @@
 packages:
   - native-collaboration
   - native-resident
+  - rlm

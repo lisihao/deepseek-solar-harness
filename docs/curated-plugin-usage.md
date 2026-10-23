@@ -84,7 +84,9 @@ The latest real Web attempt, made with the earlier installed `2c338f9` artifact,
 
 ## Solar Prime RLM
 
-The installed RLM package is `@lisihao/dsh-solar-rlm@0.1.0-dev.0`, packed from source commit `6a47ed6` (PR #280). It wraps Prime Agent's original daemon, persistent Python kernel, recursive children, messaging, Factory, and Continual Harness behind the native ACP interface. Later source changes are not implied by the installed artifact.
+The curated RLM archive is `@lisihao/dsh-solar-rlm@0.1.0-dev.0`, packed from source commit `6a47ed6` (PR #280). The following legacy page/tool instructions apply to that exact archive. It wraps Prime Agent's original daemon, persistent Python kernel, recursive children, messaging, Factory, and Continual Harness behind the native ACP interface. Later source changes are not implied by the installed artifact.
+
+A separately installed, newer local candidate is source `817d6a998ed4b0c7d120590404efe146d71bd6b5`, archive SHA-256 `320e0e74a8dac4161e1f5cd238dc22d636f207ba9d6b0fc8902f0e0fd5cb87c4`. It adds the synchronous ordinary-conversation `solar_rlm` operator, removes the standalone conversation page and uses Settings → **RLM 算子**. Its local scripted/native and GUI acceptance is recorded; installed real-provider acceptance remains unrun. It is frozen for [closeout and Argon/Opus research review](testing/prime-rlm-closeout.md). The curated installer still selects the older archive; this documentation does not update that catalog or its public bytes. Version `0.1.0-dev.0` alone cannot identify which behavior is installed. Starting `solar_rlm` also uses the calling provider's quota and needs an explicit task and limits.
 
 The main conversation tools are:
 

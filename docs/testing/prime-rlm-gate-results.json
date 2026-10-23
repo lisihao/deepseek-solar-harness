@@ -1,0 +1,358 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-gate-sanitized-results-v1",
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "executionSourceHead": "78f4f9b954653a628a91ea56a1244b9184c345e7",
+  "model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "configuredMaxTokens": 16384,
+    "backendOutputCapEnforced": false
+  },
+  "reference": {
+    "primeCommit": "7cbffa77b38facd7c87277fa3c82bcadbe816880",
+    "primeModified": false,
+    "factoryEnabled": false,
+    "refinementsEnabled": false,
+    "nativeGateMaxRetries": 32,
+    "nativeMaxContinuations": 32,
+    "nativeMaxTurns": 32,
+    "nativeMaxTokens": 4000000,
+    "nativeWallTimeMs": 1200000,
+    "nativeDepth": {
+      "R32": 1,
+      "S32": 1,
+      "S0_32": 0
+    },
+    "wholeTreeRequestCaps": {
+      "D1": 1,
+      "R32": 32,
+      "S32": 32,
+      "S0_32": 32
+    }
+  },
+  "task": {
+    "id": "oolong-trec-32k-15000243",
+    "records": 787,
+    "distinctProblems": 1,
+    "dataset": "oolongbench/oolong-synth",
+    "datasetRevision": "616cca899e8b51ea0ad5446ebab39aa72b3192bc",
+    "contextSha256": "64e3a042daf4bf66fbbb8b59d0a008179d5d4ce4a1554d7bcc11eba7f2204150",
+    "questionSha256": "d0dcc7bc53389f17e75cc9f12b246966f3524f19a0809a3c2806d6316032560f",
+    "scorerSourceCommit": "0bb7eabe839218fee7fe8d007f41cfcf2fd3ae24c",
+    "scorerSha256": "247583a3b653b91c39fb88a102460802f1493175b23d05a7217aead0d685c64c",
+    "scoreIsAccuracyPercentage": false,
+    "allScoresIndependentlyRecomputed": true
+  },
+  "phases": [
+    {
+      "id": "four-condition",
+      "preparedFingerprint": "19e815b2e034a6305a9ef1a16775dd77345273bdcec2e90a7f4bdf922c9df795",
+      "conditions": [
+        {
+          "id": "D1",
+          "status": "completed",
+          "score": 0.5625,
+          "scoreRole": "main",
+          "exact": false,
+          "executionCompleted": true,
+          "answerPresent": true,
+          "physicalCleanupIndependentlyConfirmed": true,
+          "rootRequests": 1,
+          "childRequests": 0,
+          "recursionObserved": false,
+          "resources": {
+            "modelRequests": 1,
+            "physicalModelRequests": 1,
+            "confirmedModelRequests": 1,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 1,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 202,
+              "outputTokens": 15345,
+              "totalTokens": 38843
+            },
+            "elapsedMs": 404096
+          }
+        },
+        {
+          "id": "R32",
+          "status": "incomplete",
+          "score": null,
+          "scoreRole": "unscored",
+          "exact": null,
+          "executionCompleted": true,
+          "answerPresent": false,
+          "physicalCleanupIndependentlyConfirmed": true,
+          "rootRequests": 7,
+          "childRequests": 25,
+          "recursionObserved": true,
+          "resources": {
+            "modelRequests": 32,
+            "physicalModelRequests": 32,
+            "confirmedModelRequests": 32,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 32,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 98717,
+              "outputTokens": 9050,
+              "totalTokens": 756471
+            },
+            "elapsedMs": 394869
+          }
+        },
+        {
+          "id": "S32",
+          "status": "completed",
+          "score": 0.75,
+          "scoreRole": "main",
+          "exact": false,
+          "executionCompleted": true,
+          "answerPresent": true,
+          "physicalCleanupIndependentlyConfirmed": true,
+          "rootRequests": 11,
+          "childRequests": 11,
+          "recursionObserved": true,
+          "resources": {
+            "modelRequests": 22,
+            "physicalModelRequests": 22,
+            "confirmedModelRequests": 22,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 22,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 108012,
+              "outputTokens": 11769,
+              "totalTokens": 647141
+            },
+            "elapsedMs": 433303
+          }
+        },
+        {
+          "id": "S0_32",
+          "status": "completed",
+          "score": 0.75,
+          "scoreRole": "main",
+          "exact": false,
+          "executionCompleted": true,
+          "answerPresent": true,
+          "physicalCleanupIndependentlyConfirmed": true,
+          "rootRequests": 12,
+          "childRequests": 0,
+          "recursionObserved": false,
+          "resources": {
+            "modelRequests": 12,
+            "physicalModelRequests": 12,
+            "confirmedModelRequests": 12,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 12,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 49378,
+              "outputTokens": 8322,
+              "totalTokens": 431332
+            },
+            "elapsedMs": 267966
+          }
+        }
+      ],
+      "accounting": {
+        "new": {
+          "admitted": 67,
+          "confirmed": 67,
+          "unknown": 0,
+          "physicalAdmitted": 67
+        },
+        "cumulative": {
+          "admitted": 743,
+          "confirmed": 729,
+          "unknown": 14,
+          "cap": 800,
+          "withinCap": true
+        },
+        "stopped": false
+      },
+      "allResourcesClosed": true,
+      "independentVerification": "passed",
+      "receiptSha256": "62a75b574b6785c9a3ad2901f357d0dfbfbdabebf615461284652506874d8617",
+      "independentVerificationSha256": "dbabb4aec2f2d3820c99b4a46142c03f8ce6f67cf3f5a023ba1fa82943fc12d0"
+    },
+    {
+      "id": "bare-recursive-repeat",
+      "preparedFingerprint": "6bf44eb2872228a61119149dbd75c5ef552c82551bb3c973e91badac9381eb13",
+      "conditions": [
+        {
+          "id": "D1",
+          "status": "completed",
+          "score": 0.177978515625,
+          "scoreRole": "main",
+          "exact": false,
+          "executionCompleted": true,
+          "answerPresent": true,
+          "physicalCleanupIndependentlyConfirmed": true,
+          "rootRequests": 1,
+          "childRequests": 0,
+          "recursionObserved": false,
+          "resources": {
+            "modelRequests": 1,
+            "physicalModelRequests": 1,
+            "confirmedModelRequests": 1,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 1,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 23498,
+              "outputTokens": 8678,
+              "totalTokens": 32176
+            },
+            "elapsedMs": 244240
+          }
+        },
+        {
+          "id": "S32",
+          "status": "completed",
+          "score": 0.75,
+          "scoreRole": "main",
+          "exact": false,
+          "executionCompleted": true,
+          "answerPresent": true,
+          "physicalCleanupIndependentlyConfirmed": true,
+          "rootRequests": 13,
+          "childRequests": 12,
+          "recursionObserved": true,
+          "resources": {
+            "modelRequests": 25,
+            "physicalModelRequests": 25,
+            "confirmedModelRequests": 25,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 25,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 105619,
+              "outputTokens": 12976,
+              "totalTokens": 663107
+            },
+            "elapsedMs": 490128
+          }
+        }
+      ],
+      "accounting": {
+        "new": {
+          "admitted": 26,
+          "confirmed": 26,
+          "unknown": 0,
+          "physicalAdmitted": 26
+        },
+        "cumulative": {
+          "admitted": 769,
+          "confirmed": 755,
+          "unknown": 14,
+          "cap": 800,
+          "withinCap": true
+        },
+        "stopped": false
+      },
+      "allResourcesClosed": true,
+      "independentVerification": "passed",
+      "receiptSha256": "123f0fbc67986686cf2b74a4c5d2c43b9014989d5c0a69dfa06e36d866838ecd",
+      "independentVerificationSha256": "072116f8c98af610483158dd3abe8c4f7f37242edaac291c212032379d8655d3"
+    }
+  ],
+  "contrasts": {
+    "mainSMinusD": 0.1875,
+    "repeatSMinusD": 0.572021484375,
+    "mainSMinusS0": 0,
+    "repeatS0OrOriginalPrimeRun": false,
+    "olderSameTaskBareScore": 0.75
+  },
+  "accounting": {
+    "prior": {
+      "admitted": 676,
+      "confirmed": 662,
+      "unknown": 14
+    },
+    "new": {
+      "admitted": 93,
+      "physical": 93,
+      "confirmed": 93,
+      "unknown": 0
+    },
+    "cumulative": {
+      "admitted": 769,
+      "confirmed": 755,
+      "unknown": 14,
+      "inflight": 0
+    },
+    "currentHumanCap": 800,
+    "remaining": 31,
+    "unknownsRefunded": false,
+    "paidApiFallback": false,
+    "creditPurchased": false
+  },
+  "initialOriginalPluginEnvelope": {
+    "equalAfterOwnedPathAndIdNormalization": true,
+    "normalizedSha256": "5f7d85d16ce50f10867c9842e6ffa0fd2e08db267c8dc88840a8af61a4863787",
+    "scope": "first request options only",
+    "normalizations": [
+      "exact owned run-directory prefix",
+      "conversation-log path line",
+      "top-level sessionId",
+      "message ids"
+    ],
+    "semanticContentAndDatesPreserved": true
+  },
+  "mainRecursiveContribution": {
+    "actualChildren": 2,
+    "childRecordCounts": [
+      394,
+      393
+    ],
+    "aggregateUniqueRecords": 787,
+    "childFilesEqualAggregateByRecordAndIdSequence": true,
+    "rootReadChildFilesAndWroteAnswer": true,
+    "explicitCollectApiObserved": false,
+    "mechanism": "native spawn; child output files read and aggregated by root",
+    "allPerRecordLabelsProvenCorrect": false
+  },
+  "mainOriginalPrimeFailure": {
+    "nativeWorkerCompleted": true,
+    "taskCompleted": false,
+    "answerPresent": false,
+    "nativeContinuationsUsed": 0,
+    "actualProviderRequests": 32,
+    "lastVisibleAssistantStop": "ARC_REQUEST_LIMIT",
+    "nextBridgeAttemptsDeniedBeforeProvider": 3,
+    "gateFailureProven": false
+  },
+  "interpretation": {
+    "observedWholePluginGainOverMatchedBare": true,
+    "scope": "two exploratory epochs of one reused original question",
+    "causalRecursionBenefitEstablished": false,
+    "equalComputeComparison": false,
+    "generalReasoningImprovementEstablished": false,
+    "originalPaperReproduction": false,
+    "heldOutConfirmation": false,
+    "continualHarnessQualityBenefitTested": false,
+    "olderAdverseAndUnknownOutcomesRetained": true,
+    "rawReferenceAnswersLabelsAndPrivatePayloadsPublished": false
+  },
+  "evidence": {
+    "compiledHash": "942dde4e66387664619410ce9a141f297459d2d99589942674a1d4be33e172d4",
+    "runtimeManifestSha256": "b6e34a977b4eb782b9a6e2c12436ad911adf30b511bd3df73214b55f829107f9",
+    "nativeProofSha256": "0b40ba8dfe59e6fd1fea32bb38cd0dc5769d21e3de0fc0e932f441127dc02cfb",
+    "originalFailureDiagnosisSha256": "eba6a6beb251eddb13c1661c132fc38ada5802eac96913c72cdfd1c6f332c199",
+    "recursiveContributionSha256": "5b8691247aabe3fb5d3af602409b90842bc590ce48a862b55cec954be1c9efb2",
+    "repeatProcessSocketClosureSha256": "48b7da6094c2247f21a56fd71b8ece58ea35a88ee5e167aac006d1343d4a4e7e",
+    "nativeProofReexecutedForRepeat": false
+  },
+  "delivery": {
+    "installedSourceHead": "6a47ed6afdc8e433f8748172322f93c8a56eb074",
+    "evaluationRepairsInstalled": false,
+    "merged": false,
+    "released": false
+  }
+}

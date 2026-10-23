@@ -1,0 +1,269 @@
+{
+  "formatVersion": 1,
+  "platform": "darwin",
+  "arch": "arm64",
+  "primeCommit": "7cbffa77b38facd7c87277fa3c82bcadbe816880",
+  "archiveSha256": "ffa9ef5854d625ee7f22dca0876867a78b886d1b249102f491e9a9ab56c1983d",
+  "binarySha256": "6e2780ce477b52e23f24afcc24fc332026aa628fa9cd9a7a25659b997e61cca0",
+  "pythonVersion": "3.12.13",
+  "criticalFiles": {
+    "locks/Cargo.lock": "0f7aac1050f46761660f3777f4d583af55bb9a16d4a1e2577c0cd95e45a6d791",
+    "locks/dependency-manifest.txt": "5fdeddaa0f95152719cba4775143d9a9f8ba2e30390284db0f733dbec66feac8",
+    "locks/installed-wheel-manifest.tsv": "622df55ec06f2f7c984b3be58f62f42904e4b3de9887615455c903417708c1da",
+    "locks/payload-manifest.json": "9bb89cf4724f4818f0951318e8519b24637c8937e13fa7150f2d73c259186759",
+    "locks/requirements.lock": "8c0169c257e3b53a8a44601ce665316071f86e9793f9034ad91d6a7f499a1859",
+    "locks/requirements.third-party.lock": "a7c8ef7ef10f84cca2a788601b4e5f444448812a9ad855af2bd4e891904fa2c7",
+    "locks/runtime-lock-requirements.txt": "a7c8ef7ef10f84cca2a788601b4e5f444448812a9ad855af2bd4e891904fa2c7",
+    "locks/uv.lock": "0fbf05cb67112b4ed4d68097aa14ce5571ed65faeb6af85919b82b21f93b68fa",
+    "prime/LICENSE": "e0d1bf8d137e6d56e98ee968402b0b7f324c5c85ea505e4fd7b6b78615bc4e7a",
+    "prime/package.json": "ce3672d8d03da53b7c8a704a9c4af9698e6e2e7c5c227f78a643fe5187cd4156",
+    "prime/prime-agent": "6e2780ce477b52e23f24afcc24fc332026aa628fa9cd9a7a25659b997e61cca0",
+    "prime/prime-agent-runtime/pyproject.toml": "407c81e6a31f5c105d2a1f0833f5eb5b3f9320a12f336fe433d3b0c4a4e023c2",
+    "prime/prime-agent-runtime/src/rlm/__init__.py": "e2cee24a210d1c4b3ec205849dbfd0fd6f9fd95d2a5052fa8cfe2c78578aca5e",
+    "prime/prime-agent-runtime/src/rlm/_winjob.py": "11243f5c7ba6527e70ed1f20a0e875a374b9013aca6fc4c70bcdb4653ea11296",
+    "prime/prime-agent-runtime/src/rlm/bash.py": "68a1ffad99a35e5cdda150e620250a2ec0b40aa93788cfd63a8f639415b5cc27",
+    "prime/prime-agent-runtime/src/rlm/factory.py": "917b90599f4ad99a3232a1f9c632fa49a8aefb4a097f903c5656fc9d2e17eba2",
+    "prime/prime-agent-runtime/src/rlm/harness.py": "d2e25c765cc49344601e7410606b3c7ebc4f82f7caba801e4dfa9b063c22dc75",
+    "prime/prime-agent-runtime/src/rlm/machines/builder/MACHINE.md": "5e4e50a75c43f7c3fb45884bfbbf05e3f14c5b64c5bc19512c0a575ba567284b",
+    "prime/prime-agent-runtime/src/rlm/machines/pr-manager/MACHINE.md": "38edef2c27fdce744dbf34726418120e03043c5af4125a72a12c692d53d90a20",
+    "prime/prime-agent-runtime/src/rlm/machines/review-sweep/MACHINE.md": "6fbeb3486ae0cd5c31fb6f4178be33dba8724034ec22d5cdbdf4b53033e6d7d2",
+    "prime/prime-agent-runtime/src/rlm/mcp_base.py": "0f1e5b1d66806bf4af12b1ef81f13453d5e9413846d3e5b4bb254f0c40aec4cb",
+    "prime/prime-agent-runtime/src/rlm/mcp.py": "43cc5437558b1d48669096e17d2d9f1a7b58688dd21ef24c3fa4d9551ba24aa2",
+    "prime/prime-agent-runtime/src/rlm/repl.md": "8588a9fe75d78ed961c787f6e6a67e1f6c7274bf9043ff71a49293926ffe9507",
+    "prime/prime-agent-runtime/src/rlm/repl.py": "5b97d430d4e6e4bde9c7c68c621cce0d2ce52ce641a37e432540d194eda2d786",
+    "prime/prime-agent-runtime/src/rlm/skill.py": "23f1ecba340b24a4e75880437f33fa72fbd510a2da496a87a9d033fc66b92a7a",
+    "prime/README.md": "c2e9df23878a90beaf3b523e30cf638243533cf6085cc16e61c51cd3d4536448",
+    "prime/skills/agent-message/pyproject.toml": "73bb902d87f2832814fab367c73f29a7c50210da2d790a76ac0c44cbe47dc7fa",
+    "prime/skills/agent-message/SKILL.md": "5547aa6b0c2371edbe7fe4566e4942a663ef86d497254ef42a8ad24953aab3f0",
+    "prime/skills/agent-message/src/agent_message/__init__.py": "0aa2d84fbf0a2e96b302f91c971d6c53050342a53500b969ab2066709ec953f9",
+    "prime/skills/agent-observe/pyproject.toml": "91b8bacb768158a1fb7776faa01d53f4a82328c8980458d861543c558ad4eb46",
+    "prime/skills/agent-observe/SKILL.md": "42ffc73ce1241e21399d50904d954162da5860ffa8c4602b53f2a56d080a20e8",
+    "prime/skills/agent-observe/src/agent_observe/__init__.py": "ff2b9ca45340c7435cae04c0dc67ac13c467c7ff3ea2fab65bec21bc2b9760b3",
+    "prime/skills/attach-image/pyproject.toml": "0c9449d8bbce4b5be2a245b16eec8bad7e1fd5c12c5fcaa444eac14f5caa6fb4",
+    "prime/skills/attach-image/SKILL.md": "0939d6ecbfc71089f7802a9d8902298a3f88c34b2d11140ea553fcfa82812d8a",
+    "prime/skills/attach-image/src/attach_image/__init__.py": "dfdd880227666f043b3d96b7c4e5ab48c3a34f82de0f8c783bcfa7b49c382e9e",
+    "prime/skills/attach-image/src/attach_image/attach_image.py": "89c69f84d4035ece79da569f6b592129016a866f316e1c56ce05e2fb4673cfc4",
+    "prime/skills/compact/pyproject.toml": "1d2c7e380700da31e0a1fd6dda95584aae90bb099f6c728a3506875102174f71",
+    "prime/skills/compact/SKILL.md": "25697c118cbc43364b072c0edde49cee995f6fe94e1f9ff72eaa81e8479eed25",
+    "prime/skills/compact/src/compact/__init__.py": "126ee36620089cb9a9cf16e88b9bf36c41b5feeb3e70a15bd9bd67d041c3e0dc",
+    "prime/skills/edit/pyproject.toml": "fcca6dcb584499a3b54b29c11da5e9bb3372e13b3779b25f2dd6f98a45668f90",
+    "prime/skills/edit/SKILL.md": "5e687f0d6fc45a48b5ffa7285e342e07b2595c00481c8dcd028c3a8932f67d90",
+    "prime/skills/edit/src/edit/__init__.py": "b1986c8c72198395656b6b2028bf3b51d798dab7eb0d923e2ce781c00186498f",
+    "prime/skills/factory/SKILL.md": "98a29ad0261c1f11e14cbe2dc184476c23fd1682b008dd9f63175dbd7ec5082b",
+    "prime/skills/goal/pyproject.toml": "49f32e237c446dcf03d5c10def022b0a7bb534fb2311ac3d7f4b316db9c1cf52",
+    "prime/skills/goal/SKILL.md": "da1694a20929517b59485e61e95ffcd292d67b30826155ba8a8831f9afd4dbf1",
+    "prime/skills/goal/src/goal/__init__.py": "a96fcee0bbba5b232b40bcb6b7cf679747bc91d5baa739b956237ee75036608d",
+    "prime/skills/mcp/SKILL.md": "930f99ad79037b9b2080e9a737180470505c855799667b1d26ae4ded0615fb5a",
+    "prime/skills/prime-intellect/references/compute.md": "dcf5fdffc716b87cbb54a4a682901fdc8a95145cec2889941e68246ce824f347",
+    "prime/skills/prime-intellect/references/environments.md": "35cd70f12b2e53030481f07bf41fe9b603170e5360ece4d146ca97ff2ceb5cad",
+    "prime/skills/prime-intellect/references/inference.md": "7f981c9829dad63277689f98299b44913155f463bbeb1990615c8b274bae63e5",
+    "prime/skills/prime-intellect/references/sandboxes.md": "0ae3ecc12b2853c8284d7eb755b1f668842c3cb436e8a5e37da754dbed075f33",
+    "prime/skills/prime-intellect/SKILL.md": "331d5ea7bed3d8d8132d36f9c053c4a45e23062adc0ce025aef57848cac9c5ca",
+    "prime/skills/refine/pyproject.toml": "f482f85516873881b63743e23db6bd8a966ed7c5a2137bff7537675b6ebfb8b8",
+    "prime/skills/refine/SKILL.md": "048b0e5a3df1d8d5b17ad2650d08956fd2fd92bf60f9d2d02430a87aca2e6173",
+    "prime/skills/refine/src/refine/__init__.py": "00737a6e2d3951dff6df6f4eb02578beccfe81caccbc09cfeb1f1ac6bb618844",
+    "prime/skills/rlm-heartbeat/pyproject.toml": "e9e04a90898739767f8b9cb83a72bd18fdad318c9b179f76fdbb6b7b1f64abbd",
+    "prime/skills/rlm-heartbeat/SKILL.md": "021daa60f9e9a89d682eee8257703d8b34355d1e0d05124860e37db3e3117565",
+    "prime/skills/rlm-heartbeat/src/rlm_heartbeat/__init__.py": "81b3121c4f6dd227a5e093b1b5372d72f01eb1b174c4aafcff04c9f2118155db",
+    "prime/skills/skill-creator/references/python-skills.md": "c632b20d3ec8a1f2e39455a555d6d226f7184b4b7ddcf6228b04eb2b395daef7",
+    "prime/skills/skill-creator/SKILL.md": "1d40998c697f2ecf46c76029c16a07f775c27d4875bb69a05ac4c4f089f680a3",
+    "prime/skills/websearch/pyproject.toml": "dfc40160b1d4ae3043fd41321ca981770eca628474c360c5fe913f7b4cb568fc",
+    "prime/skills/websearch/SKILL.md": "bed4f728a68cd15de9190c98a82848a900f8b0cbb364147c75b7ce8986fad9c0",
+    "prime/skills/websearch/src/websearch/__init__.py": "fea6738c4a8d7d36c6bd7e5945ee019cdb5b0d0bc62bdd1c581a326f72bfda37",
+    "prime/skills/websearch/src/websearch/websearch.py": "f1daef7db7d1946e5745c745003c00c01a6620555634176950086a3c3377baa0",
+    "python/bin/python3": "eb9d74b9c7cfdfb2c9b91614edb2c3607360ba46c5aa7fc4557b3a4a23e97cff",
+    "python/lib/python3.12/site-packages/agent_message/__init__.py": "0aa2d84fbf0a2e96b302f91c971d6c53050342a53500b969ab2066709ec953f9",
+    "python/lib/python3.12/site-packages/agent_observe/__init__.py": "ff2b9ca45340c7435cae04c0dc67ac13c467c7ff3ea2fab65bec21bc2b9760b3",
+    "python/lib/python3.12/site-packages/attach_image/__init__.py": "dfdd880227666f043b3d96b7c4e5ab48c3a34f82de0f8c783bcfa7b49c382e9e",
+    "python/lib/python3.12/site-packages/attach_image/attach_image.py": "89c69f84d4035ece79da569f6b592129016a866f316e1c56ce05e2fb4673cfc4",
+    "python/lib/python3.12/site-packages/compact/__init__.py": "126ee36620089cb9a9cf16e88b9bf36c41b5feeb3e70a15bd9bd67d041c3e0dc",
+    "python/lib/python3.12/site-packages/edit/__init__.py": "b1986c8c72198395656b6b2028bf3b51d798dab7eb0d923e2ce781c00186498f",
+    "python/lib/python3.12/site-packages/goal/__init__.py": "a96fcee0bbba5b232b40bcb6b7cf679747bc91d5baa739b956237ee75036608d",
+    "python/lib/python3.12/site-packages/refine/__init__.py": "00737a6e2d3951dff6df6f4eb02578beccfe81caccbc09cfeb1f1ac6bb618844",
+    "python/lib/python3.12/site-packages/rlm_heartbeat/__init__.py": "81b3121c4f6dd227a5e093b1b5372d72f01eb1b174c4aafcff04c9f2118155db",
+    "python/lib/python3.12/site-packages/rlm/__init__.py": "e2cee24a210d1c4b3ec205849dbfd0fd6f9fd95d2a5052fa8cfe2c78578aca5e",
+    "python/lib/python3.12/site-packages/rlm/_winjob.py": "11243f5c7ba6527e70ed1f20a0e875a374b9013aca6fc4c70bcdb4653ea11296",
+    "python/lib/python3.12/site-packages/rlm/bash.py": "68a1ffad99a35e5cdda150e620250a2ec0b40aa93788cfd63a8f639415b5cc27",
+    "python/lib/python3.12/site-packages/rlm/factory.py": "917b90599f4ad99a3232a1f9c632fa49a8aefb4a097f903c5656fc9d2e17eba2",
+    "python/lib/python3.12/site-packages/rlm/harness.py": "d2e25c765cc49344601e7410606b3c7ebc4f82f7caba801e4dfa9b063c22dc75",
+    "python/lib/python3.12/site-packages/rlm/machines/builder/MACHINE.md": "5e4e50a75c43f7c3fb45884bfbbf05e3f14c5b64c5bc19512c0a575ba567284b",
+    "python/lib/python3.12/site-packages/rlm/machines/pr-manager/MACHINE.md": "38edef2c27fdce744dbf34726418120e03043c5af4125a72a12c692d53d90a20",
+    "python/lib/python3.12/site-packages/rlm/machines/review-sweep/MACHINE.md": "6fbeb3486ae0cd5c31fb6f4178be33dba8724034ec22d5cdbdf4b53033e6d7d2",
+    "python/lib/python3.12/site-packages/rlm/mcp_base.py": "0f1e5b1d66806bf4af12b1ef81f13453d5e9413846d3e5b4bb254f0c40aec4cb",
+    "python/lib/python3.12/site-packages/rlm/mcp.py": "43cc5437558b1d48669096e17d2d9f1a7b58688dd21ef24c3fa4d9551ba24aa2",
+    "python/lib/python3.12/site-packages/rlm/repl.md": "8588a9fe75d78ed961c787f6e6a67e1f6c7274bf9043ff71a49293926ffe9507",
+    "python/lib/python3.12/site-packages/rlm/repl.py": "5b97d430d4e6e4bde9c7c68c621cce0d2ce52ce641a37e432540d194eda2d786",
+    "python/lib/python3.12/site-packages/rlm/skill.py": "23f1ecba340b24a4e75880437f33fa72fbd510a2da496a87a9d033fc66b92a7a",
+    "python/lib/python3.12/site-packages/websearch/__init__.py": "fea6738c4a8d7d36c6bd7e5945ee019cdb5b0d0bc62bdd1c581a326f72bfda37",
+    "python/lib/python3.12/site-packages/websearch/websearch.py": "f1daef7db7d1946e5745c745003c00c01a6620555634176950086a3c3377baa0"
+  },
+  "sourceEvidence": {
+    "cargoLock": {
+      "path": "locks/Cargo.lock",
+      "sha256": "0f7aac1050f46761660f3777f4d583af55bb9a16d4a1e2577c0cd95e45a6d791"
+    },
+    "runtimeLockRequirements": {
+      "sourcePath": "runtime-lock/requirements.txt",
+      "payloadPath": "locks/requirements.third-party.lock",
+      "sha256": "a7c8ef7ef10f84cca2a788601b4e5f444448812a9ad855af2bd4e891904fa2c7"
+    },
+    "loadedSources": {
+      "sitePackagesPath": "python/lib/python3.12/site-packages",
+      "files": [
+        {
+          "sourcePath": "skills/agent-message/src/agent_message/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/agent_message/__init__.py",
+          "sourceSha256": "0aa2d84fbf0a2e96b302f91c971d6c53050342a53500b969ab2066709ec953f9",
+          "loadedSha256": "0aa2d84fbf0a2e96b302f91c971d6c53050342a53500b969ab2066709ec953f9"
+        },
+        {
+          "sourcePath": "skills/agent-observe/src/agent_observe/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/agent_observe/__init__.py",
+          "sourceSha256": "ff2b9ca45340c7435cae04c0dc67ac13c467c7ff3ea2fab65bec21bc2b9760b3",
+          "loadedSha256": "ff2b9ca45340c7435cae04c0dc67ac13c467c7ff3ea2fab65bec21bc2b9760b3"
+        },
+        {
+          "sourcePath": "skills/attach-image/src/attach_image/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/attach_image/__init__.py",
+          "sourceSha256": "dfdd880227666f043b3d96b7c4e5ab48c3a34f82de0f8c783bcfa7b49c382e9e",
+          "loadedSha256": "dfdd880227666f043b3d96b7c4e5ab48c3a34f82de0f8c783bcfa7b49c382e9e"
+        },
+        {
+          "sourcePath": "skills/attach-image/src/attach_image/attach_image.py",
+          "loadedPath": "python/lib/python3.12/site-packages/attach_image/attach_image.py",
+          "sourceSha256": "89c69f84d4035ece79da569f6b592129016a866f316e1c56ce05e2fb4673cfc4",
+          "loadedSha256": "89c69f84d4035ece79da569f6b592129016a866f316e1c56ce05e2fb4673cfc4"
+        },
+        {
+          "sourcePath": "skills/compact/src/compact/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/compact/__init__.py",
+          "sourceSha256": "126ee36620089cb9a9cf16e88b9bf36c41b5feeb3e70a15bd9bd67d041c3e0dc",
+          "loadedSha256": "126ee36620089cb9a9cf16e88b9bf36c41b5feeb3e70a15bd9bd67d041c3e0dc"
+        },
+        {
+          "sourcePath": "skills/edit/src/edit/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/edit/__init__.py",
+          "sourceSha256": "b1986c8c72198395656b6b2028bf3b51d798dab7eb0d923e2ce781c00186498f",
+          "loadedSha256": "b1986c8c72198395656b6b2028bf3b51d798dab7eb0d923e2ce781c00186498f"
+        },
+        {
+          "sourcePath": "skills/goal/src/goal/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/goal/__init__.py",
+          "sourceSha256": "a96fcee0bbba5b232b40bcb6b7cf679747bc91d5baa739b956237ee75036608d",
+          "loadedSha256": "a96fcee0bbba5b232b40bcb6b7cf679747bc91d5baa739b956237ee75036608d"
+        },
+        {
+          "sourcePath": "skills/refine/src/refine/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/refine/__init__.py",
+          "sourceSha256": "00737a6e2d3951dff6df6f4eb02578beccfe81caccbc09cfeb1f1ac6bb618844",
+          "loadedSha256": "00737a6e2d3951dff6df6f4eb02578beccfe81caccbc09cfeb1f1ac6bb618844"
+        },
+        {
+          "sourcePath": "skills/rlm-heartbeat/src/rlm_heartbeat/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm_heartbeat/__init__.py",
+          "sourceSha256": "81b3121c4f6dd227a5e093b1b5372d72f01eb1b174c4aafcff04c9f2118155db",
+          "loadedSha256": "81b3121c4f6dd227a5e093b1b5372d72f01eb1b174c4aafcff04c9f2118155db"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/__init__.py",
+          "sourceSha256": "e2cee24a210d1c4b3ec205849dbfd0fd6f9fd95d2a5052fa8cfe2c78578aca5e",
+          "loadedSha256": "e2cee24a210d1c4b3ec205849dbfd0fd6f9fd95d2a5052fa8cfe2c78578aca5e"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/_winjob.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/_winjob.py",
+          "sourceSha256": "11243f5c7ba6527e70ed1f20a0e875a374b9013aca6fc4c70bcdb4653ea11296",
+          "loadedSha256": "11243f5c7ba6527e70ed1f20a0e875a374b9013aca6fc4c70bcdb4653ea11296"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/bash.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/bash.py",
+          "sourceSha256": "68a1ffad99a35e5cdda150e620250a2ec0b40aa93788cfd63a8f639415b5cc27",
+          "loadedSha256": "68a1ffad99a35e5cdda150e620250a2ec0b40aa93788cfd63a8f639415b5cc27"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/factory.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/factory.py",
+          "sourceSha256": "917b90599f4ad99a3232a1f9c632fa49a8aefb4a097f903c5656fc9d2e17eba2",
+          "loadedSha256": "917b90599f4ad99a3232a1f9c632fa49a8aefb4a097f903c5656fc9d2e17eba2"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/harness.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/harness.py",
+          "sourceSha256": "d2e25c765cc49344601e7410606b3c7ebc4f82f7caba801e4dfa9b063c22dc75",
+          "loadedSha256": "d2e25c765cc49344601e7410606b3c7ebc4f82f7caba801e4dfa9b063c22dc75"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/machines/builder/MACHINE.md",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/machines/builder/MACHINE.md",
+          "sourceSha256": "5e4e50a75c43f7c3fb45884bfbbf05e3f14c5b64c5bc19512c0a575ba567284b",
+          "loadedSha256": "5e4e50a75c43f7c3fb45884bfbbf05e3f14c5b64c5bc19512c0a575ba567284b"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/machines/pr-manager/MACHINE.md",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/machines/pr-manager/MACHINE.md",
+          "sourceSha256": "38edef2c27fdce744dbf34726418120e03043c5af4125a72a12c692d53d90a20",
+          "loadedSha256": "38edef2c27fdce744dbf34726418120e03043c5af4125a72a12c692d53d90a20"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/machines/review-sweep/MACHINE.md",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/machines/review-sweep/MACHINE.md",
+          "sourceSha256": "6fbeb3486ae0cd5c31fb6f4178be33dba8724034ec22d5cdbdf4b53033e6d7d2",
+          "loadedSha256": "6fbeb3486ae0cd5c31fb6f4178be33dba8724034ec22d5cdbdf4b53033e6d7d2"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/mcp_base.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/mcp_base.py",
+          "sourceSha256": "0f1e5b1d66806bf4af12b1ef81f13453d5e9413846d3e5b4bb254f0c40aec4cb",
+          "loadedSha256": "0f1e5b1d66806bf4af12b1ef81f13453d5e9413846d3e5b4bb254f0c40aec4cb"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/mcp.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/mcp.py",
+          "sourceSha256": "43cc5437558b1d48669096e17d2d9f1a7b58688dd21ef24c3fa4d9551ba24aa2",
+          "loadedSha256": "43cc5437558b1d48669096e17d2d9f1a7b58688dd21ef24c3fa4d9551ba24aa2"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/repl.md",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/repl.md",
+          "sourceSha256": "8588a9fe75d78ed961c787f6e6a67e1f6c7274bf9043ff71a49293926ffe9507",
+          "loadedSha256": "8588a9fe75d78ed961c787f6e6a67e1f6c7274bf9043ff71a49293926ffe9507"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/repl.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/repl.py",
+          "sourceSha256": "5b97d430d4e6e4bde9c7c68c621cce0d2ce52ce641a37e432540d194eda2d786",
+          "loadedSha256": "5b97d430d4e6e4bde9c7c68c621cce0d2ce52ce641a37e432540d194eda2d786"
+        },
+        {
+          "sourcePath": "prime-agent-runtime/src/rlm/skill.py",
+          "loadedPath": "python/lib/python3.12/site-packages/rlm/skill.py",
+          "sourceSha256": "23f1ecba340b24a4e75880437f33fa72fbd510a2da496a87a9d033fc66b92a7a",
+          "loadedSha256": "23f1ecba340b24a4e75880437f33fa72fbd510a2da496a87a9d033fc66b92a7a"
+        },
+        {
+          "sourcePath": "skills/websearch/src/websearch/__init__.py",
+          "loadedPath": "python/lib/python3.12/site-packages/websearch/__init__.py",
+          "sourceSha256": "fea6738c4a8d7d36c6bd7e5945ee019cdb5b0d0bc62bdd1c581a326f72bfda37",
+          "loadedSha256": "fea6738c4a8d7d36c6bd7e5945ee019cdb5b0d0bc62bdd1c581a326f72bfda37"
+        },
+        {
+          "sourcePath": "skills/websearch/src/websearch/websearch.py",
+          "loadedPath": "python/lib/python3.12/site-packages/websearch/websearch.py",
+          "sourceSha256": "f1daef7db7d1946e5745c745003c00c01a6620555634176950086a3c3377baa0",
+          "loadedSha256": "f1daef7db7d1946e5745c745003c00c01a6620555634176950086a3c3377baa0"
+        }
+      ]
+    },
+    "runtimeSourceRoot": "prime/prime-agent-runtime/src/rlm",
+    "skillsSourceRoot": "prime/skills",
+    "binaryExpectedSha256": "6e2780ce477b52e23f24afcc24fc332026aa628fa9cd9a7a25659b997e61cca0"
+  },
+  "packageLayout": {
+    "packageDir": "prime",
+    "binary": "prime/prime-agent",
+    "python": "python/bin/python3",
+    "lockCount": 8
+  }
+}

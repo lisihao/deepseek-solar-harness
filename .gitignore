@@ -15,3 +15,6 @@ tools/tsconfig.build.json
 
 # macOS metadata
 .DS_Store
+
+# Generated offline Prime runtime (included only in packed install artifacts)
+incubator/rlm/assets/

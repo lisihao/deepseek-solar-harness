@@ -1,0 +1,171 @@
+{
+  "formatVersion": 1,
+  "kind": "quality-three-arm-final-receipt-v1",
+  "completedAt": "2026-10-21T05:55:16.625Z",
+  "fingerprint": "21ea0460a55d431ebd61180ce240152c9377febd2be1f5bfdd51f163d0f8f7a9",
+  "providerLoaded": true,
+  "configuredRoute": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "maxTokens": 16384,
+    "configuredMaxOutputTokens": 16384
+  },
+  "nativeAcceptance": {
+    "sha256": "53ecde646618e4cf814d5db95e44236b4bf4531afcc5dc01862c7df74722cd26"
+  },
+  "results": [
+    {
+      "condition": {
+        "id": "D1",
+        "arm": "D",
+        "protocol": "bare-direct-v1",
+        "taskId": "oolong-trec-32k-15000243"
+      },
+      "status": "unknown",
+      "answer": {
+        "present": false,
+        "sha256": null,
+        "bytes": null,
+        "archive": null,
+        "encoding": "direct-text",
+        "error": "fetch failed"
+      },
+      "grading": {
+        "score": null,
+        "primaryScore": null,
+        "exact": null,
+        "parseConfidence": null,
+        "scorerSha256": null,
+        "schemaValid": false,
+        "errors": [
+          "bare assistant text is unavailable",
+          "official scorer returned an invalid result"
+        ]
+      },
+      "resources": {
+        "modelRequests": 1,
+        "physicalModelRequests": 1,
+        "confirmedModelRequests": 0,
+        "unknownModelRequests": 1,
+        "requestsWithKnownUsage": 0,
+        "requestsWithoutKnownUsage": 1,
+        "knownUsageTotals": {
+          "inputTokens": null,
+          "outputTokens": null,
+          "totalTokens": null
+        },
+        "elapsedMs": 10512
+      },
+      "observed": {
+        "childModelRequestCount": 0,
+        "rootModelRequestCount": 1,
+        "recursionObserved": false,
+        "noToolsExecuted": true,
+        "streamChunks": 2
+      },
+      "executionCompleted": false,
+      "cleanupComplete": false,
+      "notRunReason": null
+    },
+    {
+      "condition": {
+        "id": "R32",
+        "arm": "R",
+        "protocol": "quality-pilot-v1",
+        "taskId": "oolong-trec-32k-15000243"
+      },
+      "status": "not-run",
+      "answer": {
+        "present": false,
+        "sha256": null,
+        "bytes": null,
+        "archive": null,
+        "encoding": "json-string",
+        "error": null
+      },
+      "grading": {
+        "score": null,
+        "primaryScore": null,
+        "exact": null,
+        "parseConfidence": null,
+        "scorerSha256": null,
+        "schemaValid": false,
+        "errors": []
+      },
+      "resources": null,
+      "observed": {
+        "childModelRequestCount": 0,
+        "rootModelRequestCount": 0,
+        "recursionObserved": false
+      },
+      "executionCompleted": false,
+      "cleanupComplete": false,
+      "notRunReason": "D1 retained an unknown request"
+    },
+    {
+      "condition": {
+        "id": "S32",
+        "arm": "S",
+        "protocol": "quality-pilot-v1",
+        "taskId": "oolong-trec-32k-15000243"
+      },
+      "status": "not-run",
+      "answer": {
+        "present": false,
+        "sha256": null,
+        "bytes": null,
+        "archive": null,
+        "encoding": "json-string",
+        "error": null
+      },
+      "grading": {
+        "score": null,
+        "primaryScore": null,
+        "exact": null,
+        "parseConfidence": null,
+        "scorerSha256": null,
+        "schemaValid": false,
+        "errors": []
+      },
+      "resources": null,
+      "observed": {
+        "childModelRequestCount": 0,
+        "rootModelRequestCount": 0,
+        "recursionObserved": false
+      },
+      "executionCompleted": false,
+      "cleanupComplete": false,
+      "notRunReason": "D1 retained an unknown request"
+    }
+  ],
+  "accounting": {
+    "prefix": {
+      "admitted": 523,
+      "confirmed": 510,
+      "unknown": 13
+    },
+    "new": {
+      "admitted": 1,
+      "confirmed": 0,
+      "unknown": 1,
+      "physicalAdmitted": 1
+    },
+    "cumulative": {
+      "admitted": 524,
+      "confirmed": 510,
+      "unknown": 14,
+      "cap": 600,
+      "withinCap": true
+    },
+    "stopped": true
+  },
+  "closes": {
+    "provider": "closed",
+    "relay": "closed",
+    "networkProfile": "disposed",
+    "longReadProfile": "closed"
+  },
+  "stopReason": "D1 retained an unknown request",
+  "error": null
+}

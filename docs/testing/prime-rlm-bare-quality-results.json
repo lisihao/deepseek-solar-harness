@@ -1,0 +1,372 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-bare-quality-results-v1",
+  "recordedAt": "2026-10-21T04:25:31.914066+00:00",
+  "goalStatus": "not-demonstrated",
+  "qualityImprovementEstablished": false,
+  "completedQualityPair": false,
+  "model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "configuredMaxOutputTokens": 16384
+  },
+  "case": {
+    "taskId": "oolong-trec-64k-16000219",
+    "dataset": "oolongbench/oolong-synth",
+    "revision": "616cca899e8b51ea0ad5446ebab39aa72b3192bc",
+    "rowId": 16000219,
+    "contextLength": 65536,
+    "contextUtf8Bytes": 153459,
+    "publicPromptSha256": "f43c872c9dc379acce78d52acfb8380327986a27e7fd9f65fbd7566bfcd0d9ed",
+    "gold": 314,
+    "scorerCommit": "0bb7eabe839218fee7fe8d007f41cfc2fd3ae24c",
+    "scorerSha256": "247583a3b653b91c39fb88a102460802f1493175b23d05a7217aead0d685c64c"
+  },
+  "lastAttempt": {
+    "bare": {
+      "answer": 291,
+      "absoluteError": 23,
+      "officialScore": 0.0013378550367377784,
+      "completed": true,
+      "requests": 1
+    },
+    "rlmDraft": {
+      "answer": 269,
+      "absoluteError": 45,
+      "officialScore": 2.386474799099523e-06,
+      "completed": false,
+      "requests": 13,
+      "actualChildRequests": 0,
+      "depthConfiguredAndReadBack": 1,
+      "stop": "Fourteenth native request was refused before parent admission; all thirteen admitted RLM calls settled.",
+      "diagnosis": {
+        "actualRootRequests": 13,
+        "actualChildRequests": 0,
+        "nativeAttemptedRequests": 14,
+        "parentAllowedRequests": 13,
+        "nativeOuterGuardRequests": 14,
+        "wallTimeMs": 370395,
+        "wallTimeLimitMs": 1200000,
+        "savedAnswerBeforeCancellation": true,
+        "answerWasComputedFromPersistentPythonSet": true,
+        "candidateFileWasNotTheFinalCount": true,
+        "whyNoSpawn": "Unknown; enabled depth is capability, not an observed recursive invocation."
+      }
+    },
+    "knownProviderReportedUsage": {
+      "inputTokens": 113749,
+      "outputTokens": 20384,
+      "totalTokens": 646261,
+      "cacheReadTokens": 512128
+    },
+    "sourceHead": "6735129c2cacaaae3539dd79909e27ed6db84818",
+    "compiledHash": "7c4aa9fa77bd6514f13deaa5a6a10607bb60efdc526feb91e6b7f3e49415c2a3",
+    "runtimeManifestSha256": "b6e34a977b4eb782b9a6e2c12436ad911adf30b511bd3df73214b55f829107f9"
+  },
+  "denominator": {
+    "plannedConditions": 6,
+    "recordedConditions": 4,
+    "completedConditions": 1,
+    "incompleteConditions": 3,
+    "notRunConditions": 2
+  },
+  "accounting": {
+    "historicalBeforeThisQualityPilot": {
+      "charged": 506,
+      "confirmed": 495,
+      "unknown": 11
+    },
+    "newQualityPilot": {
+      "charged": 16,
+      "confirmed": 14,
+      "unknown": 2,
+      "physicalModelPosts": 15
+    },
+    "cumulative": {
+      "charged": 522,
+      "confirmed": 509,
+      "unknown": 13,
+      "cap": 522,
+      "withinCap": true
+    }
+  },
+  "phases": [
+    {
+      "phase": "bare-quality-v1",
+      "sourceHead": "5a66d484fc6b8d4fd3b10ff8709a1e876f18cde7",
+      "fingerprint": "b7e1a52d09e1b4a79b595708d9f8371ca183b40b292dce5ab8bec7c86e954ab5",
+      "plannedConditions": 2,
+      "denominator": {
+        "plannedConditions": 2,
+        "recordedConditions": 1,
+        "completedConditions": 0,
+        "failedOrIncompleteConditions": 1,
+        "notRunConditions": 1
+      },
+      "accounting": {
+        "newAdmitted": 1,
+        "settled": 0,
+        "unknown": 1,
+        "physicalAdmitted": 0,
+        "cumulativeAdmitted": 507,
+        "cumulativeConfirmed": 495,
+        "cumulativeUnknown": 12,
+        "stopped": true,
+        "budgets": {
+          "D1": 1,
+          "S14": 14
+        }
+      },
+      "closes": {
+        "provider": "closed",
+        "relay": "closed",
+        "networkProfile": "disposed"
+      },
+      "closureSha256": "ee92b9d789dabee011009533e57028b329ea33ac0f2148784e128f9ef5bdf4f9",
+      "cells": [
+        {
+          "arm": "D",
+          "status": "incomplete",
+          "grading": {
+            "score": null,
+            "primaryScore": null,
+            "exact": null,
+            "schemaValid": false,
+            "errors": [
+              "bare assistant text is unavailable"
+            ]
+          },
+          "resources": {
+            "modelRequests": 1,
+            "physicalModelRequests": 0,
+            "confirmedModelRequests": 0,
+            "unknownModelRequests": 1,
+            "requestsWithKnownUsage": 0,
+            "requestsWithoutKnownUsage": 1,
+            "knownUsageTotals": {
+              "inputTokens": null,
+              "outputTokens": null,
+              "totalTokens": null
+            },
+            "elapsedMs": 20
+          },
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "childRequests": 0,
+          "answerError": "content.some is not a function"
+        },
+        {
+          "arm": "S",
+          "status": "not-run",
+          "grading": {
+            "score": null,
+            "exact": null
+          },
+          "resources": null,
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "childRequests": 0,
+          "answerError": null
+        }
+      ]
+    },
+    {
+      "phase": "bare-quality-v2",
+      "sourceHead": "3957ab35ce13b2a79c5c0fb11739621b41caa426",
+      "fingerprint": "db75ca32000b04b9965b0284ee5d7717ff663abed5caa8f0fc461a4404601eb2",
+      "plannedConditions": 2,
+      "denominator": {
+        "plannedConditions": 2,
+        "recordedConditions": 1,
+        "completedConditions": 0,
+        "failedOrIncompleteConditions": 1,
+        "notRunConditions": 1
+      },
+      "accounting": {
+        "newAdmitted": 1,
+        "settled": 0,
+        "unknown": 1,
+        "physicalAdmitted": 1,
+        "cumulativeAdmitted": 508,
+        "cumulativeConfirmed": 495,
+        "cumulativeUnknown": 13,
+        "stopped": true,
+        "budgets": {
+          "D1": 1,
+          "S14": 14
+        }
+      },
+      "closes": {
+        "provider": "closed",
+        "relay": "closed",
+        "networkProfile": "disposed"
+      },
+      "closureSha256": "0b8ab6e3ec68f64801cb0d0b92eb3fad5d0037b3778084263178544f615fb632",
+      "cells": [
+        {
+          "arm": "D",
+          "status": "incomplete",
+          "grading": {
+            "score": null,
+            "primaryScore": null,
+            "exact": null,
+            "schemaValid": false,
+            "errors": [
+              "bare assistant text is unavailable"
+            ]
+          },
+          "resources": {
+            "modelRequests": 1,
+            "physicalModelRequests": 1,
+            "confirmedModelRequests": 0,
+            "unknownModelRequests": 1,
+            "requestsWithKnownUsage": 0,
+            "requestsWithoutKnownUsage": 1,
+            "knownUsageTotals": {
+              "inputTokens": null,
+              "outputTokens": null,
+              "totalTokens": null
+            },
+            "elapsedMs": 532798
+          },
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "childRequests": 0,
+          "answerError": "terminated"
+        },
+        {
+          "arm": "S",
+          "status": "not-run",
+          "grading": {
+            "score": null,
+            "exact": null
+          },
+          "resources": null,
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "childRequests": 0,
+          "answerError": null
+        }
+      ]
+    },
+    {
+      "phase": "bare-quality-v3",
+      "sourceHead": "6735129c2cacaaae3539dd79909e27ed6db84818",
+      "fingerprint": "920f2b42addec3f513bd5d7b82e236a31843c4cebd33f5e3ea1a183ab7aab99a",
+      "plannedConditions": 2,
+      "denominator": {
+        "plannedConditions": 2,
+        "recordedConditions": 2,
+        "completedConditions": 1,
+        "failedOrIncompleteConditions": 1,
+        "notRunConditions": 0
+      },
+      "accounting": {
+        "newAdmitted": 14,
+        "settled": 14,
+        "unknown": 0,
+        "physicalAdmitted": 14,
+        "cumulativeAdmitted": 522,
+        "cumulativeConfirmed": 509,
+        "cumulativeUnknown": 13,
+        "stopped": false,
+        "budgets": {
+          "D1": 1,
+          "S14": 13
+        }
+      },
+      "closes": {
+        "provider": "closed",
+        "relay": "closed",
+        "networkProfile": "disposed",
+        "longReadProfile": "closed"
+      },
+      "closureSha256": "ca198ffad645625236234e55952fc10408ce07e8e1946503e3f2f14123c16f84",
+      "cells": [
+        {
+          "arm": "D",
+          "status": "completed",
+          "grading": {
+            "score": 0.0013378550367377784,
+            "primaryScore": 0.0013378550367377784,
+            "exact": false,
+            "attemptedParse": "291",
+            "parseConfidence": "vhigh",
+            "scorerSha256": "247583a3b653b91c39fb88a102460802f1493175b23d05a7217aead0d685c64c",
+            "schemaValid": true,
+            "errors": []
+          },
+          "resources": {
+            "modelRequests": 1,
+            "physicalModelRequests": 1,
+            "confirmedModelRequests": 1,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 1,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 46026,
+              "outputTokens": 11071,
+              "totalTokens": 57097
+            },
+            "elapsedMs": 308842
+          },
+          "executionCompleted": true,
+          "cleanupComplete": true,
+          "childRequests": 0,
+          "answerError": null
+        },
+        {
+          "arm": "S",
+          "status": "incomplete",
+          "grading": {
+            "score": 2.386474799099523e-06,
+            "primaryScore": 2.386474799099523e-06,
+            "exact": false,
+            "attemptedParse": "269",
+            "parseConfidence": "vhigh",
+            "scorerSha256": "247583a3b653b91c39fb88a102460802f1493175b23d05a7217aead0d685c64c",
+            "schemaValid": true,
+            "errors": []
+          },
+          "resources": {
+            "modelRequests": 13,
+            "physicalModelRequests": 13,
+            "confirmedModelRequests": 13,
+            "unknownModelRequests": 0,
+            "requestsWithKnownUsage": 13,
+            "requestsWithoutKnownUsage": 0,
+            "knownUsageTotals": {
+              "inputTokens": 67723,
+              "outputTokens": 9313,
+              "totalTokens": 589164
+            },
+            "elapsedMs": 370395
+          },
+          "executionCompleted": false,
+          "cleanupComplete": false,
+          "childRequests": 0,
+          "answerError": null
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "RLM draft quality is diagnostic only: its native run did not complete.",
+    "The configured recursion capability was not exercised on this TREC case.",
+    "No cost threshold, task taxonomy or general efficacy claim is derived.",
+    "The two infrastructure failures and both unstarted RLM comparators remain retained."
+  ],
+  "verification": {
+    "fullPnpmCheck": "passed",
+    "qualityChecksPassed": 16,
+    "ci": {
+      "sourceHead": "6735129c2cacaaae3539dd79909e27ed6db84818",
+      "status": "success",
+      "url": "https://github.com/lisihao/deepseek-solar-harness/actions/runs/39541904107/job/119031316916"
+    },
+    "sourceProductionPluginChanged": false,
+    "installedAppChanged": false,
+    "newModelCallsStoppedAtCap": true
+  }
+}

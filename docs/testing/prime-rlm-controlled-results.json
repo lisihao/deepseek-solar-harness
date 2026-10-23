@@ -1,0 +1,168 @@
+{
+  "formatVersion": 1,
+  "kind": "prime-rlm-controlled-sanitized-results-v1",
+  "date": "2026-10-21",
+  "timezone": "Asia/Shanghai",
+  "executionSourceHead": "99dab45d4938ef2572076d372a0d9c006cbf9c8f",
+  "preparedFingerprint": "020eac276997d887a6d0c4e5a40b8990799d0262ae77c7e1ea0bc7fd117a03a7",
+  "continuationDriverSha256": "8f046b4b1057b668be550080def56e82afd208c1174b04f619db58fac32e5375",
+  "model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high",
+    "configuredMaxTokens": 16384,
+    "backendOutputCapEnforced": false
+  },
+  "task": {
+    "id": "oolong-trec-32k-15000243",
+    "records": 787,
+    "contextSha256": "64e3a042daf4bf66fbbb8b59d0a008179d5d4ce4a1554d7bcc11eba7f2204150",
+    "scorerSha256": "247583a3b653b91c39fb88a102460802f1493175b23d05a7217aead0d685c64c"
+  },
+  "conditions": [
+    {
+      "id": "D1",
+      "status": "completed",
+      "score": 0.75,
+      "scoreRole": "main",
+      "executionCompleted": true,
+      "physicalCleanupIndependentlyConfirmed": true,
+      "resources": {
+        "modelRequests": 1,
+        "physicalModelRequests": 1,
+        "confirmedModelRequests": 1,
+        "unknownModelRequests": 0,
+        "knownUsageTotals": {
+          "inputTokens": 23498,
+          "outputTokens": 9450,
+          "totalTokens": 32948
+        },
+        "elapsedMs": 292673
+      },
+      "rootRequests": 1,
+      "childRequests": 0
+    },
+    {
+      "id": "R32",
+      "status": "incomplete",
+      "score": 0.017817948013544083,
+      "scoreRole": "incomplete-diagnostic",
+      "executionCompleted": false,
+      "physicalCleanupIndependentlyConfirmed": true,
+      "resources": {
+        "modelRequests": 32,
+        "physicalModelRequests": 32,
+        "confirmedModelRequests": 32,
+        "unknownModelRequests": 0,
+        "knownUsageTotals": {
+          "inputTokens": 108769,
+          "outputTokens": 15011,
+          "totalTokens": 923652
+        },
+        "elapsedMs": 494193
+      },
+      "rootRequests": 15,
+      "childRequests": 17
+    },
+    {
+      "id": "S32",
+      "status": "incomplete",
+      "score": null,
+      "scoreRole": "unscored",
+      "executionCompleted": false,
+      "physicalCleanupIndependentlyConfirmed": true,
+      "resources": {
+        "modelRequests": 28,
+        "physicalModelRequests": 28,
+        "confirmedModelRequests": 28,
+        "unknownModelRequests": 0,
+        "requestsWithKnownUsage": 28,
+        "requestsWithoutKnownUsage": 0,
+        "knownUsageTotals": {
+          "inputTokens": 114593,
+          "outputTokens": 9537,
+          "totalTokens": 838498
+        },
+        "elapsedMs": 487865
+      },
+      "rootRequests": 13,
+      "childRequests": 15
+    },
+    {
+      "id": "S0_32",
+      "status": "completed",
+      "score": 0.5625,
+      "scoreRole": "main",
+      "executionCompleted": true,
+      "physicalCleanupIndependentlyConfirmed": true,
+      "resources": {
+        "modelRequests": 15,
+        "physicalModelRequests": 15,
+        "confirmedModelRequests": 15,
+        "unknownModelRequests": 0,
+        "requestsWithKnownUsage": 15,
+        "requestsWithoutKnownUsage": 0,
+        "knownUsageTotals": {
+          "inputTokens": 49744,
+          "outputTokens": 6847,
+          "totalTokens": 534543
+        },
+        "elapsedMs": 295457
+      },
+      "rootRequests": 15,
+      "childRequests": 0
+    }
+  ],
+  "accounting": {
+    "prior": {
+      "admitted": 600,
+      "confirmed": 586,
+      "unknown": 14
+    },
+    "new": {
+      "admitted": 76,
+      "physical": 76,
+      "confirmed": 76,
+      "unknown": 0
+    },
+    "cumulative": {
+      "admitted": 676,
+      "confirmed": 662,
+      "unknown": 14,
+      "inflight": 0
+    },
+    "phaseCap": 700,
+    "currentHumanCap": 800,
+    "unknownsRefunded": false
+  },
+  "initialOriginalPluginEnvelope": {
+    "equalAfterOwnedPathAndIdNormalization": true,
+    "normalizedSha256": "3c5982c045b1ee39a86eb9a8e248ed57c84aad2c7529f37188696eb1d31db1a9",
+    "noSemanticOrDateNormalization": true
+  },
+  "zeroCallContinuationFailure": {
+    "modelRequests": 0,
+    "reason": "parent-intents directory missing before ledger admission",
+    "closed": true,
+    "freshNamespaceUsed": true
+  },
+  "interpretation": {
+    "recursivePluginBenefitEstablished": false,
+    "causalRecursionBenefitEstablished": false,
+    "originalPaperReproduction": false,
+    "heldOutConfirmation": false,
+    "allPriorOutcomesRetained": true,
+    "rawReferenceAndLabelsPrivate": true,
+    "finalIndependentVerification": "passed",
+    "s0RecordedHelperBypassObserved": false
+  },
+  "evidence": {
+    "originalPreparedSha256": "6f4e2ac1deede11979ccf162722240fc7186e5d302972eecb3d62d1a84e695e8",
+    "originalReceiptSha256": "27da68aa24ede440bc6f7687ddf3cfe9e6645d9e73db61a699eca0169bb96ac6",
+    "completionPreparedSha256": "49734f8fd4089666d89359a5590efc969fc978bb5c9792e959bb861408498d47",
+    "completionReceiptSha256": "5c89492d9c378638218c735cb7b4cd46016b3da4bbe954fb2dbad36b4e352c84",
+    "compiledHash": "7c4aa9fa77bd6514f13deaa5a6a10607bb60efdc526feb91e6b7f3e49415c2a3",
+    "runtimeManifestSha256": "b6e34a977b4eb782b9a6e2c12436ad911adf30b511bd3df73214b55f829107f9",
+    "finalIndependentVerificationSha256": "8a7dfe63d13faa44e1be69be48a897fe0bc60bcd997e97db4efacaac742e8b91"
+  }
+}

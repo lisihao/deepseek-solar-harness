@@ -157,6 +157,8 @@ done
 
 完整依赖、恢复方式和验收限制见[使用指南](docs/curated-plugin-usage.md)。
 
+RLM 版本说明：公开精选目录仍提供 `6a47ed6` 预览包；本机另已安装 `817d6a9` 普通会话算子候选，其主入口为 `solar_rlm`，设置中保留“RLM 算子”诊断。两者同为 `0.1.0-dev.0`，但不是同一构建；上表的旧独立页面属于目录旧包。当前候选冻结，真实模型普通会话验收及递归独立增益仍未建立。详见[收口与 Argon/Opus 研究交接](docs/testing/prime-rlm-closeout.md)、[插件说明](incubator/rlm/README.md)和[验证记录](docs/testing/prime-rlm-verification.md)。本次不替换公开预览归档。
+
 ## Agent 执行约定
 
 1. 阅读[包目录](distribution/plugins/catalog.json)、[安装说明](docs/curated-plugin-installation.md)和[使用指南](docs/curated-plugin-usage.md)，确认平台、宿主版本、用户选择与所需外部依赖。
