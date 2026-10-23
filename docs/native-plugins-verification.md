@@ -25,6 +25,12 @@ The final cancellation regression verifies that an unknown node remains fenced w
 
 PR CI runs the full check on Ubuntu/Node 24 for each submitted head. Its result belongs to that head and is reported separately from this local record.
 
+## Native UI source correction (2026-10-19)
+
+The later UI candidate adds the `智能协同` conversation/settings entries, an owner-only Remote control service, and ten manual/fixture acceptance cases. At its stable source boundary, `pnpm check` passed: build, strict types, 94 tests, actual built-bundle scratch CLI installation/boot and homepage check. The scratch probe observed all three tools and the UI status service without a model request. A VM check ran the actual browser artifact without CommonJS globals, verified module-factory registration and both slot contributions. Focused regressions cover legal Resident graph identities, strict markers, no duplicate unresolved canary, revision controls and cancelling remaining work in an indeterminate graph.
+
+These source and scratch results do not establish installed UI or real native model execution. The installed record below initially describes the earlier merged artifacts; a later candidate must record its own installation evidence.
+
 ## Desktop installation (2026-10-19)
 
 昊哥 explicitly authorized installation and selected the existing `~/.dsh` as the permanent default home, replacing the earlier separate-home decision. The installed official app and its bundled CLI both reported `0.2.1-rc.2`.
@@ -38,10 +44,37 @@ PR CI runs the full check on Ubuntu/Node 24 for each submitted head. Its result 
 
 This establishes package installation, visible enablement and Resident daemon availability. It does not establish complete user-facing native execution, live tool bridging, logged-in model catalogs, or real model behavior. The app was left running.
 
-## Not run in this delivery
+## UI candidate installation and bounded native checks (2026-10-19)
 
-- Logged-in Codex or Claude model execution, live model catalogs, or paid calls.
-- Full native task execution or complete feature acceptance in the installed app; the installation and read-only checks above are narrower.
+The Collaboration UI candidate at source commit `e4c50c6288e939af826278cddc7ef61d738d84f2` was packed to a stable local path and installed with the official bundled CLI after the user quit the app. The installed package files matched the checked build. All previously declared direct dependency versions and enabled bundles were preserved; Resident remained at its earlier installed artifact. PR #278 CI passed for that source head.
+
+The running app's accessibility tree exposed the `智能协同` conversation tab and its status panel. Its actual Remote call reported Resident connected, all three Solar tools registered, and both official one-shot providers registered. This proves the loaded entry and read-only query, not authentication or model behavior. The automation screenshot and accessibility state disagreed, so default/narrow visual acceptance and the settings entry have not passed. Automated button actions produced no observed task admission; no native execution was inferred from those actions.
+
+With explicit permission for one native check per executor, the installed Resident public client first confirmed an empty graph list and the matching daemon fingerprint. It then admitted two synthetic marker tasks, one per executor, with no DSH bridge and no graph retry policy. Durable snapshots/events showed exactly one node attempt in each graph. The Codex graph completed with a succeeded node and exact `SOLAR_CODEX_OK` output. The Claude Code graph reached a failed terminal state because an external execution prerequisite was unavailable; details are retained privately. It is not accepted as a pass, and was not retried. These checks used the installed public client rather than the UI button path; they do not establish complete UI acceptance or count physical provider requests.
+
+## Rendered UI acceptance (2026-10-20, Asia/Shanghai)
+
+The later installed Collaboration build is source commit `e70bf6038384ecf0ec6dbd3d3dadcee624305d37`, development version `0.1.0-dev.0`, tarball SHA-256 `9de77811cf7ab5e2fe6c9635820d3b0848d31fd208c95e0dc841eb4dc191495c`. Its built entry files matched the verified source build. After a normal app exit and profile backup, the official bundled CLI installed this candidate; all unrelated direct dependency versions and enabled bundles remained present. Resident was not replaced.
+
+The earlier screenshot/accessibility disagreement did not recur in this session. Actual screenshots and accessibility state agreed on both the conversation tab and Settings → 智能协同. The app was inspected at normal width (2560 screenshot pixels) and narrow width (1536 screenshot pixels, approximately 768 logical points), then restored to its original width.
+
+| GUI check | Observed result |
+|---|---|
+| Conversation → 智能协同 | Entry opened the actual status/task panel. Resident connected; the three Solar tools and two official providers were registered. |
+| Refresh registration/task status | Clicking the button updated the read time and displayed that no native execution was submitted. |
+| Settings → 智能协同 | Navigation opened the same capabilities and historical tasks; the close button returned to the conversation. |
+| Quota-labelled buttons | Both full labels were readable at normal/narrow widths. In narrow Settings content they wrapped onto separate rows. They were deliberately not clicked. |
+| Historical result disclosure | Both node disclosures opened. The existing Codex marker and existing Claude failure details were visible. No new graph was admitted. |
+| Text/background and error reason | Replaced nonexistent theme variables with actual host design tokens; the installed dark theme now rendered readable text and surfaces. The raw reason `failed` became the Chinese task explanation. |
+| Narrow layout | Text, marker output and long error details wrapped within their cards; no horizontal clipping/overflow was observed on these inspected panels. |
+
+The latest full source gate passed build, strict types, 94 tests, built-bundle scratch CLI install/boot and homepage check. After the final reason-label correction, the affected build/type checks and seven client-loading/helper regressions passed. This GUI session made no native model call: Codex retains its earlier successful result; Claude Code remains blocked by insufficient quota. This is visual/navigation/read-only-control acceptance, not proof of the paid buttons' complete submission path.
+
+## Remaining uncovered scope
+
+- The paid GUI buttons' complete submission path was not rerun, as explicitly directed by the user.
+- A successful live Claude Code canary; its single authorized attempt did not complete.
+- Live model catalogs, full collaboration tasks, logged-in tool bridging, and ordinary long-task pause/resume/recovery.
 - Subscription-plugin modification, search reconfiguration, account switching, DSH 3.x data import, release/tag/index publication, or recurring automation.
 
 The public Tool Runtime is used for DSH guards and execution. The Resident journal is not a complete native-tool trace in the parent DSH transcript; see [the missing public logging seam](blocked-seams.md).

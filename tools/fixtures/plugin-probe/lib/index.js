@@ -82,6 +82,15 @@ async function runProbe(ctx) {
     assert(Array.isArray(initial), 'Resident list() did not return an array')
     checks.listed = true
 
+    if (expectCollaboration) {
+      const control = ctx.get('solarNativeControl')
+      assert(control !== undefined && typeof control.status === 'function', 'native collaboration UI control is unavailable')
+      const status = await control.status()
+      assert(status.resident.available === true, 'UI status cannot reach Resident')
+      assert(status.tools.every(tool => tool.available), 'UI status is missing a native tool')
+      checks.uiStatus = true
+    }
+
     const submitted = await resident.submit({ commandId: `plugin-probe-submit-${process.pid}`, graph: graphForProbe() })
     graphId = submitted.graph.id
     assert(submitted.status === 'queued', `expected queued graph, got ${String(submitted.status)}`)

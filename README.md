@@ -174,6 +174,7 @@ done
 本项目的默认分支为 `v4`；旧 DSH 3.x 源码与历史分支保留但已冻结。功能源码位于独立开发分支的 `incubator/`；公开验证包位于 `distribution/plugins/`，**不把这些预览包冒充 `plugins/*` 的稳定市场 Release**。包目录给出各自的源码提交和来源仓库。
 
 - [项目约定](AGENTS.md) · [原生插件契约](docs/native-plugins-contract.md) · [市场指南](docs/market-guide.md)
+- [原生插件验证记录](docs/native-plugins-verification.md) · [智能协同与 Resident 验收用例](docs/native-plugins-acceptance.zh.md)
 - [固定宿主基线](upstream.json)：`@deepseek-ai/dsh@0.2.1-rc.2` / Cordis `4.0.5`。这不是“上游最新版”的声明。
 - 官方 `deepseek-ai/deepseek-harness` 只供参考，本项目不修改官方 App，也不向官方上游自动提交代码。
 - 下方稳定市场列表由发布 tag 自动生成；预览包的直接下载不需要、也不会自动创建市场索引、Pages 或 npm 发布。

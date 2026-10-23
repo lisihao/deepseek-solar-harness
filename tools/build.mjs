@@ -17,7 +17,7 @@ for (const name of packages) {
   await build({
     entryPoints: name === 'native-resident'
       ? ['src/index.ts', 'src/daemon.ts', 'src/client.ts', 'src/contracts.ts']
-      : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts'] : ['src/index.ts'],
+      : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts'] : ['src/index.ts', 'src/typert.ts'],
     absWorkingDir: directory,
     outdir: 'lib',
     bundle: true,
@@ -27,6 +27,9 @@ for (const name of packages) {
     format: 'esm',
     sourcemap: true,
   })
+  if (name === 'native-collaboration') {
+    await build({ entryPoints: ['src/client.ts'], absWorkingDir: directory, outfile: 'lib/client.cjs', bundle: true, platform: 'browser', target: 'es2022', format: 'cjs', external: ['@deepseek-ai/*', 'react'], banner: { js: 'window.__ModuleLoader__.load({ id: "@lisihao/dsh-solar-native-collaboration", factory: (require) => { var module = { exports: {} }; var exports = module.exports;' }, footer: { js: 'return module.exports; } });' }, sourcemap: true })
+  }
   if (name === 'chatgpt-web') {
     await build({ entryPoints: ['src/client.ts'], absWorkingDir: directory, outfile: 'lib/client.cjs', bundle: true, platform: 'browser', target: 'es2022', format: 'cjs', loader: { '.css': 'text' }, external: ['@deepseek-ai/*', 'react', 'react-dom'], banner: { js: `window.__ModuleLoader__.load({ id: "@lisihao/dsh-solar-${name}", factory: (require) => { var module = { exports: {} }; var exports = module.exports;` }, footer: { js: 'return module.exports; } });' }, sourcemap: true })
   }

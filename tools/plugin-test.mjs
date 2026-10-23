@@ -284,6 +284,7 @@ async function readProbeMarker(path) {
   const expectedTools = marker.expectedCollaboration
     ? ['solar_delegate', 'solar_resident', 'solar_coordinate']
     : ['solar_resident']
+  if (marker.expectedCollaboration && checks.uiStatus !== true) throw new Error('plugin probe did not pass UI status')
   for (const tool of expectedTools) {
     if (!checks?.tools?.includes(tool)) throw new Error(`plugin probe did not register ${tool}: ${JSON.stringify(marker)}`)
   }
