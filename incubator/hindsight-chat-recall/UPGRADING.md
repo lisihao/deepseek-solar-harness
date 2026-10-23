@@ -1,0 +1,3 @@
+# Upgrading
+
+Pins are peer/dev dependencies in package.json and the standalone lockfile. This adapter calls the public rc.2 Agent pre-step event and Mnemon 0.5.32 read-only search/body-directory protocol; it does not modify either implementation. Recheck workspace registry shape, source provenance, cancellation and the entered-message logging contract before changing versions. Run focused tests and built plain-Node official-CLI acceptance, then an explicitly authorized installed test. No carried upstream patch. Supported external configuration override: Hindsight coding-agents 0.8.1 `harnesses.dsh.autoInject=none` disables its older pages injection only; its tools and other harness settings remain intact.

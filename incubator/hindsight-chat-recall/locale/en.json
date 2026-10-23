@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Hindsight chat recall",
+    "description": "Read bounded local project memory before normal chat requests."
+  }
+}

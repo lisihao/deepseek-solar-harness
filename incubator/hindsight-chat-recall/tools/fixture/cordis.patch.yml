@@ -1,0 +1,5 @@
+# Test-only row. tools/plugin-test.mjs installs this package only into a
+# disposable profile together with the packed chat-recall plugin.
+- insert:
+    - id: hindsight-chat-recall-fixture
+      name: dsh-hindsight-chat-recall-fixture
