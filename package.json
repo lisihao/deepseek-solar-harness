@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:plugin": "node tools/plugin-test.mjs",
     "homepage": "node tools/homepage.mjs",
-    "homepage:check": "node tools/homepage.mjs --check && node tools/installed-plugin-guide.mjs --check && python3 tools/check-curated-packages.py && bash tools/tests/curated-installer.test.sh",
+    "homepage:check": "node tools/homepage.mjs --check && node tools/installed-plugin-guide.mjs --check && python3 tools/check-curated-packages.py && bash tools/tests/curated-installer.test.sh && python3 tools/tests/curated-history.test.py",
     "check": "pnpm build && pnpm typecheck && pnpm test && pnpm test:plugin && pnpm homepage:check"
   },
   "devDependencies": {

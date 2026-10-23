@@ -15,7 +15,7 @@
 | 看上下文和费用 | `dsh-context`、`dsh-cost-meter` | 社区原版；费用显示为估算 |
 | 切换原生模型并保留任务 | `model-handoff` | 短任务免摘要调用、取消后新任务、Web 进入/返回选择和提示框已验收；不保证摘要质量 |
 | 多阶段原生任务和可编辑流程 | `native-resident` + `native-collaboration` | 持久化/调度的无密钥检查及流程编辑、保存重开已验收；真实任务结果需自行验收 |
-| 网页回答、洞察分析 | `chatgpt-web` | **实验性**：旧安装包 `2c338f9` 的真实请求出现回执不匹配；新包 `67cd3aa` 已通过源码检查并安装核对；修复后真实回答链路尚未验收 |
+| 网页回答、洞察分析 | `chatgpt-web` | **实验性**：`0.1.0-dev.1` 已修复行内代码导致的回执不匹配并安装；2026-10-23 单次普通对话返回 `PURGE_UI_OK`，右侧栏可用；洞察分析未作完整验收 |
 | 技能目录过大、旧目录累积 | `skill-context` | 完整技能仍保留，按需搜索后由官方工具加载；原生模拟请求已验证，真实模型请求未运行 |
 | 原始 Prime RLM | `rlm` | macOS arm64 原始运行时与本地机制检查；未证明普遍推理质量收益 |
 | 修复压缩预检失败 | `billion-context` | Solar fork 的 `every compression tier is exhausted` 修复；不是 handoff 的替代品 |
@@ -81,7 +81,7 @@ done
 | [`@lisihao/dsh-solar-native-collaboration`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 普通/智能协同与执行流程编辑 | `bash "$work/install.sh" --ref "$ref" native-collaboration` |
 | [`billion-context`](https://github.com/lisihao/billion-context) | `0.1.202-solar.1` | Solar 维护的上下文压缩预检修复 | `bash "$work/install.sh" --ref "$ref" billion-context` |
 | [`@lisihao/dsh-solar-model-handoff`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 原生模型上下文交接与 Web 返回范围选择 | `bash "$work/install.sh" --ref "$ref" model-handoff` |
-| [`@lisihao/dsh-solar-chatgpt-web`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | ChatGPT 网页算子和洞察分析；实验性 | `bash "$work/install.sh" --ref "$ref" chatgpt-web` |
+| [`@lisihao/dsh-solar-chatgpt-web`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.1` | ChatGPT 网页算子和洞察分析；实验性 | `bash "$work/install.sh" --ref "$ref" chatgpt-web` |
 | [`@lisihao/dsh-solar-rlm`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 原始 Prime RLM/Continual Harness 适配；实验性 | `bash "$work/install.sh" --ref "$ref" rlm` |
 | [`@lisihao/dsh-solar-skill-context`](https://github.com/lisihao/deepseek-solar-harness) | `0.1.0-dev.0` | 技能按需检索；旧完整目录退出请求、原日志保留 | `bash "$work/install.sh" --ref "$ref" skill-context` |
 
@@ -141,6 +141,8 @@ done
 | [`@deepseek-ai/dsh-experimental-session-titles-bundle`](https://github.com/deepseek-ai/deepseek-harness) | `0.2.1-rc.2` | 会话标题 | 在官方插件设置中启用；按需完成其登录/依赖配置 |
 | [`@deepseek-ai/dsh-experimental-badge-skill-bundle`](https://github.com/deepseek-ai/deepseek-harness) | `0.2.1-rc.2` | 技能徽章 | 在官方插件设置中启用；按需完成其登录/依赖配置 |
 <!-- SOLAR-INSTALLED-PLUGINS:END -->
+
+网页算子条目于 2026-10-23 单独更新至 `0.1.0-dev.1`，并通过一次普通对话验收；其余条目保留原快照的核对范围。
 
 ## 我们开发和修改的插件怎么用
 
