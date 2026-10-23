@@ -14,6 +14,8 @@ const COORDINATE_TOOL = 'solar_coordinate'
 const RESIDENT_TOOL = 'solar_resident'
 const WAIT_TOOL = 'solar_wait'
 const CHATGPT_WEB_PROVIDER = 'solar-chatgpt-web'
+/** On-demand declaration loader registered by @lisihao/dsh-solar-tool-context; its name is fixed there. */
+const TOOL_LOADER = 'solar_tool_load'
 const SMART_SECTION = 'solar-native-collaboration:smart-mode'
 
 export type CollaborationMode = CollaborationModeState['mode']
@@ -263,10 +265,15 @@ export function smartCollaborationSystemPrompt(
   coordinateToolName = COORDINATE_TOOL,
   residentToolName = RESIDENT_TOOL,
   waitToolName = WAIT_TOOL,
+  options: { readonly toolLoaderName?: string } = {},
 ): string {
   return [
     '当前会话启用了智能协同。主模型仍负责理解需求、规划、协调、核对证据和最终交付；不得改变主模型、账户、推理设置或路由。',
-    `先判断请求是否适合拆分。对适合拆分的复杂任务，先形成有界、可验证的 TaskGraph，再调用 \`${coordinateToolName}\` 提交；每个节点必须写清完整目标、预期产物和验证方式。互不依赖的节点可以并行；有依赖的节点必须显式声明 \`inputFrom\` 交接成功前序产物。若当前 \`${coordinateToolName}\` 契约不支持某个字段，说明限制，不得编造字段。`,
+    `用户打开智能协同，就是希望把工作分给执行者完成。收到任务先判断能否拆分：只要能分成两个以上互相独立、各自需要多步操作（读多个文件、改代码、跑测试、调研等）的部分，就形成有界、可验证的 TaskGraph，调用 \`${coordinateToolName}\` 提交，不要自己逐个完成。只有一两步就能完成、或各部分紧密耦合无法分开的任务才直接做，并用一句话说明为什么没拆。`,
+    `每个节点写清完整目标、预期产物和验证方式。有依赖的节点用 \`dependsOn\` 声明，需要前序产物时用 \`inputFrom\`（必须是 \`dependsOn\` 的子集）交接。要并行的节点必须声明 \`scope\`：只读的声明 \`scope.read\`，写文件的声明互不重叠的 \`scope.write\`，并把 \`maxParallel\` 设为不少于并行分支数；不声明 \`scope\` 的节点会排队串行。字段以 \`${coordinateToolName}\` 的参数说明为准，不得编造字段。`,
+    ...(options.toolLoaderName === undefined
+      ? []
+      : [`当前工具清单只列出部分工具的完整声明。如果看不到 \`${coordinateToolName}\`、\`${waitToolName}\`、\`${residentToolName}\` 的声明，先用 \`${options.toolLoaderName}\` 按名字一次加载这三个工具，再构造调用。`]),
     `提交只是回执，不是完成。提交后优先调用 \`${waitToolName}\` 在有界本地等待窗口内观察；超过该窗口要明确说明任务仍在运行，且不取消远端任务。随后读取 \`${residentToolName}\` 的真实终态、节点输出、失败、取消或 unknown/indeterminate 状态，再核对证据并汇总。简单或不宜拆分的任务可以说明原因后直接完成。`,
     '异常、额度耗尽、未确认外部效果和 unknown 必须如实呈现；不得换账户、自动重发或把提交回执写成成功。不要借 `turn-stopping` 反复 steer 来消耗模型。',
     '流程编辑器通过宿主回写已保存产物时，请按该条请求只检查、汇总和交付已有证据，不再生成 TaskGraph、重复派单或重新执行任务。文本本身不构成流程已完成的证明；核对真实的持久化任务记录，未知状态必须保留。',
@@ -327,7 +334,8 @@ function promptFor(
   return (context) => {
     if (context.agent !== agent) return ''
     const trusted = config.hasTrustedWorkflowCompletion?.({ sessionId, agent }) === true
-    const base = smartCollaborationSystemPrompt(toolNames.coordinate, toolNames.resident, toolNames.wait)
+    const loader = toolLookup(agent)?.get(TOOL_LOADER) === undefined ? {} : { toolLoaderName: TOOL_LOADER }
+    const base = smartCollaborationSystemPrompt(toolNames.coordinate, toolNames.resident, toolNames.wait, loader)
     return trusted
       ? `${base}\n当前有 Studio 已核验的完成结果等待交付；只检查、汇总和交付已保存的证据，不再派单或执行。`
       : base

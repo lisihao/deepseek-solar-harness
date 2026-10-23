@@ -246,12 +246,61 @@ function parseRetry(value: unknown, field: string): TaskNode['retry'] | undefine
   return { maxAttempts, delayMs, codes }
 }
 
+/** Node fields solar_coordinate accepts; the tool description lists the same set. */
+export const COORDINATE_NODE_FIELDS = ['id', 'prompt', 'executor', 'role', 'dependsOn', 'inputFrom', 'scope', 'sessionKey', 'session_key', 'profile', 'allocation', 'notBefore', 'retry'] as const
+
+/** Graph fields solar_coordinate accepts; the tool description lists the same set. */
+export const COORDINATE_GRAPH_FIELDS = ['formatVersion', 'id', 'label', 'cwd', 'maxParallel', 'notBefore', 'nodes'] as const
+
+const GRAPH_FIELD_DOCS: Readonly<Record<(typeof COORDINATE_GRAPH_FIELDS)[number], string>> = {
+  formatVersion: 'must be 1',
+  id: 'optional; omit to let the tool assign one',
+  label: 'optional title',
+  cwd: 'absolute working directory, required',
+  maxParallel: 'integer; at least the number of branches that should run at once',
+  notBefore: 'optional epoch milliseconds before which nothing starts',
+  nodes: 'array of nodes',
+}
+
+const NODE_FIELD_DOCS: Readonly<Record<(typeof COORDINATE_NODE_FIELDS)[number], string>> = {
+  id: 'unique node id',
+  prompt: 'self-contained task, expected result and verification',
+  executor: "'codex' or 'claude-code'; omit to allocate from role/profile/catalog",
+  dependsOn: 'ids of nodes that must succeed first',
+  inputFrom: 'subset of dependsOn whose outputs are appended to this prompt',
+  scope: "{ read?: paths, write?: paths } relative to cwd, '.' for all of cwd",
+  role: 'optional role mapped to a configured profile',
+  profile: '{ model?, reasoningEffort? }',
+  sessionKey: 'optional native session to continue',
+  session_key: 'alias of sessionKey',
+  allocation: 'optional per-node allocation hint',
+  notBefore: 'optional epoch milliseconds before which the node does not start',
+  retry: '{ maxAttempts, delayMs?, codes } for named retryable failure codes',
+}
+
+/**
+ * The solar_coordinate graph parameter description, generated from the
+ * accepted field sets so the model never has to guess a field name. The
+ * parallelism rule comes first because a node without a scope serializes.
+ * @returns the description text.
+ */
+export function coordinateGraphDescription(): string {
+  const fields = (docs: Readonly<Record<string, string>>) => Object.entries(docs).map(([name, doc]) => `${name} (${doc})`).join('; ')
+  return [
+    'TaskGraph JSON. Parallel rule: a node without scope is treated as writing all of cwd and waits for every other node there;',
+    'read-only nodes declare scope.read and run together; nodes that write declare non-overlapping scope.write.',
+    'Scope schedules work but is not a sandbox, so keep each prompt inside its scope.',
+    `Graph fields: ${fields(GRAPH_FIELD_DOCS)}.`,
+    `Node fields: ${fields(NODE_FIELD_DOCS)}. No other field is accepted.`,
+  ].join(' ')
+}
+
 function parseNode(value: unknown, index: number): RawNode {
   const field = `graph.nodes[${index}]`
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${field} must be an object`)
   const source = value as Record<string, unknown>
-  const allowed = new Set(['id', 'prompt', 'executor', 'role', 'dependsOn', 'inputFrom', 'scope', 'sessionKey', 'session_key', 'profile', 'allocation', 'notBefore', 'retry'])
-  for (const key of Object.keys(source)) if (!allowed.has(key)) throw new Error(`${field} has unsupported field "${key}"`)
+  const allowed: ReadonlySet<string> = new Set(COORDINATE_NODE_FIELDS)
+  for (const key of Object.keys(source)) if (!allowed.has(key)) throw new Error(`${field} has unsupported field "${key}"; supported fields: ${COORDINATE_NODE_FIELDS.join(', ')}`)
   const id = text(source.id, `${field}.id`)
   const prompt = text(source.prompt, `${field}.prompt`)
   const selectedExecutor = optionalExecutor(source.executor, `${field}.executor`)
@@ -298,8 +347,8 @@ function parseNode(value: unknown, index: number): RawNode {
 function parseGraph(value: unknown): RawGraph {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('solar_coordinate graph must be an object')
   const source = value as Record<string, unknown>
-  const allowed = new Set(['formatVersion', 'id', 'label', 'cwd', 'maxParallel', 'notBefore', 'nodes'])
-  for (const key of Object.keys(source)) if (!allowed.has(key)) throw new Error(`solar_coordinate graph has unsupported field "${key}"`)
+  const allowed: ReadonlySet<string> = new Set(COORDINATE_GRAPH_FIELDS)
+  for (const key of Object.keys(source)) if (!allowed.has(key)) throw new Error(`solar_coordinate graph has unsupported field "${key}"; supported fields: ${COORDINATE_GRAPH_FIELDS.join(', ')}`)
   if (source.formatVersion !== 1) throw new Error('solar_coordinate graph.formatVersion must be 1')
   const label = source.label === undefined ? 'Solar coordinated collaboration' : text(source.label, 'graph.label')
   const cwd = text(source.cwd, 'graph.cwd')
