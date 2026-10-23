@@ -6,7 +6,7 @@ const id = '7d40e2ee-891a-4a44-8dbe-07b2e8781cde'
 function setup() {
   let resolve!: (value: never) => void
   const pending = new Promise<never>(done => { resolve = done })
-  const controller = { list: vi.fn(async () => []), start: vi.fn(() => pending), observe: vi.fn(), cancel: vi.fn() }
+  const controller = { list: vi.fn(async () => []), start: vi.fn(() => pending), observe: vi.fn(), cancel: vi.fn(), abandon: vi.fn() }
   const service = new WebControl(new Context(), controller as unknown as WebController, { modelLabel: 'GPT-6' })
   return { service, controller, resolve }
 }
@@ -33,5 +33,19 @@ test('non-owner Remote callers cannot query or submit', async () => {
   await expect(receiver.launch({id,request:{prompt:'hi'}})).rejects.toThrow('LOCAL_OWNER_REQUIRED')
   await expect(receiver.observe({id})).rejects.toThrow('LOCAL_OWNER_REQUIRED')
   await expect(receiver.cancel({id})).rejects.toThrow('LOCAL_OWNER_REQUIRED')
+  await expect(receiver.abandon({ id, expectedRevision: 0, acknowledgeUnknown: true })).rejects.toThrow('LOCAL_OWNER_REQUIRED')
   expect(controller.start).not.toHaveBeenCalled()
+})
+
+test('abandon requires a strict owner acknowledgement and forwards the CAS revision', async () => {
+  const { service, controller } = setup()
+  const record = { id, revision: 7, stage: 'abandoned' }
+  controller.abandon.mockResolvedValue(record)
+
+  await expect(service.abandon({ id, expectedRevision: 7, acknowledgeUnknown: true })).resolves.toBe(record)
+  expect(controller.abandon).toHaveBeenCalledExactlyOnceWith(id, 7, true)
+  await expect(service.abandon({ id, expectedRevision: 7, acknowledgeUnknown: false } as never)).rejects.toThrow()
+  await expect(service.abandon({ id, expectedRevision: 7, acknowledgeUnknown: true, extra: true } as never)).rejects.toThrow()
+  await expect(service.abandon({ id, expectedRevision: -1, acknowledgeUnknown: true })).rejects.toThrow()
+  expect(controller.abandon).toHaveBeenCalledTimes(1)
 })
