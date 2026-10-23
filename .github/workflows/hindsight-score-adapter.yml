@@ -1,0 +1,35 @@
+name: Hindsight score adapter
+on:
+  pull_request:
+    paths:
+      - 'incubator/hindsight-score-adapter/**'
+      - 'docs/integrations/hindsight-score-adapter.md'
+      - '.github/workflows/hindsight-score-adapter.yml'
+  push:
+    branches: ['codex/hindsight-score-adapter']
+    paths:
+      - 'incubator/hindsight-score-adapter/**'
+      - '.github/workflows/hindsight-score-adapter.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: incubator/hindsight-score-adapter
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.31.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm build && pnpm typecheck && pnpm test && pnpm test:plugin
+      - run: node tools/homepage.mjs --check
+        working-directory: .

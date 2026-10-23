@@ -1,0 +1,9 @@
+- insert:
+    - id: hindsight-score-fixture
+      name: dsh-hindsight-score-fixture
+    - id: mnemon-source-memory-spaces
+      name: dsh-mnemon-source-memory-spaces
+      config:
+        providers:
+          - use: dsh-mnemon-provider-hindsight
+            instanceId: hindsight

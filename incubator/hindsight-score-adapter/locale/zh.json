@@ -1,0 +1,1 @@
+{"meta":{"title":"Hindsight 评分适配","description":"保留 Hindsight 原始排序分数，将其作为未校准证据，避免误用置信度门槛。"}}
