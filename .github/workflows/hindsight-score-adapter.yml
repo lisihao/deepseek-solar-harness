@@ -5,11 +5,6 @@ on:
       - 'incubator/hindsight-score-adapter/**'
       - 'docs/integrations/hindsight-score-adapter.md'
       - '.github/workflows/hindsight-score-adapter.yml'
-  push:
-    branches: ['codex/hindsight-score-adapter']
-    paths:
-      - 'incubator/hindsight-score-adapter/**'
-      - '.github/workflows/hindsight-score-adapter.yml'
 permissions:
   contents: read
 jobs:
