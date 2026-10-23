@@ -39,7 +39,7 @@ variants:                  # the first is the baseline
     env: { SOME_DIR: '{cell}/state' }  # {cell} expands to the run's private state directory
 ```
 
-Each run gets a fresh workspace (seeded from the task fixture), a private `$DSH_HOME` seeded from `profiles/<profile>` and `.credentials.yaml` of the current home (the credential copy is deleted when the child exits), and a state directory. A run whose root turn ends with `AUTH`, `INSUFFICIENT_BALANCE` or `QUOTA` is recorded as unmeasurable rather than failed. Cost is recorded only when `--prices <file.json>` gives a price row (USD per million tokens) for every model a run used.
+Each run gets a fresh workspace (seeded from the task fixture), a private `$DSH_HOME` seeded from `profiles/<profile>`, `.credentials.yaml` and `.env` of the current home (rc.2 loads `$DSH_HOME/.env`, which holds the proxy the official app uses; both copies are deleted when the child exits), and a state directory. A run whose root turn ends with one of rc.2's canonical codes `INVALID_CREDENTIAL`, `QUOTA` or `ACCOUNT_QUOTA` is recorded as unmeasurable rather than failed; no real rc.2 run has yet been observed producing such a record. Cost is recorded only when `--prices <file.json>` gives a price row (USD per million tokens) for every model a run used.
 
 ## Analysis
 

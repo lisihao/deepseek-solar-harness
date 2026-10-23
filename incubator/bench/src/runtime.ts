@@ -29,6 +29,16 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/**
+ * Home-relative files copied into every run home and deleted when its child
+ * exits: the credential file, and the `.env` that rc.2 loads from `$DSH_HOME`
+ * (for example the proxy the official app needs).
+ */
+export const RUN_TEMPLATE_FILES: readonly string[] = ['.credentials.yaml', '.env']
+
+/** rc.2 canonical codes (`dsh-llm`) for a rejected credential or an exhausted quota or balance. */
+export const PROVIDER_FAILURE_CODES: readonly string[] = ['INVALID_CREDENTIAL', 'QUOTA', 'ACCOUNT_QUOTA']
+
 /** Runtime configuration. */
 export interface Config {
   /**
@@ -70,7 +80,7 @@ export const Config: z<Config> = z.object({
     output: z.number().min(0).required(),
     cacheRead: z.number().min(0),
   })).default([]),
-  providerFailureCodes: z.array(z.string()).default(['AUTH', 'INSUFFICIENT_BALANCE', 'QUOTA']),
+  providerFailureCodes: z.array(z.string()).default([...PROVIDER_FAILURE_CODES]),
 })
 
 /** Schemastery schema of {@link AnalysisOptions}, with defaults, for consumers that take analysis settings as config. */

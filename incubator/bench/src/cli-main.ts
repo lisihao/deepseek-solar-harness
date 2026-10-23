@@ -23,7 +23,7 @@ import { loadDeclarativeSuite } from './declarative.js'
 import { readExperiment } from './experiment.js'
 import { importLegacyLedger } from './import.js'
 import { BenchRegistry } from './registry.js'
-import { BenchRuntime } from './runtime.js'
+import { BenchRuntime, PROVIDER_FAILURE_CODES, RUN_TEMPLATE_FILES } from './runtime.js'
 import { DSH_NATIVE_SUITE_DIR } from './suite.js'
 import type { ModelPrice } from './metrics.js'
 import type { AnalysisOptions, Comparison, Experiment, ExperimentAnalysis, RunProgress, VariantSummary } from './types.js'
@@ -163,12 +163,12 @@ async function runCommand(flags: RunFlags, signal: AbortSignal): Promise<number>
         runtime = new BenchRuntime(inner, {
           command: flags.launcher,
           templateHome: flags.home,
-          templateFiles: ['.credentials.yaml'],
+          templateFiles: [...RUN_TEMPLATE_FILES],
           ledgerRoot: join(flags.home, 'solar', 'bench', 'ledgers'),
           concurrency: flags.concurrency,
           runTimeoutMs: 600_000,
           prices: flags.prices,
-          providerFailureCodes: ['AUTH', 'INSUFFICIENT_BALANCE', 'QUOTA'],
+          providerFailureCodes: [...PROVIDER_FAILURE_CODES],
         })
       },
     })

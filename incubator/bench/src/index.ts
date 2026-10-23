@@ -15,7 +15,7 @@ import z from '@deepseek-ai/schemastery'
 import { BenchLedgersControl, createLedgersApi } from './control.js'
 import { loadDeclarativeSuite } from './declarative.js'
 import { BenchRegistry } from './registry.js'
-import { AnalysisConfig, BenchRuntime } from './runtime.js'
+import { AnalysisConfig, BenchRuntime, PROVIDER_FAILURE_CODES, RUN_TEMPLATE_FILES } from './runtime.js'
 import { DSH_NATIVE_SUITE_DIR } from './suite.js'
 import type { ModelPrice } from './metrics.js'
 import type { AnalysisOptions } from './types.js'
@@ -30,7 +30,7 @@ export { readExperiment } from './experiment.js'
 export { importLegacyLedger } from './import.js'
 export { ExperimentLedger, LEDGER_FORMAT_VERSION } from './ledger.js'
 export { BenchRegistry } from './registry.js'
-export { AnalysisConfig, BenchRuntime } from './runtime.js'
+export { AnalysisConfig, BenchRuntime, PROVIDER_FAILURE_CODES, RUN_TEMPLATE_FILES } from './runtime.js'
 export type { Config as RuntimeConfig } from './runtime.js'
 export { BenchLedgersControl, createLedgersApi } from './control.js'
 export { DSH_NATIVE_SUITE_DIR } from './suite.js'
@@ -82,12 +82,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const runtime = new BenchRuntime(ctx, {
     command: config.launcher,
     templateHome: home,
-    templateFiles: ['.credentials.yaml'],
+    templateFiles: [...RUN_TEMPLATE_FILES],
     ledgerRoot,
     concurrency: 1,
     runTimeoutMs: 600_000,
     prices: config.prices,
-    providerFailureCodes: ['AUTH', 'INSUFFICIENT_BALANCE', 'QUOTA'],
+    providerFailureCodes: [...PROVIDER_FAILURE_CODES],
   })
   new BenchLedgersControl(ctx, createLedgersApi(runtime, config.analysis))
 }

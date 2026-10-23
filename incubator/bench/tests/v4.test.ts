@@ -11,7 +11,8 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { AnalysisConfig, BenchRegistry, BenchRuntime, createLedgersApi, ExperimentLedger, importLegacyLedger } from '../src/index.js'
+import { AnalysisConfig, BenchRegistry, BenchRuntime, createLedgersApi, ExperimentLedger, importLegacyLedger, RUN_TEMPLATE_FILES } from '../src/index.js'
+import { prepareCell, scrubTemplateFiles } from '../src/cell.js'
 import type { AnalysisOptions, Experiment, RunRecord } from '../src/index.js'
 import { io, main } from '../src/cli-main.js'
 import { en, zh } from '../src/locales.js'
@@ -95,6 +96,21 @@ describe('run record schema', () => {
     await expect(read({ ...graded('plugin', 't1', true, 0.01), status: 'skipped' })).rejects.toThrow(/runs\.jsonl:2:/)
     await expect(read({ ...graded('plugin', 't1', true, 0.01), extra: 1 })).rejects.toThrow(/runs\.jsonl:2:/)
     await expect(read({ ...graded('plugin', 't1', true, 0.01), formatVersion: 2 })).rejects.toThrow(/run record format 2 is not readable/)
+  })
+})
+
+describe('run homes', () => {
+  it('carry the Harness home .env (proxy) and credentials into each run and delete them after it', async () => {
+    const home = join(root, 'home')
+    await mkdir(join(home, 'profiles', 'headless'), { recursive: true })
+    await writeFile(join(home, '.env'), 'HTTPS_PROXY=http://127.0.0.1:7890\n')
+    await writeFile(join(home, '.credentials.yaml'), 'k: v\n')
+    const dirs = await prepareCell(join(root, 'cell'), undefined, { home, files: RUN_TEMPLATE_FILES }, 'headless')
+    expect(await readFile(join(dirs.home, '.env'), 'utf8')).toContain('HTTPS_PROXY')
+    expect(await readFile(join(dirs.home, '.credentials.yaml'), 'utf8')).toBe('k: v\n')
+    await scrubTemplateFiles(dirs.home, RUN_TEMPLATE_FILES)
+    await expect(readFile(join(dirs.home, '.env'))).rejects.toThrow()
+    expect(await readFile(join(home, '.env'), 'utf8')).toContain('HTTPS_PROXY')
   })
 })
 
