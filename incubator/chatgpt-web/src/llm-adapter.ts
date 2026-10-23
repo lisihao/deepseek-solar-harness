@@ -143,16 +143,38 @@ function sourceForm(source: unknown): string | undefined {
   return isRecord(source) && typeof source.form === 'string' ? source.form : undefined
 }
 
+function isSolarWebRequestAudit(message: Record<string, unknown>): boolean {
+  if (message.role !== 'user') return false
+  const source = message.source
+  if (sourceKind(source) !== 'solar-web-context' || sourceForm(source) !== 'notice') return false
+  if (!Array.isArray(message.content) || message.content.length !== 1) return false
+  const block = message.content[0]
+  if (!isRecord(block) || block.type !== 'text' || typeof block.text !== 'string') return false
+  try {
+    const parsed = JSON.parse(block.text) as unknown
+    return isRecord(parsed) && parsed.kind === 'web-request'
+  } catch {
+    return false
+  }
+}
+
+function isAutomaticNativeBackground(kind: string, form: string | undefined): boolean {
+  if (kind === 'plugin:graph-memory' && form === 'snapshot') return true
+  if (kind === 'dsh-mnemon' && form === 'instructions') return true
+  return AUTOMATIC_CONTEXT_SOURCE_KINDS.has(kind)
+    && AUTOMATIC_CONTEXT_FORMS.has(form ?? '')
+}
+
 function omitBrowserBackgroundMessage(message: Record<string, unknown>): boolean {
   const kind = sourceKind(message.source)
   if (message.role === 'system' && kind === 'system-prompt') return true
   if (message.role !== 'user' || kind === undefined) return false
+  if (isSolarWebRequestAudit(message)) return true
   // The skill-context plugin's discovery notice is an automatic native-tool
   // instruction. Match its exact source kind/form so ordinary user notices,
   // explicit skill-context instructions, and other producers remain visible.
   if (kind === 'solar-skill-context' && sourceForm(message.source) === 'notice') return true
-  return AUTOMATIC_CONTEXT_SOURCE_KINDS.has(kind)
-    && AUTOMATIC_CONTEXT_FORMS.has(sourceForm(message.source) ?? '')
+  return isAutomaticNativeBackground(kind, sourceForm(message.source))
 }
 
 /**

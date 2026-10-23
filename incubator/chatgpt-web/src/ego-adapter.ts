@@ -34,8 +34,8 @@ const DEFAULT_STDERR_MAX_BYTES = 32 * 1024
 const STDERR_NOTICE_OVERHEAD_BYTES = 64 * 1024
 /** Operational output bound, never a list of model or effort names. */
 const MAX_CATALOG_CHOICES = 128
-const CATALOG_PROCESS_TIMEOUT_MULTIPLIER = 2
-const CATALOG_PROCESS_TIMEOUT_MAX_MS = 120_000
+const SETUP_PROCESS_TIMEOUT_MULTIPLIER = 2
+const SETUP_PROCESS_TIMEOUT_MAX_MS = 120_000
 /**
  * The post-send receipt check is intentionally a short, read-only grace
  * window.  It is capped separately from the command budget so a delayed DOM
@@ -98,10 +98,10 @@ function browserError(code: string, message: string): WebBrowserError {
   return new WebBrowserError(code, message)
 }
 
-function catalogProcessTimeoutMs(commandTimeoutMs: number): number {
-  return commandTimeoutMs >= CATALOG_PROCESS_TIMEOUT_MAX_MS / CATALOG_PROCESS_TIMEOUT_MULTIPLIER
-    ? CATALOG_PROCESS_TIMEOUT_MAX_MS
-    : commandTimeoutMs * CATALOG_PROCESS_TIMEOUT_MULTIPLIER
+function setupProcessTimeoutMs(commandTimeoutMs: number): number {
+  return commandTimeoutMs >= SETUP_PROCESS_TIMEOUT_MAX_MS / SETUP_PROCESS_TIMEOUT_MULTIPLIER
+    ? SETUP_PROCESS_TIMEOUT_MAX_MS
+    : commandTimeoutMs * SETUP_PROCESS_TIMEOUT_MULTIPLIER
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -1507,7 +1507,11 @@ if (__input.request.webSearch === true) {
     __throw("WEB_SEARCH_TEXT_INSERT_FAILED", "ChatGPT prompt could not be inserted without clearing webpage search");
   }
 } else {
-  await __page.fill(__composerSelector, __input.request.prompt, { clearFirst: true });
+  // Native plain-text paste creates ChatGPT's literal-paste node. Generic
+  // contenteditable fill is reserialized as escaped Markdown on submission.
+  // Empty draft/history was checked above; never clear an existing draft.
+  await __page.focus(__composerSelector);
+  await __page.keyboard.paste(__input.request.prompt);
 }
 const __afterFill = await __observeModelMenu();
 if (__afterFill.composerText !== __input.request.prompt || __afterFill.hasAttachments) {
@@ -1707,7 +1711,7 @@ export class EgoWebAdapter implements WebBrowserAdapter {
       resource,
       input,
       timeoutMs: this.#config.commandTimeoutMs,
-    }, signal, catalogProcessTimeoutMs(this.#config.commandTimeoutMs)), resource)
+    }, signal, setupProcessTimeoutMs(this.#config.commandTimeoutMs)), resource)
   }
 
   async prepare(resource: WebRunResource, request: WebRunRequest, signal?: AbortSignal): Promise<ChatGptPageObservation> {
@@ -1717,7 +1721,7 @@ export class EgoWebAdapter implements WebBrowserAdapter {
       resource,
       request,
       timeoutMs: this.#config.commandTimeoutMs,
-    }, signal))
+    }, signal, setupProcessTimeoutMs(this.#config.commandTimeoutMs)))
     this.#assertReady(observation, true)
     assertRequestedLabels(request, observation, true)
     this.#prepared.set(resource.spaceId, {
