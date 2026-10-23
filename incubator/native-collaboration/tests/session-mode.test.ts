@@ -347,6 +347,21 @@ describe('installSessionMode', () => {
     }
   })
 
+  it('requires scope.write for file changes and a truthful per-node account in the final reply', async () => {
+    const value = await fixture()
+    try {
+      await value.controller.select(value.agent.id, 'smart', 0)
+      const text = (value.sections[0]!.text as (context: { agent?: Agent }) => string)({ agent: value.agent })
+      expect(text).toContain('需要修改文件的节点必须声明 `scope.write`，否则执行者只有只读权限')
+      expect(text).toContain('succeeded 只表示执行者结束了这一轮，不代表产物存在')
+      expect(text).toContain('核对节点输出、文件改动和测试结果')
+      expect(text).toContain('哪些节点失败、被拒绝或没有产出及其原因，以及哪些工作是你自己补做的')
+      expect(text).toContain('不得把你补做的部分写成执行者完成')
+    } finally {
+      value.remove()
+    }
+  })
+
   it('tells the Agent to load the collaboration declarations only when the on-demand loader is present', async () => {
     const value = await fixture()
     try {

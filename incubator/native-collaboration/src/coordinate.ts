@@ -289,6 +289,7 @@ export function coordinateGraphDescription(): string {
   return [
     'TaskGraph JSON. Parallel rule: a node without scope is treated as writing all of cwd and waits for every other node there;',
     'read-only nodes declare scope.read and run together; nodes that write declare non-overlapping scope.write.',
+    'A node that changes files must declare scope.write; otherwise its executor is read-only.',
     'Scope schedules work but is not a sandbox, so keep each prompt inside its scope.',
     `Graph fields: ${fields(GRAPH_FIELD_DOCS)}.`,
     `Node fields: ${fields(NODE_FIELD_DOCS)}. No other field is accepted.`,
