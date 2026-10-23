@@ -20,13 +20,23 @@ export interface WebIdInput {
   readonly id: string
 }
 
+/** Explicit owner acknowledgement for retiring an idle indeterminate run. */
+export interface WebAbandonInput {
+  readonly id: string
+  readonly expectedRevision: number
+  readonly acknowledgeUnknown: true
+}
+
 /** Public direct Remote methods consumed by the browser client. */
 export interface ChatGptWebControlApi {
   status(): Promise<WebUiStatus>
   launch(input: WebLaunchInput): Promise<{ readonly id: string }>
   observe(input: WebIdInput): Promise<WebRunRecord>
   cancel(input: WebIdInput): Promise<WebRunRecord>
+  abandon(input: WebAbandonInput): Promise<WebRunRecord>
 }
+
+export const WEB_ABANDON_CONFIRMATION = '仅结束本地跟踪、保留远端结果未知，不取消远端、不重发；确认后新任务才能运行'
 
 export const WEB_STAGE_LABELS: Readonly<Record<WebRunRecord['stage'], string>> = {
   prepared: '已创建，等待网页准备',
@@ -38,4 +48,5 @@ export const WEB_STAGE_LABELS: Readonly<Record<WebRunRecord['stage'], string>> =
   indeterminate: '执行结果未确认',
   failed: '执行失败',
   cancelled: '已请求停止',
+  abandoned: '已结束本地跟踪（远端结果未知）',
 }

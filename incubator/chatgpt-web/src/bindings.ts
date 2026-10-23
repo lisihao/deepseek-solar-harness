@@ -185,6 +185,7 @@ function safeRecordDiagnostic(record: WebRunRecord): string {
   if (record.stage === 'completed' && record.output === undefined) {
     return 'ChatGPT Web 记录标记为 completed，但没有完整输出，不能视为成功。'
   }
+  if (record.stage === 'abandoned') return 'ChatGPT Web 已结束本地跟踪，远端结果仍未知；没有自动重试。'
   if (record.stage === 'indeterminate') {
     return `ChatGPT Web 结果为 indeterminate，未确认完成${code === undefined ? '' : `（${code}）`}。`
   }

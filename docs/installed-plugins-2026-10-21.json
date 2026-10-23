@@ -1,0 +1,444 @@
+{
+  "formatVersion": 1,
+  "observedAt": "2026-10-21T09:29:09.278185+00:00",
+  "profile": "desktop",
+  "hostBaseline": "0.2.1-rc.2",
+  "scope": "Configured profile bundles and installed package metadata; not a fresh GUI enablement or feature execution check. Versions are a snapshot, not latest-version recommendations. Local paths, settings, credentials and sessions excluded.",
+  "plugins": [
+    {
+      "name": "@deepseek-ai/dsh-base",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-web-app",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-agent-team-profile",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-voice-input-bundle",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-inspector-profile",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-auto-review",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "dshmarket",
+      "version": "1.66.37",
+      "category": "community",
+      "repository": "https://github.com/dsh-market/dsh-market",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "dshmarket@1.66.37"
+    },
+    {
+      "name": "dsh-thoughtdag",
+      "version": "0.5.19",
+      "category": "community",
+      "repository": "https://github.com/chenxiachan/thoughtdag",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-thoughtdag@0.5.19"
+    },
+    {
+      "name": "@feng0531/dsh-code-review",
+      "version": "0.84.0",
+      "category": "community",
+      "repository": "https://github.com/f-e-n-g-0531/dsh-code-review",
+      "license": "SEE LICENSE IN LICENSE",
+      "versionEvidence": "installed-package",
+      "installSpec": "@feng0531/dsh-code-review@0.84.0"
+    },
+    {
+      "name": "@tt-a1i/archify-dsh",
+      "version": "1.0.0",
+      "category": "community",
+      "repository": "https://github.com/tt-a1i/archify",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "@tt-a1i/archify-dsh@1.0.0"
+    },
+    {
+      "name": "@vectorize-io/hindsight-coding-agents",
+      "version": "0.8.1",
+      "category": "community",
+      "repository": "https://github.com/vectorize-io/hindsight",
+      "license": null,
+      "versionEvidence": "installed-package",
+      "installSpec": "@vectorize-io/hindsight-coding-agents@0.8.1"
+    },
+    {
+      "name": "@wxg-prc-cpg/browser-skill-dsh-plugin",
+      "version": "0.3.3",
+      "category": "community",
+      "repository": "https://github.com/Tencent/BrowserSkill",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "@wxg-prc-cpg/browser-skill-dsh-plugin@0.3.3"
+    },
+    {
+      "name": "@linxin666/dsh-client-ui-git-graph",
+      "version": "0.4.7",
+      "category": "community",
+      "repository": "https://github.com/zhu1090093659/dsh-web",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "@linxin666/dsh-client-ui-git-graph@0.4.7"
+    },
+    {
+      "name": "dsh-context",
+      "version": "0.73.3",
+      "category": "community",
+      "repository": "https://github.com/bowenliang123/dsh-context",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-context@0.73.3"
+    },
+    {
+      "name": "@linxin666/dsh-liangshen",
+      "version": "0.4.7",
+      "category": "community",
+      "repository": "https://github.com/zhu1090093659/dsh-web",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "@linxin666/dsh-liangshen@0.4.7"
+    },
+    {
+      "name": "dsh-dream-skin",
+      "version": "10.21.2-folder.2f6929c",
+      "category": "curated",
+      "repository": "https://github.com/RevolutionLA/dsh-dream-skin",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "packageId": "dream-skin",
+      "maintainedSourceRepo": "https://github.com/lisihao/dsh-dream-skin"
+    },
+    {
+      "name": "dsh-loopx-plugin",
+      "version": "0.1.1-beta.6",
+      "category": "community",
+      "repository": "https://github.com/loopx-project/loopx",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "https://github.com/loopx-project/loopx/releases/download/dsh-loopx-plugin-v0.1.1-beta.6/dsh-loopx-plugin-0.1.1-beta.6.tgz"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-cot-translation-bundle",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-tool-worktree",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-terminal-bundle",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-subagent-codex",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": "MIT",
+      "versionEvidence": "installed-package"
+    },
+    {
+      "name": "@deepseek-ai/dsh-subagent-claude-code",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": "MIT",
+      "versionEvidence": "installed-package"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-ralph-bundle",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-plugin-market-bundle",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-session-search",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-session-titles-bundle",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "@deepseek-ai/dsh-experimental-badge-skill-bundle",
+      "version": "0.2.1-rc.2",
+      "category": "official",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": null,
+      "versionEvidence": "official-app-baseline"
+    },
+    {
+      "name": "dsh-deepseek-web-login",
+      "version": "1.0.3",
+      "category": "community",
+      "repository": "https://github.com/cv-superding/dsh-deepseek-web-login",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-deepseek-web-login@1.0.3"
+    },
+    {
+      "name": "dsh-codex-subscription",
+      "version": "3.1.1",
+      "category": "community",
+      "repository": "https://github.com/WSL043/dsh-codex-subscription",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-codex-subscription@3.1.1"
+    },
+    {
+      "name": "dsh-cost-meter",
+      "version": "1.9.11",
+      "category": "community",
+      "repository": "https://github.com/Han-1413141/dsh-cost-meter",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-cost-meter@1.9.11"
+    },
+    {
+      "name": "dsh-chat-import",
+      "version": "0.26.1",
+      "category": "community",
+      "repository": "https://github.com/Nwflower/dsh-chat-import",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-chat-import@0.26.1"
+    },
+    {
+      "name": "dsh-synapse",
+      "version": "0.4.2",
+      "category": "community",
+      "repository": "https://github.com/liangmianya/dsh-synapse",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "github:liangmianya/dsh-synapse#847b712b14579ca5e5c5fcf414f4559589c44d93"
+    },
+    {
+      "name": "dsh-agent-persona",
+      "version": "0.1.4",
+      "category": "community",
+      "repository": "https://github.com/Awoodwhale/dsh-agent-persona",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-agent-persona@0.1.4"
+    },
+    {
+      "name": "@lisihao/dsh-solar-native-resident",
+      "version": "0.1.0-dev.0",
+      "category": "curated",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "packageId": "native-resident",
+      "repositoryEvidence": "identified Solar source repository; installed manifest omits repository"
+    },
+    {
+      "name": "@lisihao/dsh-solar-native-collaboration",
+      "version": "0.1.0-dev.0",
+      "category": "curated",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "packageId": "native-collaboration",
+      "repositoryEvidence": "identified Solar source repository; installed manifest omits repository"
+    },
+    {
+      "name": "billion-context",
+      "version": "0.1.202-solar.1",
+      "category": "curated",
+      "repository": "https://github.com/lisihao/billion-context",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "packageId": "billion-context"
+    },
+    {
+      "name": "dsh-mnemon",
+      "version": "0.5.32",
+      "category": "community",
+      "repository": "https://github.com/omdsh-dev/dsh-mnemon",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-mnemon@0.5.32"
+    },
+    {
+      "name": "@dickpy/dsh-imagegen",
+      "version": "1.9.2",
+      "category": "community",
+      "repository": "https://github.com/dickpy/dsh-imagegen",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "@dickpy/dsh-imagegen@1.9.2"
+    },
+    {
+      "name": "@lisihao/dsh-solar-model-handoff",
+      "version": "0.1.0-dev.0",
+      "category": "curated",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "packageId": "model-handoff",
+      "repositoryEvidence": "identified Solar source repository; installed manifest omits repository"
+    },
+    {
+      "name": "@lisihao/dsh-solar-chatgpt-web",
+      "version": "0.1.0-dev.0",
+      "category": "curated",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "packageId": "chatgpt-web",
+      "repositoryEvidence": "identified Solar source repository; installed manifest omits repository",
+      "installedSourceCommit": "2c338f9fc3e121d6142db6d1a1d74b602c3047c5",
+      "installedArtifactSha256": "525a60d4c514e57e0657c81c5a8c44d7d9385631d69492627ba8763c90f2be34"
+    },
+    {
+      "name": "@lisihao/dsh-solar-rlm",
+      "version": "0.1.0-dev.0",
+      "category": "curated",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "packageId": "rlm",
+      "repositoryEvidence": "identified Solar source repository; installed manifest omits repository"
+    },
+    {
+      "name": "graph-memory",
+      "version": "1.6.0-beta.17",
+      "category": "community",
+      "repository": "https://github.com/adoresever/graph-memory",
+      "license": null,
+      "versionEvidence": "installed-package",
+      "installSpec": "github:adoresever/graph-memory#5841b1987c3967998818764c9d4238add5f3aa7c"
+    },
+    {
+      "name": "clearai-dsh",
+      "version": "0.5.6",
+      "category": "community",
+      "repository": "https://github.com/Clearailhc/clearai-dsh",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "clearai-dsh@0.5.6"
+    },
+    {
+      "name": "dsh-purge-community",
+      "version": "1.6.38",
+      "category": "community",
+      "repository": "https://github.com/kingcharleslzy-ai/dsh-purge",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "https://github.com/kingcharleslzy-ai/dsh-purge/releases/download/v1.6.38/dsh-purge-community-1.6.38.tgz"
+    },
+    {
+      "name": "dsh-session-prefix",
+      "version": "0.1.0",
+      "category": "community",
+      "repository": "https://github.com/john-walks-slow/dsh-session-prefix",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-session-prefix@0.1.0"
+    },
+    {
+      "name": "@dsh-jev/plugin",
+      "version": "0.1.0",
+      "category": "community",
+      "repository": "https://github.com/luobosibing2/deepseek-harness-jev",
+      "license": "MIT",
+      "versionEvidence": "installed-package",
+      "installSpec": "github:luobosibing2/dsh-jev-plugin#c54e071e99eb839749b3991d29ede9ca20e275f6",
+      "maintainedSourceRepo": "https://github.com/luobosibing2/dsh-jev-plugin",
+      "installSourceEvidence": "exact resolved commit in installed profile lockfile; manifest repository differs"
+    },
+    {
+      "name": "dsh-univer-office",
+      "version": "0.3.7",
+      "category": "community",
+      "repository": "https://github.com/dream-num/dsh-univer-office",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-univer-office@0.3.7"
+    },
+    {
+      "name": "dsh-research-report",
+      "version": "0.3.29",
+      "category": "community",
+      "repository": "https://github.com/PerryLink/dsh-research-report",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-research-report@0.3.29"
+    },
+    {
+      "name": "dsh-industry-research",
+      "version": "0.3.23",
+      "category": "community",
+      "repository": "https://github.com/PerryLink/dsh-industry-research",
+      "license": "Apache-2.0",
+      "versionEvidence": "installed-package",
+      "installSpec": "dsh-industry-research@0.3.23"
+    }
+  ]
+}
