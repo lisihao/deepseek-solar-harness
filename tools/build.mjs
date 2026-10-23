@@ -34,7 +34,7 @@ const config = join(root, 'tools', 'tsconfig.build.json')
 await writeFile(config, JSON.stringify({
   extends: '../tsconfig.json',
   compilerOptions: { noEmit: false, declaration: true, emitDeclarationOnly: true, rootDir: '../incubator', outDir: '../.build-types' },
-  include: ['../incubator/*/src/**/*.ts'],
+  include: packages.map(name => `../incubator/${name}/src/**/*.ts`),
   exclude: ['../incubator/*/tests/**', '../incubator/*/lib/**', '../node_modules/**'],
 }, null, 2) + '\n')
 execFileSync(join(root, 'node_modules/.bin/tsc'), ['-p', config], { cwd: root, stdio: 'inherit' })
