@@ -133,28 +133,24 @@ export function BenchSection({ connection, t }: BenchSectionInjected) {
     setLoading(true)
     setError(undefined)
     void (async () => {
-      const next = await getJson<BenchExperimentList>(connection, '/experiments')
-      // Default to the experiment that recorded a run most recently.
-      const ended = (entry: BenchExperimentList['experiments'][number]) => entry.lastEndedAt ?? 0
-      const newest = next.experiments.reduce<BenchExperimentList['experiments'][number] | undefined>(
-        (best, entry) => best === undefined || ended(entry) > ended(best) ? entry : best, undefined)
-      const id = choose ?? newest?.id
-      const body = id === undefined ? undefined : await getJson<BenchExperimentDetail>(connection, `/experiments/${encodeURIComponent(id)}`)
-      return { next, id, body }
-    })().then(
-      ({ next, id, body }) => {
+      try {
+        const next = await getJson<BenchExperimentList>(connection, '/experiments')
+        // Default to the experiment that recorded a run most recently.
+        const ended = (entry: BenchExperimentList['experiments'][number]) => entry.lastEndedAt ?? 0
+        const newest = next.experiments.reduce<BenchExperimentList['experiments'][number] | undefined>(
+          (best, entry) => best === undefined || ended(entry) > ended(best) ? entry : best, undefined)
+        const id = choose ?? newest?.id
+        const body = id === undefined ? undefined : await getJson<BenchExperimentDetail>(connection, `/experiments/${encodeURIComponent(id)}`)
         if (mine !== epoch.current) return
         setList(next)
         setSelected(id)
         setDetail(body)
-        setLoading(false)
-      },
-      (cause: unknown) => {
+      } catch (cause) {
         if (mine !== epoch.current) return
         setError(cause instanceof Error ? cause.message : String(cause))
-        setLoading(false)
-      },
-    )
+      }
+      setLoading(false)
+    })()
   }, [connection])
 
   useEffect(() => {
@@ -162,12 +158,13 @@ export function BenchSection({ connection, t }: BenchSectionInjected) {
     return () => { epoch.current += 1 }
   }, [load])
 
+  const refresh = <Button variant="outline" size="sm" className={styles.action} disabled={loading} onClick={() => { load(selected) }}>
+    {loading ? t('refreshing') : t('refresh')}
+  </Button>
   return <main className={styles.page} aria-busy={loading}>
     <header className={styles.hero}>
       <div><h1>{t('title')}</h1><p>{t('intro')}</p></div>
-      <Button variant="outline" size="sm" className={styles.action} disabled={loading} onClick={() => { load(selected) }}>
-        {loading ? t('refreshing') : t('refresh')}
-      </Button>
+      {refresh}
     </header>
     {error === undefined ? null : <p className={styles.error} role="alert">{t('loadFailed')}: {error}</p>}
     {list === undefined
