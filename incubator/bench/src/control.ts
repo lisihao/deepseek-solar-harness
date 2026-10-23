@@ -10,6 +10,8 @@ import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { z } from 'zod'
 import { analyzeExperiment } from './analysis.js'
 import type { BenchDetailInput, BenchExperimentDetail, BenchExperimentList, BenchExperimentListItem, BenchLedgersApi } from './contracts.js'
+import { variantTitles } from './runs.js'
+import type { BenchRunManager, BenchRunChoices, BenchJobStatus, BenchStartInput } from './runs.js'
 import type { BenchRuntime } from './runtime.js'
 import type { AnalysisOptions } from './types.js'
 
@@ -55,7 +57,7 @@ export function createLedgersApi(runtime: BenchRuntime, analysis: AnalysisOption
       const { id } = detailInput.parse(input)
       const snapshot = await runtime.ledger(id)
       if (snapshot === undefined) throw new Error(`BENCH_EXPERIMENT_NOT_FOUND: no experiment ${JSON.stringify(id)}`)
-      return { ...snapshot, analysis: analyzeExperiment(snapshot.experiment, snapshot.records, analysis) }
+      return { ...snapshot, analysis: analyzeExperiment(snapshot.experiment, snapshot.records, analysis), titles: await variantTitles(snapshot.experiment) }
     },
   }
 }
@@ -90,3 +92,49 @@ export class BenchLedgersControl extends TypertRemoteService {
 }
 
 declare module '@deepseek-ai/cordis' { interface Context { solarBenchLedgers: BenchLedgersControl } }
+
+/** Remote service name of the run controls. */
+export const BENCH_RUNS_SERVICE = 'solarBenchRuns'
+
+/** `ctx.solarBenchRuns`: start, observe and stop experiments from the app, for the local owner only. */
+export class BenchRunsControl extends TypertRemoteService {
+  /**
+   * @param ctx - plugin context.
+   * @param runs - the run manager.
+   */
+  constructor(ctx: Context, private readonly runs: BenchRunManager) {
+    super(ctx, BENCH_RUNS_SERVICE)
+  }
+
+  private owner(): void {
+    if (this.ctx.invocation !== undefined && this.ctx.invocation.peer.principal.kind !== 'owner') {
+      throw new Error('LOCAL_OWNER_REQUIRED: benchmark runs can be started only by the local owner.')
+    }
+  }
+
+  @Remote
+  async choices(): Promise<BenchRunChoices> {
+    this.owner()
+    return this.runs.choices()
+  }
+
+  @Remote
+  async start(input: BenchStartInput): Promise<{ experimentId: string }> {
+    this.owner()
+    return this.runs.start(input)
+  }
+
+  @Remote
+  async status(): Promise<BenchJobStatus> {
+    this.owner()
+    return this.runs.status()
+  }
+
+  @Remote
+  async stop(): Promise<BenchJobStatus> {
+    this.owner()
+    return this.runs.stop()
+  }
+}
+
+declare module '@deepseek-ai/cordis' { interface Context { solarBenchRuns: BenchRunsControl } }

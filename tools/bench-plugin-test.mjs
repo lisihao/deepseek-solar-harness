@@ -154,7 +154,7 @@ async function readProbeMarker(path) {
   let marker
   try { marker = JSON.parse(await readFile(path, 'utf8')) } catch (error) { throw new Error(`bench probe marker is missing or invalid at ${path}: ${String(error)}`) }
   if (marker?.ok !== true) throw new Error(`bench probe reported failure: ${JSON.stringify(marker)}`)
-  for (const name of ['suite', 'ledgerRoot', 'list', 'detail', 'verdict']) {
+  for (const name of ['suite', 'ledgerRoot', 'list', 'detail', 'verdict', 'choices']) {
     if (marker.checks?.[name] !== true) throw new Error(`bench probe did not pass ${name}: ${JSON.stringify(marker)}`)
   }
   return marker
@@ -178,6 +178,8 @@ async function main() {
         if (result.status !== 0 || result.signal !== null || result.error !== undefined || result.timedOut) throw commandError(label, result)
       }
       await assertInstalledBundles(profileDir)
+      // The run controls list plugins from the desktop profile by default; point them at this profile.
+      await writeFile(join(profileDir, 'cordis.patch.yml'), `- id: solar-bench\n  config:\n    sourceProfile: ${PROFILE}\n`)
       const bootLabel = `dsh --profile ${PROFILE}`
       const boot = await runCommand(DSH_BIN, ['--profile', PROFILE], { cwd: ROOT, env: environment, timeoutMs: BOOT_TIMEOUT_MS, label: bootLabel })
       if (boot.status !== 0 || boot.signal !== null || boot.error !== undefined || boot.timedOut) {

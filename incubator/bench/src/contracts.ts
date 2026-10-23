@@ -40,6 +40,12 @@ export interface BenchExperimentDetail {
   records: RunRecord[]
   /** Analysis of `records` with the plugin's configured settings. */
   analysis: ExperimentAnalysis
+  /**
+   * Display names per variant id, read from the plugin locale beside each
+   * variant's pinned patch; a variant without patches is the baseline, and a
+   * missing locale leaves the id as its name.
+   */
+  titles: Record<string, { zh?: string; en?: string; baseline?: true }>
 }
 
 /** Input of `solarBenchLedgers.detail`. */

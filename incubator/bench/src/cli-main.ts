@@ -11,7 +11,6 @@
  * @module @lisihao/dsh-solar-bench/cli-main
  */
 
-import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -189,8 +188,8 @@ async function runCommand(flags: RunFlags, signal: AbortSignal): Promise<number>
       flags.maxUsd === undefined ? 'No spending limit.' : `Stops once priced runs cost more than $${flags.maxUsd.toFixed(2)}.`,
       '',
     ].join('\n'))
-    const credential = (io.env.DEEPSEEK_API_KEY ?? '') !== '' || existsSync(join(flags.home, '.credentials.yaml'))
-    if (!credential) throw new Error(`no model credential: set DEEPSEEK_API_KEY, or create ${join(flags.home, '.credentials.yaml')}`)
+    // The headless profile disables the credential store and reads the key from the launch environment.
+    if ((io.env.DEEPSEEK_API_KEY ?? '') === '') throw new Error('no model credential: export DEEPSEEK_API_KEY; headless runs do not read the stored credential file')
     if (!flags.confirmed) {
       io.stdout.write('Nothing ran. Runs call the configured model and can cost money; re-run with --yes to start.\n')
       return EXIT_UNCONFIRMED

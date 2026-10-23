@@ -37,5 +37,19 @@ export const RPC_REMOTE: TypertRemoteContribution = {
       parameters: [{ name: 'input', wire: 'input', source: 'json' as const, codec: codec('BenchDetailInput') }],
       result: codec('BenchExperimentDetail'),
     },
+    ...([
+      ['choices', undefined, 'BenchRunChoices'],
+      ['start', 'BenchStartInput', 'BenchStartResult'],
+      ['status', undefined, 'BenchJobStatus'],
+      ['stop', undefined, 'BenchJobStatus'],
+    ] as const).map(([method, input, result]) => ({
+      id: `${PKG}#solarBenchRuns/${method}`,
+      service: 'solarBenchRuns',
+      namespace: 'solarBenchRuns',
+      method,
+      invocation: { kind: 'direct' as const },
+      parameters: input === undefined ? [] : [{ name: 'input', wire: 'input', source: 'json' as const, codec: codec(input) }],
+      result: codec(result),
+    })),
   ],
 }

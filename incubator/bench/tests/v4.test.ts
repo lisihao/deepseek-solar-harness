@@ -100,14 +100,14 @@ describe('run record schema', () => {
 })
 
 describe('run homes', () => {
-  it('carry the Harness home .env (proxy) and credentials into each run and delete them after it', async () => {
+  it('carry the Harness home .env (proxy), not the credential file, into each run and delete it after the run', async () => {
     const home = join(root, 'home')
     await mkdir(join(home, 'profiles', 'headless'), { recursive: true })
     await writeFile(join(home, '.env'), 'HTTPS_PROXY=http://127.0.0.1:7890\n')
     await writeFile(join(home, '.credentials.yaml'), 'k: v\n')
     const dirs = await prepareCell(join(root, 'cell'), undefined, { home, files: RUN_TEMPLATE_FILES }, 'headless')
     expect(await readFile(join(dirs.home, '.env'), 'utf8')).toContain('HTTPS_PROXY')
-    expect(await readFile(join(dirs.home, '.credentials.yaml'), 'utf8')).toBe('k: v\n')
+    await expect(readFile(join(dirs.home, '.credentials.yaml'))).rejects.toThrow()
     await scrubTemplateFiles(dirs.home, RUN_TEMPLATE_FILES)
     await expect(readFile(join(dirs.home, '.env'))).rejects.toThrow()
     expect(await readFile(join(home, '.env'), 'utf8')).toContain('HTTPS_PROXY')
@@ -178,20 +178,31 @@ describe('ledger read API', () => {
   })
 })
 
-describe('Settings page', () => {
-  it('renders one experiment in both languages without internal keys', async () => {
+describe('results view', () => {
+  it('renders one experiment in both languages with display names instead of variant ids', async () => {
     const ledgers = join(root, 'ledgers')
     await writeLedger(join(ledgers, 'ablation-1'), legacyExperiment, legacyRecords)
     const { formatVersion: _version, ...pinned } = legacyExperiment
     const records = await new ExperimentLedger(ledgers, pinned as unknown as Experiment).records(false)
     const { analyzeExperiment } = await import('../src/index.js')
-    const detail = { experiment: pinned as unknown as Experiment, records, analysis: analyzeExperiment(pinned as unknown as Experiment, records, ANALYSIS) }
-    for (const dictionary of [en, zh]) {
-      const html = renderToStaticMarkup(createElement(Detail, { detail, t: key => dictionary[key] }))
+    const titles = { baseline: { baseline: true as const }, plugin: { zh: '示例插件', en: 'Sample plugin' } }
+    const detail = { experiment: pinned as unknown as Experiment, records, analysis: analyzeExperiment(pinned as unknown as Experiment, records, ANALYSIS), titles }
+    for (const [dictionary, lang, plugin] of [[en, 'en', 'Sample plugin'], [zh, 'zh-CN', '示例插件']] as const) {
+      const holder = globalThis as { document?: unknown }
+      holder.document = { documentElement: { lang } }
+      let html: string
+      try {
+        html = renderToStaticMarkup(createElement(Detail, { detail, t: key => dictionary[key] }))
+      } finally {
+        delete holder.document
+      }
       expect(html).toContain(dictionary.comparisonsTitle)
       expect(html).toContain(dictionary.matrixTitle)
       expect(html).toContain('ablation-1')
       expect(html).toContain('75.0%')
+      expect(html).toContain(dictionary.baselineName)
+      expect(html).toContain(plugin)
+      expect(html).not.toMatch(/>(baseline|plugin)</)
       expect(html).not.toMatch(/verdict[A-Z]|explain[A-Z]|\{(delta|tasks|variant)\}/)
     }
   })

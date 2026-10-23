@@ -27,8 +27,10 @@ export interface CellDirs {
 
 /** What a run's home is seeded from. */
 export interface HomeTemplate {
-  /** Absolute home whose `profiles/<profile>` directory and listed files are copied. */
+  /** Absolute home whose `profiles/<profile>` directory is copied. */
   home: string
+  /** Absolute home the listed files are copied from; defaults to `home`. */
+  filesHome?: string
   /** Home-relative files copied into each run home when present, such as credentials and settings. */
   files: readonly string[]
 }
@@ -52,7 +54,7 @@ export async function prepareCell(dir: string, fixture: string | undefined, temp
   else await cp(fixture, dirs.workspace, copy)
   await cp(join(template.home, 'profiles', profile), join(dirs.home, 'profiles', profile), copy)
   for (const file of template.files) {
-    const source = join(template.home, file)
+    const source = join(template.filesHome ?? template.home, file)
     // An absent template file is allowed: credentials may come from the environment instead.
     if (await stat(source).then(() => true, () => false)) await cp(source, join(dirs.home, file), copy)
   }

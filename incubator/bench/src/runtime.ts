@@ -10,6 +10,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -31,10 +32,11 @@ declare module '@deepseek-ai/cordis' {
 
 /**
  * Home-relative files copied into every run home and deleted when its child
- * exits: the credential file, and the `.env` that rc.2 loads from `$DSH_HOME`
- * (for example the proxy the official app needs).
+ * exits: the `.env` that rc.2 loads from `$DSH_HOME` (for example the proxy
+ * the official app needs). The model key reaches a child through
+ * {@link RunOptions.env}, never as a copied file.
  */
-export const RUN_TEMPLATE_FILES: readonly string[] = ['.credentials.yaml', '.env']
+export const RUN_TEMPLATE_FILES: readonly string[] = ['.env']
 
 /** rc.2 canonical codes (`dsh-llm`) for a rejected credential or an exhausted quota or balance. */
 export const PROVIDER_FAILURE_CODES: readonly string[] = ['INVALID_CREDENTIAL', 'QUOTA', 'ACCOUNT_QUOTA']
@@ -99,13 +101,59 @@ export interface RunOptions {
   signal?: AbortSignal
   /** Called after each run is recorded. */
   onProgress?: (progress: RunProgress) => void
+  /** Called when a run's child starts. */
+  onStart?: (cell: CellKey) => void
+  /** Called with each chunk a run's child prints, already redacted. */
+  onOutput?: (cell: CellKey, text: string) => void
+  /**
+   * Extra child environment, such as the model key. Every value is treated as
+   * secret: it is replaced by `[redacted]` in records and in `onOutput`.
+   */
+  env?: Readonly<Record<string, string>>
+  /** Home whose `profiles/<profile>` seeds run homes, instead of the configured `templateHome`. */
+  profileHome?: string
+}
+
+/** Child output head kept for activation warnings, which print before the answer. */
+const OUTPUT_HEAD_BYTES = 16_000
+
+/**
+ * Package names that a patch file's insert rows mount (`name:` values).
+ * @param text - the patch YAML.
+ * @returns the names.
+ */
+export function patchPackageNames(text: string): string[] {
+  const names: string[] = []
+  for (const match of text.matchAll(/^[\s-]*name:\s*['"]?([^'"\s#]+)['"]?\s*(?:#.*)?$/gm)) names.push(match[1] as string)
+  return names
+}
+
+/**
+ * A row of the variant's own patches that did not activate in the child.
+ * dsh prints `<n> entries did not activate` followed by one line per row,
+ * `id (package): failed to import …` or `id (package): pending (waiting for service: …)`.
+ * @param packages - package names the variant's patches mount.
+ * @param output - the child's output head.
+ * @returns the warning line, or `undefined` when every one activated.
+ */
+export function inactivePatchRow(packages: readonly string[], output: string): string | undefined {
+  const start = output.search(/entries? did not activate/)
+  if (start < 0 || packages.length === 0) return undefined
+  for (const line of output.slice(start).split('\n').slice(1)) {
+    if (!/^\S+ \(/.test(line)) break
+    if (packages.some(name => line.includes(`(${name})`) || line.includes(`(${name}/`))) return line.trim()
+  }
+  return undefined
 }
 
 /** Exit of one run's child process. */
 interface ChildExit {
   code: number | null
   timedOut: boolean
+  /** Output tail. */
   output: string
+  /** Output head. */
+  head: string
 }
 
 /**
@@ -171,7 +219,7 @@ export class BenchRuntime extends Service {
     const worker = async (): Promise<void> => {
       for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
         options.signal?.throwIfAborted()
-        const record = await this.runCell(command, experiment, suite, ledger.dir, next, options.signal)
+        const record = await this.runCell(command, experiment, suite, ledger.dir, next, options)
         options.signal?.throwIfAborted()
         await ledger.append(record)
         records.push(record)
@@ -246,21 +294,34 @@ export class BenchRuntime extends Service {
     suite: BenchSuite,
     ledgerDir: string,
     job: { cell: CellKey; task: BenchTask; variant: Variant },
-    signal: AbortSignal | undefined,
+    options: RunOptions,
   ): Promise<RunRecord> {
+    const { signal } = options
+    const secrets = Object.values(options.env ?? {}).filter(value => value.length >= 4)
+    const redact = (text: string): string => secrets.reduce((result, secret) => result.replaceAll(secret, '[redacted]'), text)
     const startedAt = Date.now()
     const dir = join(ledgerDir, 'cells', job.cell.variant, job.cell.task, String(job.cell.rep))
-    const template = { home: this.config.templateHome, files: this.config.templateFiles }
+    const template = { home: options.profileHome ?? this.config.templateHome, filesHome: this.config.templateHome, files: this.config.templateFiles }
     const dirs = await prepareCell(dir, job.task.fixture, template, experiment.profile)
+    const packages = (await Promise.all(job.variant.patches.map(async patch => patchPackageNames(await readFile(patch, 'utf8').catch(() => ''))))).flat()
     const argv = [
       ...command.slice(1),
       '--profile', experiment.profile,
       ...job.variant.patches.flatMap(patch => ['--patch', patch]),
       job.task.prompt,
     ]
-    const exit = await this.spawnChild(command[0] as string, argv, dirs.workspace, cellEnv(process.env, dirs, job.variant), signal)
+    options.onStart?.(job.cell)
+    const env = { ...cellEnv(process.env, dirs, job.variant), ...options.env }
+    const onOutput = options.onOutput === undefined ? undefined : (text: string) => { options.onOutput?.(job.cell, redact(text)) }
+    const raw = await this.spawnChild(command[0] as string, argv, dirs.workspace, env, signal, onOutput)
+    const exit = { ...raw, output: redact(raw.output), head: redact(raw.head) }
     await scrubTemplateFiles(dirs.home, this.config.templateFiles)
     const base = { formatVersion: LEDGER_FORMAT_VERSION as 1, cell: job.cell, exitCode: exit.code, suiteVersion: suite.version, startedAt }
+    const inactive = inactivePatchRow(packages, exit.head)
+    if (inactive !== undefined) {
+      signal?.throwIfAborted()
+      return { ...base, status: 'invalid', models: [], error: `plugin under test did not load: ${inactive}`, endedAt: Date.now() }
+    }
     let sessions
     try {
       sessions = await readRunSessions(dirs.home)
@@ -301,13 +362,18 @@ export class BenchRuntime extends Service {
     cwd: string,
     env: NodeJS.ProcessEnv,
     signal: AbortSignal | undefined,
+    onOutput?: (text: string) => void,
   ): Promise<ChildExit> {
     return new Promise((resolve, reject) => {
-      const child = spawn(launcher, argv, { cwd, env, signal, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(launcher, argv, { cwd, env, signal, killSignal: 'SIGKILL', stdio: ['ignore', 'pipe', 'pipe'] })
       let output = ''
+      let head = ''
       let timedOut = false
       const collect = (chunk: Buffer): void => {
-        output = (output + chunk.toString('utf8')).slice(-OUTPUT_TAIL_BYTES)
+        const text = chunk.toString('utf8')
+        output = (output + text).slice(-OUTPUT_TAIL_BYTES)
+        if (head.length < OUTPUT_HEAD_BYTES) head = (head + text).slice(0, OUTPUT_HEAD_BYTES)
+        onOutput?.(text)
       }
       child.stdout.on('data', collect)
       child.stderr.on('data', collect)
@@ -315,13 +381,20 @@ export class BenchRuntime extends Service {
         timedOut = true
         child.kill('SIGKILL')
       }, this.config.runTimeoutMs)
+      let aborted: Error | undefined
       child.once('error', (error) => {
+        // An abort kills the child; settle only once it has exited, so a stopped run leaves no process behind.
+        if (error.name === 'AbortError' && child.pid !== undefined) {
+          aborted = error
+          return
+        }
         clearTimeout(timer)
         reject(error)
       })
       child.once('close', (code) => {
         clearTimeout(timer)
-        resolve({ code, timedOut, output })
+        if (aborted !== undefined) reject(aborted)
+        else resolve({ code, timedOut, output, head })
       })
     })
   }

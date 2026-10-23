@@ -19,7 +19,7 @@ async function writeMarker(path, marker) {
 async function runProbe(ctx) {
   const markerPath = requiredEnv('SOLAR_PLUGIN_PROBE_MARKER')
   const expectedRoot = join(requiredEnv('DSH_HOME'), 'solar', 'bench', 'ledgers')
-  const checks = { suite: false, ledgerRoot: false, list: false, detail: false, verdict: false }
+  const checks = { suite: false, ledgerRoot: false, list: false, detail: false, verdict: false, choices: false }
   let error
   try {
     const registry = ctx.get('solarBenchmarks')
@@ -41,6 +41,11 @@ async function runProbe(ctx) {
     checks.detail = true
     assert(detail.analysis.comparisons[0]?.verdict === 'insufficient', `verdict ${detail.analysis.comparisons[0]?.verdict}`)
     checks.verdict = true
+    const choices = await ctx.get('solarBenchRuns').choices()
+    assert(choices.suites.some(suite => suite.id === 'dsh-native' && suite.tasks.length === 14), 'choices lack the dsh-native suite')
+    assert(JSON.stringify(choices.plugins.map(plugin => plugin.name)) === JSON.stringify(['@lisihao/dsh-solar-bench-probe']), `choices list ${JSON.stringify(choices.plugins)}`)
+    assert(choices.credential === false, 'a scrubbed home must report no credential')
+    checks.choices = true
   } catch (caught) {
     error = { name: caught?.name, message: caught?.message ?? String(caught), stack: caught?.stack }
   }
@@ -49,7 +54,7 @@ async function runProbe(ctx) {
 }
 
 export const name = 'bench-plugin-probe'
-export const inject = ['appReady', 'solarBenchmarks', 'solarBenchRuntime', 'solarBenchLedgers']
+export const inject = ['appReady', 'solarBenchmarks', 'solarBenchRuntime', 'solarBenchLedgers', 'solarBenchRuns']
 
 export function apply(ctx) {
   const ready = ctx.get('appReady')
