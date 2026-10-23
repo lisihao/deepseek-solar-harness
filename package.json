@@ -3,13 +3,17 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.31.0",
-  "engines": { "node": "^22.19 || >=24" },
-  "workspaces": ["plugins/*"],
+  "engines": {
+    "node": "^22.19 || >=24"
+  },
+  "workspaces": [
+    "plugins/*"
+  ],
   "scripts": {
     "build": "node tools/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:plugin": "node tools/plugin-test.mjs",
+    "test:plugin": "node tools/plugin-test.mjs && node tools/skill-context-plugin-test.mjs",
     "homepage": "node tools/homepage.mjs",
     "homepage:check": "node tools/homepage.mjs --check && node tools/installed-plugin-guide.mjs --check && python3 tools/check-curated-packages.py && bash tools/tests/curated-installer.test.sh && python3 tools/tests/curated-history.test.py",
     "check": "pnpm build && pnpm typecheck && pnpm test && pnpm test:plugin && pnpm homepage:check"
@@ -19,14 +23,19 @@
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh": "0.2.1-rc.2",
     "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
     "@deepseek-ai/dsh-home-paths": "0.2.1-rc.2",
     "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
     "@deepseek-ai/dsh-subagent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tool-skill": "0.2.1-rc.2",
     "@deepseek-ai/dsh-tool-subagent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-working-directory": "0.2.1-rc.2",
     "@deepseek-ai/schemastery": "3.18.5",
-    "@openai/codex": "0.153.4",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "@openai/codex": "0.153.4",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",

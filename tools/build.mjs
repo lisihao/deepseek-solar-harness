@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const packages = []
-for (const name of ['native-resident', 'native-collaboration']) {
+for (const name of ['native-resident', 'native-collaboration', 'skill-context']) {
   try { await stat(join(root, 'incubator', name, 'package.json')); packages.push(name) }
   catch (error) { if (error.code !== 'ENOENT') throw error }
 }
