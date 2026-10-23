@@ -14,6 +14,6 @@
     },
     "noEmit": true
   },
-  "include": ["incubator/*/src/**/*.ts", "incubator/*/tests/**/*.ts", "tests/**/*.ts"],
+  "include": ["incubator/native-resident/src/**/*.ts", "incubator/native-resident/tests/**/*.ts", "incubator/native-collaboration/src/**/*.ts", "incubator/native-collaboration/tests/**/*.ts", "tests/**/*.ts"],
   "exclude": ["**/lib/**", "**/node_modules/**"]
 }
