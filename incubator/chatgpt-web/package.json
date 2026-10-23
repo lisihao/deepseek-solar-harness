@@ -1,6 +1,6 @@
 {
   "name": "@lisihao/dsh-solar-chatgpt-web",
-  "version": "0.1.0-dev.0",
+  "version": "0.1.0-dev.1",
   "description": "Text-only ChatGPT webpage execution through a durable, bounded Ego Lite adapter.",
   "type": "module",
   "main": "lib/index.js",

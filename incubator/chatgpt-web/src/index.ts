@@ -41,7 +41,7 @@ export const Config: z<Config> = z.object({
   executablePath: z.string().default(join(homedir(), '.local', 'bin', 'ego-browser')),
   taskSpaceId: z.number().min(0).default(0),
   commandTimeoutMs: z.number().min(5_000).max(60_000).default(25_000),
-  runTimeoutMs: z.number().min(10_000).max(600_000).default(300_000),
+  runTimeoutMs: z.number().min(10_000).max(7_200_000).default(1_800_000),
   pollMs: z.number().min(1_000).max(30_000).default(2_000),
   maxOutputBytes: z.number().min(1024).max(8 * 1024 * 1024).default(1024 * 1024),
   modelLabel: z.string().default(''),

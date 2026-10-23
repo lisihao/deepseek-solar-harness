@@ -27,7 +27,7 @@ These choices settle D1–D8 and Q1–Q3. The current external scope preserves e
 ## Repository and branches (D5)
 
 - V4 lives in the existing public repository `lisihao/deepseek-solar-harness`, on its own branch **`v4`**, verified as the repository's default branch on 2026-10-19. The default branch's `README.md` is the GitHub homepage, and the market generator reads plugins from the default branch.
-- DSH 3.x stays in the same repository on `solar` and `master`, with its existing branches, pull requests, `DSH-desktop-v*` tags, and Releases retained. Its source archive is verified and development is frozen, as recorded in [the archive index](docs/legacy-source-archive.md). V4 never merges into or from `solar` or modifies the DSH 3.x installed app. Feature extraction reads legacy source for reference and rewrites against the published baseline; it does not import legacy runtime data implicitly. The official Harness home is now shared by the user's explicit D4 decision below.
+- DSH 3.x stays in the same repository on `solar` and `master`, with its existing branches, pull requests, `DSH-desktop-v*` tags, and Releases retained. Its source archive is verified and development is frozen, as recorded in [the archive index](docs/legacy-source-archive.md). V4 never merges into or from `solar` or modifies the DSH 3.x installed app. Legacy runtime records are not imported implicitly; the official Harness home is shared only by the explicit D4 decision below.
 - The local V4 checkout is `~/Projects/DeepSeek-Solar-Harness-V4`, kept outside `~/Projects/DeepSeek-Solar-Harness` so that DSH 3.x agent memory and rules do not load into V4 sessions. Task worktrees branch from the V4 branch.
 - The V4 branch tree holds only V4 content. Released plugin packages belong under `plugins/*`; unreleased plugin work belongs under `incubator/*`, outside the root workspace globs. The market generator reads the union of root `package.json` `workspaces` and `pnpm-workspace.yaml` `packages` (negated globs are dropped), so only `plugins/*` can contribute a bundle to the market.
 - PRs open automatically when a feature is source-verified; merge and release happen only when 昊哥 asks. The native-plugin change includes Ubuntu PR CI for build, unit tests, plugin tests, and the homepage check. No recurring compatibility job is activated by that workflow.
@@ -40,7 +40,7 @@ In this file, **upstream** means the official `deepseek-ai/deepseek-harness` rep
 2. **No Desktop build.** Never fork, rebuild, re-sign, or reseal the Desktop application or its runtime. A V4 delivery never produces an `.app`.
 3. **Missing seam → redesign or defer.** When a feature needs an extension point that the baseline does not offer, redesign it on existing seams, or defer it and record the missing seam in `docs/blocked-seams.md`. Keep the finding in this personal project; do not start an official-upstream contribution workflow, push to official upstream, submit an upstream PR, or merge changes into it. A missing seam is never a reason to patch upstream. (D3)
 4. **Published packages only.** Build and test against the published npm packages at the baseline version. Never vendor upstream.
-5. **Harness home and installation.** V4 plugins install into the existing official Harness home, `~/.dsh`, by default, as explicitly directed by 昊哥 on 2026-10-19. Preserve existing settings, credentials, sessions and unrelated plugins; back up affected profile configuration before installation. This replaces the previous GUI-isolation prerequisite, not the requirement for explicit installation authorization. Development and tests still use a throwaway `DSH_HOME` in a scratch directory. Solar plugins write only to their own namespaces and import legacy data only through an explicit, versioned import. (D4)
+5. **Harness home and installation.** Authorized V4 installs use the existing official Harness home, `~/.dsh`, by default, as explicitly directed by 昊哥 on 2026-10-19. Preserve existing settings, credentials, sessions and unrelated plugins; back up affected profile configuration before installation. This replaces the old GUI-isolation prerequisite, not the requirement for installation authorization. Development and tests still use a throwaway `DSH_HOME`. Sharing the home does not authorize importing or converting legacy records. (D4)
 
 ## Plugin contract
 
@@ -127,7 +127,7 @@ One feature per PR, in this order:
 1. **Upstream first.** Check whether the baseline already provides it, built in or as an official/experimental bundle (e.g. `subagent-codex`, `subagent-claude-code`, `agent-team`, `browser-use-*`, `workflow`, `goal`, `schedule`, `session-search`). If it does, use upstream and drop ours.
 2. **Seams.** List the extension points the feature needs and confirm each exists in the baseline. DSH 3.x's `distribution/upstream-source-edits.json` (136 edited upstream files) shows which features depended on edits; those need a redesign or deferral recorded locally in `docs/blocked-seams.md` (boundary 3).
 3. **Port, not copy.** Rewrite against the baseline APIs (DSH 3.x forked at rc.5); delete code that existed only to support upstream edits.
-4. **Data.** A new plugin starts with its own empty namespace in the selected Harness home; importing DSH 3.x data is an explicit, versioned import step inside the plugin. Sharing `~/.dsh` does not authorize converting legacy records.
+4. **Data.** A new plugin starts with its own empty namespace in the selected Harness home; importing DSH 3.x data is an explicit, versioned import step inside the plugin.
 5. **Test, install, accept** as above. Update `docs/extraction-candidates.md`.
 
 The two named native plugins are authorized; unrelated extraction candidates remain unscheduled. (D7)
@@ -158,3 +158,7 @@ The two named native plugins are authorized; unrelated extraction candidates rem
 | Q3 | Keep unreleased plugins under `incubator/<name>/`. | `incubator/*` stays outside root workspace globs; only an authorized first release moves a plugin to `plugins/<name>/`. |
 
 The limited repository transition and the preserved legacy state are recorded in [docs/repo-reorganization.md](docs/repo-reorganization.md).
+
+## Authorized preview distribution follow-up
+
+On 2026-10-21 昊哥 requested public package archives, copy/paste installation commands on the GitHub homepage, and usage guides for the selected installed/developed plugins. The preview catalog and installer under `distribution/plugins/` and the homepage implement that bounded request. They do not authorize market tags/Pages, npm publication, unrelated feature merges, account setup, model probes, or automatic installation of every snapshot entry. Preserve each package's exact artifact and source acceptance boundary.

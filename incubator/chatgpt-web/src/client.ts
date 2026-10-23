@@ -21,6 +21,7 @@ import type { WebModelCatalogApi } from './model-catalog.js'
 import { RPC_REMOTE } from './remote.js'
 import { PreferencesPanel, createPreferencesApi, type PreferencesClientApi, type PreferencesWire } from './preferences-client.js'
 import {
+  WEB_ABANDON_CONFIRMATION,
   WEB_STAGE_LABELS,
   type ChatGptWebControlApi,
   type WebUiStatus,
@@ -180,6 +181,8 @@ function stageHint(stage: WebRunStage): string {
     case 'submitted':
     case 'indeterminate':
       return '结果可能仍在网页端。请先读取该任务状态，不要重复提交。'
+    case 'abandoned':
+      return '已结束本地跟踪；远端结果仍未知。未取消远端，也未重新提交。原始请求和修订记录仍保留。'
     case 'cancelled':
       return '本机已请求停止；这不保证网页端已经停止，请继续读取状态。'
     case 'blocked':
@@ -189,6 +192,11 @@ function stageHint(stage: WebRunStage): string {
     default:
       return ''
   }
+}
+
+/** An indeterminate record can be retired only after the local action settles. */
+export function canAbandon(stage: WebRunStage, pending: boolean, active: boolean): boolean {
+  return stage === 'indeterminate' && !pending && !active
 }
 
 function canCancel(stage: WebRunStage): boolean {
@@ -244,13 +252,17 @@ function mergeObservedStatus(status: WebUiStatus | undefined, record: WebRunReco
 interface WebRunCardProps {
   readonly record: WebRunRecord
   readonly pending: boolean
+  readonly active: boolean
   readonly onObserve: (record: WebRunRecord) => void
   readonly onCancel: (record: WebRunRecord) => void
+  readonly onAbandon: (record: WebRunRecord) => void
 }
 
-function WebRunCard({ record, pending, onObserve, onCancel }: WebRunCardProps): ReactElement {
+function WebRunCard({ record, pending, active, onObserve, onCancel, onAbandon }: WebRunCardProps): ReactElement {
   const conversationUrl = safeConversationUrl(record.resource?.conversationUrl)
   const hint = stageHint(record.stage)
+  const offerAbandon = canAbandon(record.stage, pending, active)
+  const offerCancel = canCancel(record.stage) && (record.stage !== 'indeterminate' || active)
   return createElement('article', { style: sectionStyle }, [
     createElement('div', { key: 'heading', style: { display: 'grid', gap: 4, minWidth: 0 } }, [
       createElement('strong', { key: 'label', style: { overflowWrap: 'anywhere' } }, runLabel(record)),
@@ -295,6 +307,19 @@ function WebRunCard({ record, pending, onObserve, onCancel }: WebRunCardProps): 
             createElement('pre', { key: 'value', style: preStyle }, record.output.markdown),
           ]),
       ]),
+    offerAbandon
+      ? createElement('details', { key: 'abandon', style: { display: 'grid', gap: 6, minWidth: 0 } }, [
+        createElement('summary', { key: 'summary', style: { cursor: 'pointer', overflowWrap: 'anywhere' } }, '结束本机跟踪'),
+        createElement('p', { key: 'copy', style: mutedStyle }, WEB_ABANDON_CONFIRMATION),
+        createElement('button', {
+          key: 'confirm',
+          type: 'button',
+          disabled: pending || active,
+          onClick: () => onAbandon(record),
+          style: buttonStyle,
+        }, pending ? '正在处理…' : '确认结束本机跟踪'),
+      ])
+      : null,
     createElement('div', { key: 'actions', style: actionRowStyle }, [
       createElement('button', {
         key: 'observe',
@@ -303,13 +328,15 @@ function WebRunCard({ record, pending, onObserve, onCancel }: WebRunCardProps): 
         onClick: () => onObserve(record),
         style: buttonStyle,
       }, pending ? '正在读取状态…' : '读取最新状态'),
-      createElement('button', {
-        key: 'cancel',
-        type: 'button',
-        disabled: pending || !canCancel(record.stage),
-        onClick: () => onCancel(record),
-        style: buttonStyle,
-      }, pending ? '正在处理…' : '请求本机停止'),
+      offerCancel
+        ? createElement('button', {
+          key: 'cancel',
+          type: 'button',
+          disabled: pending,
+          onClick: () => onCancel(record),
+          style: buttonStyle,
+        }, pending ? '正在处理…' : '请求本机停止')
+        : null,
     ]),
   ])
 }
@@ -492,6 +519,27 @@ function ChatGptWebPanel({ remoteStore }: { readonly remoteStore: RemoteAccessSt
     }
   }, [removePendingId, remote.api, setActionPending])
 
+  const abandon = useCallback(async (record: WebRunRecord): Promise<void> => {
+    const api = remote.api
+    const active = status?.activeIds.includes(record.id) ?? false
+    const pending = pendingIds.has(record.id) || pendingActions.has(record.id)
+    const lockKey = `abandon:${record.id}`
+    if (api === undefined || actionLocks.current.has(lockKey) || !canAbandon(record.stage, pending, active)) return
+    actionLocks.current.add(lockKey)
+    setActionPending(record.id, true)
+    try {
+      const retired = await api.abandon({ id: record.id, expectedRevision: record.revision, acknowledgeUnknown: true })
+      setStatus(current => mergeObservedStatus(current, retired))
+      removePendingId(record.id)
+      setNotice({ tone: 'info', message: `已结束“${runLabel(record)}”的本机跟踪；远端结果仍未知，未取消远端、未重新提交。现在可以运行新任务。` })
+    } catch (error) {
+      setNotice({ tone: 'error', message: `无法结束“${runLabel(record)}”的本机跟踪：${errorText(error)}。远端结果仍未知，请先读取状态。` })
+    } finally {
+      setActionPending(record.id, false)
+      actionLocks.current.delete(lockKey)
+    }
+  }, [pendingActions, pendingIds, removePendingId, remote.api, setActionPending, status?.activeIds])
+
   const onSubmit = useCallback((event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     void launch()
@@ -630,9 +678,11 @@ function ChatGptWebPanel({ remoteStore }: { readonly remoteStore: RemoteAccessSt
         : createElement('div', { key: 'list', style: { display: 'grid', gap: 10, minWidth: 0 } }, runs.map(record => createElement(WebRunCard, {
           key: record.id,
           record,
-          pending: pendingActions.has(record.id),
+          pending: pendingActions.has(record.id) || pendingIds.has(record.id),
+          active: status?.activeIds.includes(record.id) ?? false,
           onObserve: item => { void observe(item.id, runLabel(item)) },
           onCancel: item => { void cancel(item) },
+          onAbandon: item => { void abandon(item) },
         }))),
     ]),
   ])
