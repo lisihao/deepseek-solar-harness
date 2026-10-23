@@ -40,4 +40,14 @@ A fake-adapter success is mechanism evidence, not model tool-choice accuracy or 
 
 Regressions include asynchronous serial load logs, original deny/ask/cancel paths, exact unloaded tool calls, changed registry hashes, failed receipt flush/retry, cold reconstruction, complete-prompt refusal, dynamic section re-evaluation, original historical tool/memory/prefix retention, and replay with the current strict `Session.create()` constructor. Native wire schemas preserve the original tool set; the plugin's PTC-only discovery helpers are not added to Native wire declarations.
 
-Installed-App acceptance is a separate delivery step; these source/scratch results do not by themselves claim it has passed.
+## Installed-App acceptance
+
+The production package from source `211726f5f32c8a5c88503869081916d3525f96a0` was installed through the official bundled CLI. Archive SHA-256: `718490e9b6ddcfd0a7e4f49e1dd5d83c69e714e3a2f1c1a13ca89fa1533c3b3a`. All 12 installed files matched the archive; the observed installed `lib/index.js` SHA-256 was `cfdf8c54bfce899faa522af1361d84b23a2ed8fd911655adbbf1b3df20242940`. Exact source CI [39875184776](https://github.com/lisihao/deepseek-solar-harness/actions/runs/39875184776) passed.
+
+After a normal App/Host quit and an idle Resident shutdown, the latest profile/lock files and affected plugin-owned data were backed up. The official App Host registered both helpers and ran the packed production import in a separate Context: four fake adapter responses, normal PTC search/load/one fake business dispatch, zero real provider calls and zero user-session writes from the isolated probe. Both temporary acceptance bundles were then removed through the official CLI, production bytes/configuration were rechecked, and the official App/Host reopened.
+
+The same installation included the necessary `skill-context` step-order correction from source `5ea10c7`, separately verified. Original compressed-log prefixes were preserved. App relaunches appended lifecycle/inbox records in one existing log; no new turn, request or tool event appeared in that delta. Unrelated plugin JSON, dependency manifests, profile configuration, credential configuration and App/CLI files matched the installation baseline. Private logs and account data are not included in the repository.
+
+The current public inventory includes local-only installed bundles whose reproducible public source is not identified; their names/versions are recorded without invented download commands. No unrelated bundle was disabled or repackaged.
+
+Real provider-token measurements and real-model discovery accuracy remain unrun by explicit instruction.
