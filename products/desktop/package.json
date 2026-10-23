@@ -12,6 +12,9 @@
     "dsh-plugin-desktop"
   ],
   "resolutions": {
+    "@deepseek-ai/dsh-bench": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-bench-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-bench-runner": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-bench-runner-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-bench-web": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-bench-web-0.1.0-rc.5.tgz",
     "app-builder-lib@npm:26.15.3": "patch:app-builder-lib@npm%3A26.15.3#./patches/app-builder-lib@26.15.3.patch",
     "@deepseek-ai/dsh-agent": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-agent-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-agent-default-model": "0.1.0-rc.6",

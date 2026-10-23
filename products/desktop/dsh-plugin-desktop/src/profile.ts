@@ -46,6 +46,12 @@ import {
 import {
   AGENT_TEAMS_PACKAGE,
   AGENT_TEAMS_ROW_ID,
+  BENCH_REGISTRY_PACKAGE,
+  BENCH_REGISTRY_ROW_ID,
+  BENCH_RUNNER_PACKAGE,
+  BENCH_RUNNER_ROW_ID,
+  BENCH_WEB_PACKAGE,
+  BENCH_WEB_ROW_ID,
   SCHEDULING_EVIDENCE_PACKAGE,
   SCHEDULING_EVIDENCE_ROW_ID,
   SCHEDULING_EVIDENCE_RPC_PACKAGE,
@@ -439,6 +445,9 @@ export const GOUZI_WORKER_DISABLED_ROW_IDS = [
   SCHEDULING_EVIDENCE_ROW_ID,
   SCHEDULING_EVIDENCE_RPC_ROW_ID,
   SCHEDULING_EVIDENCE_SETTINGS_ROW_ID,
+  BENCH_REGISTRY_ROW_ID,
+  BENCH_RUNNER_ROW_ID,
+  BENCH_WEB_ROW_ID,
 ] as const
 
 /** Plugin that mounts only the remote execution host of orchestration-local. */
@@ -627,6 +636,19 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
     { id: SCHEDULING_EVIDENCE_SETTINGS_ROW_ID, name: SCHEDULING_EVIDENCE_SETTINGS_PACKAGE },
   ].filter(row => !rows.has(row.id))
   if (evidenceRows.length > 0) patches.push({ insert: evidenceRows })
+  // Benchmark results appear in Settings: the runtime only reads the ledgers
+  // the `dsh --profile bench` command writes under the Harness home, and has no
+  // launcher, so the App never starts a run. A profile that supplies a row keeps it.
+  const benchRows = [
+    { id: BENCH_REGISTRY_ROW_ID, name: BENCH_REGISTRY_PACKAGE },
+    {
+      id: BENCH_RUNNER_ROW_ID,
+      name: BENCH_RUNNER_PACKAGE,
+      config: { templateHome: home, templateFiles: [], ledgerRoot: join(home, 'bench') },
+    },
+    { id: BENCH_WEB_ROW_ID, name: BENCH_WEB_PACKAGE },
+  ].filter(row => !rows.has(row.id))
+  if (benchRows.length > 0) patches.push({ insert: benchRows })
   const agentTeams = rows.get(AGENT_TEAMS_ROW_ID)
   if (agentTeams?.name !== AGENT_TEAMS_PACKAGE) {
     throw new Error(`${BIN_NAME}: product profile must use ${AGENT_TEAMS_PACKAGE} in the ${AGENT_TEAMS_ROW_ID} row`)
