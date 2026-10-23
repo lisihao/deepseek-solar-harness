@@ -231,13 +231,22 @@ describe('BenchRuntime.run', () => {
     await expect(ctx.benchRuntime.run(experiment({ repetitions: 1 }))).rejects.toThrow(/ENOENT/)
   })
 
-  it('refuses an empty launcher command', async () => {
-    ctx = new Context()
-    await ctx.plugin(BenchRegistry)
-    await expect(ctx.plugin(BenchRuntime, {
-      command: [], templateHome: root, templateFiles: [], ledgerRoot: root,
-      concurrency: 1, runTimeoutMs: 1, prices: [], providerFailureCodes: [],
-    })).rejects.toThrow(/command must name the dsh launcher/)
+  it('reads ledgers without a command and refuses to run', async () => {
+    await mount([task('t1', 'write:out.txt:yes')])
+    await ctx.benchRuntime.run(experiment({ repetitions: 1 }))
+    await ctx.fiber.dispose()
+    // Overriding with undefined leaves the key unset, so the schema applies its default.
+    await mount([task('t1', 'write:out.txt:yes')], { command: undefined } as unknown as Partial<Config>)
+    expect(await ctx.benchRuntime.experiments()).toEqual(['exp'])
+    expect((await ctx.benchRuntime.ledger('exp'))?.records).toHaveLength(2)
+    await expect(ctx.benchRuntime.run(experiment({ id: 'other' as ExperimentId, repetitions: 1 }))).rejects.toThrow(/only reads ledgers/)
+    expect(await ctx.benchRuntime.experiments()).toEqual(['exp'])
+  })
+
+  it('treats an explicit empty command as read-only', async () => {
+    await mount([task('t1', 'write:out.txt:yes')], { command: [] })
+    await expect(ctx.benchRuntime.run(experiment({ repetitions: 1 }))).rejects.toThrow(/only reads ledgers/)
+    expect(await ctx.benchRuntime.experiments()).toEqual([])
   })
 })
 

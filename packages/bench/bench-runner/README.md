@@ -62,7 +62,7 @@ Metrics come from sessions read through the JSONL persistence backend. Tokens an
 
 | Key | Default | Meaning |
 |---|---|---|
-| `command` | required | Launcher argv prefix, for example `[node, /abs/apps/cli/lib/bin.js]`. Built output only: the child runs under plain Node. |
+| `command` | `[]` | Launcher argv prefix, for example `[node, /abs/apps/cli/lib/bin.js]`. Built output only: the child runs under plain Node. Empty, the runtime only reads ledgers and `run` refuses before creating any directory, as in a Desktop that only shows results. |
 | `templateHome` | required | Home whose profile seeds every run home. |
 | `templateFiles` | required | Home-relative files copied into each run home for the child when they exist, for example `.credentials.yaml`; deleted when the child exits. |
 | `ledgerRoot` | required | Directory holding one ledger per experiment. |

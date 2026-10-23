@@ -398,7 +398,10 @@ export type Config = LocalConfig
 ```ts config-catalog
 /** Runtime configuration. */
 export interface Config {
-  /** Launcher argv prefix for `dsh`, for example `[node, /abs/apps/cli/lib/bin.js]`. */
+  /**
+   * Launcher argv prefix for `dsh`, for example `[node, /abs/apps/cli/lib/bin.js]`.
+   * Empty (the default), the runtime only reads ledgers and {@link BenchRuntime.run} refuses.
+   */
   command: string[]
   /** Absolute home whose `profiles/<profile>` seeds every run home. */
   templateHome: string
