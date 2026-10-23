@@ -59,7 +59,8 @@ const NODE_KINDS = [
 ] as const satisfies readonly StudioNodeKind[]
 const RUN_STATUSES = ['pending', 'running', 'completed', 'failed', 'cancelled', 'unknown', 'needs-input'] as const satisfies readonly StudioRunStatus[]
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/
+/** Identifiers the workflow studio stores: sources, drafts, runs and graphs. */
+export const IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/
 
 type JsonRecord = Record<string, unknown>
 

@@ -10,6 +10,8 @@ import type {
   TaskNode,
   TaskScope,
 } from '@lisihao/dsh-solar-native-resident/contracts'
+import { createHash } from 'node:crypto'
+import { IDENTIFIER_PATTERN } from './studio-validation.js'
 import { normalizeDshTools } from './validation.js'
 
 const EXECUTORS: readonly Executor[] = ['codex', 'claude-code']
@@ -318,6 +320,9 @@ function parseGraph(value: unknown): RawGraph {
   }
   assertAcyclic(nodes)
   const id = source.id === undefined ? undefined : text(source.id, 'graph.id')
+  if (id !== undefined && !IDENTIFIER_PATTERN.test(id)) {
+    throw new Error('solar_coordinate graph.id must be 1-160 letters, digits, dots, underscores, hyphens or colons and start with a letter or digit; omit it to let the tool assign one')
+  }
   return { formatVersion: 1, ...(id === undefined ? {} : { id }), label, cwd, maxParallel, ...(notBefore === undefined ? {} : { notBefore }), nodes }
 }
 
@@ -527,6 +532,23 @@ export async function buildCoordinateGraph(
   }
 }
 
+const COMMAND_PREFIX = 'native-collaboration-coordinate:'
+
+/**
+ * Resident command identity for one tool call. The derived graph id must be a
+ * workflow-studio identifier, so a call id with other characters (for example
+ * `call_…|fc_…` from Responses providers) or one too long is replaced by its
+ * SHA-256 digest. The mapping is deterministic, so a repeated call keeps its
+ * identity and Resident still reconciles the original submission.
+ * @param callId - the tool call id.
+ * @returns the command id; the graph id is this value plus `:graph`.
+ */
+export function coordinateCommandId(callId: string): string {
+  const direct = `${COMMAND_PREFIX}${callId}`
+  if (IDENTIFIER_PATTERN.test(`${direct}:graph`)) return direct
+  return `${COMMAND_PREFIX}sha256-${createHash('sha256').update(callId, 'utf8').digest('hex')}`
+}
+
 export async function coordinateResident(
   rawGraph: unknown,
   rawAllocation: unknown,
@@ -541,7 +563,7 @@ export async function coordinateResident(
   }
   const residentWithModels = services.resident as ResidentApi & { models?: (cwd: string) => Promise<readonly ModelCatalog[]> }
   const parsed = parseCoordinateInput(rawGraph, rawAllocation)
-  const commandId = `native-collaboration-coordinate:${exec.callId}`
+  const commandId = coordinateCommandId(exec.callId)
   const graphId = parsed.graph.id ?? `${commandId}:graph`
   const built = await buildCoordinateGraph(rawGraph, rawAllocation, config, residentWithModels.models === undefined ? undefined : () => residentWithModels.models!(parsed.graph.cwd), graphId)
   const dshTools = normalizeDshTools(rawDshTools, 'dsh_tools')
