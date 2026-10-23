@@ -1,10 +1,10 @@
 # Prime RLM candidate closeout and research handoff
 
-Date: 2026-10-23, America/Toronto. Audience: the owner and a later Argon/Opus reviewer. This closes the current engineering iteration as an **installed, unreleased development candidate with explicit acceptance gaps**. It pauses efficacy exploration; it does not certify general usability, recursion-specific quality improvement, full reference fidelity, or publication.
+Date: 2026-10-23, America/Toronto. Audience: the owner and a later Argon/Opus reviewer. This closes the current engineering iteration as an **installed development candidate with explicit acceptance gaps and no stable market release**. It pauses efficacy exploration; it does not certify general usability, recursion-specific quality improvement, full reference fidelity, or publication.
 
 ## Decision and scope
 
-Keep the existing ordinary-conversation operator and Settings diagnostics. Freeze the current Prime pin and adapter behavior. Do not run new model experiments, update Prime, change models/reasoning, modify native algorithms, reinstall, merge, or publish as part of this closeout. The existing separately authorized community watcher remains a read-only evidence source; a reply is not permission to restart implementation or experiments.
+Keep the existing ordinary-conversation operator and Settings diagnostics. Freeze the current Prime pin and adapter behavior. Do not run new model experiments, update Prime, change models/reasoning, modify native algorithms, reinstall, merge PR #280, or publish as part of this closeout. The existing separately authorized community watcher remains a read-only evidence source; a reply is not permission to restart implementation or experiments.
 
 The user's goal remains valid: demonstrate a reproducible quality gain on some problems, then use that evidence to decide when DSH should invoke RLM. That goal is **not achieved by this closeout**. Task-family recommendations and cost-based routing thresholds come after credible quality evidence, rather than being inferred from the present small sample.
 
@@ -24,6 +24,12 @@ The user's goal remains valid: demonstrate a reproducible quality gain on some p
 
 The local stable artifact is under the main V4 checkout at `artifacts/rlm-operator-20261022/817d6a9/lisihao-dsh-solar-rlm-0.1.0-dev.0.tgz`. On 2026-10-23 a read-only comparison checked all 37 regular package files against the installed package: zero mismatches. This reuses the earlier installation; it is not a new installation or a runtime test.
 
+## Public preview versus this installed candidate
+
+The current `v4` curated catalog independently distributes an **older preview** from `6a47ed6afdc8e433f8748172322f93c8a56eb074`, archive SHA-256 `5d64a1122d3c2afe8977178c4b90f4553063223da8d8dc1fbe0036bfc7684537`. It has the older standalone view and asynchronous tools. It is not the installed `817d6a9` ordinary-operator artifact identified above, despite their identical development version strings. Preview download availability is separate from a stable Solar market release; this closeout replaces neither the public archive nor its catalog identity.
+
+The feature branch also synchronizes the current `v4` homepage/distribution documentation and preserves its curated-distribution checks alongside the RLM checks. No RLM executable source changes are introduced by that synchronization. Do not mistake a feature-branch synchronization for merging PR #280.
+
 ## What is implemented and what actually passed
 
 Prime owns the original Rust daemon/session engine, persistent Python REPL, recursive children, messaging, Factory, Harness CRUD, refinement and rollback. Solar owns DSH tool registration, input snapshots, process ownership, model-transport conversion and evidence. Native source patches carried: **none**. The custom provider bridge is an explicit adaptation, not proof of equivalence to Prime's official provider route.
@@ -32,7 +38,7 @@ Prime owns the original Rust daemon/session engine, persistent Python REPL, recu
 | --- | --- |
 | Ordinary operator | `solar_rlm` is registered; explicit task/cwd/tree-request/time limits; waits for a native result and returns it to the parent tool call. Async `solar_rlm_run`, `solar_rlm_inspect`, `solar_rlm_control` remain available. |
 | Result/error lifecycle | Failed, cancelled, indeterminate and empty-answer rounds remain errors. Inspection does not replay a task. Known-session follow-up/resume uses Prime's native mechanism. |
-| Source checks | Previously passed build/typecheck, 174 Vitest, 46 ARC, 57 recursion and 37 quality-runner keyless checks. Reuse applies to unchanged executable inputs; this closeout changes prose only. |
+| Source checks | Previously passed build/typecheck, 174 Vitest, 46 ARC, 57 recursion and 37 quality-runner keyless checks. Reuse applies to unchanged executable inputs; RLM executable inputs are unchanged; branch synchronization preserves both sets of check commands. |
 | Ordinary Agent loop in a disposable profile | Passed using the built package, an actual local DSH Agent/Session and scripted providers: model-visible schema, original Prime Python call, result returned to parent, durable tool call/result and session flush. |
 | Installed GUI and native mechanism check | Recorded passed: Settings-only entry, old conversation slot removed, wide/narrow rendering, 14 native checks using 18 scripted responses and zero real-provider requests. |
 | Installed ordinary conversation with a real parent model | **Not run** for the ordinary-operator build. Real-model discovery/selection and complete installed real-provider execution are not accepted by the scripted checks. |
