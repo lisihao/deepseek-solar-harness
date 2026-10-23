@@ -1,0 +1,3 @@
+- insert:
+    - id: chatgpt-web
+      name: '@lisihao/dsh-solar-chatgpt-web'

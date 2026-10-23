@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ChatGPT Web operator",
+    "description": "Run one text task in the logged-in ChatGPT webpage with durable request and result records."
+  }
+}
