@@ -1,4 +1,4 @@
-import { Context, Service, type Plugin } from '@deepseek-ai/cordis'
+import { Context, CordisError, Service, type Plugin } from '@deepseek-ai/cordis'
 import type { Dict } from '@deepseek-ai/cosmokit'
 import { ModuleLoader, type ModuleJob, type ResolveResult } from '@deepseek-ai/cordis-plugin-loader'
 import type { Include } from '@deepseek-ai/cordis-plugin-include'
@@ -59,6 +59,8 @@ interface ConfigRefresh {
 
 interface ConfigRegistration {
   watcher: FSWatcher
+  /** Fail a registration still waiting for its watcher to report ready. */
+  abandon: () => void
 }
 
 async function findWatchRoot(filename: string): Promise<{ filename: string; root: string; depth: number }> {
@@ -93,6 +95,8 @@ class Hmr extends Service {
   private readonly configs = new Map<string, ConfigRegistration>()
   private readonly configRefreshes = new WeakMap<object, ConfigRefresh>()
   private readonly refreshTasks = new Set<Promise<void>>()
+  /** Set when teardown starts; a config watch requested or readied afterwards is refused. */
+  private disposed = false
 
   /**
    * Changes from externals will always trigger a full reload.
@@ -146,7 +150,16 @@ class Hmr extends Service {
       ignored: undefined,
       ignoreInitial: false,
     })
-    const registration = { watcher }
+    const ready = Promise.withResolvers<void>()
+    let readyState: 'pending' | 'resolved' | 'rejected' = 'pending'
+    const registration: ConfigRegistration = {
+      watcher,
+      abandon: () => {
+        if (readyState !== 'pending') return
+        readyState = 'rejected'
+        ready.reject(new CordisError('INACTIVE_EFFECT'))
+      },
+    }
     this.configs.set(watchFilename, registration)
     const onChange = (path: string) => {
       const observed = resolve(path)
@@ -157,9 +170,8 @@ class Hmr extends Service {
     watcher.on('change', onChange)
     watcher.on('unlink', onChange)
 
-    const ready = Promise.withResolvers<void>()
-    let readyState: 'pending' | 'resolved' | 'rejected' = 'pending'
     watcher.once('ready', () => {
+      if (readyState !== 'pending') return
       readyState = 'resolved'
       ready.resolve()
     })
@@ -174,6 +186,8 @@ class Hmr extends Service {
 
     try {
       await ready.promise
+      // Teardown may have run while this watch opened; it would never close a watch registered now.
+      if (this.disposed) throw new CordisError('INACTIVE_EFFECT')
       return this.ctx.effect(() => async () => {
         if (this.configs.get(watchFilename) === registration) this.configs.delete(watchFilename)
         await watcher.close()
@@ -198,6 +212,9 @@ class Hmr extends Service {
 
   async* [Service.init]() {
     yield async () => {
+      this.disposed = true
+      // A closed watcher never reports ready; release registrations still waiting for it.
+      for (const registration of this.configs.values()) registration.abandon()
       await this.watcher?.close()
       await Promise.allSettled([...this.configs.values()].map(registration => registration.watcher.close()))
       this.configs.clear()
