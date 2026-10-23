@@ -12,7 +12,7 @@ import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-
 import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
 import z from '@deepseek-ai/schemastery'
 import type { GraphStatus, ResidentApi } from '@lisihao/dsh-solar-native-resident/contracts'
-import { coordinateResident, type AllocationProfile, type CoordinateOutput } from './coordinate.js'
+import { coordinateResident, type AllocationProfile, type CoordinateOutput, coordinateGraphDescription } from './coordinate.js'
 import { dispatchCollaboration, type DelegationOutput } from './dispatch.js'
 import { disposeOwnedActivations, trackOwnedActivation } from './lifecycle.js'
 import type { NormalizedCollaborationInput } from './validation.js'
@@ -230,7 +230,7 @@ export function createCoordinateTool(ctx: Context, config: Config): ToolDefiniti
       graph: {
         type: 'json',
         required: true,
-        description: 'TaskGraph JSON with formatVersion 1, cwd, maxParallel, and dependency-linked nodes.',
+        description: coordinateGraphDescription(),
       },
       allocation: {
         type: 'json',

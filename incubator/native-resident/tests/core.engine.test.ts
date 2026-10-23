@@ -183,6 +183,38 @@ describe('ResidentEngine durable graph scheduler', () => {
     await eventually(async () => expect((await engine.inspect('reader')).status).toBe('completed'))
   })
 
+  it.each([
+    ['read-scoped nodes run together', { scope: { read: ['.'] } }, 2],
+    ['nodes without a scope queue behind each other', {}, 1],
+  ] as const)('within one graph and cwd, %s', async (_name, extra, concurrent) => {
+    const databasePath = await temporaryDatabasePath()
+    const workspace = await temporaryDirectory()
+    const waits: Array<ReturnType<typeof deferred<TaskResult>>> = []
+    const calls: DriverRequest[] = []
+    const engine = await openEngine(databasePath, {
+      codex: {
+        async execute(request) {
+          calls.push(request)
+          request.onSession(`session-${calls.length}`)
+          const wait = deferred<TaskResult>()
+          waits.push(wait)
+          return wait.promise
+        },
+      },
+    })
+    await engine.submit({
+      commandId: `submit-parallel-${concurrent}`,
+      graph: graph('parallel', [node('a', 'first', extra), node('b', 'second', extra)], workspace),
+    })
+    await eventually(() => expect(calls.length).toBeGreaterThan(0))
+    await delay(40)
+    expect(calls).toHaveLength(concurrent)
+    waits.forEach(wait => wait.resolve({ output: 'done' }))
+    await eventually(() => expect(calls).toHaveLength(2))
+    waits.forEach(wait => wait.resolve({ output: 'done' }))
+    await eventually(async () => expect((await engine.inspect('parallel')).status).toBe('completed'))
+  })
+
   it('compares declared scopes as absolute paths across nested workspace roots', async () => {
     const databasePath = await temporaryDatabasePath()
     const root = await temporaryDirectory()

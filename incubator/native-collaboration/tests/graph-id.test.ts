@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { GraphSnapshot, ResidentApi } from '@lisihao/dsh-solar-native-resident/contracts'
-import { coordinateCommandId, coordinateResident } from '../src/coordinate.js'
+import { COORDINATE_GRAPH_FIELDS, COORDINATE_NODE_FIELDS, coordinateCommandId, coordinateGraphDescription, coordinateResident } from '../src/coordinate.js'
 import { IDENTIFIER_PATTERN } from '../src/studio-validation.js'
 
 const PREFIX = 'native-collaboration-coordinate:'
@@ -69,5 +69,21 @@ describe('coordinate submission ids', () => {
     await expect(coordinateResident({ ...graph, id: 'bad|id' }, undefined, undefined, toolExec('call_2'), config, { resident }))
       .rejects.toThrow('graph.id must be 1-160')
     expect(submit).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('coordinate graph description', () => {
+  it('names every accepted graph and node field and leads with the parallel rule', () => {
+    const description = coordinateGraphDescription()
+    expect(description.startsWith('TaskGraph JSON. Parallel rule: a node without scope')).toBe(true)
+    for (const name of [...COORDINATE_GRAPH_FIELDS, ...COORDINATE_NODE_FIELDS]) expect(description).toContain(`${name} (`)
+    expect(description).toContain('No other field is accepted.')
+  })
+
+  it('lists the accepted node fields when a model guesses a wrong one', async () => {
+    const { resident } = recordingResident()
+    const badNode = { ...graph, nodes: [{ id: 'one', executor: 'codex', prompt: 'task', dependencies: [] }] }
+    await expect(coordinateResident(badNode, undefined, undefined, toolExec('call_3'), config, { resident }))
+      .rejects.toThrow('unsupported field "dependencies"; supported fields: id, prompt, executor, role, dependsOn, inputFrom, scope')
   })
 })

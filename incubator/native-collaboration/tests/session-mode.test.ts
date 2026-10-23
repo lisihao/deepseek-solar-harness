@@ -329,6 +329,38 @@ describe('installSessionMode', () => {
     }
   })
 
+  it('asks for a split whenever a task has two or more independent multi-step parts and states the parallel scope rule', async () => {
+    const value = await fixture()
+    try {
+      await value.controller.select(value.agent.id, 'smart', 0)
+      const text = (value.sections[0]!.text as (context: { agent?: Agent }) => string)({ agent: value.agent })
+      expect(text).toContain('只要能分成两个以上互相独立、各自需要多步操作')
+      expect(text).toContain('不要自己逐个完成')
+      expect(text).toContain('用一句话说明为什么没拆')
+      expect(text).toContain('只读的声明 `scope.read`，写文件的声明互不重叠的 `scope.write`')
+      expect(text).toContain('要并行的节点必须声明 `scope`')
+      expect(text).toContain('不声明 `scope` 的节点会排队串行')
+      expect(text).toContain('必须是 `dependsOn` 的子集')
+      for (const kept of ['提交只是回执，不是完成', '不得换账户、自动重发', '未知状态必须保留', '不要借 `turn-stopping` 反复 steer']) expect(text).toContain(kept)
+    } finally {
+      value.remove()
+    }
+  })
+
+  it('tells the Agent to load the collaboration declarations only when the on-demand loader is present', async () => {
+    const value = await fixture()
+    try {
+      await value.controller.select(value.agent.id, 'smart', 0)
+      const render = () => (value.sections.at(-1)!.text as (context: { agent?: Agent }) => string)({ agent: value.agent })
+      expect(render()).not.toContain('solar_tool_load')
+      value.tools.set('solar_tool_load', {})
+      expect(render()).toContain('先用 `solar_tool_load` 按名字一次加载这三个工具')
+      expect(render()).toContain('`solar_coordinate`、`solar_wait`、`solar_resident` 的声明')
+    } finally {
+      value.remove()
+    }
+  })
+
   it('reads persisted mode when a later Agent is created and adds its session-only section', async () => {
     const value = await fixture({ initialMode: 'smart', initiallyPresent: false })
     try {
