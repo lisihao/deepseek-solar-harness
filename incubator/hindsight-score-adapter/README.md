@@ -30,8 +30,23 @@ in Mnemon's supported per-workspace metadata.
 Run `pnpm build`, `pnpm typecheck`, `pnpm test`, and `pnpm test:plugin` from this
 package. Tests use synthetic results and a disposable Harness home; the plugin
 test installs built `lib/` through the official CLI and boots plain Node.
-App acceptance is recorded separately, with no generation model calls. A
-scratch test or an enabled listing alone is not installed-App acceptance.
+Installed-App acceptance was completed on 2026-10-23 with the identified built
+archive. A temporary read-only plugin used the running official App Host's normal
+`mnemonRemote.read(search)` endpoint for twelve previously frozen questions,
+with only query, limit and workspace parameters. All twelve retained their
+expected fact provenance in the results, with no batch filter. Runtime settings
+reported a 60,000 ms timeout, workspace isolation and unchanged strict thresholds.
+All returned Hindsight results were unknown-confidence and capped at two per bank.
+The three approved project routes each exposed only their own active Hindsight
+bank. These are scoped recall results, not a guarantee for arbitrary questions,
+a visual UI test, or a test of automatic prompt injection.
+
+The temporary acceptance plugin was removed afterwards; the adapter's nine
+installed package files still matched the accepted archive, and the existing
+plugin entry files, user patch and global Native data hashes were preserved.
+The acceptance plugin called no generation model, retain/import or session API.
+Private queries, results and provenance stay outside the repository. A scratch
+test or an enabled listing alone is not installed-App acceptance.
 
 Install only an identified tarball from a fixed location while the App is fully
 quit. User approval is required. This candidate is not a market release.

@@ -57,3 +57,28 @@ The plugin writes no data and adds no session events or model messages.
 No official-upstream contribution, merge, release, tag or market publication is
 authorized. Public source/test fixtures contain synthetic data only; private
 queries, imported memories, paths, runtime receipts and backups stay outside Git.
+
+## Recorded installed acceptance (2026-10-23)
+
+The exact behavior archive from source commit
+`6a2f8a1d66f32898f620ff7e34c6c02605994088` was installed through the official
+Desktop CLI after explicit App ownership handback and a fresh profile backup.
+Its SHA-256 was
+`f3fdc232d182c09fb0b5655193a1631d94a8c6f834a1c0400e3196d643d3d02c`.
+The runtime package files matched that archive; package.json was checked against
+its actual packed bytes, not source JSON formatting.
+
+The running App Host executed the twelve original ordinary queries across three
+isolated project routes. All twelve matched retained fact provenance without a
+batch, body or document filter. Runtime timeout was 60,000 ms; strict-v1 thresholds
+remained 0.25/0.6 and maxUnknownResults remained 2. Every returned result was
+unknown-confidence, with at most two per bank. No unexpected provider or expected
+fact from another project was returned. The adapter preserves raw scores/order;
+this acceptance does not calibrate confidence or establish arbitrary-query
+precision, visual UI behavior or automatic memory injection.
+
+The temporary probe was removed through the official CLI. The nine remaining
+adapter files still matched the archive; original plugin entries, user patch
+and global Native data were preserved. The probe invoked no generation model,
+retain/import or session API. Private queries, observation provenance, backups
+and raw runtime receipts are excluded from Git.
