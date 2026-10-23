@@ -385,10 +385,14 @@ export function RunPanel({ api, visible, t, onSettled }: {
           ? h('p', { key: 'none', style: mutedStyle }, t('noPlugins'))
           : h('div', { key: 'list', style: { display: 'grid', gap: 4, maxHeight: 220, overflowY: 'auto' } }, choices.plugins.map(plugin => h('label', { key: plugin.name, style: checkRowStyle }, [
             h('input', { key: 'box', type: 'checkbox', checked: plugins.has(plugin.name), onChange: () => { toggle(plugins, plugin.name, setPlugins) } }),
-            h('span', { key: 'text', style: { display: 'grid', minWidth: 0 } }, [
-              h('span', { key: 'title' }, plugin.title[language] ?? plugin.title.zh ?? plugin.title.en ?? plugin.name),
-              h('span', { key: 'name', style: { ...mutedStyle, fontSize: 11 } }, `${plugin.name} ${plugin.version}`),
-            ]),
+            h('span', { key: 'text', style: { display: 'grid', minWidth: 0 } }, (() => {
+              const title = plugin.title[language] ?? plugin.title.zh ?? plugin.title.en
+              return [
+                h('span', { key: 'title' }, title ?? plugin.name),
+                // The package name is shown only when a title replaced it.
+                h('span', { key: 'name', style: { ...mutedStyle, fontSize: 11 } }, title === undefined ? plugin.version : `${plugin.name} ${plugin.version}`),
+              ]
+            })()),
           ]))),
       ]),
       h('div', { key: 'numbers', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 } }, [
