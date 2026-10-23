@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "ChatGPT 网页算子",
+    "description": "通过已登录的 ChatGPT 网页执行单个文本任务，保留请求、实际模型与结果记录。"
+  }
+}

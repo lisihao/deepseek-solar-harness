@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const packages = []
-for (const name of ['native-resident', 'native-collaboration']) {
+for (const name of ['native-resident', 'native-collaboration', 'chatgpt-web']) {
   try { await stat(join(root, 'incubator', name, 'package.json')); packages.push(name) }
   catch (error) { if (error.code !== 'ENOENT') throw error }
 }
@@ -17,7 +17,7 @@ for (const name of packages) {
   await build({
     entryPoints: name === 'native-resident'
       ? ['src/index.ts', 'src/daemon.ts', 'src/client.ts', 'src/contracts.ts']
-      : ['src/index.ts'],
+      : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts'] : ['src/index.ts'],
     absWorkingDir: directory,
     outdir: 'lib',
     bundle: true,
@@ -27,6 +27,9 @@ for (const name of packages) {
     format: 'esm',
     sourcemap: true,
   })
+  if (name === 'chatgpt-web') {
+    await build({ entryPoints: ['src/client.ts'], absWorkingDir: directory, outfile: 'lib/client.cjs', bundle: true, platform: 'browser', target: 'es2022', format: 'cjs', loader: { '.css': 'text' }, external: ['@deepseek-ai/*', 'react', 'react-dom'], banner: { js: `window.__ModuleLoader__.load({ id: "@lisihao/dsh-solar-${name}", factory: (require) => { var module = { exports: {} }; var exports = module.exports;` }, footer: { js: 'return module.exports; } });' }, sourcemap: true })
+  }
 }
 const declarations = join(root, '.build-types')
 await rm(declarations, { recursive: true, force: true })
