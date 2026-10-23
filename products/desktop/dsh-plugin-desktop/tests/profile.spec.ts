@@ -169,6 +169,8 @@ describe('desktop profile composition', () => {
       expect(server.find(row => row.id === id), id).toBeDefined()
       expect(workerById.get(id)?.disabled, id).toBe(true)
     }
+    // A member process serves no Settings page, so it mounts no benchmark row.
+    for (const id of ['benchmarks', 'bench-runner', 'bench-web']) expect(workerById.get(id)?.disabled, id).toBe(true)
     expect(workerById.get('orchestration-remote-host')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-orchestration-local/remote-host',
       config: { dshHome: home, directoryLockRoot: join(home, 'shared-execution-locks') },
@@ -444,6 +446,14 @@ describe('desktop profile composition', () => {
         stateRoot: expect.stringMatching(/scheduling-evidence$/u),
       },
     }))
+    expect(rows.find(row => row.id === 'benchmarks')).toEqual(expect.objectContaining({ name: '@deepseek-ai/dsh-bench' }))
+    expect(rows.find(row => row.id === 'bench-web')).toEqual(expect.objectContaining({ name: '@deepseek-ai/dsh-bench-web' }))
+    const benchRunner = rows.find(row => row.id === 'bench-runner')
+    expect(benchRunner).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-bench-runner',
+      config: { templateHome: expect.any(String), templateFiles: [], ledgerRoot: expect.stringMatching(/[\\/]bench$/u) },
+    }))
+    expect(benchRunner?.config?.ledgerRoot).toBe(join(benchRunner?.config?.templateHome as string, 'bench'))
     expect(rows.find(row => row.id === 'remote-web-ui')).toEqual(expect.objectContaining({
       name: '@linxin666/dsh-remote-web-ui',
     }))
