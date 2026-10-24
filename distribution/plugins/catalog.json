@@ -372,8 +372,8 @@
           "scope": "MacBook installed package identity matched this fixed archive; no scratch-profile execution in this distribution task"
         },
         "ui": {
-          "status": "not-run",
-          "scope": "no App or UI acceptance in this distribution task"
+          "status": "passed",
+          "scope": "both authorized Macs: selected fixed archive installed with zero own-file drift; installed-plugin enable switch observed on; destination Bench launcher configured; no benchmark, recall request, or model efficacy probe"
         },
         "live": {
           "status": "not-run",
@@ -407,8 +407,8 @@
           "scope": "MacBook installed package identity matched this fixed archive; no scratch-profile execution in this distribution task"
         },
         "ui": {
-          "status": "not-run",
-          "scope": "no App or UI acceptance in this distribution task"
+          "status": "passed",
+          "scope": "both authorized Macs: selected fixed archive installed with zero own-file drift; installed-plugin enable switch observed on; destination Bench launcher configured; no benchmark, recall request, or model efficacy probe"
         },
         "live": {
           "status": "not-run",
@@ -442,7 +442,8 @@
           "scope": "official published CLI installs and boots all three fixed packages in a disposable home; built hub client SlotCore/render/lifecycle probe passes; provider account behavior is not exercised"
         },
         "ui": {
-          "status": "not-run"
+          "status": "passed",
+          "scope": "both authorized Macs: official CLI fixed-archive install, zero own-file drift, one Model subscriptions navigation entry and both original provider pages at default and narrow widths; no manual client patch, login, quota refresh, or model request"
         },
         "live": {
           "status": "not-run"
@@ -475,7 +476,8 @@
           "scope": "official published CLI installs and boots all three fixed packages in a disposable home; built hub client SlotCore/render/lifecycle probe passes; provider account behavior is not exercised"
         },
         "ui": {
-          "status": "not-run"
+          "status": "passed",
+          "scope": "both authorized Macs: official CLI fixed-archive install, zero own-file drift, one Model subscriptions navigation entry and both original provider pages at default and narrow widths; no manual client patch, login, quota refresh, or model request"
         },
         "live": {
           "status": "not-run"
@@ -508,7 +510,8 @@
           "scope": "official published CLI installs and boots all three fixed packages in a disposable home; built hub client SlotCore/render/lifecycle probe passes; provider account behavior is not exercised"
         },
         "ui": {
-          "status": "not-run"
+          "status": "passed",
+          "scope": "both authorized Macs: official CLI fixed-archive install, zero own-file drift, one Model subscriptions navigation entry and both original provider pages at default and narrow widths; no manual client patch, login, quota refresh, or model request"
         },
         "live": {
           "status": "not-run"

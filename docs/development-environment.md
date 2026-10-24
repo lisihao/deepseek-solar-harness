@@ -56,3 +56,5 @@ Require the actual settings sidebar to contain exactly one Model subscriptions e
 Verify Bench and chat recall registration in the running app and their selected configuration. Functional model/benchmark effects require separately authorized probes; registration alone does not prove efficacy. Compare runtime file hashes across both Macs and retain any mismatch as a failed parity check. Never repair an unknown mismatch with a silent installed-file edit.
 
 Jev remains paused. Both Tailscale instances remain running with automatic startup; neither native Codex verification nor this restore flow may stop or suspend them. Preserve existing private history and configuration backups.
+
+Installed acceptance for this fixed composition is recorded in [the acceptance boundary](development-environment-acceptance.md).
