@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Solar 记忆上下文",
+    "description": "筛选本轮 Graph Memory 回忆、退役旧快照，并精简已识别的 Hindsight 常驻说明；保留原始日志和工具。"
+  }
+}

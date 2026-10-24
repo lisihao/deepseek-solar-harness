@@ -1,0 +1,4 @@
+# Test-only package. tools/plugin-test.mjs installs it only into a disposable profile.
+- insert:
+    - id: memory-context-fixture
+      name: dsh-memory-context-fixture
