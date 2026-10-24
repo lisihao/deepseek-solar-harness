@@ -1,7 +1,7 @@
 {
   "name": "@lisihao/dsh-solar-chatgpt-web",
   "version": "0.1.0-dev.1",
-  "description": "Text-only ChatGPT webpage execution through a durable, bounded Ego Lite adapter.",
+  "description": "Text-only ChatGPT and Grok webpage execution plus configurable Insight workflows through Ego Lite.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

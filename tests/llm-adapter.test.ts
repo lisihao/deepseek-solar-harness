@@ -426,7 +426,7 @@ describe('WebLlmAdapter', () => {
     expect(serialized.prompt).toContain('USER QUESTION: retain this text.')
   })
 
-  it('drops only the exact solar web-request audit notice and keeps decisions, other content, and other sources', async () => {
+  it('drops exact solar Web/Grok request audit notices and keeps decisions, other content, and other sources', async () => {
     const actualUser = {
       id: 'audit-question' as never,
       role: 'user' as const,
@@ -444,6 +444,11 @@ describe('WebLlmAdapter', () => {
       role: 'user' as const,
       source: { kind: 'solar-web-context', form: 'notice' },
       content: [{ type: 'text' as const, text: JSON.stringify({ kind: 'insight-answers', answers: { choice: 'retain' } }) }],
+    }
+    const grokRequestAudit = {
+      ...webRequestAudit,
+      id: 'grok-request-audit' as never,
+      content: [{ type: 'text' as const, text: JSON.stringify({ kind: 'grok-request', id: 'grok-audit-1' }) }],
     }
     const planDecision = {
       id: 'plan-decision-audit' as never,
@@ -477,7 +482,7 @@ describe('WebLlmAdapter', () => {
       messages: [actualUser, webRequestAudit, insightAnswers, planDecision, multipleTextBlocks, malformedJson, otherSource] as GenerateOptions['messages'],
     }))
     const withOnlyWebRequestAudit = serializeConversationRequest(options({
-      messages: [actualUser, webRequestAudit] as GenerateOptions['messages'],
+      messages: [actualUser, webRequestAudit, grokRequestAudit] as GenerateOptions['messages'],
     }))
 
     expect(withOnlyWebRequestAudit.id).toBe(base.id)

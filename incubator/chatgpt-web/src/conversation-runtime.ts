@@ -12,6 +12,7 @@ import { versionedTemplate } from './insight-contract.js'
 import { flowReadiness, geminiReadinessIssueMessage, insightGeminiReadiness } from './flow-readiness.js'
 import { WebRunStore, type WebRunRecord } from './store.js'
 import type { WebController } from './controller.js'
+import type { GrokExecutionPort } from './grok-contract.js'
 
 export function workflowUuid(value: string): string {
   const h = createHash('sha256').update(value).digest('hex')
@@ -26,6 +27,8 @@ export interface ConversationRuntimeOptions {
   ports: StudioBoundPorts
   logRequest(sessionId:string,text:string):Promise<void>
   pollMs:number
+  grok?:GrokExecutionPort
+  grokModelLabel?:string
 }
 
 export function webRecordToStudio(record: WebRunRecord, sessionId: string): StudioRun {
@@ -139,6 +142,11 @@ export class ConversationRuntime extends LlmAdapter {
     }
     return new ConversationWebAdapter({
       web:new WebLlmAdapter(wrapped,{...preferences.web,onRequest:input=>this.onWebRequest(input)}),
+      ...(this.options.grok === undefined ? {} : {
+        grok:this.options.grok,
+        ...(this.options.grokModelLabel === undefined ? {} : {grokModelLabel:this.options.grokModelLabel}),
+        onGrokRequest:(sessionId:string,text:string)=>this.options.logRequest(sessionId,text),
+      }),
       startInsight:input=>this.startInsight(input,preferences),
       inspectInsight:async(sessionId,id)=>{
         const record=await this.insight.store.read(sessionId,id)

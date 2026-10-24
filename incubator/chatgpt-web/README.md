@@ -1,4 +1,4 @@
-# ChatGPT Web and Insight provider
+# ChatGPT Web, Grok and Insight provider
 
 Unreleased source candidate: `@lisihao/dsh-solar-chatgpt-web`. It uses the official Harness unchanged and the separately installed Ego Lite browser. This README describes the current source contracts and candidate user paths. It does not claim current installation, a complete real-provider run, or full real `洞察分析` acceptance.
 
@@ -17,6 +17,37 @@ Request-audit notices remain in the session log but are excluded from the browse
 The observed optimistic `/c/local-chatgpt%3A<uuid>` URL may finalize to a same-origin `/c/<uuid>` on the original page only after the exact submission receipt and requested selections match. This also permits observation-only recovery of an already persisted optimistic URL. Other conversation changes remain a named failure.
 
 The browser is an external dependency. A task requires an available Ego Lite CLI, an agent-owned TaskSpace, and a logged-in empty ChatGPT conversation. Login prompts, user takeover, existing drafts/attachments/conversations, unknown model labels, and unavailable requested labels stop before submission. The plugin does not download the browser or copy browser credentials.
+
+### `Grok 网页算子`
+
+Select **Grok 网页算子** in the normal model picker, then enter a text question in
+Harness. This independent route uses the signed-in Grok account in Ego Lite;
+login remains manual. The companion model-handoff candidate recognizes
+`solar-chatgpt-web/grok-web` as a webpage operator: entering it starts a fresh
+operator task without Luna; returning to an ordinary model asks separately
+about operator results and the earlier task context.
+
+The default `grokModelLabel: ""` follows the target Grok page's visible selection.
+An optional exact label can be configured on the Host plugin row. Recorded
+picker labels are `Auto`, `Fast`, `Expert`, `Build`, and `Heavy`; the adapter
+checks the actual option and checked state at execution, including any visible
+subscription restriction, and never substitutes a model. The ChatGPT catalogue
+refresh and its model/effort settings do not configure Grok.
+
+A request uses one fresh Grok TaskSpace, a flushed pre-send intent, and at most
+one submit attempt. Grok's observed ProseMirror composer is read as logical direct-paragraph text, preserving exact empty lines, explicit breaks and whitespace. Native `innerText` layout separators are not part of the draft; mixed or unsupported paragraph structures stop before submission. Preparation and the final pre-submit check still require exact prompt equality. Only an exact original-question receipt followed by one
+matching visible text reply, non-busy transcript, Copy control, and repeated
+stable observations can complete it. Existing or uncertain commands only
+observe the recorded original page; missing or mismatched receipts are errors,
+not permission to send again. Ordinary visible text is supported; Canvas/media
+contents are not claimed as a complete text reply. There is no Grok Studio
+research node in this candidate.
+
+The no-model site observation confirmed login, existing-message containers,
+model picker states, and one separately authorized draft-only enabled Submit
+control. The draft was cleared, zero new messages remained, and the dedicated
+space was normally finished. No new Grok reply or end-to-end generation was run.
+See [design and evidence boundary](../../docs/integrations/grok-web.md).
 
 ### `洞察分析`
 
@@ -52,7 +83,7 @@ Model and reasoning choices are discovered from the plugin's target Ego Lite bro
 
 Settings contributes **`网页与洞察`** with separate **`网页回答`** and **`洞察分析`** tabs. The ordinary view shows model and reasoning controls with a compact browser summary; manual labels and catalogue queries are collapsed. Insight stages expand individually for model/template editing, with full JSON and Gemini selectors in a separate advanced disclosure. The Insight tab also states whether the whole flow can enter page preflight and names every missing semantic control. It distinguishes configuration from a live webpage acceptance and never treats a saved selector as proof. New ordinary Web settings leave model/effort empty to follow that target browser's current choice; existing saved values remain unchanged. Saving uses the exact preference revision and affects new runs only; a prepared request and a saved execution keep their own snapshots.
 
-The profile fields are `executablePath`, `taskSpaceId`, `commandTimeoutMs`, `runTimeoutMs`, `pollMs`, `maxOutputBytes`, `modelLabel`, and `effortLabel`. Defaults are an absolute `~/.local/bin/ego-browser` path resolved for the current home, `taskSpaceId: 0`, `commandTimeoutMs: 25000`, `runTimeoutMs: 1800000`, `pollMs: 2000`, `maxOutputBytes: 1048576`, and empty configured labels. `runTimeoutMs` remains configurable from 10000 to 7200000 ms. The 30-minute default replaces the former five-minute wait, which was shorter than the observed live Pro analysis. These are local bounds and defaults, not provider latency or capability claims.
+The profile fields are `executablePath`, `taskSpaceId`, `commandTimeoutMs`, `runTimeoutMs`, `pollMs`, `maxOutputBytes`, `modelLabel`, `effortLabel`, and optional `grokModelLabel`. Defaults are an absolute `~/.local/bin/ego-browser` path resolved for the current home, `taskSpaceId: 0`, `commandTimeoutMs: 25000`, `runTimeoutMs: 1800000`, `pollMs: 2000`, `maxOutputBytes: 1048576`, and empty configured labels. `runTimeoutMs` remains configurable from 10000 to 7200000 ms. The 30-minute default replaces the former five-minute wait, which was shorter than the observed live Pro analysis. These are local bounds and defaults, not provider latency or capability claims.
 
 Website labels are preserved exactly. A visible `GPT-6` label is not renamed to `GPT-6 Astra`; `effortLabel` records the observed visible reasoning label and optional `effortId` independently records the website identifier, without assuming that Pro maps to a fixed identifier. An empty configured label means to use the page's observed selection. A requested label that the page does not expose is a named failure, not permission to substitute another model. Catalogue refresh restores the original slider position, range, visible label and raw identifier: different positions can share a raw identifier, so restoring by that identifier alone is insufficient.
 
@@ -63,6 +94,7 @@ Optional `geminiSemantics` is accepted only as explicitly observed website selec
 The plugin's own root is `$DSH_HOME/solar/chatgpt-web/`.
 
 - Web task records are append-only UUID directories containing contiguous revision files (`0.json`, `1.json`, …). Each `WebRunRecord` uses format version `1`, stores the complete text request, requested and observed labels, original TaskSpace/page/conversation identity, output or named error, and a revision. The store rejects unknown versions and revision gaps. The Web route has an explicit no-auto-retry policy (`maxRetries: 0`); after `submission-unknown` or `indeterminate`, only observation of the original resource is allowed.
+- `grok-web/` contains separate format-1 append-only Grok revisions with CAS, full request, original page, requested/observed model, pre-send intent, receipt/reply identity and hashed visible text output. Unknown formats and identity conflicts are refused. No ChatGPT record is treated as a Grok result.
 - `preferences.json` uses `WEB_PREFERENCES_FORMAT_VERSION: 1` and a CAS `revision`. It stores web labels, version-1 Insight configuration/templates, size limits, and optional observed Gemini semantics. Concurrent or unknown preference writes are rejected; credentials and browser login state are not copied here.
 - `studio-executions/` stores the Web and Insight provider execution snapshots with `STUDIO_EXECUTION_FORMAT_VERSION: 1`. Each captured run freezes the exact graph, command id, draft revision, rendered phase inputs, node/phase state, and full provider artifacts. Artifacts retain provider/source, visible evidence, citations, limitations, fallback and same-provider-review provenance. The source/draft/run records shared with the editor live in native-collaboration's workflow store; the Native Resident graph remains in its own plugin namespace.
 - Insight stage configuration and run records preserve requested versus observed selection, versioned template text and SHA-256 template hash, full rendered input, resource identity, answers, complete visible artifacts, quota evidence, and limitations. Hidden chain of thought is never requested or stored.

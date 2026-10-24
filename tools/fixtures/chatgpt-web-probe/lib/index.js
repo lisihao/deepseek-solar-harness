@@ -59,6 +59,7 @@ async function runProbe(ctx) {
     mainModelProvider: false,
     mainModelCatalog: false,
     mainModelInsightCatalog: false,
+    mainModelGrokCatalog: false,
     preferencesControl: false,
     preferencesDefaults: false,
     preferencesReadNoEffect: false,
@@ -110,6 +111,8 @@ async function runProbe(ctx) {
     checks.mainModelCatalog = true
     assert(mainModels.some(item => item.id === 'insight-analysis' && item.name === '洞察分析'), 'main Insight catalog entry missing')
     checks.mainModelInsightCatalog = true
+    assert(mainModels.some(item => item.id === 'grok-web' && item.name === 'Grok 网页算子'), 'main Grok catalog entry missing')
+    checks.mainModelGrokCatalog = true
 
     const preferencesPath = join(webRoot, 'preferences.json')
     assert(!(await exists(preferencesPath)), 'ChatGPT Web preferences exist before a read-only probe')

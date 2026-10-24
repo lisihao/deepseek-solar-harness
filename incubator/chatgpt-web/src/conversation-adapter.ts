@@ -11,6 +11,7 @@ import {
 } from '@deepseek-ai/dsh-llm'
 
 import type { StudioRun } from '@lisihao/dsh-solar-native-collaboration/studio-contracts'
+import type { GrokExecutionPort, GrokRequest, GrokRunRecord } from './grok-contract.js'
 import {
   latestUserTextFromMessages,
   projectBrowserPortableRequest,
@@ -23,6 +24,8 @@ import {
 
 export const INSIGHT_LLM_MODEL = 'insight-analysis' as const
 export const INSIGHT_LLM_NAME = '洞察分析' as const
+export const GROK_LLM_MODEL = 'grok-web' as const
+export const GROK_LLM_NAME = 'Grok 网页算子' as const
 
 export interface InsightStartInput {
   readonly id: string
@@ -37,6 +40,12 @@ export interface ConversationWebAdapterOptions {
   readonly startInsight: (input: InsightStartInput) => Promise<StudioRun>
   readonly inspectInsight: (sessionId: string, id: string) => Promise<StudioRun>
   readonly resolveDelivery?: (sessionId: string, text: string) => Promise<string | undefined>
+  /** Optional independent ordinary-text webpage route; never a Studio node. */
+  readonly grok?: GrokExecutionPort
+  /** Exact visible Grok model label requested for this route. */
+  readonly grokModelLabel?: string
+  /** Appends the durable Grok request audit before its first browser start. */
+  readonly onGrokRequest?: (sessionId: string, text: string) => Promise<void> | void
   readonly insightWaitMs: number
   readonly pollMs: number
 }
@@ -44,6 +53,11 @@ export interface ConversationWebAdapterOptions {
 type InsightEntry = {
   readonly canonical: string
   inFlight?: Promise<StudioRun>
+}
+
+type GrokEntry = {
+  readonly canonical: string
+  inFlight?: Promise<GrokRunRecord>
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -75,6 +89,25 @@ function completedInsightText(run: StudioRun): string {
   throw new LlmError(`洞察分析尚未完成（${run.status}）。`, 'WEB_INSIGHT_INCOMPLETE')
 }
 
+function completedGrokText(run: GrokRunRecord): string {
+  if (run.stage === 'completed' && typeof run.output?.text === 'string' && run.output.text.length > 0) return run.output.text
+  if (run.stage === 'indeterminate' || run.stage === 'submission-unknown') {
+    const code = run.error?.code ?? 'GROK_RUN_INDETERMINATE'
+    throw new LlmError(`Grok 网页结果未确定（${code}）；未自动重试，也没有输出可用。`, 'GROK_RUN_INDETERMINATE')
+  }
+  if (run.stage === 'cancelled') {
+    throw new LlmError('Grok 网页请求已取消；未自动重试。', 'GROK_RUN_ABORTED')
+  }
+  if (run.stage === 'failed' || run.stage === 'blocked') {
+    const code = run.error?.code ?? (run.stage === 'failed' ? 'GROK_RUN_FAILED' : 'GROK_RUN_BLOCKED')
+    throw new LlmError(`Grok 网页请求未完成（${code}）；未自动重试。`, code)
+  }
+  if (run.stage === 'completed') {
+    throw new LlmError('Grok 网页记录标记为 completed，但缺少完整可见文本输出。', 'GROK_OUTPUT_MISSING')
+  }
+  throw new LlmError(`Grok 网页结果尚未完成（${run.stage}）；没有输出可用。`, 'GROK_RUN_INCOMPLETE')
+}
+
 async function* textChunks(text: string): AsyncIterable<StreamChunk> {
   yield { type: 'block-start', index: 0, blockType: 'text' }
   if (text.length > 0) yield { type: 'text-delta', index: 0, text }
@@ -104,6 +137,22 @@ function wrapInsightError(error: unknown, code: string, message: string): LlmErr
   return new LlmError(message, code, { cause: error })
 }
 
+function errorCode(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined
+}
+
+function wrapGrokError(error: unknown, fallback: string): LlmError {
+  if (error instanceof LlmError) return error
+  const code = errorCode(error)
+  return new LlmError(
+    `Grok 网页控制器操作失败${code === undefined ? '' : `（${code}）`}；未自动重试。`,
+    code ?? fallback,
+    { cause: error },
+  )
+}
+
 /**
  * Public provider that composes ordinary Web conversation requests with the
  * bounded, durable Insight Studio route. It owns no browser or Studio store;
@@ -112,6 +161,7 @@ function wrapInsightError(error: unknown, code: string, message: string): LlmErr
 export class ConversationWebAdapter extends LlmAdapter {
   private readonly options: ConversationWebAdapterOptions
   private readonly insightRuns = new Map<string, InsightEntry>()
+  private readonly grokRuns = new Map<string, GrokEntry>()
 
   constructor(options: ConversationWebAdapterOptions) {
     super()
@@ -120,6 +170,18 @@ export class ConversationWebAdapter extends LlmAdapter {
     }
     if (typeof options.startInsight !== 'function' || typeof options.inspectInsight !== 'function') {
       throw new LlmError('ChatGPT Web 会话适配器缺少洞察分析控制接口。', 'CHATGPT_WEB_ADAPTER_INVALID')
+    }
+    if (options.grok !== undefined && (typeof options.grok !== 'object'
+      || typeof options.grok.start !== 'function'
+      || typeof options.grok.observe !== 'function'
+      || typeof options.grok.read !== 'function')) {
+      throw new LlmError('ChatGPT Web 会话适配器缺少 Grok 控制接口。', 'CHATGPT_WEB_ADAPTER_INVALID')
+    }
+    if (options.grokModelLabel !== undefined && (typeof options.grokModelLabel !== 'string' || options.grokModelLabel.trim().length === 0)) {
+      throw new LlmError('Grok 模型标签必须是非空字符串。', 'CHATGPT_WEB_CONFIG_INVALID')
+    }
+    if (options.onGrokRequest !== undefined && typeof options.onGrokRequest !== 'function') {
+      throw new LlmError('Grok 请求日志回调无效。', 'CHATGPT_WEB_CONFIG_INVALID')
     }
     if (!Number.isSafeInteger(options.insightWaitMs) || options.insightWaitMs < 0
       || !Number.isSafeInteger(options.pollMs) || options.pollMs <= 0) {
@@ -145,6 +207,7 @@ export class ConversationWebAdapter extends LlmAdapter {
     return [
       { provider: WEB_LLM_PROVIDER, id: WEB_LLM_MODEL, name: WEB_LLM_NAME },
       { provider: WEB_LLM_PROVIDER, id: INSIGHT_LLM_MODEL, name: INSIGHT_LLM_NAME },
+      ...(this.options.grok === undefined ? [] : [{ provider: WEB_LLM_PROVIDER, id: GROK_LLM_MODEL, name: GROK_LLM_NAME }]),
     ]
   }
 
@@ -153,6 +216,9 @@ export class ConversationWebAdapter extends LlmAdapter {
     throwIfAborted(signal)
     if (model === WEB_LLM_MODEL) return this.options.web.resolveModel(provider, model, signal)
     if (model === INSIGHT_LLM_MODEL) return { provider: WEB_LLM_PROVIDER, id: INSIGHT_LLM_MODEL, name: INSIGHT_LLM_NAME }
+    if (model === GROK_LLM_MODEL && this.options.grok !== undefined) {
+      return { provider: WEB_LLM_PROVIDER, id: GROK_LLM_MODEL, name: GROK_LLM_NAME }
+    }
     throw new LlmError(`ChatGPT Web 不支持模型 ${model}。`, 'CHATGPT_WEB_MODEL_INVALID')
   }
 
@@ -160,7 +226,9 @@ export class ConversationWebAdapter extends LlmAdapter {
     if (options.provider !== WEB_LLM_PROVIDER) {
       throw new LlmError(`ChatGPT Web 不支持 provider ${options.provider}。`, 'CHATGPT_WEB_PROVIDER_INVALID')
     }
-    if (options.model !== WEB_LLM_MODEL && options.model !== INSIGHT_LLM_MODEL) {
+    if (options.model !== WEB_LLM_MODEL
+      && options.model !== INSIGHT_LLM_MODEL
+      && !(options.model === GROK_LLM_MODEL && this.options.grok !== undefined)) {
       throw new LlmError(`ChatGPT Web 不支持模型 ${options.model}。`, 'CHATGPT_WEB_MODEL_INVALID')
     }
     if (options.sessionId === undefined || String(options.sessionId).length === 0) {
@@ -180,6 +248,24 @@ export class ConversationWebAdapter extends LlmAdapter {
     const portableOptions = projectBrowserPortableRequest(options)
     const question = latestUserTextFromMessages(portableOptions.messages)
     const sessionId = String(options.sessionId)
+    // Grok is an independent normal model route. In particular, it must not
+    // consume a completed Web/Insight delivery from Studio as if it were its
+    // own answer.
+    if (options.model === GROK_LLM_MODEL) {
+      const grokSerialized = serializeConversationRequest(portableOptions, {
+        ...(this.options.grokModelLabel === undefined ? {} : { modelLabel: this.options.grokModelLabel }),
+      })
+      const run = await this.grok({
+        id: grokSerialized.id,
+        sessionId: grokSerialized.sessionId,
+        canonical: grokSerialized.canonical,
+        prompt: grokSerialized.prompt,
+        ...(this.options.grokModelLabel === undefined ? {} : { modelLabel: this.options.grokModelLabel }),
+      }, options.signal)
+      throwIfAborted(options.signal)
+      yield* textChunks(completedGrokText(run))
+      return
+    }
     const serialized = serializeConversationRequest(portableOptions, {
       ...(portableOptions.reasoningEffort === undefined ? {} : { effortLabel: String(portableOptions.reasoningEffort) }),
     })
@@ -237,6 +323,75 @@ export class ConversationWebAdapter extends LlmAdapter {
       () => { if (entry.inFlight === promise) delete entry.inFlight },
     )
     return promise
+  }
+
+  private grok(request: GrokRequest, signal: AbortSignal | undefined): Promise<GrokRunRecord> {
+    const port = this.options.grok
+    if (port === undefined) return Promise.reject(new LlmError('Grok 网页算子未配置。', 'GROK_NOT_CONFIGURED'))
+    const existing = this.grokRuns.get(request.id)
+    if (existing !== undefined) {
+      if (existing.canonical !== request.canonical) {
+        return Promise.reject(new LlmError('Grok 网页 durable command identity 冲突。', 'GROK_COMMAND_ID_CONFLICT'))
+      }
+      if (existing.inFlight !== undefined) return existing.inFlight
+      return this.observeGrok(port, request.id, signal)
+    }
+
+    const entry: GrokEntry = { canonical: request.canonical }
+    this.grokRuns.set(request.id, entry)
+    let retainEntry = false
+    const promise = Promise.resolve()
+      .then(async () => {
+        const retained = await port.read(request.id)
+        if (retained !== undefined) {
+          if (retained.request.canonical !== request.canonical || retained.request.sessionId !== request.sessionId
+            || retained.request.prompt !== request.prompt || retained.request.modelLabel !== request.modelLabel) {
+            throw new LlmError('Grok 网页持久记录与本次请求不一致；未提交或使用旧回答。', 'GROK_COMMAND_ID_CONFLICT')
+          }
+          retainEntry = true
+          return port.observe(request.id, signal)
+        }
+        await this.captureGrok(request)
+        // Once the log is durable, this id is observation-only even if start
+        // throws after creating an uncertain browser effect.
+        retainEntry = true
+        return port.start(request, signal)
+      })
+      .catch(error => {
+        throw wrapGrokError(error, 'GROK_CONTROLLER_ERROR')
+      })
+    entry.inFlight = promise
+    void promise.then(
+      () => { if (entry.inFlight === promise) delete entry.inFlight },
+      () => {
+        if (!retainEntry && this.grokRuns.get(request.id) === entry) this.grokRuns.delete(request.id)
+        if (entry.inFlight === promise) delete entry.inFlight
+      },
+    )
+    return promise
+  }
+
+  private observeGrok(port: GrokExecutionPort, id: string, signal: AbortSignal | undefined): Promise<GrokRunRecord> {
+    return Promise.resolve()
+      .then(() => port.observe(id, signal))
+      .catch(error => { throw wrapGrokError(error, 'GROK_CONTROLLER_ERROR') })
+  }
+
+  private captureGrok(request: GrokRequest): Promise<void> {
+    if (this.options.onGrokRequest === undefined) return Promise.resolve()
+    const text = JSON.stringify({
+      kind: 'grok-request',
+      id: request.id,
+      model: request.modelLabel ?? null,
+      prompt: request.prompt,
+      canonical: request.canonical,
+    })
+    return Promise.resolve()
+      .then(() => this.options.onGrokRequest?.(request.sessionId, text))
+      .catch(error => {
+        if (error instanceof LlmError) throw error
+        throw new LlmError('Grok 当前会话来源捕获失败；未提交网页请求。', 'GROK_REQUEST_LOG_FAILED', { cause: error })
+      })
   }
 
   private async startAndPoll(input: InsightStartInput): Promise<StudioRun> {
