@@ -1,0 +1,26 @@
+{
+  "name": "dsh-hindsight-chat-recall-fixture",
+  "version": "0.0.0-test.0",
+  "private": true,
+  "description": "Private scratch-profile fixture for the Hindsight chat-recall plugin.",
+  "type": "module",
+  "main": "./index.mjs",
+  "files": [
+    "index.mjs",
+    "cordis.patch.yml"
+  ],
+  "engines": {
+    "node": ">=22.19",
+    "dsh": "0.2.1-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

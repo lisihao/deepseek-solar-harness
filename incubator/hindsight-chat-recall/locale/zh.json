@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Hindsight 聊天自动召回",
+    "description": "正常聊天请求前读取有界的本地项目记忆。"
+  }
+}

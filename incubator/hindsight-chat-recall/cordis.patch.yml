@@ -1,0 +1,7 @@
+- insert:
+    - id: solar-hindsight-chat-recall
+      name: '@lisihao/dsh-solar-hindsight-chat-recall'
+      config:
+        timeoutMs: 60000
+        resultLimit: 2
+        maxContextCharacters: 12000
