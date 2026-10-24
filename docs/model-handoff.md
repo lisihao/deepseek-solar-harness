@@ -59,3 +59,30 @@ Web and Insight are operator tasks, so selecting either now installs a fresh tas
 The stable local gate passed 171 source tests and 39 built-runtime tests, build/declarations, strict types, both official CLI fake-provider checks and the homepage check. The actual AgentLoop fake-provider check retained the first Insight input exactly once without a summary call. All four return selections, restart and preview recovery, native route changes, excluded-history boundaries and failed/unknown retry archives have regression coverage. Runtime `73e92a6bc19df25f269e13c3378b48f8002db839` passed [exact-head CI](https://github.com/lisihao/deepseek-solar-harness/actions/runs/39558952013) and was installed through the official CLI with all 17 packed files matching.
 
 The user directly confirmed the installed empty-conversation Web → Insight → native route checklist: no handoff processing on operator entry, two independent return questions, both answers submitted as **do not carry**, cards dismissed and input restored. The persisted return is committed with both choices false and the operator entry returned. Final read-only auditing found zero new handoff call identities, unchanged Resident state and unchanged Web JSON files from the post-install baseline. This is human UI confirmation plus durable-state evidence, not an automated click or a live-provider test. Actual result-carrying, real summary quality and real model execution remain unrun; the historical stream-failure cause remains unknown.
+
+## Grok route compatibility candidate — 2026-10-24
+
+Runtime source `e8b1e3e37e8ff0f233dff6468bf87454f2e65154` (PR #317)
+adds `solar-chatgpt-web/grok-web` to the existing operator routes. Entering Grok
+starts a fresh operator segment without Luna; returning to a native model keeps
+the two independent context choices. Exact Web/Grok request-audit envelopes are
+omitted from handoff task material while original audit events, decisions,
+other notices and user text remain.
+
+Build/types passed. The source suite passed 172 cases before the final added
+history case; all 5 history cases then passed. The final built runtime suite
+passed 40 cases, both official CLI fake-provider probes passed, and the generated
+homepage matched. Exact source CI `40123446720` succeeded. No live model ran.
+
+The fixed archive SHA-256 is
+`76432c75a26322112c901cc25a1472610b7b355dee6f638e5c28430455e47bd7`.
+It was installed with the official CLI after a latest profile/data backup and
+normal App/Host exit; all 17 installed files matched. The companion Web/Grok
+candidate added 61 matching files. The 43 unrelated plugins, configuration,
+billion-context state/logs, Hindsight configuration, existing Solar records and
+472 original session logs were preserved. Desktop was normally restarted; the
+post-restart audit found no changed/new session files or Solar JSON records.
+
+The native UI tool could not uniquely match the selected window to Accessibility.
+Human confirmation of the Grok model entry is pending; live Grok generation and
+result-carrying handoff remain unrun. Installation is not a release or a merge.
