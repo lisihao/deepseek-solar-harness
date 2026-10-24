@@ -32,7 +32,7 @@ export const PI_AI_NAMESPACE = 'llm-pi-ai' as const
 const SUBSCRIPTIONS_PAGE_SLOT = 'settings.subscriptions.page'
 const SETTINGS_SECTION_SLOT = 'settings.section'
 
-export const inject = ['slots', 'locale', 'remote'] as const
+export const inject = ['slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.settings'] as const
 
 const dictionaries = {
   zh: {

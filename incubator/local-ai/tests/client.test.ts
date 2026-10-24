@@ -5,6 +5,7 @@ import {
   apply,
   createLocalAiOperations,
   formFromSnapshot,
+  inject,
   resolveTarget,
   type SettingsSnapshot,
 } from '../src/client.js'
@@ -164,6 +165,12 @@ function slotFixture() {
 }
 
 describe('Settings registration', () => {
+  test('declares every Remote namespace it reads, or Cordis refuses the property at runtime', () => {
+    // Observed in a scratch `dsh web` profile: without these entries the page
+    // failed with `cannot get property "remote.settings" without inject`.
+    expect(inject).toEqual(expect.arrayContaining(['remote', 'remote.settings', 'remote.llm', 'remote.credentials']))
+  })
+
   test('joins the subscription hub when it is present and never shows a second copy', () => {
     const setup = slotFixture()
     setup.declare('settings.section')
