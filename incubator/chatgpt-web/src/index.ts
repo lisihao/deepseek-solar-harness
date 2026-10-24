@@ -6,6 +6,9 @@ import { isAbsolute, join } from 'node:path'
 import { WebRunStore } from './store.js'
 import { WebController } from './controller.js'
 import { EgoWebAdapter } from './ego-adapter.js'
+import { GrokRunStore } from './grok-store.js'
+import { GrokController } from './grok-controller.js'
+import { GrokEgoAdapter } from './grok-ego-adapter.js'
 import { WebControl } from './control.js'
 import { ModelCatalogControl } from './model-catalog-control.js'
 import { createWebProvider, createWebTool } from './bindings.js'
@@ -36,6 +39,8 @@ export interface Config {
   readonly maxOutputBytes: number
   readonly modelLabel: string
   readonly effortLabel: string
+  /** Empty follows the target Grok browser's current visible model. */
+  readonly grokModelLabel?: string
 }
 export const Config: z<Config> = z.object({
   executablePath: z.string().default(join(homedir(), '.local', 'bin', 'ego-browser')),
@@ -46,6 +51,7 @@ export const Config: z<Config> = z.object({
   maxOutputBytes: z.number().min(1024).max(8 * 1024 * 1024).default(1024 * 1024),
   modelLabel: z.string().default(''),
   effortLabel: z.string().default(''),
+  grokModelLabel: z.string().default(''),
 })
 export function apply(ctx: Context, config: Config): void {
   if (!Number.isSafeInteger(config.taskSpaceId) || config.taskSpaceId < 0) throw new Error('WEB_CONFIG_INVALID: taskSpaceId 必须是非负整数。')
@@ -54,6 +60,10 @@ export function apply(ctx: Context, config: Config): void {
   const controller = new WebController(new WebRunStore(root), new EgoWebAdapter({
     executable: config.executablePath, cwd: root, commandTimeoutMs: config.commandTimeoutMs,
     ...(config.taskSpaceId === 0 ? {} : { spaceId: config.taskSpaceId }),
+    stdoutMaxBytes: config.maxOutputBytes + 512 * 1024,
+  }), { timeoutMs: config.runTimeoutMs, pollMs: config.pollMs, stableObservations: 3, maxOutputBytes: config.maxOutputBytes })
+  const grok = new GrokController(new GrokRunStore(root), new GrokEgoAdapter({
+    executable: config.executablePath, cwd: root, commandTimeoutMs: config.commandTimeoutMs,
     stdoutMaxBytes: config.maxOutputBytes + 512 * 1024,
   }), { timeoutMs: config.runTimeoutMs, pollMs: config.pollMs, stableObservations: 3, maxOutputBytes: config.maxOutputBytes })
   const defaults = {
@@ -118,7 +128,8 @@ export function apply(ctx: Context, config: Config): void {
     },
   })
   ctx.effect(()=>()=>ports.dispose())
-  const runtime=new ConversationRuntime({root,preferences,controller,ports,logRequest,pollMs:config.pollMs,
+  const runtime=new ConversationRuntime({root,preferences,controller,ports,logRequest,pollMs:config.pollMs,grok,
+    ...(config.grokModelLabel?.trim() ? {grokModelLabel:config.grokModelLabel.trim()} : {}),
     studio:()=>ctx.get('solarWorkflowStudio') as (WorkflowStudioApi & {resolveDelivery(sessionId:string,text:string):Promise<string|undefined>})|undefined,
   })
   ctx.effect(()=>ctx.llm.registerAdapter([WEB_LLM_PROVIDER],runtime))

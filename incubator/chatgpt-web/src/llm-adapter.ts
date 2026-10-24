@@ -152,7 +152,7 @@ function isSolarWebRequestAudit(message: Record<string, unknown>): boolean {
   if (!isRecord(block) || block.type !== 'text' || typeof block.text !== 'string') return false
   try {
     const parsed = JSON.parse(block.text) as unknown
-    return isRecord(parsed) && parsed.kind === 'web-request'
+    return isRecord(parsed) && (parsed.kind === 'web-request' || parsed.kind === 'grok-request')
   } catch {
     return false
   }
