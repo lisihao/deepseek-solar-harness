@@ -57,3 +57,40 @@ result-carrying handoff or complete Insight research chain was run.
 Local tests and signed-in draft observation do not establish these effects.
 Private backup paths, account/conversation content and UI captures are not
 committed.
+
+## Literal paragraph-readback repair installed — 2026-10-24
+
+The first user-triggered attempt failed before durable send intent with
+`GROK_PROMPT_READBACK_MISMATCH`. Its exact original draft was retained: 90 direct
+ProseMirror paragraphs, 26 empty, with 115 extra layout LF characters in native
+`innerText`. The fixed production DOM observer reconstructed exactly 12,153 input
+bytes on that same page, with no page writes, no messages and no Send. Strict
+comparison still rejects real space/line differences and unsupported structures.
+
+Runtime source `e8f23504cd99b21682bb9274805462096a01e50f` passed the full gate:
+531 tests across 57 files, build, strict types, two official CLI scratch-profile
+probes and homepage/curated checks. The focused DOM/transport suite passed 19
+cases; the three new reproduction cases had failed before the fix. Independent
+read-only review found no blocker. Exact source CI `40127887359` succeeded.
+
+The new archive SHA-256 is
+`250d78ee0fbf85332ba9fa51167c756d6832562f8b092c4b56403fe79aecb207`.
+Only Web was updated using the official CLI, after the latest profile/lock/Web
+data and affected original session backup. All 61 installed files matched.
+The 44 other plugins, profile settings, billion-context state/config/logs,
+Hindsight configuration, existing Solar JSON and 472 original session files
+passed preservation checks before normal relaunch. The client artifact is
+byte-identical, so the earlier user-confirmed model-entry UI remains applicable.
+
+Post-restart the original failed Grok run still had the same four revisions;
+no new Solar JSON or Grok task appeared. One original compressed session file
+changed. Full multi-frame Zstandard decoding showed its 72 previous records
+preserved exactly in order, with one native `session/end-seed` record appended.
+There was no new request or model event in that append. The official CLI listed
+45 direct plugins and the normal App process was running.
+
+The original browser page/draft and failed attempt remain retained, not retried.
+No real new Send, user receipt or completed-answer capture was run by this
+repair. A passive record baseline is ready for a later user-initiated check;
+installation and the successful original-draft readback do not establish that
+remaining live chain.
