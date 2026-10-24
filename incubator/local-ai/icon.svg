@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Local AI">
+  <rect width="64" height="64" rx="14" fill="#1d2838"/>
+  <rect x="15" y="17" width="34" height="22" rx="4" fill="#46a4ff"/>
+  <path d="M26 47h12M32 39v8" stroke="#46a4ff" stroke-linecap="round" stroke-width="4"/>
+  <circle cx="25" cy="28" r="3" fill="#fff"/>
+  <circle cx="39" cy="28" r="3" fill="#fff"/>
+</svg>

@@ -1,0 +1,3 @@
+- insert:
+    - id: solar-local-ai
+      name: '@lisihao/dsh-solar-local-ai'

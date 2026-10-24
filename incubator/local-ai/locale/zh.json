@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "本地 AI",
+    "description": "使用自己部署的 OpenAI 兼容模型服务，支持局域网直连或经 Tailscale 用户态节点访问。"
+  }
+}

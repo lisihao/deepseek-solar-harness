@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const packages = []
-for (const name of ['native-resident', 'native-collaboration', 'chatgpt-web', 'subscription-hub']) {
+for (const name of ['native-resident', 'native-collaboration', 'chatgpt-web', 'subscription-hub', 'local-ai']) {
   try { await stat(join(root, 'incubator', name, 'package.json')); packages.push(name) }
   catch (error) { if (error.code !== 'ENOENT') throw error }
 }
@@ -18,7 +18,7 @@ for (const name of packages) {
     entryPoints: name === 'native-resident'
       ? ['src/index.ts', 'src/daemon.ts', 'src/client.ts', 'src/contracts.ts']
       : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts']
-        : name === 'subscription-hub' ? ['src/index.ts']
+        : name === 'subscription-hub' || name === 'local-ai' ? ['src/index.ts']
           : ['src/index.ts', 'src/typert.ts', 'src/studio-contract.ts'],
     absWorkingDir: directory,
     outdir: 'lib',
