@@ -55,6 +55,39 @@ process_must_be_stopped() {
   fi
 }
 
+process_bundle_must_be_stopped() {
+  local label="$1"
+  local bundle="$2"
+  local processes
+  local line
+  local pid
+  local comm
+  processes="$(ps -axo pid=,comm= 2>/dev/null)" || \
+    die "could not inspect processes while checking $label"
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [ -n "$line" ] || continue
+    pid="${line%%[[:space:]]*}"
+    comm="${line#"$pid"}"
+    comm="${comm#"${comm%%[![:space:]]*}"}"
+    case "$comm" in
+      "$bundle"/Contents/*)
+        die "$label appears to be active; quit it yourself before changing the desktop profile"
+        ;;
+    esac
+  done <<< "$processes"
+}
+
+bundle_for_cli() {
+  case "$1" in
+    *.app/Contents/*)
+      printf '%s\n' "${1%%.app/Contents/*}.app"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 verify_file() {
   local path="$1"
   local expected_sha="$2"
@@ -400,6 +433,7 @@ require_command awk
 require_command tr
 require_command mktemp
 require_command pgrep
+require_command ps
 require_command cmp
 require_command cut
 
@@ -419,9 +453,22 @@ esac
 [ -x "$DSH_CLI" ] || die "official dsh CLI is not executable: $DSH_CLI"
 
 assert_target_processes_stopped() {
-  process_must_be_stopped \
-    "DeepSeek Harness application" \
-    "/Applications/DeepSeek Harness\\.app/Contents/"
+  local bundle
+  local actual_bundle
+  local app_bundles=()
+  local home_app
+
+  app_bundles+=("/Applications/DeepSeek Harness.app")
+  if [ -n "${HOME:-}" ]; then
+    home_app="$HOME/Applications/DeepSeek Harness.app"
+    app_bundles+=("$home_app")
+  fi
+  if actual_bundle="$(bundle_for_cli "$DSH_CLI")"; then
+    app_bundles+=("$actual_bundle")
+  fi
+  for bundle in "${app_bundles[@]}"; do
+    process_bundle_must_be_stopped "DeepSeek Harness application" "$bundle"
+  done
   process_must_be_stopped \
     "Solar Native Resident daemon" \
     "dsh-solar-native-resident/lib/daemon\\.js.*--root"

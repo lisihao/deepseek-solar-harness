@@ -1,0 +1,27 @@
+{
+  "name": "@lisihao/dsh-solar-subscription-hub-probe",
+  "version": "0.0.0-test.0",
+  "description": "Private scratch-profile probe for the Solar subscription hub bundle.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "package.json"
+  ],
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.19",
+    "dsh": "0.2.1-rc.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

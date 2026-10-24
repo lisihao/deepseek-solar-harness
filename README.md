@@ -46,6 +46,14 @@ bash "$work/install.sh" --ref "$ref" native-resident native-collaboration model-
 
 安装完成后手动打开 Harness，在「插件 → 已安装」确认目标插件，再按[使用指南](docs/curated-plugin-usage.md)检查入口。**看到插件开关不等于真实模型链路成功。** Web/Insight、RLM 和原生执行消耗的额度及服务条件见指南；本安装步骤不运行这些测试。
 
+## 在不同 Mac 还原开发环境
+
+开发环境清单新增五个固定包：`subscription-hub`、`codex-subscription`、`grok-subscription`、`bench` 和 `hindsight-chat-recall`。前面三个共同提供一个「模型订阅」设置入口，其中 Codex/Grok 使用经过小范围修改的维护 fork；原版 npm 包仍保留各自的独立设置页。
+
+这组开发预览按完整源码提交、归档 SHA-256 和字节数固定在 [catalog.json](distribution/plugins/catalog.json)，不依赖修改已安装的 `lib/client.js`。它们尚未成为稳定市场 Release；当前 PR 未合并时，恢复必须使用包含该清单的完整 PR 提交，不能直接使用默认分支。
+
+[环境恢复约定](docs/development-environment.md)说明源码、固定插件、私有设置与会话备份各自的恢复方式；[订阅聚合设计](docs/integrations/model-subscriptions.md)记录维护 fork 的边界；[两个新增插件](docs/development-plugin-additions.md)列出 Bench 与聊天回忆的选定构建。目标机 App 路径通过 `tools/configure-development-profile.mjs` 配置，安装文件通过 `tools/audit-development-plugins.py` 比对。个人壁纸、历史聊天和凭据保留在私有迁移备份中，不提交到 GitHub。Jev 保持暂停，两端 Tailscale 保持运行。
+
 ## 安装社区原版前的共同准备
 
 下方社区命令使用官方 App 的 CLI，不经过全局 npm 的另一份 Harness。先正常退出 App/Host、处理完 Resident 工作；在终端设置并检查 CLI，备份当前 `desktop` profile。不要把凭据或此备份上传到 GitHub。
