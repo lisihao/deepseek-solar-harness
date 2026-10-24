@@ -19,6 +19,13 @@ export const LOCAL_AI_KEY_REF = 'LOCAL_AI_API_KEY' as const
  */
 export const NO_KEY_PLACEHOLDER = 'local-ai-no-key' as const
 export const LOCAL_AI_API = 'openai-completions' as const
+/**
+ * `llm-pi-ai` aborts a stream after 5 minutes without a byte. A local server
+ * that queues requests can spend longer than that prefilling a full agent
+ * prompt before its first token, so new routes get 15 minutes. A value
+ * already in the profile is kept.
+ */
+export const LOCAL_AI_STREAM_IDLE_TIMEOUT_MS = 900_000
 
 export const GATEWAY_HOST = '127.0.0.1' as const
 export const GATEWAY_PATH_PREFIX = '/tailnet/' as const
@@ -144,4 +151,13 @@ export function providerProfile(options: {
     apiKeyEnv: LOCAL_AI_KEY_REF,
     models: options.models.map(model => ({ ...model })),
   }
+}
+
+/**
+ * The value saved over an existing route: fields the page does not edit
+ * (such as `headers` or a tuned `streamIdleTimeoutMs`) survive, the page's
+ * own fields win, and a new route gets the local idle timeout.
+ */
+export function routeValueForSave(existing: Record<string, unknown> | undefined, profile: Record<string, unknown>): Record<string, unknown> {
+  return { streamIdleTimeoutMs: LOCAL_AI_STREAM_IDLE_TIMEOUT_MS, ...existing, ...profile }
 }

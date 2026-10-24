@@ -51,7 +51,8 @@ async function runProbe(ctx) {
   await until('settings namespaces', () => view(ctx, ENTRY) !== undefined && view(ctx, 'llm-pi-ai') !== undefined)
   const self = view(ctx, ENTRY)
   checks.selfNamespace = JSON.stringify(self.value?.tailscale) === JSON.stringify({ enabled: false, port: 18765, proxy: 'socks5://127.0.0.1:1055' })
-  checks.gatewayIdleByDefault = !(await portOpen(18765)) || 'port 18765 is used by something else'
+  // Only meaningful when nothing else held the default port before boot.
+  checks.gatewayIdleByDefault = process.env.LOCAL_AI_PROBE_DEFAULT_PORT_FREE !== '1' || !(await portOpen(18765)) || 'default port 18765 opened without tailscale.enabled'
 
   await ctx.settings.mutate(ENTRY, [{ op: 'set', path: ['tailscale'], value: { enabled: true, port: portA, proxy } }], self.revision)
   await until(`gateway on ${portA}`, () => portOpen(portA))

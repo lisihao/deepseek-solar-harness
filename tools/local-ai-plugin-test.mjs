@@ -104,6 +104,11 @@ async function main() {
   upstreamPort = await listen(upstream)
   const socksPort = await listen(socks)
   const [portA, portB] = [await freePort(), await freePort()]
+  const defaultPortFree = await new Promise(resolvePromise => {
+    const probe = createTcpServer()
+    probe.once('error', () => resolvePromise(false))
+    probe.listen(18765, '127.0.0.1', () => probe.close(() => resolvePromise(true)))
+  })
   const scratch = await mkdtemp(join(TEMP_ROOT, 'dsh-v4-local-ai-plugin-test-'))
   const marker = join(scratch, 'probe', 'marker.json')
   const env = { ...process.env }
@@ -116,6 +121,7 @@ async function main() {
     LOCAL_AI_PROBE_PORT_A: String(portA),
     LOCAL_AI_PROBE_PORT_B: String(portB),
     LOCAL_AI_PROBE_SOCKS_PORT: String(socksPort),
+    LOCAL_AI_PROBE_DEFAULT_PORT_FREE: defaultPortFree ? '1' : '0',
     // What the page stores when the user leaves the key empty.
     LOCAL_AI_API_KEY: 'local-ai-no-key',
   })
@@ -133,7 +139,7 @@ async function main() {
     if (!socksRequested.every(target => target === '100.114.161.62:8000') || socksRequested.length < 2) throw new Error(`unexpected SOCKS targets ${JSON.stringify(socksRequested)}`)
     const chat = upstreamSeen.find(entry => entry.path === '/v1/chat/completions')
     if (chat?.authorization !== 'Bearer local-ai-no-key' || chat.host !== '100.114.161.62:8000') throw new Error(`unexpected upstream request ${JSON.stringify(upstreamSeen)}`)
-    process.stdout.write(`${JSON.stringify({ profile: PROFILE, checks: result.checks, socksRequested, upstreamSeen }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ profile: PROFILE, defaultPortFree, checks: result.checks, socksRequested, upstreamSeen }, null, 2)}\n`)
   } catch (error) {
     failure = error
   } finally {

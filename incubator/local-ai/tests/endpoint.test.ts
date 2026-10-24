@@ -7,6 +7,7 @@ import {
   normalizeEndpoint,
   parseGatewayPath,
   providerProfile,
+  routeValueForSave,
   toGatewayBaseURL,
 } from '../src/endpoint.js'
 
@@ -89,5 +90,12 @@ describe('route profile', () => {
       apiKeyEnv: LOCAL_AI_KEY_REF,
       models: [{ id: 'qwen' }],
     })
+  })
+
+  test('a new route gets the local idle timeout; a saved one keeps its own fields', () => {
+    const profile = providerProfile({ displayName: 'Mini', baseURL: 'http://192.168.2.200:8000/v1', models: [{ id: 'qwen' }] })
+    expect(routeValueForSave(undefined, profile)).toMatchObject({ streamIdleTimeoutMs: 900_000, baseURL: 'http://192.168.2.200:8000/v1' })
+    const kept = routeValueForSave({ streamIdleTimeoutMs: 60_000, headers: { x: '1' }, baseURL: 'http://old/v1', displayName: 'Old' }, profile)
+    expect(kept).toMatchObject({ streamIdleTimeoutMs: 60_000, headers: { x: '1' }, baseURL: 'http://192.168.2.200:8000/v1', displayName: 'Mini' })
   })
 })

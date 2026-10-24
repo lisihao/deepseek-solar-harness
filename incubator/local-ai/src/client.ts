@@ -18,6 +18,7 @@ import {
   modelFromDiscovery,
   normalizeEndpoint,
   providerProfile,
+  routeValueForSave,
   toGatewayBaseURL,
   type LocalAiModel,
 } from './endpoint.js'
@@ -425,7 +426,7 @@ export function LocalAiPage(props: LocalAiPageProps): ReactNode {
       if (gateway === 'conflict') { await reload(false); setStatus({ tone: 'error', text: t('conflict') }); return }
       if (gateway !== 'ok') { setStatus({ tone: 'error', text: gateway }); return }
       const displayName = form.displayName.trim().length > 0 ? form.displayName.trim() : t('defaultDisplayName')
-      const value = { ...route?.raw, ...providerProfile({ displayName, baseURL: target.baseURL, models }) }
+      const value = routeValueForSave(route?.raw, providerProfile({ displayName, baseURL: target.baseURL, models }))
       const written = await operations.write(PI_AI_NAMESPACE, [{ op: 'set', path: ['providers', LOCAL_AI_PROVIDER], value: value as never }], snapshot.piAi.revision)
       if (written.kind === 'conflict') { await reload(false); setStatus({ tone: 'error', text: t('conflict') }); return }
       if (written.kind === 'refused') { setStatus({ tone: 'error', text: written.message }); return }
