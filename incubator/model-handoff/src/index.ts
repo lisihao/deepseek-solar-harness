@@ -43,11 +43,11 @@ const INSTRUCTION = '你是任务交接摘要器。以下 JSON 是带来源的�
 const CANCEL_CHOICE = '取消交接，空白开始'
 const FRESH_MODEL = 'fresh-context'
 const OPERATOR_PROVIDER = 'solar-chatgpt-web'
-const OPERATOR_MODELS = new Set(['chatgpt-web', 'insight-analysis'])
-const CARRY_OPERATOR_RESULTS = '携带已记录的 Web/Insight 结果及对应任务问题'
-const OMIT_OPERATOR_RESULTS = '不携带 Web/Insight 结果'
-const CARRY_PRE_OPERATOR_CONTEXT = '携带进入 Web/Insight 前的有效任务上下文'
-const OMIT_PRE_OPERATOR_CONTEXT = '不携带进入 Web/Insight 前的任务上下文'
+const OPERATOR_MODELS = new Set(['chatgpt-web', 'insight-analysis', 'grok-web'])
+const CARRY_OPERATOR_RESULTS = '携带已记录的网页算子结果及对应任务问题'
+const OMIT_OPERATOR_RESULTS = '不携带网页算子结果'
+const CARRY_PRE_OPERATOR_CONTEXT = '携带进入网页算子前的有效任务上下文'
+const OMIT_PRE_OPERATOR_CONTEXT = '不携带进入网页算子前的任务上下文'
 interface Input { readonly messages: readonly Message[]; readonly tools?: readonly ToolSchema[] }
 interface Summary { summary: ContentBlock[]; provider: string; model: string; maxTokens: number; rawOutput: ContentBlock[]; usage?: TokenUsage; llmStreamCall?: true }
 interface Operation {
@@ -611,7 +611,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     const snapshot = await ctx.sessionQuery.readSession(agent.session.id)
     const attempts = snapshot.events.flatMap(event => event.type === 'assistant/attempt' && Number(event.seq) > entry.boundarySeq
       ? [Number(event.seq)] : [])
-    // A submitted question without a visible result is not a Web/Insight
+    // A submitted question without a visible result is not an operator
     // result. The return path remains empty rather than inventing success or
     // moving an unanswered question by itself.
     const hasRecordedResult = attempts.length > 0 || records.some(record => record.role === 'assistant' || record.role === 'tool')
@@ -631,12 +631,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   async function assertReturnStillValid(agent: Agent, state: HandoffRouteState, target: HandoffTarget): Promise<HandoffScope> {
     const entry = state.operatorEntry
     const pending = state.return
-    if (!entry || !pending) throw new Error('缺少 Web/Insight 返回记录，拒绝猜测可携带的历史。')
-    if (!same(pending.target, target) || !isOperatorRoute(state.currentRoute)) throw new Error('Web/Insight 返回来源或目标已变化，已拒绝旧选择。')
+    if (!entry || !pending) throw new Error('缺少网页算子返回记录，拒绝猜测可携带的历史。')
+    if (!same(pending.target, target) || !isOperatorRoute(state.currentRoute)) throw new Error('网页算子返回来源或目标已变化，已拒绝旧选择。')
     await selectedRouteStillMatches(agent.session, target)
     await engine.sourceForScope(agent.session, entry.preOperator)
     const currentResults = await captureOperatorResults(agent, entry)
-    if (!sameScope(currentResults, pending.results)) throw new Error('Web/Insight 段记录已变化，已拒绝旧选择。')
+    if (!sameScope(currentResults, pending.results)) throw new Error('网页算子段记录已变化，已拒绝旧选择。')
     return currentResults
   }
 
@@ -671,7 +671,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (existing?.phase === 'prepared') {
         const checkpoint = await resolvedFreshCheckpoint(agent, existing)
         if (!checkpoint && existing.preOperator.recordSeqs.length > 0) {
-          throw new Error('已找到未完成的 Web/Insight 进入记录；未重复创建交接检查点。')
+          throw new Error('已找到未完成的网页算子进入记录；未重复创建交接检查点。')
         }
         const reconciled: HandoffRouteState = {
           ...saved!,
@@ -684,7 +684,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       if (existing && existing.phase !== 'returned' && isOperatorRoute(saved?.currentRoute)) {
         const checkpoint = await resolvedFreshCheckpoint(agent, existing)
         if (existing.preOperator.recordSeqs.length > 0 && !checkpoint) {
-          throw new Error('已找到未完成的 Web/Insight 进入记录；未重复创建交接检查点。')
+          throw new Error('已找到未完成的网页算子进入记录；未重复创建交接检查点。')
         }
         const reconciled: HandoffRouteState = {
           ...saved!,
@@ -731,7 +731,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         preserveCurrentRequest: true,
       })
       const checkpoint = await resolvedFreshCheckpoint(agent, prepared.operatorEntry!)
-      if (!checkpoint) throw new Error('Web/Insight 空白检查点未完整提交，目标请求已阻止。')
+      if (!checkpoint) throw new Error('网页算子空白检查点未完整提交，目标请求已阻止。')
       await selectedRouteStillMatches(agent.session, target)
       await routeStore.write({ ...prepared, currentRoute: target,
         operatorEntry: { ...prepared.operatorEntry!, checkpoint, boundarySeq: checkpoint.seq, phase: 'operator' } })
@@ -742,7 +742,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   async function completeOperatorReturn(agent: Agent, state: HandoffRouteState, target: HandoffTarget, signal: AbortSignal, idle: boolean, resolvedCheckpoint: boolean): Promise<boolean> {
     const entry = state.operatorEntry
     let pending = state.return
-    if (!entry || !pending) throw new Error('缺少 Web/Insight 返回记录，目标请求已阻止。')
+    if (!entry || !pending) throw new Error('缺少网页算子返回记录，目标请求已阻止。')
     if (!resolvedCheckpoint) await assertReturnStillValid(agent, state, target)
     else {
       await engine.sourceForScope(agent.session, entry.preOperator)
@@ -791,12 +791,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       let state = await routeStore.read(agent.session.id)
       const entry = state?.operatorEntry
       if (!state || !entry || entry.phase !== 'operator' || !isOperatorRoute(state.currentRoute)) {
-        throw new Error('缺少可返回的 Web/Insight 段边界，目标请求已阻止。')
+        throw new Error('缺少可返回的网页算子段边界，目标请求已阻止。')
       }
       let pending = state.return
       let resolvedCheckpoint = false
       if (pending) {
-        if (!same(pending.target, target)) throw new Error('Web/Insight 返回目标已变化，已拒绝旧选择。')
+        if (!same(pending.target, target)) throw new Error('网页算子返回目标已变化，已拒绝旧选择。')
         resolvedCheckpoint = await hasResolvedReturnCheckpoint(agent, pending, target)
         if (!resolvedCheckpoint) await assertReturnStillValid(agent, state, target)
       } else {
@@ -821,14 +821,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         await routeStore.write(state)
         const answer = await ctx.userQuestions.ask({ agent, signal, questions: [{
           id: 'operator-results',
-          question: '是否携带已记录的 Web/Insight 结果及其对应任务问题？',
-          detail: '只会携带当前连续 Web/Insight 段的已记录结果；没有结果时不会补造成功回复。',
+          question: '是否携带已记录的网页算子结果及其对应任务问题？',
+          detail: '只会携带当前连续网页算子段的已记录结果；没有结果时不会补造成功回复。',
           options: [{ label: CARRY_OPERATOR_RESULTS }, { label: OMIT_OPERATOR_RESULTS }],
         }] })
         const selected = answer.answers[0]
         if (answer.answers.length !== 1 || selected?.id !== 'operator-results' || selected.custom
           || selected.selected.length !== 1 || ![CARRY_OPERATOR_RESULTS, OMIT_OPERATOR_RESULTS].includes(selected.selected[0]!)) {
-          throw new Error('Web/Insight 结果需要明确选择携带或不携带。')
+          throw new Error('网页算子结果需要明确选择携带或不携带。')
         }
         pending = { ...pending, choices: { ...pending.choices, results: selected.selected[0] === CARRY_OPERATOR_RESULTS }, phase: 'choosing-context' }
         state = { ...state, return: pending }
@@ -842,14 +842,14 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         await routeStore.write(state)
         const answer = await ctx.userQuestions.ask({ agent, signal, questions: [{
           id: 'operator-context',
-          question: '是否携带进入当前连续 Web/Insight 段之前的有效任务上下文？',
-          detail: '该上下文在首次进入 Web/Insight 前冻结；不会用原始日志扫描补回后来排除的内容。',
+          question: '是否携带进入当前连续网页算子段之前的有效任务上下文？',
+          detail: '该上下文在首次进入网页算子前冻结；不会用原始日志扫描补回后来排除的内容。',
           options: [{ label: CARRY_PRE_OPERATOR_CONTEXT }, { label: OMIT_PRE_OPERATOR_CONTEXT }],
         }] })
         const selected = answer.answers[0]
         if (answer.answers.length !== 1 || selected?.id !== 'operator-context' || selected.custom
           || selected.selected.length !== 1 || ![CARRY_PRE_OPERATOR_CONTEXT, OMIT_PRE_OPERATOR_CONTEXT].includes(selected.selected[0]!)) {
-          throw new Error('进入 Web/Insight 前的上下文需要明确选择携带或不携带。')
+          throw new Error('进入网页算子前的上下文需要明确选择携带或不携带。')
         }
         pending = { ...pending, choices: { ...pending.choices, context: selected.selected[0] === CARRY_PRE_OPERATOR_CONTEXT }, phase: 'chosen' }
         state = { ...state, return: pending }
