@@ -16,7 +16,7 @@ import { cellEnv, prepareCell, scrubTemplateFiles } from '../src/cell.js'
 import type { AnalysisOptions, Experiment, RunRecord } from '../src/index.js'
 import { io, main } from '../src/cli-main.js'
 import { en, zh } from '../src/locales.js'
-import { Detail, ParetoChart } from '../src/view.js'
+import { BenchSidebar, Detail, ParetoChart } from '../src/view.js'
 import { translator } from '../src/client.js'
 
 const ANALYSIS: AnalysisOptions = { confidence: 0.95, resamples: 200, seed: 1, margin: 0.05, minTasks: 3, invalidTolerance: 0.1 }
@@ -213,6 +213,14 @@ describe('results view', () => {
       expect(html).not.toMatch(/>(baseline|plugin)</)
       expect(html).not.toMatch(/verdict[A-Z]|explain[A-Z]|\{(delta|tasks|variant)\}/)
     }
+  })
+})
+
+describe('right sidebar tab', () => {
+  it('fills the clipped tab body and scrolls inside its own area', () => {
+    const html = renderToStaticMarkup(createElement(BenchSidebar, { ledgers: undefined, runs: undefined, mountError: undefined, visible: true, t: key => zh[key] }))
+    expect(html).toMatch(/^<main style="height:100%;min-height:0;flex:auto;display:flex;flex-direction:column/)
+    expect(html).toMatch(/data-scroll="solar-bench" style="[^"]*flex:auto;min-height:0;overflow-y:auto/)
   })
 })
 

@@ -506,7 +506,11 @@ export function BenchSidebar({ ledgers, runs, mountError, visible, t }: {
 }): ReactElement {
   const [focus, setFocus] = useState<string>()
   const onSettled = useCallback((id: string) => { setFocus(id) }, [])
-  return h('main', { style: { ...pageStyle, padding: 12 } }, [
+  // The sidebar's tab body is a fixed-height flex column that clips overflow, so the tab scrolls itself, like the Files tab.
+  return h('main', { style: { height: '100%', minHeight: 0, flex: 'auto', display: 'flex', flexDirection: 'column', color: 'var(--dsw-alias-label-primary)' } }, h('div', {
+    'data-scroll': 'solar-bench',
+    style: { ...pageStyle, padding: 12, flex: 'auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', scrollbarGutter: 'stable', alignContent: 'start' },
+  }, [
     h('header', { key: 'hero', style: { display: 'grid', gap: 4 } }, [
       h('h1', { key: 'title', style: { margin: 0, fontSize: 18 } }, t('title')),
       h('p', { key: 'intro', style: { ...mutedStyle, fontSize: 13 } }, t('intro')),
@@ -518,5 +522,5 @@ export function BenchSidebar({ ledgers, runs, mountError, visible, t }: {
         h(RunPanel, { key: 'run', api: runs, visible, t, onSettled }),
         h(Results, { key: 'results', api: ledgers, t, focus }),
       ]),
-  ])
+  ]))
 }
