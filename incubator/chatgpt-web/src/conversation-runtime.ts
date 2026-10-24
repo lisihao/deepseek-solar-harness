@@ -5,11 +5,11 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import type { StudioGraph, StudioProvider, StudioRun, StudioSource, WorkflowStudioApi } from '@lisihao/dsh-solar-native-collaboration/studio-contracts'
 import { WebLlmAdapter, WEB_LLM_PROVIDER, type WebLlmRequestCapture } from './llm-adapter.js'
-import { ConversationWebAdapter, type InsightStartInput } from './conversation-adapter.js'
+import { ConversationWebAdapter, INSIGHT_LLM_MODEL, type InsightStartInput } from './conversation-adapter.js'
 import { PreferencesStore, type WebPreferences } from './preferences.js'
 import { buildInsightStudioGraph, buildWebStudioGraph, createInsightStudioProvider, createWebStudioProvider, type StudioBoundPorts } from './studio-provider.js'
 import { versionedTemplate } from './insight-contract.js'
-import { flowReadiness } from './flow-readiness.js'
+import { flowReadiness, geminiReadinessIssueMessage, insightGeminiReadiness } from './flow-readiness.js'
 import { WebRunStore, type WebRunRecord } from './store.js'
 import type { WebController } from './controller.js'
 
@@ -173,14 +173,29 @@ export class ConversationRuntime extends LlmAdapter {
       this.automaticDelivery.delete(`${input.sessionId}:${input.id}`)
     }
   }
+  private assertInsightReady(preferences: WebPreferences): void {
+    const report = insightGeminiReadiness(preferences.insight, preferences.geminiSemantics)
+    const issues = report.targets.filter(target => !target.configurationComplete)
+    if (issues.length > 0) throw new LlmError(issues.map(geminiReadinessIssueMessage).join(' '), 'INSIGHT_NOT_CONFIGURED')
+  }
   override providerInfo(provider:string) { return this.generationMetadata().providerInfo(provider) }
   override providerRetryPolicy(provider:string) { return this.generationMetadata().providerRetryPolicy(provider) }
   private generationMetadata() { return new WebLlmAdapter(this.options.controller) }
   override async listModels(provider:string):Promise<readonly LlmModelInfo[]> { return this.generation(await this.options.preferences.read()).listModels(provider) }
-  override async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo> { return this.generation(await this.options.preferences.read()).resolveModel(provider,model,signal) }
+  override async resolveModel(provider:string,model:string,signal?:AbortSignal):Promise<LlmResolvedModelInfo> {
+    const preferences = await this.options.preferences.read()
+    if (provider === WEB_LLM_PROVIDER && model === INSIGHT_LLM_MODEL) this.assertInsightReady(preferences)
+    return this.generation(preferences).resolveModel(provider,model,signal)
+  }
   override async prepareCall(provider:string,model:string,signal?:AbortSignal):Promise<PreparedAdapterCall> {
-    const generation=this.generation(await this.options.preferences.read())
+    const preferences = await this.options.preferences.read()
+    if (provider === WEB_LLM_PROVIDER && model === INSIGHT_LLM_MODEL) this.assertInsightReady(preferences)
+    const generation=this.generation(preferences)
     return generation.prepareCall(provider,model,signal)
   }
-  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk> { yield* this.generation(await this.options.preferences.read()).stream(options) }
+  override async *stream(options:GenerateOptions):AsyncIterable<StreamChunk> {
+    const preferences = await this.options.preferences.read()
+    if (options.provider === WEB_LLM_PROVIDER && options.model === INSIGHT_LLM_MODEL) this.assertInsightReady(preferences)
+    yield* this.generation(preferences).stream(options)
+  }
 }

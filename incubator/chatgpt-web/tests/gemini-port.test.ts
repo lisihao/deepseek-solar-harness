@@ -85,6 +85,7 @@ type FakeBrowser = {
   readonly spaceIds: number[]
   readonly pages: Map<string, PageState>
   ownership: 'agent' | 'user'
+  researchStartEnabled: boolean
   quotaText?: string
   defaultOutputMarkdown?: string
   assertIntentBeforeSubmit?: () => Promise<void>
@@ -109,9 +110,9 @@ async function executeSource(source: string, taskSpace: (...args: unknown[]) => 
 
 function selectorState(page: PageState, selector: string, quotaText: string | undefined) {
   if (selector === 'button[data-test-id="bard-mode-menu-button"]') return { count: 1, texts: ['4 Argon'] }
-  if (selector === '#prompt-receipt') return page.promptReceipt === undefined ? { count: 0, texts: [] } : { count: 1, texts: [page.promptReceipt] }
-  if (selector === '#plan-ready') return page.submitted ? { count: 1, texts: ['计划已生成'] } : { count: 0, texts: [] }
-  if (selector === '#report-ready') return page.researchStarted ? { count: 1, texts: ['报告已完成'] } : { count: 0, texts: [] }
+  if (selector === '#prompt-receipt' || selector === 'user-query-content .query-text') return page.promptReceipt === undefined ? { count: 0, texts: [] } : { count: 1, texts: [page.promptReceipt] }
+  if (selector === '#plan-ready' || selector === 'deep-research-confirmation-widget') return page.submitted ? { count: 1, texts: ['计划已生成'] } : { count: 0, texts: [] }
+  if (selector === '#report-ready' || selector === 'deep-research-immersive-panel') return page.researchStarted ? { count: 1, texts: ['报告已完成'] } : { count: 0, texts: [] }
   if (selector === '#research-activity') return { count: 0, texts: [] }
   if (selector === '#thinking-selected') return page.effort === undefined ? { count: 0, texts: [] } : { count: 1, texts: [page.effort] }
   if (selector === '#quota') return quotaText === undefined ? { count: 0, texts: [] } : { count: 1, texts: [quotaText] }
@@ -135,6 +136,7 @@ function pageObservation(page: PageState) {
     ...(page.modelMenuOpen ? { selectedModelLabel: page.model } : {}),
     deepResearchCount: page.toolsOpen ? 1 : 0,
     ...(page.toolsOpen ? { deepResearchChecked: page.deepResearch } : {}),
+    ...(page.researchStarted ? { researchReportReady: true } : {}),
     ...(markdown === undefined ? {} : { responseText: markdown.replace(/[#\n]/g, '') }),
     ...(markdown === undefined ? {} : { responseMarkdown: markdown }),
     citations: markdown === undefined ? [] : ['https://example.test/source'],
@@ -150,6 +152,7 @@ function makeBrowser(): FakeBrowser {
     pages,
     outputs: [],
     ownership: 'agent',
+    researchStartEnabled: true,
   }
   const pageFor = (label: string): PageState => {
     let page = pages.get(label)
@@ -193,16 +196,24 @@ function makeBrowser(): FakeBrowser {
             const source = String(fn)
             if (source.includes('function inspectGeminiSelector')) return selectorState(page, String(argument), browser.quotaText)
             if (source.includes('function inspectGeminiPage')) return pageObservation(page)
+            if (source.includes('function findGeminiModelOption')) {
+              const input = argument as { readonly modelLabel?: string }
+              return input.modelLabel === '4 Argon' ? 'button.model-option' : undefined
+            }
+            if (source.includes('function findGeminiThinkingTrigger')) return 'button.thinking-trigger'
+            if (source.includes('function findGeminiThinkingOption')) {
+              const input = argument as { readonly label?: string }
+              return input.label === '高' ? 'button.thinking-high' : undefined
+            }
+            if (source.includes('function readGeminiThinkingSelection')) return page.effort
             if (source.includes('function findUniqueGeminiTextSelector')) {
               const input = argument as { readonly selector?: string; readonly text?: string }
-              if (input.text === '4 Argon') return 'button.model-option'
               if (input.text === 'Deep Research') return 'button.deep-research'
-              if (input.text === '高') return 'button.thinking-high'
               return undefined
             }
             if (source.includes('function findUniqueGeminiControl')) {
-              if (argument === '#submit') return 'button.submit'
-              if (argument === '#research-start') return 'button.research-start'
+              if (argument === '#submit' || argument === 'button[aria-label="发送"]') return 'button.submit'
+              if (argument === '#research-start' || argument === 'button[aria-label="开始研究"]') return browser.researchStartEnabled ? 'button.research-start' : undefined
               if (argument === '#thinking-trigger') return 'button.thinking-trigger'
               return undefined
             }
@@ -270,18 +281,22 @@ describe.sequential('Gemini Web port', () => {
     expect(state.runnerCalls).not.toHaveBeenCalled()
   })
 
-  it('rejects missing Deep Research semantics before task-space allocation or submission', async () => {
+  it('does not click or create a new research intent when the observed start control is disabled', async () => {
+    const rootValue = await root()
     const state = makeBrowser()
-    const port = createGeminiPort(options(await root(), state, { semantics: { submitSelector: '#submit' } }), state.runner)
+    state.researchStartEnabled = false
+    const port = createGeminiPort(options(rootValue, state, { semantics: {} }), state.runner)
+    await expect(port.execute(request())).resolves.toMatchObject({ kind: 'complete' })
 
-    await expect(port.execute(request())).resolves.toMatchObject({
-      kind: 'failed',
-      code: 'GEMINI_PLAN_SEMANTICS_UNCONFIGURED',
-      certainty: 'no-active-effect',
-      reason: expect.stringContaining('planReadyMarker'),
-    })
-    expect(state.spaceForRun).not.toHaveBeenCalled()
-    expect(state.runnerCalls).not.toHaveBeenCalled()
+    await expect(port.execute(request({
+      phase: 'research',
+      commandId: 'command-research-disabled-start',
+      nodeId: 'node-research-disabled-start',
+    }))).resolves.toMatchObject({ kind: 'unknown', reason: 'GEMINI_RESEARCH_START_CONTROL_UNAVAILABLE' })
+    expect(await readdir(join(rootValue, 'gemini-port', 'intents'))).toHaveLength(1)
+    const page = state.pages.values().next().value as PageState
+    expect(page.clicks.filter((value) => value === 'button.submit')).toHaveLength(1)
+    expect(page.clicks).not.toContain('button.research-start')
   })
 
   it('refuses a user-controlled TaskSpace without claiming it or clicking the page', async () => {
@@ -317,7 +332,7 @@ describe.sequential('Gemini Web port', () => {
     expect([...state.pages.keys()]).toEqual([expect.stringMatching(/^gemini-plan-research-[a-f0-9]{16}-[a-f0-9]{12}$/)])
     const page = state.pages.values().next().value as PageState
     expect(page.clicks.filter((value) => value === 'button.submit')).toHaveLength(1)
-    expect(page.fills).toEqual([{ selector: '[contenteditable][role="textbox"][aria-label]', value: request().renderedInput }])
+    expect(page.fills).toEqual([{ selector: '[contenteditable][role="textbox"][aria-label="为 Gemini 输入提示"]', value: request().renderedInput }])
     const source = state.runnerCalls.mock.calls[0]?.[0].source ?? ''
     expect(source).toContain('taskSpace(__input.local.spaceId)')
     expect(source).toContain('button[data-test-id="bard-mode-menu-button"]')
@@ -375,6 +390,28 @@ describe.sequential('Gemini Web port', () => {
     expect(page.clicks.filter((value) => value === 'button.research-start')).toHaveLength(1)
   })
 
+  it('rechecks a configured research-start control before making a durable research intent', async () => {
+    const rootValue = await root()
+    const state = makeBrowser()
+    const port = createGeminiPort(options(rootValue, state, {
+      semantics: { ...semantics, researchStartSelector: '#missing-visible-start' },
+    }), state.runner)
+    await expect(port.execute(request())).resolves.toMatchObject({ kind: 'complete' })
+    const research = request({
+      phase: 'research',
+      commandId: 'command-research-start-missing',
+      nodeId: 'node-research-start-missing',
+      renderedInput: '等待确认后才开始研究。',
+    })
+
+    await expect(port.execute(research)).resolves.toMatchObject({
+      kind: 'unknown',
+      reason: 'GEMINI_RESEARCH_START_CONTROL_UNAVAILABLE',
+    })
+    expect(await readdir(join(rootValue, 'gemini-port', 'intents'))).toHaveLength(1)
+    expect([...state.pages.values()].flatMap((page) => page.clicks)).not.toContain('button.research-start')
+  })
+
   it('maps only the explicit high to 高 effort after visible readback and gives thinking a separate page', async () => {
     const rootValue = await root()
     const state = makeBrowser()
@@ -399,6 +436,28 @@ describe.sequential('Gemini Web port', () => {
       expect.stringMatching(/^gemini-plan-research-[a-f0-9]{16}-[a-f0-9]{12}$/),
       expect.stringMatching(/^gemini-thinking-[a-f0-9]{16}-[a-f0-9]{12}$/),
     ])
+  })
+
+  it('uses the recorded high to 高 adapter without inventing preference selectors', async () => {
+    const rootValue = await root()
+    const state = makeBrowser()
+    const { thinking: _unusedThinking, ...withoutThinkingSelectors } = semantics
+    const port = createGeminiPort(options(rootValue, state, { semantics: withoutThinkingSelectors }), state.runner)
+    await expect(port.execute(request())).resolves.toMatchObject({ kind: 'complete' })
+    const thinking = request({
+      phase: 'thinking',
+      commandId: 'command-thinking-observed-map',
+      nodeId: 'node-thinking-observed-map',
+      nodeKind: 'gemini-thinking',
+      requested: { provider: 'gemini', modelLabel: '4 Argon', effortLabel: 'high' },
+      renderedInput: '保留完整证据。',
+    })
+
+    await expect(port.execute(thinking)).resolves.toMatchObject({
+      kind: 'complete',
+      observed: { modelLabel: '4 Argon', effortLabel: '高' },
+    })
+    expect([...state.pages.values()].flatMap((page) => page.clicks).filter((value) => value === 'button.thinking-high')).toHaveLength(1)
   })
 
   it('does not alias Gemini 4 Argon when the exact requested label is unavailable', async () => {

@@ -19,6 +19,7 @@ import type {
   WebModelCatalogApi,
   WebModelChoice,
 } from './model-catalog.js'
+import { insightGeminiReadiness } from './flow-readiness.js'
 import type { WebPreferences, WebPreferencesSaveInput } from './preferences.js'
 
 export interface PreferencesClientApi {
@@ -522,6 +523,41 @@ function stageFields(
   return fields
 }
 
+function GeminiReadinessSummary(props: { readonly preferences: WebPreferences }): ReactElement {
+  const readiness = insightGeminiReadiness(props.preferences.insight, props.preferences.geminiSemantics)
+  const missing = readiness.requirements.filter(requirement => !requirement.configured)
+  return createElement('section', {
+    'aria-label': '完整洞察流程就绪状态',
+    style: {
+      display: 'grid',
+      gap: 10,
+      minWidth: 0,
+      padding: '14px 0 4px',
+      borderTop: '1px solid var(--dsw-alias-settings-card-stroke)',
+      borderBottom: '1px solid var(--dsw-alias-settings-card-stroke)',
+    },
+  }, [
+    createElement('div', { key: 'heading', style: { display: 'grid', gap: 4, minWidth: 0 } }, [
+      createElement('strong', { key: 'title', style: { overflowWrap: 'anywhere' } }, readiness.configurationComplete ? '完整洞察流程可进入网页前置校验' : '完整洞察流程当前不会启动'),
+      createElement('p', { key: 'explanation', role: 'status', style: mutedStyle }, readiness.configurationComplete
+        ? '必要语义路径已具备。实际执行仍会逐项确认控件唯一、可见、启用并完成回读；此状态不表示 Gemini 已可用、研究已启动或流程已验收。'
+        : '缺少项会在任何前序模型调用前拒绝；不会改用普通网页，也不会自动重试。'),
+      createElement('p', { key: 'observed-adapter', style: mutedStyle }, '已内置无模型页面观察到的 4 Argon 选择、Deep Research 切换、发送就绪、原问题可见回执、计划标志、报告完成态及 high→高回读，并记录开始研究定位。开始研究每次仍须唯一、可见且启用，否则停止。'),
+    ]),
+    createElement('div', { key: 'targets', style: { display: 'grid', gap: 5, minWidth: 0 } }, readiness.targets.map(target => createElement('p', { key: target.id, style: mutedStyle }, target.configurationComplete
+      ? `${target.label}：配置已齐全，仍待实际页面唯一性校验。`
+      : `${target.label}：未配置 ${target.missing.map(item => readiness.requirements.find(requirement => requirement.id === item)?.label ?? item).join('、')}。`))),
+    createElement('ul', { key: 'requirements', style: { display: 'grid', gap: 5, margin: 0, paddingInlineStart: 18, minWidth: 0 } }, readiness.requirements.map(requirement => createElement('li', { key: requirement.id, style: mutedStyle }, requirement.source === 'observed-adapter'
+      ? `${requirement.label}：已由内置无模型观察路径覆盖；执行时仍须进行唯一可见性回读。`
+      : requirement.source === 'preferences'
+        ? `${requirement.label}：已配置；此界面不把配置视为实际网页验收。`
+        : `${requirement.label}：未配置，尚未验收。`))),
+    missing.length === 0
+      ? null
+      : createElement('p', { key: 'guide', style: mutedStyle }, '请只填入已通过无模型页面观察确认的语义选择器或标志；不要根据猜测填写 CSS 选择器。'),
+  ])
+}
+
 export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): ReactElement {
   const fieldId = useId()
   const [preferences, setPreferences] = useState<WebPreferences | undefined>()
@@ -735,8 +771,9 @@ export function PreferencesPanel({ api, modelCatalog }: PreferencesPanelApis): R
     createElement('div', { key: 'header', style: surfaceHeaderStyle }, [
       createElement('p', { key: 'eyebrow', style: eyebrowStyle }, '洞察分析'),
       createElement('h2', { key: 'title', style: headingStyle }, '阶段配置'),
-      createElement('p', { key: 'hint', style: mutedStyle }, '按阶段查看当前模型；目录选择只提供给 ChatGPT 网页阶段，Codex 与 Gemini 保持手工配置。'),
+      createElement('p', { key: 'hint', style: mutedStyle }, '按阶段查看当前模型；目录选择只提供给 ChatGPT 网页阶段，Codex 与 Gemini 保持手工配置。完整流程是否能启动见下方就绪状态。'),
     ]),
+    createElement(GeminiReadinessSummary, { key: 'gemini-readiness', preferences: current }),
     createElement('div', { key: 'stages', style: stageListStyle }, stageRows),
     advanced,
   ])
