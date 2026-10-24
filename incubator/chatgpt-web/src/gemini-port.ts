@@ -7,16 +7,26 @@ import {
   GEMINI_APP_URL,
   GEMINI_COMPOSER_SELECTOR,
   GEMINI_DEEP_RESEARCH_SELECTOR,
+  GEMINI_HIGH_EFFORT_LABEL,
   GEMINI_MODEL_BUTTON_SELECTOR,
   GEMINI_MORE_TOOLS_SELECTOR,
   GEMINI_UPLOAD_TOOLS_SELECTOR,
+  findGeminiModelOption,
+  findGeminiThinkingOption,
+  findGeminiThinkingTrigger,
   findUniqueGeminiControl,
   findUniqueGeminiTextSelector,
   inspectGeminiPage,
   inspectGeminiSelector,
+  readGeminiThinkingSelection,
   type GeminiPageObservation,
   type GeminiSelectorObservation,
 } from './gemini-page.js'
+import {
+  missingGeminiSemantics,
+  observedGeminiSemantics,
+  type GeminiReadinessPhase,
+} from './gemini-readiness.js'
 import {
   type InsightArtifact,
   type InsightExternalResource,
@@ -36,7 +46,7 @@ const STDERR_OVERHEAD_BYTES = 64 * 1024
 const FRAME_OVERHEAD_BYTES = 256 * 1024
 
 type JsonRecord = Record<string, unknown>
-type GeminiPhase = 'plan' | 'research' | 'thinking'
+type GeminiPhase = GeminiReadinessPhase
 type ScriptOperation = 'prepare-prompt' | 'prepare-research' | 'submit-prompt' | 'start-research' | 'observe'
 
 /**
@@ -329,6 +339,10 @@ const __isGeminiUrl = (value) => {
   } catch { return false; }
 };
 const __exactText = ${String(findUniqueGeminiTextSelector)};
+const __findModelOption = ${String(findGeminiModelOption)};
+const __findThinkingTrigger = ${String(findGeminiThinkingTrigger)};
+const __findThinkingOption = ${String(findGeminiThinkingOption)};
+const __readThinkingSelection = ${String(readGeminiThinkingSelection)};
 const __uniqueControl = ${String(findUniqueGeminiControl)};
 const __inspect = ${String(inspectGeminiPage)};
 const __inspectSelector = ${String(inspectGeminiSelector)};
@@ -360,9 +374,7 @@ const __openModelMenu = async () => {
   if (!__buttons || __buttons.count !== 1) __throw("GEMINI_MODEL_CONTROL_UNAVAILABLE", "Gemini model selector is unavailable or ambiguous");
   await __page.click(__modelButton, { timeout: __input.commandTimeoutMs, label: "open Gemini model selector" });
   const __observed = await __page.evaluate(__inspect);
-  if (!__observed || typeof __observed.selectedModelLabel !== "string") {
-    __throw("GEMINI_MODEL_READBACK_UNAVAILABLE", "Gemini selected model could not be read back");
-  }
+  if (!__observed) __throw("GEMINI_PAGE_OBSERVATION_INVALID", "Gemini page observation is invalid");
   return __observed;
 };
 const __closeModelMenu = async () => {
@@ -371,10 +383,7 @@ const __closeModelMenu = async () => {
 const __selectModel = async (requested) => {
   let __current = await __openModelMenu();
   if (__current.selectedModelLabel !== requested) {
-    const __target = await __page.evaluate(__exactText, {
-      selector: '[role="menuitemradio"],[role="option"],[role="menuitem"]',
-      text: requested,
-    });
+    const __target = await __page.evaluate(__findModelOption, { modelLabel: requested });
     if (!__target) __throw("GEMINI_MODEL_SELECTION_UNAVAILABLE", "Requested exact Gemini model label is unavailable");
     await __page.click(__target, { timeout: __input.commandTimeoutMs, label: "select requested Gemini model" });
     __current = await __page.evaluate(__inspect);
@@ -392,6 +401,7 @@ const __readCurrentModel = async () => {
   const __current = await __openModelMenu();
   const __label = __current.selectedModelLabel;
   await __closeModelMenu();
+  if (typeof __label !== "string") __throw("GEMINI_MODEL_READBACK_UNAVAILABLE", "Gemini selected model could not be read back");
   return __label;
 };
 `
@@ -428,24 +438,26 @@ const __readDeepResearchSelection = async () => {
 };
 `
   const selectEffort = `
-const __effortDisplay = (requested) => requested === "high" ? "高" : undefined;
+const __effortDisplay = (requested) => requested === "high" ? ${JSON.stringify(GEMINI_HIGH_EFFORT_LABEL)} : undefined;
+const __openThinkingMenu = async () => {
+  await __openModelMenu();
+  const __trigger = await __page.evaluate(__findThinkingTrigger);
+  if (!__trigger) __throw("GEMINI_EFFORT_CONTROL_UNAVAILABLE", "Gemini thinking control is unavailable or ambiguous");
+  await __page.click(__trigger, { timeout: __input.commandTimeoutMs, label: "open Gemini thinking level selector" });
+};
 const __selectEffort = async (requested) => {
   const __display = __effortDisplay(requested);
   if (!__display) __throw("GEMINI_EFFORT_UNSUPPORTED", "Only the observed high to 高 Gemini effort mapping is supported");
-  const __thinking = __input.semantics.thinking;
-  if (!__thinking || typeof __thinking.triggerSelector !== "string" || typeof __thinking.optionSelector !== "string" || typeof __thinking.selectedSelector !== "string") {
-    __throw("GEMINI_EFFORT_SELECTORS_UNCONFIGURED", "Gemini thinking selectors are required for effort selection");
-  }
-  const __trigger = await __page.evaluate(__uniqueControl, __thinking.triggerSelector);
-  if (!__trigger) __throw("GEMINI_EFFORT_CONTROL_UNAVAILABLE", "Gemini thinking control is unavailable or ambiguous");
-  await __page.click(__trigger, { timeout: __input.commandTimeoutMs, label: "open Gemini thinking level selector" });
-  const __target = await __page.evaluate(__exactText, { selector: __thinking.optionSelector, text: __display });
+  await __openThinkingMenu();
+  const __target = await __page.evaluate(__findThinkingOption, { label: __display });
   if (!__target) __throw("GEMINI_EFFORT_SELECTION_UNAVAILABLE", "Requested Gemini thinking level is unavailable");
   await __page.click(__target, { timeout: __input.commandTimeoutMs, label: "select Gemini thinking level" });
-  const __selected = await __page.evaluate(__inspectSelector, __thinking.selectedSelector);
-  if (!__selected || __selected.count !== 1 || !Array.isArray(__selected.texts) || __selected.texts.length !== 1 || __selected.texts[0] !== __display) {
+  await __openThinkingMenu();
+  const __selected = await __page.evaluate(__readThinkingSelection);
+  if (__selected !== __display) {
     __throw("GEMINI_EFFORT_MISMATCH", "Gemini thinking level did not read back as 高");
   }
+  await __closeModelMenu();
   return __display;
 };
 `
@@ -506,6 +518,8 @@ const __model = await __readCurrentModel();
 if (__model !== __input.request.requested.modelLabel) __throw("GEMINI_MODEL_MISMATCH", "Gemini model changed after the plan");
 if (__input.request.requested.modeLabel !== "Deep Research") __throw("GEMINI_MODE_UNSUPPORTED", "Deep Research is required for the research stage");
 const __mode = await __readDeepResearchSelection();
+const __start = await __page.evaluate(__uniqueControl, __input.semantics.researchStartSelector);
+if (!__start) __throw("GEMINI_RESEARCH_START_CONTROL_UNAVAILABLE", "Configured Gemini research-start control is unavailable or ambiguous");
 const __semantic = await __semanticState();
 if (!__semantic.planReady || __semantic.planReady.count !== 1) __throw("GEMINI_PLAN_READY_MARKER_MISSING", "Configured Gemini plan-ready marker is absent or ambiguous");
 const __receipts = __semantic.promptReceipt && Array.isArray(__semantic.promptReceipt.texts) ? __semantic.promptReceipt.texts : [];
@@ -572,8 +586,10 @@ function parsePageObservation(value: unknown): GeminiPageObservation {
       throw portError('GEMINI_EGO_FRAME', 'Gemini page observation contains an invalid text field')
     }
   }
-  if (hasOwn(value, 'deepResearchChecked') && value.deepResearchChecked !== undefined && typeof value.deepResearchChecked !== 'boolean') {
-    throw portError('GEMINI_EGO_FRAME', 'Gemini page observation contains an invalid Deep Research state')
+  for (const key of ['deepResearchChecked', 'researchReportReady'] as const) {
+    if (hasOwn(value, key) && value[key] !== undefined && typeof value[key] !== 'boolean') {
+      throw portError('GEMINI_EGO_FRAME', 'Gemini page observation contains an invalid readiness state')
+    }
   }
   return {
     url: value.url,
@@ -585,6 +601,7 @@ function parsePageObservation(value: unknown): GeminiPageObservation {
     ...(optionalString(value, 'selectedModelLabel') === undefined ? {} : { selectedModelLabel: optionalString(value, 'selectedModelLabel') }),
     deepResearchCount: value.deepResearchCount,
     ...(optionalBoolean(value, 'deepResearchChecked') === undefined ? {} : { deepResearchChecked: optionalBoolean(value, 'deepResearchChecked') }),
+    ...(optionalBoolean(value, 'researchReportReady') === undefined ? {} : { researchReportReady: optionalBoolean(value, 'researchReportReady') }),
     ...(optionalString(value, 'responseText') === undefined ? {} : { responseText: optionalString(value, 'responseText') }),
     ...(optionalString(value, 'responseMarkdown') === undefined ? {} : { responseMarkdown: optionalString(value, 'responseMarkdown') }),
     citations: [...value.citations],
@@ -800,7 +817,7 @@ class GeminiPortImpl implements GeminiPort {
       if (existing !== undefined) {
         return this.unknown(request, 'GEMINI_INTENT_ALREADY_DURABLE_OBSERVE_ORIGINAL_RESOURCE', existing)
       }
-      const missing = this.missingSemantics(phase, request)
+      const missing = missingGeminiSemantics(phase, request.requested.effortLabel, this.options.semantics)
       if (missing.length > 0) {
         return this.rejected(
           request,
@@ -958,7 +975,7 @@ class GeminiPortImpl implements GeminiPort {
     const receipt = snapshot.semantic.promptReceipt
     if (receipt === undefined || receipt.texts.filter((text) => samePrompt(text, intent.promptReceipt)).length !== 1) return undefined
     if (intent.phase === 'plan' && snapshot.semantic.planReady?.count !== 1) return undefined
-    if (intent.phase === 'research' && snapshot.semantic.reportReady?.count !== 1) return undefined
+    if (intent.phase === 'research' && (snapshot.semantic.reportReady?.count !== 1 || observation.researchReportReady !== true)) return undefined
     return observation.responseMarkdown
   }
 
@@ -1013,30 +1030,6 @@ class GeminiPortImpl implements GeminiPort {
       evidence: observed.texts.join('\n'),
       certainty: 'no-active-effect',
     }
-  }
-
-  private missingSemantics(phase: GeminiPhase, request: GeminiPortRequest): string[] {
-    const semantics = this.options.semantics
-    const missing: string[] = []
-    if (phase === 'plan') {
-      if (!nonEmptyString(semantics.submitSelector)) missing.push('submitSelector')
-      if (!nonEmptyString(semantics.promptReceiptSelector)) missing.push('promptReceiptSelector')
-      if (!nonEmptyString(semantics.planReadyMarker)) missing.push('planReadyMarker')
-    } else if (phase === 'research') {
-      if (!nonEmptyString(semantics.promptReceiptSelector)) missing.push('promptReceiptSelector')
-      if (!nonEmptyString(semantics.researchStartSelector)) missing.push('researchStartSelector')
-      if (!nonEmptyString(semantics.researchReportReadyMarker)) missing.push('researchReportReadyMarker')
-    } else {
-      if (!nonEmptyString(semantics.submitSelector)) missing.push('submitSelector')
-      if (!nonEmptyString(semantics.promptReceiptSelector)) missing.push('promptReceiptSelector')
-    }
-    if (request.requested.effortLabel !== undefined) {
-      const thinking = semantics.thinking
-      if (!thinking || !nonEmptyString(thinking.triggerSelector) || !nonEmptyString(thinking.optionSelector) || !nonEmptyString(thinking.selectedSelector)) {
-        missing.push('thinking')
-      }
-    }
-    return missing
   }
 
   private scriptInput(intent: GeminiIntentRecord): ScriptInput {
@@ -1227,7 +1220,7 @@ export function createGeminiPort(options: GeminiPortOptions, runner: GeminiProce
     || typeof options.spaceForRun !== 'function') {
     throw portError('GEMINI_PORT_CONFIG_INVALID', 'Gemini port configuration is invalid')
   }
-  const semantics = options.semantics ?? {}
+  const semantics = observedGeminiSemantics(options.semantics)
   return new GeminiPortImpl({
     root: options.root,
     executable: options.executable,

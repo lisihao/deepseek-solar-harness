@@ -162,3 +162,22 @@ The reported ordinary-conversation failure had one observed user message: expect
 The observer's prior recursive text projection omitted Markdown delimiters represented by visible inline code elements. A synthetic fixture of 15 inline-code spans reproduces the same 30-character loss. Two new observer tests failed before the change and passed after it; existing controller/adapter tests retain exact CRLF-normalized comparison, mismatched/duplicate-message rejection and one-send/no-auto-retry behavior. This is the reproduced cause of the supplied report; other mismatches still fail closed. The implementation deliberately leaves block Markdown reconstruction outside this fix.
 
 The requested delivery is a separately identified preview artifact, using the repository's existing curated-package channel. It does not merge the larger open feature PR or publish a stable Discover market release. Source, package, installed files and the one separately approved live model call are recorded independently.
+
+## Gemini no-model adapter observation — 2026-10-24
+
+This source follow-up distinguishes three evidence classes. A separate agent-owned empty Gemini TaskSpace was observed without a prompt, Send action, research start, connection test, or model request. It established the unique empty composer, the `4 Argon` menu entry and its selected-icon readback, the `Deep Research` toggle, and the visible `high` → `高` thinking-menu selection/readback. The adapter now uses those exact labels and recorded attributes, and rejects label drift or ambiguous controls rather than substituting a model or effort.
+
+A different pre-existing completed Deep Research page was inspected read-only. Its visible user-query text, plan widget, completed report panel, non-busy report body, export/table-of-contents/source controls, and source list informed the report observer. Report completion requires the unique visible panel, a non-empty `aria-busy="false"` body, and all observed toolbar/source controls; it does not treat panel presence alone as completion. The extractor excludes `thinking-overlay` descendants and reads only visible original-question text, so a collapsed/hidden fragment cannot satisfy a prompt receipt.
+
+The empty page did not expose a visible enabled Send control. The user later authorized exactly one draft-only observation in a new agent-owned TaskSpace: after filling a fixed offline UI-check draft, exactly one visible enabled `button[aria-label="发送"]` appeared; the draft was then cleared and the empty composer/query state was confirmed. No Send action, receipt, research start, connection test, or model request occurred. This establishes only local Send-control readiness, so the selector is built into the adapter without being reported as a successful submission. A historical report page then exposed exactly one visible `button[aria-label="开始研究"]`, but it was disabled. Its locator is recorded as a built-in preflight target, not as clickability or research acceptance. Before any actual start click, the port requires that control to be unique, visible, and enabled; otherwise it preserves the original plan resource, creates no research intent, does not retry, and does not fall back to ordinary Web. A new complete Insight workflow and a new-plan research start remain unrun.
+
+The repository's synthetic DOM fixture and keyless tests exercise this adapter contract only. They contain no page export, account state, history title, prompt, report, or model output, and they are not real Gemini acceptance. No new Gemini workflow, Send action, research start, installed-app test, package installation, or live model result is claimed by this section.
+
+The stable local `pnpm check` passed build/declarations, strict types,
+**488 tests in 53 files**, both official-CLI built-package scratch probes,
+and generated homepage/curated-package validation. The probes registered the
+ordinary Web and Insight model entries without invoking an executor or opening
+a browser task. The generated homepage and installed-plugin guide were
+refreshed with no resulting published-version change. The separate Gemini
+observation space was finished normally after confirming an empty composer;
+no test draft or temporary page was retained.

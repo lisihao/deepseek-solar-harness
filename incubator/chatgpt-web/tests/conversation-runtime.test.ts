@@ -134,6 +134,20 @@ function request(model: string, reasoningEffort?: string): GenerateOptions {
   }
 }
 
+function preferencesWithUnconfiguredThinking(): WebPreferences {
+  const preferences = defaultWebPreferences()
+  return {
+    ...preferences,
+    insight: {
+      ...preferences.insight,
+      polish: {
+        ...preferences.insight.polish,
+        requested: { ...preferences.insight.polish.requested, effortLabel: 'medium' },
+      },
+    },
+  }
+}
+
 async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
   const chunks: StreamChunk[] = []
   for await (const chunk of stream) chunks.push(chunk)
@@ -278,8 +292,8 @@ describe('ConversationRuntime', () => {
     expect(value.captures).toEqual([])
   })
 
-  it('rejects Insight before any port, browser, log, or capture effect when Gemini semantics are missing', async () => {
-    const value = await fixture({ preferences: defaultWebPreferences() })
+  it('rejects Insight before any port, browser, log, or capture effect when an unobserved thinking mapping is requested', async () => {
+    const value = await fixture({ preferences: preferencesWithUnconfiguredThinking() })
     let failure: unknown
     try {
       await collect(value.runtime.stream(request('insight-analysis')))
@@ -288,6 +302,20 @@ describe('ConversationRuntime', () => {
     }
     expect(failure).toMatchObject({ code: 'INSIGHT_NOT_CONFIGURED' })
     expect((failure as Error).message).toContain('本次不会启动前序模型调用')
+    expect(value.portCalls).toEqual([])
+    expect(value.controller.start).not.toHaveBeenCalled()
+    expect(value.controller.observe).not.toHaveBeenCalled()
+    expect(value.logs).toEqual([])
+    expect(value.captures).toEqual([])
+  })
+
+  it('reports the complete Insight entry gate before model resolution when an unobserved thinking mapping is requested', async () => {
+    const value = await fixture({ preferences: preferencesWithUnconfiguredThinking() })
+
+    await expect(value.runtime.resolveModel(PROVIDER, 'insight-analysis')).rejects.toMatchObject({
+      code: 'INSIGHT_NOT_CONFIGURED',
+      message: expect.stringContaining('完整洞察流程尚不能启动'),
+    })
     expect(value.portCalls).toEqual([])
     expect(value.controller.start).not.toHaveBeenCalled()
     expect(value.controller.observe).not.toHaveBeenCalled()
