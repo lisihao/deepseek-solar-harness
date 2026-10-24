@@ -24,7 +24,7 @@ this record does not instruct reinstalling the older package.
   selection requires an actual unique matching element and checked-state readback.
   Readiness keeps the full required-control list separate from missing controls.
 
-## Unrun or pending
+## Human confirmation and unrun scope
 
 No new question, Gemini plan, research start, report generation, polishing run,
 ChatGPT verification or complete Insight chain was submitted. Configuration
@@ -32,7 +32,9 @@ completeness allows actual per-page preflight; it is not a live acceptance.
 Historical failure messages remain in the original log.
 
 The Desktop native tool returned only shell accessibility nodes after the first
-installation. Human confirmation that Insight settings no longer list the
-missing Send/research-start configuration was requested and is pending here.
-No UI-button pass is inferred from a successful CLI install or source gate.
+installation. On 2026-10-24 the user directly confirmed that Insight settings
+no longer list the missing Send/research-start configuration. This closes the
+settings-display check; it does not establish a real research start or complete
+Insight chain. No automated UI-button pass is inferred from a successful CLI
+install or source gate.
 Private browser/account content and captures are not committed.
