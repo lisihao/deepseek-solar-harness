@@ -1,0 +1,3 @@
+- insert:
+    - id: subscription-hub
+      name: '@lisihao/dsh-solar-subscription-hub'
