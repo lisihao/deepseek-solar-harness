@@ -99,8 +99,8 @@ A private replay through the published Session surface retained original event
 history and all non-target messages. The selected historical step's Graph and
 Hindsight reference-token groups changed from 17,966 to 419 using `o200k_base`;
 this is an offline reference measurement, not provider input usage or a live
-saving. The actual no-tools marker removed five stale automatic Graph snapshots
-from the effective surface; original archive markers remained.
+saving. Replaying the historical no-tools marker removed five stale automatic
+Graph snapshots from the effective surface; original archive markers remained.
 
 Desktop was normally restarted. One existing header-only empty session file
 changed after that restart; its current journal contains no message/request
@@ -109,6 +109,7 @@ body copy for attributing that header rewrite. Do not claim every compressed
 file stayed byte-identical after restart. Existing Solar JSON hashes were
 unchanged and this installation made no model/browser submission.
 
-Human confirmation of the enabled **Solar 记忆上下文** installed-list entry was
-requested and is pending in this record. No new live efficacy test was run.
+On 2026-10-24 the user directly confirmed that **Solar 记忆上下文** appears enabled
+in Settings → Plugin Market → Installed. This closes the installed-entry check;
+no new live efficacy test was run.
 A later Grok installation retained this exact package as an unrelated dependency.
