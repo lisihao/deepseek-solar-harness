@@ -6,15 +6,28 @@ IFS=$'\n\t'
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
 INSTALLER="$ROOT/tools/install-curated-plugins.sh"
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/curated-installer-test.XXXXXX")"
-trap 'rm -rf "$TEMP_ROOT"' EXIT HUP INT TERM
 
 FIXTURE="$TEMP_ROOT/fixture"
 FAKE_BIN="$TEMP_ROOT/bin"
 DSH_HOME="$TEMP_ROOT/dsh-home"
 EVENTS="$TEMP_ROOT/events.log"
 CLI_LOG="$TEMP_ROOT/cli.log"
+HOME_FIXTURE="$TEMP_ROOT/home"
+CUSTOM_APP_BUNDLE="$HOME_FIXTURE/Applications/DeepSeek Harness.app"
+CUSTOM_APP_CLI="$CUSTOM_APP_BUNDLE/Contents/Resources/runtime/cli/bin/dsh"
+CUSTOM_APP_COMM="$CUSTOM_APP_BUNDLE/Contents/MacOS/DeepSeek Harness"
+CUSTOM_APP_PID=""
 mkdir -p "$FIXTURE" "$FAKE_BIN" "$DSH_HOME/profiles/desktop"
 printf '{"fixture":true}\n' > "$DSH_HOME/profiles/desktop/package.json"
+
+cleanup() {
+  if [ -n "${CUSTOM_APP_PID:-}" ]; then
+    kill "$CUSTOM_APP_PID" 2>/dev/null || true
+    wait "$CUSTOM_APP_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TEMP_ROOT"
+}
+trap cleanup EXIT HUP INT TERM
 
 cat > "$FAKE_BIN/uname" <<'SH'
 #!/usr/bin/env bash
@@ -28,6 +41,13 @@ chmod +x "$FAKE_BIN/uname"
 cat > "$FAKE_BIN/pgrep" <<'SH'
 #!/usr/bin/env bash
 exit 1
+SH
+cat > "$FAKE_BIN/ps" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${CURATED_TEST_RUNNING_APP_PID:-}" ] && kill -0 "$CURATED_TEST_RUNNING_APP_PID" 2>/dev/null; then
+  printf '%s %s\n' "$CURATED_TEST_RUNNING_APP_PID" "$CURATED_TEST_APP_COMM"
+fi
 SH
 cat > "$FAKE_BIN/curl" <<'SH'
 #!/usr/bin/env bash
@@ -62,7 +82,7 @@ done
 printf 'cli:%s\n' "$(basename "$last")" >> "$CURATED_TEST_EVENTS"
 printf '%s\n' "$last" >> "$CURATED_TEST_CLI_LOG"
 SH
-chmod +x "$FAKE_BIN/pgrep" "$FAKE_BIN/curl" "$FAKE_BIN/dsh"
+chmod +x "$FAKE_BIN/pgrep" "$FAKE_BIN/ps" "$FAKE_BIN/curl" "$FAKE_BIN/dsh"
 
 printf 'resident archive' > "$FIXTURE/resident.tgz"
 printf 'collaboration archive' > "$FIXTURE/collaboration.tgz"
@@ -222,6 +242,35 @@ while IFS= read -r installed_path; do
       ;;
   esac
 done < "$CLI_LOG"
+
+mkdir -p "$(dirname -- "$CUSTOM_APP_CLI")" "$(dirname -- "$CUSTOM_APP_COMM")"
+cp -p "$FAKE_BIN/dsh" "$CUSTOM_APP_CLI"
+ln -s "$(command -v sleep)" "$CUSTOM_APP_COMM"
+"$CUSTOM_APP_COMM" 30 &
+CUSTOM_APP_PID=$!
+: > "$EVENTS"
+: > "$CLI_LOG"
+if PATH="$FAKE_BIN:$PATH" \
+  CURATED_TEST_EVENTS="$EVENTS" \
+  CURATED_TEST_FIXTURE="$FIXTURE" \
+  CURATED_TEST_CLI_LOG="$CLI_LOG" \
+  CURATED_TEST_RUNNING_APP_PID="$CUSTOM_APP_PID" \
+  CURATED_TEST_APP_COMM="$CUSTOM_APP_COMM" \
+  HOME="$HOME_FIXTURE" \
+  DSH_HOME="$DSH_HOME" \
+  DSH_CLI="$CUSTOM_APP_CLI" \
+  "$INSTALLER" --ref aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa web \
+  > "$TEMP_ROOT/running-custom-app.stdout" 2> "$TEMP_ROOT/running-custom-app.stderr"
+then
+  printf 'running custom DeepSeek Harness unexpectedly reached installation\n' >&2
+  exit 1
+fi
+grep -q 'DeepSeek Harness application appears to be active' "$TEMP_ROOT/running-custom-app.stderr"
+[ ! -s "$EVENTS" ]
+[ ! -s "$CLI_LOG" ]
+kill "$CUSTOM_APP_PID"
+wait "$CUSTOM_APP_PID" 2>/dev/null || true
+CUSTOM_APP_PID=""
 
 : > "$EVENTS"
 : > "$CLI_LOG"

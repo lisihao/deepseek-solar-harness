@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const packages = []
-for (const name of ['native-resident', 'native-collaboration', 'chatgpt-web']) {
+for (const name of ['native-resident', 'native-collaboration', 'chatgpt-web', 'subscription-hub']) {
   try { await stat(join(root, 'incubator', name, 'package.json')); packages.push(name) }
   catch (error) { if (error.code !== 'ENOENT') throw error }
 }
@@ -17,7 +17,9 @@ for (const name of packages) {
   await build({
     entryPoints: name === 'native-resident'
       ? ['src/index.ts', 'src/daemon.ts', 'src/client.ts', 'src/contracts.ts']
-      : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts'] : ['src/index.ts', 'src/typert.ts', 'src/studio-contract.ts'],
+      : name === 'chatgpt-web' ? ['src/index.ts', 'src/typert.ts', 'src/operator.ts']
+        : name === 'subscription-hub' ? ['src/index.ts']
+          : ['src/index.ts', 'src/typert.ts', 'src/studio-contract.ts'],
     absWorkingDir: directory,
     outdir: 'lib',
     bundle: true,

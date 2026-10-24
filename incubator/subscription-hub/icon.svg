@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Model subscriptions">
+  <rect width="64" height="64" rx="14" fill="#1d2838"/>
+  <path d="M16 23.5c0-4.14 3.36-7.5 7.5-7.5h17c4.14 0 7.5 3.36 7.5 7.5v17c0 4.14-3.36 7.5-7.5 7.5h-17a7.5 7.5 0 0 1-7.5-7.5v-17Z" fill="#46a4ff"/>
+  <path d="M23 28h18M23 36h18" stroke="#fff" stroke-linecap="round" stroke-width="4"/>
+</svg>

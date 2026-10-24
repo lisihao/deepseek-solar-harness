@@ -345,6 +345,178 @@
           "status": "not-run"
         }
       }
+    },
+    {
+      "id": "bench",
+      "name": "@lisihao/dsh-solar-bench",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "6af9b9ccf7af37e90d605fb1bbd5eb2a46405310",
+      "artifact": {
+        "file": "bench/6af9b9ccf7/lisihao-dsh-solar-bench-0.1.0-dev.0.tgz",
+        "sha256": "60b6ae86dd5047c8ac62a81d8e8da43c96fdf7e4b2c53731b6203a94b25ec651",
+        "size": 175818
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "fixed Git source commit, archive manifest/license/hash/size and forbidden-content scans verified read-only; no rebuild in this distribution task"
+        },
+        "scratch": {
+          "status": "observed",
+          "scope": "MacBook installed package identity matched this fixed archive; no scratch-profile execution in this distribution task"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "both authorized Macs: selected fixed archive installed with zero own-file drift; installed-plugin enable switch observed on; destination Bench launcher configured; no benchmark, recall request, or model efficacy probe"
+        },
+        "live": {
+          "status": "not-run",
+          "scope": "no real model or provider execution"
+        }
+      }
+    },
+    {
+      "id": "hindsight-chat-recall",
+      "name": "@lisihao/dsh-solar-hindsight-chat-recall",
+      "version": "0.0.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "a9f1a8187905cf832a8a648f81ce7f0922f0c138",
+      "artifact": {
+        "file": "hindsight-chat-recall/a9f1a81879/lisihao-dsh-solar-hindsight-chat-recall-0.0.0.tgz",
+        "sha256": "ed009f76e70c3ff5128d6088b8d2d4c897414a24b532c47e0dc767f257d327f6",
+        "size": 6400
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "fixed Git source commit, archive manifest/license/hash/size and forbidden-content scans verified read-only; no rebuild in this distribution task"
+        },
+        "scratch": {
+          "status": "observed",
+          "scope": "MacBook installed package identity matched this fixed archive; no scratch-profile execution in this distribution task"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "both authorized Macs: selected fixed archive installed with zero own-file drift; installed-plugin enable switch observed on; destination Bench launcher configured; no benchmark, recall request, or model efficacy probe"
+        },
+        "live": {
+          "status": "not-run",
+          "scope": "no real model or provider execution"
+        }
+      }
+    },
+    {
+      "id": "grok-subscription",
+      "name": "dsh-grok-subscription",
+      "version": "2.0.9",
+      "sourceRepo": "https://github.com/lisihao/dsh-grok-subscription",
+      "sourceCommit": "8ff215c2b7897b24078122097fec4c528b68915e",
+      "artifact": {
+        "file": "grok-subscription/8ff215c2b7/dsh-grok-subscription-2.0.9.tgz",
+        "sha256": "5a698a88bac5064e34aca68a104cb1cd1b305cf50da777247f6fe792fa392c7f",
+        "size": 1781293
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "maintained-fork build and 178 keyless tests against published rc.2 modules; provider host bundle unchanged"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "official published CLI installs and boots all three fixed packages in a disposable home; built hub client SlotCore/render/lifecycle probe passes; provider account behavior is not exercised"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "both authorized Macs: official CLI fixed-archive install, zero own-file drift, one Model subscriptions navigation entry and both original provider pages at default and narrow widths; no manual client patch, login, quota refresh, or model request"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "codex-subscription",
+      "name": "dsh-codex-subscription",
+      "version": "3.1.1",
+      "sourceRepo": "https://github.com/lisihao/dsh-codex-subscription",
+      "sourceCommit": "db55d578fa06e8d46c6759b0dbaccfd1d175238f",
+      "artifact": {
+        "file": "codex-subscription/db55d57/dsh-codex-subscription-3.1.1.tgz",
+        "sha256": "83a41e6659a929ad638a04e193da08c462b09768ef2697f94e2cc3f3e99416df",
+        "size": 392307
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "maintained-fork build; 830 keyless tests passed and 26 skipped with canonical TMPDIR; five published rc.2 lifecycle tests; provider host bundle unchanged"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "official published CLI installs and boots all three fixed packages in a disposable home; built hub client SlotCore/render/lifecycle probe passes; provider account behavior is not exercised"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "both authorized Macs: official CLI fixed-archive install, zero own-file drift, one Model subscriptions navigation entry and both original provider pages at default and narrow widths; no manual client patch, login, quota refresh, or model request"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "id": "subscription-hub",
+      "name": "@lisihao/dsh-solar-subscription-hub",
+      "version": "0.1.0-dev.0",
+      "sourceRepo": "https://github.com/lisihao/deepseek-solar-harness",
+      "sourceCommit": "38f9f016984991fd5521ce05b7d8628d19657abe",
+      "artifact": {
+        "file": "subscription-hub/38f9f01698/lisihao-dsh-solar-subscription-hub-0.1.0-dev.0.tgz",
+        "sha256": "423b09d2b635aa5018fafb662909acfe2364b6dc540869d74e9433c5f783f436",
+        "size": 10984
+      },
+      "license": {
+        "spdx": "MIT",
+        "licenseFile": "package/LICENSE"
+      },
+      "requiredPackageIds": [],
+      "validationScope": {
+        "source": {
+          "status": "passed",
+          "scope": "four focused source lifecycle/locale/keyboard tests, strict types, build and package audit"
+        },
+        "scratch": {
+          "status": "passed",
+          "scope": "official published CLI installs and boots all three fixed packages in a disposable home; built hub client SlotCore/render/lifecycle probe passes; provider account behavior is not exercised"
+        },
+        "ui": {
+          "status": "passed",
+          "scope": "both authorized Macs: official CLI fixed-archive install, zero own-file drift, one Model subscriptions navigation entry and both original provider pages at default and narrow widths; no manual client patch, login, quota refresh, or model request"
+        },
+        "live": {
+          "status": "not-run"
+        }
+      }
     }
   ],
   "excludedPackages": []
