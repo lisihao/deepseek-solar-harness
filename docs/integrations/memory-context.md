@@ -82,3 +82,33 @@ install stable verified tarballs with its bundled CLI, relaunch and verify
 installed bytes/startup. Replay copied private events keylessly through the
 installed pure helper to inspect the expected projection. No real model
 effectiveness claim follows from keyless tests.
+
+## Installed preview record — 2026-10-24
+
+Runtime source `bbf2d9fa75056cc2636c71b46a77ecfab424ff6f` is recorded in
+PR #314; its exact source CI `40119319969` succeeded. The stable preview archive
+SHA-256 is `e67b3956ce683e0c55924691c9ac20d74557e4213a12208a57761ffb3ea41c56`.
+All 20 installed files matched the archive. Installation used the official CLI
+after normal App/Host exit, idle Resident inspection/normal shutdown and latest
+profile/data backup. It preserved the existing Graph/Hindsight data, unrelated
+plugins, configuration and original session logs before relaunch.
+
+The source package passed 35 tests, build, strict types and the official CLI
+baseline/Graph-first/Solar-first scratch checks with fake model behavior.
+A private replay through the published Session surface retained original event
+history and all non-target messages. The selected historical step's Graph and
+Hindsight reference-token groups changed from 17,966 to 419 using `o200k_base`;
+this is an offline reference measurement, not provider input usage or a live
+saving. The actual no-tools marker removed five stale automatic Graph snapshots
+from the effective surface; original archive markers remained.
+
+Desktop was normally restarted. One existing header-only empty session file
+changed after that restart; its current journal contains no message/request
+history. The pre-relaunch byte check passed, but there was no retained prior
+body copy for attributing that header rewrite. Do not claim every compressed
+file stayed byte-identical after restart. Existing Solar JSON hashes were
+unchanged and this installation made no model/browser submission.
+
+Human confirmation of the enabled **Solar 记忆上下文** installed-list entry was
+requested and is pending in this record. No new live efficacy test was run.
+A later Grok installation retained this exact package as an unrelated dependency.
