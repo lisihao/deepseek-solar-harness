@@ -1,0 +1,3 @@
+id: dsh-native
+version: "2"
+description: Coding tasks on DSH's own tool surface, graded by test commands, file contents, and tool usage.

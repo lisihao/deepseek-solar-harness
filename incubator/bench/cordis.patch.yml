@@ -1,0 +1,7 @@
+# Mounts the Solar benchmark bundle: the suite/grader registry with the
+# bundled dsh-native suite, the ledger runtime over
+# $DSH_HOME/solar/bench/ledgers, the run controls, and the right-sidebar
+# Benchmarks tab that starts, observes and stops experiments.
+- insert:
+    - id: solar-bench
+      name: '@lisihao/dsh-solar-bench'

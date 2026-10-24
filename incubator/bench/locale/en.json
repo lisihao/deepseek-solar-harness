@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Solar Benchmarks",
+    "description": "Ablation experiments that measure whether a plugin improves success, tokens, cost, and time, with a Benchmarks page in Settings."
+  }
+}
