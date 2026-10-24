@@ -21,6 +21,19 @@ function textRecord(
 }
 
 describe('task history projection', () => {
+  it('excludes only exact Web/Grok request audits while retaining decisions and user copies', () => {
+    const source = { kind: 'solar-web-context', form: 'notice' }
+    const records = [
+      textRecord(1, 'user', JSON.stringify({ kind: 'grok-request', prompt: 'duplicated input' }), source),
+      textRecord(2, 'user', JSON.stringify({ kind: 'web-request', request: { prompt: 'duplicated input' } }), source),
+      textRecord(3, 'user', JSON.stringify({ kind: 'insight-plan-decision', approved: true }), source),
+      textRecord(4, 'user', JSON.stringify({ kind: 'grok-request' }), { kind: 'user' }),
+      textRecord(5, 'user', '{"kind":"grok-request"', source),
+    ]
+    expect(projectTaskRecords(records).map(record => record.seq)).toEqual([3, 4, 5])
+    expect(records).toHaveLength(5)
+  })
+
   it('removes system and injected context while preserving a literal task', () => {
     const catalog = '技能目录：'.repeat(120_000)
     const records: RecordInput[] = [

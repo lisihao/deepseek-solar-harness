@@ -80,6 +80,7 @@ const draft = JSON.stringify({
 const target = { provider: 'target-provider', model: 'target-model' }
 const webRoute = { provider: 'solar-chatgpt-web', model: 'chatgpt-web' }
 const insightRoute = { provider: 'solar-chatgpt-web', model: 'insight-analysis' }
+const grokRoute = { provider: 'solar-chatgpt-web', model: 'grok-web' }
 
 function captureHandoffCommand(ctx: Context): {
   readonly remove: () => void
@@ -538,8 +539,8 @@ describe('model-handoff runtime boundary', () => {
     }
   })
 
-  it('enters both operator routes from an idle picker without questions or Luna', async () => {
-    for (const operator of [webRoute, insightRoute]) {
+  it('enters all web-operator routes from an idle picker without questions or Luna', async () => {
+    for (const operator of [webRoute, insightRoute, grokRoute]) {
       const f = await createFixture({ idle: true, ...(operator.model === insightRoute.model ? { noHeader: true } : {}) })
       fixtures.push(f)
       const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
@@ -557,6 +558,49 @@ describe('model-handoff runtime boundary', () => {
         expect(saved?.operatorEntry?.preOperator.recordSeqs.length).toBeGreaterThan(0)
         expect(f.calls).toHaveLength(0)
         expect(f.asks).toEqual([])
+      } finally {
+        removeCommands(); removeAgents()
+        if (previousHome === undefined) delete process.env.DSH_HOME
+        else process.env.DSH_HOME = previousHome
+      }
+    }
+  })
+
+  it('enters Grok fresh, switches to Web or Insight without compaction, and asks both native return choices', async () => {
+    for (const nextOperator of [webRoute, insightRoute]) {
+      const f = await createFixture({ operatorChoices: { results: false, context: false } })
+      fixtures.push(f)
+      const removeAgents = f.ctx.provide('agents', { get: () => f.agent, roots: () => [f.agent] })
+      const removeCommands = f.ctx.provide('commands', { register: () => () => undefined })
+      const previousHome = process.env.DSH_HOME
+      process.env.DSH_HOME = f.root
+      try {
+        await applyRuntime(f.ctx, config)
+        const routes = new HandoffRouteStore(join(f.root, 'solar', 'model-handoff'))
+        await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 1, signal: new AbortController().signal }, async () => grokRoute)).resolves.toEqual(grokRoute)
+        const entered = await routes.read(f.session.id)
+        expect(entered?.currentRoute).toEqual(grokRoute)
+        expect(entered?.operatorEntry?.entryRoute).toEqual(grokRoute)
+        expect(entered?.operatorEntry?.phase).toBe('operator')
+        expect(f.calls).toHaveLength(0)
+        expect(f.targetRequests).toHaveLength(0)
+        expect(JSON.stringify(f.session.deriveMessages())).not.toContain('旧会话中的原始任务')
+
+        await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 2, signal: new AbortController().signal }, async () => nextOperator)).resolves.toEqual(nextOperator)
+        const switched = await routes.read(f.session.id)
+        expect(switched?.currentRoute).toEqual(nextOperator)
+        expect(switched?.operatorEntry?.entryRoute).toEqual(grokRoute)
+        expect(f.calls).toHaveLength(0)
+        expect(f.targetRequests).toHaveLength(0)
+
+        await expect(f.ctx.waterfall('agent/request', { agent: f.agent, turn: 1, step: 3, signal: new AbortController().signal }, async () => target)).resolves.toEqual(target)
+        expect(f.asks.slice(0, 2).map(ask => ask.ids)).toEqual([['operator-results'], ['operator-context']])
+        expect(f.calls).toHaveLength(0)
+        expect(f.targetRequests).toHaveLength(0)
+        const returned = await routes.read(f.session.id)
+        expect(returned?.currentRoute).toEqual(target)
+        expect(returned?.operatorEntry?.phase).toBe('returned')
+        expect(returned?.return).toMatchObject({ choices: { results: false, context: false }, phase: 'committed' })
       } finally {
         removeCommands(); removeAgents()
         if (previousHome === undefined) delete process.env.DSH_HOME
@@ -1419,8 +1463,8 @@ async function createFixture(options: FixtureOptions = {}): Promise<RuntimeFixtu
       }
       if (request.questions[0]?.id === 'handoff-budget' && options.approveBudget) return { answers: [{ id: 'handoff-budget', selected: ['按此上限继续'] }] }
       if (request.questions[0]?.id === options.cancelAt) return { answers: [{ id: options.cancelAt, selected: ['取消交接，空白开始'] }] }
-      if (request.questions[0]?.id === 'operator-results') return { answers: [{ id: 'operator-results', selected: [options.operatorChoices?.results ? '携带已记录的 Web/Insight 结果及对应任务问题' : '不携带 Web/Insight 结果'] }] }
-      if (request.questions[0]?.id === 'operator-context') return { answers: [{ id: 'operator-context', selected: [options.operatorChoices?.context ? '携带进入 Web/Insight 前的有效任务上下文' : '不携带进入 Web/Insight 前的任务上下文'] }] }
+      if (request.questions[0]?.id === 'operator-results') return { answers: [{ id: 'operator-results', selected: [options.operatorChoices?.results ? '携带已记录的网页算子结果及对应任务问题' : '不携带网页算子结果'] }] }
+      if (request.questions[0]?.id === 'operator-context') return { answers: [{ id: 'operator-context', selected: [options.operatorChoices?.context ? '携带进入网页算子前的有效任务上下文' : '不携带进入网页算子前的任务上下文'] }] }
       if (request.questions[0]?.id === 'handoff-mode') return { answers: [{ id: 'handoff-mode', selected: ['携带当前任务上下文'] }] }
       if (request.questions[0]?.id === 'handoff-confirm') return { answers: [{ id: 'handoff-confirm', selected: ['确认并继续'] }] }
       if (options.chooseCandidates) return { answers: request.questions.map(question => ({ id: question.id, selected: [question.options![0]!.label] })) }

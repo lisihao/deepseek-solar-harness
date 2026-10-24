@@ -91,6 +91,19 @@ function shouldRetain(record: JsonRecord): boolean {
   const kind = sourceKind(source)
   const role = record.role
 
+  // Request audit envelopes repeat the complete operator input and canonical
+  // identity. Keep the original log, but do not treat that copy as task facts.
+  if (role === 'user' && kind === 'solar-web-context' && sourceForm(source) === 'notice'
+    && Array.isArray(record.content) && record.content.length === 1) {
+    const block = record.content[0]
+    if (isRecord(block) && block.type === 'text' && typeof block.text === 'string') {
+      try {
+        const audit: unknown = JSON.parse(block.text)
+        if (isRecord(audit) && (audit.kind === 'grok-request' || audit.kind === 'web-request')) return false
+      } catch { /* Unknown notices remain attributed task context. */ }
+    }
+  }
+
   if (isAutomaticContext(record, source)) return false
   if (role === 'assistant' || role === 'tool' || role === 'developer') return true
   if (role !== 'user') return false
