@@ -46,13 +46,14 @@ memory-context and billion-context packages. A read-only post-restart audit
 found zero changed original session files, zero new session files and zero
 changed/new Solar JSON files.
 
-## Unrun or pending
+## Human confirmation and unrun scope
 
 The native UI observer could not uniquely match the selected CoreGraphics window
-to an Accessibility window; this is not a plugin-button acceptance. Human
-confirmation that the model picker shows **Grok 网页算子** was requested and is
-pending in this record. No new Grok generation, live result receipt, live reply
-capture, result-carrying handoff or complete Insight research chain was run.
+to an Accessibility window; this is not automated plugin-button acceptance.
+On 2026-10-24 the user directly confirmed that the normal model picker shows
+**Grok 网页算子**. This closes the installed-entry visibility check only.
+No new Grok generation, live result receipt, live reply capture,
+result-carrying handoff or complete Insight research chain was run.
 Local tests and signed-in draft observation do not establish these effects.
 Private backup paths, account/conversation content and UI captures are not
 committed.
