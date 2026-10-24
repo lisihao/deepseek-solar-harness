@@ -43,6 +43,41 @@ function inspect(document: GrokFixtureDocument, input?: GrokPageInspectionInput,
 }
 
 describe('Grok page DOM observation', () => {
+  it('reconstructs the observed 90 ProseMirror paragraphs without 115 native layout newlines', () => {
+    const element = grokFixtureElement
+    const lines = Array.from({ length: 90 }, (_, index) => index < 26 ? '' : `line ${index}: preserve 🧭 and  spaces  `)
+    const prompt = lines.join('\n')
+    const composer = element('div', { contenteditable: 'true', role: 'combobox', 'aria-label': '向 Grok 提任何问题' },
+      ...lines.map(line => element('p', {}, ...(line ? [line] : [element('br', { class: 'ProseMirror-trailingBreak' })]))))
+    composer.innerText = lines.map(line => line || '\n').join('\n\n')
+    expect((composer.innerText.match(/\n/g) ?? []).length - (prompt.match(/\n/g) ?? []).length).toBe(115)
+    const observed = inspect(new GrokFixtureDocument(element('main', {}, composer)))
+    expect(observed.composerText).toBe(prompt)
+    expect(observed.errors).toEqual([])
+  })
+
+  it('preserves explicit breaks, inline text, empty lines and boundary whitespace in paragraph drafts', () => {
+    const element = grokFixtureElement
+    const composer = element('div', { contenteditable: 'true', role: 'textbox', 'aria-label': '向 Grok 提任何问题' },
+      element('p', {}, element('br', { class: 'ProseMirror-trailingBreak' })),
+      element('p', {}, '  first ', element('strong', {}, 'word'), element('br', {}), 'second  ', element('br', { class: 'ProseMirror-trailingBreak' })),
+      element('p', {}, element('br', { class: 'ProseMirror-trailingBreak' })))
+    composer.innerText = '\n\n  first word\nsecond  \n\n'
+    expect(inspect(new GrokFixtureDocument(element('main', {}, composer))).composerText).toBe('\n  first word\nsecond  \n')
+  })
+
+  it('refuses mixed or unsupported paragraph content instead of hiding a draft difference', () => {
+    const element = grokFixtureElement
+    for (const content of [
+      [element('p', {}, 'first'), element('div', {}, 'second')],
+      [element('p', {}, element('img', { src: 'https://fixture.invalid/image.png' }))],
+    ]) {
+      const composer = element('div', { contenteditable: 'true', role: 'textbox', 'aria-label': '向 Grok 提任何问题' }, ...content)
+      composer.innerText = 'apparently matching text'
+      expect(inspect(new GrokFixtureDocument(element('main', {}, composer))).errors).toContain('GROK_COMPOSER_STRUCTURE_UNSUPPORTED')
+    }
+  })
+
   it('preserves native multiline user receipt text separately from formatted assistant paragraphs', () => {
     const element = grokFixtureElement
     const body = element('div', { class: 'relative' }, element('p', {}, 'first line'), element('p', {}, 'second line'))

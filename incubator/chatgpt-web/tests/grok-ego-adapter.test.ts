@@ -135,6 +135,17 @@ describe('GrokEgoAdapter', () => {
     expect(finishSource).toContain('await __task.finish({ keep: [] })')
   })
 
+  it('rejects genuine whitespace edits rather than relaxing exact draft comparison', async () => {
+    for (const changed of ['Fixture prompt ', 'Fixture\nprompt', 'Fixture  prompt']) {
+      const fixture = queueRunner(success({ resource }), success(observation({ composerText: changed })))
+      const adapter = GrokEgoAdapter.create(options, fixture.run)
+      const allocated = await adapter.allocate({ id: 'literal-draft', sessionId: 'fixture-session' })
+      await expect(adapter.prepare(allocated, { prompt: 'Fixture prompt', modelLabel: 'Expert' }))
+        .rejects.toMatchObject({ code: 'GROK_PROMPT_READBACK_MISMATCH' })
+      expect(fixture.calls).toHaveBeenCalledTimes(2)
+    }
+  })
+
   it('records the submit attempt before the process call and never retries an uncertain send', async () => {
     const timeout = new EgoProcessError('EGO_TIMEOUT', 'untrusted stderr', false, true, 'secret')
     const fixture = queueRunner(success({ resource }), success(observation()), timeout)

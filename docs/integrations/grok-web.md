@@ -87,3 +87,27 @@ types. A completed answer retains a named cleanup error if TaskSpace finish
 fails, releases its own admission lease, and never retries the finish or Send.
 The original request's audit notice stays logged but does not duplicate itself
 into a browser prompt or handoff task context. No real Grok generation ran.
+
+## ProseMirror draft-readback repair (2026-10-24)
+
+The first user-triggered live attempt stopped in preparation with
+`GROK_PROMPT_READBACK_MISMATCH`. Its durable journal never reached a send intent,
+and the original page contained zero messages. Read-only inspection found 90
+direct paragraph elements, including 26 empty paragraphs with editor-placeholder
+BRs. Native `innerText` introduced 115 layout LF characters: 12,268 bytes versus
+the original 12,153-byte input. Logical paragraph reconstruction was exactly the
+original request; this was an adapter readback failure, not a remote rejection.
+
+The observer now joins direct paragraphs with one literal LF, preserving empty
+paragraphs, inline text, explicit BRs and boundary whitespace. It ignores only
+editor trailing-break placeholders, never trims or collapses whitespace, and
+rejects unsupported/mixed paragraph structures before intent. Exact comparison
+at preparation and just before Send remains unchanged. No original event,
+failed-run record, browser draft or previous artifact is rewritten or replayed.
+
+The three new reproduction/negative tests failed before the fix and passed after
+it. Read-only evaluation of the fixed production observer on the same retained
+draft returned exactly 12,153 bytes and the original SHA-256, no errors, and zero
+messages. No fill, Send, model call or new browser task was used for that check.
+This proves the observed preparation defect is fixed; it does not establish a
+new live submission receipt or completed-answer capture.

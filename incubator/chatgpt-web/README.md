@@ -35,7 +35,7 @@ subscription restriction, and never substitutes a model. The ChatGPT catalogue
 refresh and its model/effort settings do not configure Grok.
 
 A request uses one fresh Grok TaskSpace, a flushed pre-send intent, and at most
-one submit attempt. Only an exact original-question receipt followed by one
+one submit attempt. Grok's observed ProseMirror composer is read as logical direct-paragraph text, preserving exact empty lines, explicit breaks and whitespace. Native `innerText` layout separators are not part of the draft; mixed or unsupported paragraph structures stop before submission. Preparation and the final pre-submit check still require exact prompt equality. Only an exact original-question receipt followed by one
 matching visible text reply, non-busy transcript, Copy control, and repeated
 stable observations can complete it. Existing or uncertain commands only
 observe the recorded original page; missing or mismatched receipts are errors,

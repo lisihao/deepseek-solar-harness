@@ -73,15 +73,45 @@ export function inspectGrokPage(input: GrokPageInspectionInput = {}): GrokPageOb
     return blockTags.has(element.tagName) && inner.length > 0 ? `${newline}${inner}${newline}` : inner
   }
   const composerText = (composer: BrowserElement): string => {
+    const nodes = Array.from(composer.childNodes)
+    if (nodes.some(node => node.nodeType === 1 && (node as BrowserElement).tagName === 'P')) {
+      // ProseMirror stores one logical line per direct P. Native innerText
+      // adds layout separators (and more around empty paragraphs), so it is
+      // not the literal draft value. Preserve explicit BRs and whitespace.
+      const inlineTags = new Set(['SPAN', 'STRONG', 'EM', 'B', 'I', 'CODE', 'A', 'S', 'DEL', 'U', 'MARK', 'SUB', 'SUP'])
+      const inlineText = (node: BrowserNode): string | undefined => {
+        if (node.nodeType === 3) return node.textContent ?? ''
+        if (node.nodeType !== 1) return undefined
+        const element = node as BrowserElement
+        if (!visible(element)) return undefined
+        if (element.tagName === 'BR') {
+          return (element.getAttribute('class') ?? '').split(/\s+/).includes('ProseMirror-trailingBreak') ? '' : newline
+        }
+        if (!inlineTags.has(element.tagName)) return undefined
+        const parts = Array.from(element.childNodes).map(inlineText)
+        return parts.some(part => part === undefined) ? undefined : parts.join('')
+      }
+      const lines = nodes.map(node => {
+        if (node.nodeType !== 1 || (node as BrowserElement).tagName !== 'P' || !visible(node as BrowserElement)) return undefined
+        const paragraph = node as BrowserElement
+        const children = Array.from(paragraph.childNodes)
+        // The observed empty paragraph's sole BR is an editor placeholder.
+        if (children.length === 1 && children[0]!.nodeType === 1 && (children[0] as BrowserElement).tagName === 'BR') return ''
+        const parts = children.map(inlineText)
+        return parts.some(part => part === undefined) ? undefined : parts.join('')
+      })
+      if (lines.some(line => line === undefined)) {
+        errors.push('GROK_COMPOSER_STRUCTURE_UNSUPPORTED')
+        return ''
+      }
+      return normalizeNewlines(lines.join(newline))
+    }
     const hasVisibleText = (node: BrowserNode): boolean => {
       if (node.nodeType === 3) return (node.textContent ?? '').length > 0
       if (node.nodeType !== 1) return false
       const element = node as BrowserElement
       return visible(element) && Array.from(element.childNodes).some(hasVisibleText)
     }
-    // A blank ProseMirror can expose native innerText as only a placeholder
-    // newline from P/BR. Count visible text nodes first so that markup-only
-    // empty editors remain empty, while literal whitespace is still preserved.
     if (!hasVisibleText(composer)) return ''
     const nativeInnerText = (composer as unknown as { readonly innerText?: unknown }).innerText
     return typeof nativeInnerText === 'string' ? normalizeNewlines(nativeInnerText) : normalizeNewlines(visibleText(composer))
