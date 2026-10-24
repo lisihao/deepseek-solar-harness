@@ -1,0 +1,5 @@
+# Test-only row. This package is installed only into an ephemeral profile by
+# tools/local-ai-plugin-test.mjs and is not a Solar release bundle.
+- insert:
+    - id: local-ai-probe
+      name: '@lisihao/dsh-solar-local-ai-probe'

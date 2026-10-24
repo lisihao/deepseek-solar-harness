@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Local AI",
+    "description": "Use a self-hosted OpenAI-compatible model server, directly or through a userspace Tailscale node."
+  }
+}
