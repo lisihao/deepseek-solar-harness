@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { AnalysisConfig, BenchRegistry, BenchRuntime, createLedgersApi, ExperimentLedger, importLegacyLedger, RUN_TEMPLATE_FILES } from '../src/index.js'
-import { prepareCell, scrubTemplateFiles } from '../src/cell.js'
+import { cellEnv, prepareCell, scrubTemplateFiles } from '../src/cell.js'
 import type { AnalysisOptions, Experiment, RunRecord } from '../src/index.js'
 import { io, main } from '../src/cli-main.js'
 import { en, zh } from '../src/locales.js'
@@ -111,6 +111,14 @@ describe('run homes', () => {
     await scrubTemplateFiles(dirs.home, RUN_TEMPLATE_FILES)
     await expect(readFile(join(dirs.home, '.env'))).rejects.toThrow()
     expect(await readFile(join(home, '.env'), 'utf8')).toContain('HTTPS_PROXY')
+  })
+})
+
+describe('run child environment', () => {
+  it('drops the desktop host IPC channel and client identity, and keeps the rest', () => {
+    const dirs = { workspace: '/w', home: '/h', state: '/s' }
+    const env = cellEnv({ NODE_CHANNEL_FD: '3', NODE_CHANNEL_SERIALIZATION_MODE: 'json', DSH_CLIENT_VERSION: '1', PATH: '/bin', DSH_HOME: '/real' }, dirs, { id: 'v', patches: [], env: { X: '{cell}/x' } })
+    expect(env).toEqual({ PATH: '/bin', DSH_HOME: '/h', X: '/s/x' })
   })
 })
 

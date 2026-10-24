@@ -78,8 +78,18 @@ export async function scrubTemplateFiles(home: string, files: readonly string[])
  * @param variant - the variant whose `env` is expanded.
  * @returns `base` plus `DSH_HOME` and the variant's expanded entries.
  */
+/**
+ * Variables of the desktop host process kept out of a run child, so an
+ * in-app run starts like a shell run: Node's IPC channel to the host (the
+ * child is spawned without that fd) and the host's client identity. A
+ * launcher started with `NODE_CHANNEL_FD=3` and no fd 3 still printed its
+ * help, so this is hygiene, not a fix for an observed failure.
+ */
+const HOST_ONLY_ENV = ['NODE_CHANNEL_FD', 'NODE_CHANNEL_SERIALIZATION_MODE', 'NODE_UNIQUE_ID', 'DSH_CLIENT_VERSION']
+
 export function cellEnv(base: NodeJS.ProcessEnv, dirs: CellDirs, variant: Variant): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, DSH_HOME: dirs.home }
+  for (const name of HOST_ONLY_ENV) delete env[name]
   for (const [name, value] of Object.entries(variant.env)) env[name] = value.replaceAll('{cell}', dirs.state)
   return env
 }

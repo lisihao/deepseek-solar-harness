@@ -210,6 +210,20 @@ describe('BenchRunManager', () => {
     expect(() => process.kill(pid as number, 0)).toThrow()
   })
 
+  it('kills the running child when the plugin is unloaded', async () => {
+    const manager = await mount({ prompt: 'hang' })
+    process.env.FAKE_DSH_PID = join(root, 'child.pid')
+    await manager.start({ suite: 'demo', tasks: ['t1'], plugins: ['dsh-cost-meter'], repetitions: 1, maxUsd: 5 })
+    let pid: number | undefined
+    for (let i = 0; i < 100 && pid === undefined; i += 1) {
+      pid = Number(await readFile(process.env.FAKE_DSH_PID, 'utf8').catch(() => '')) || undefined
+      if (pid === undefined) await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    await manager.dispose()
+    expect(manager.status()).toMatchObject({ state: 'stopped', reason: 'the benchmark plugin was unloaded' })
+    expect(() => process.kill(pid as number, 0)).toThrow()
+  })
+
   it('refuses to start without a key or with an unknown plugin or task', async () => {
     const manager = await mount({ key: undefined })
     await expect(manager.start({ suite: 'demo', tasks: ['t1'], plugins: ['dsh-cost-meter'], repetitions: 1, maxUsd: 5 })).rejects.toThrow(/BENCH_NO_CREDENTIAL/)

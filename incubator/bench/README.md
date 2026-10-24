@@ -7,7 +7,7 @@ Unreleased source candidate: `@lisihao/dsh-solar-bench`. It measures whether a p
 Open the right sidebar, add a tab, and pick **基准测试 / Benchmarks**. The tab has three parts:
 
 - **New experiment**: the suite and its tasks (all selected by default), the plugins to compare (every third-party plugin enabled in the desktop profile, shown by its own title), repetitions and a spending limit in US dollars. The plan line shows the number of runs; a note says when fewer than 10 tasks cannot give a verdict. **开始运行（会调用模型并产生费用）** starts it. It needs the DeepSeek API key saved on the Models settings page.
-- **Run**: state, a progress bar, money spent against the limit, the run in progress, each finished run with its outcome, a live log, and **停止**. One experiment runs at a time; reopening the tab reattaches to it.
+- **Run**: state, a progress bar, money spent against the limit, the run in progress, each finished run with its outcome, a live log, and **停止**. One experiment runs at a time. Its state lives in the app host, so a reopened tab reads it again; that reattachment has not yet been observed in the app.
 - **Results**: every recorded experiment, newest first, with its analysis. Variants are shown by plugin title; the baseline is **基线（不加插件）**.
 
 ## How a run is isolated
@@ -17,7 +17,8 @@ Open the right sidebar, add a tab, and pick **基准测试 / Benchmarks**. The t
 - The headless profile disables the credential store, so the key is resolved through the official credentials service and passed to the child only as `DEEPSEEK_API_KEY` in its environment. It is replaced by `[redacted]` in records, the live log and errors, and is never written to disk by this plugin.
 - If a row of the plugin under test is reported by dsh as not activated (failed to import, or pending a service the one-shot profile lacks), the run is recorded as unmeasurable with that reason instead of as a fail.
 - A run whose root turn ends with one of rc.2's canonical codes `INVALID_CREDENTIAL`, `QUOTA` or `ACCOUNT_QUOTA` is recorded as unmeasurable; no real rc.2 run has yet been observed producing such a record.
-- The experiment stops when priced runs exceed the spending limit, and also when a run used a model with no price row, because the limit could not be enforced. Stopping, or closing the app, kills the running child; recorded runs are kept.
+- The experiment stops when priced runs exceed the spending limit, and also when a run used a model with no price row, because the limit could not be enforced. Stopping, or unloading the plugin, kills the running child; recorded runs are kept. Quitting the app in the middle of a run has not yet been observed.
+- Children do not inherit the desktop host's Node IPC variables (`NODE_CHANNEL_FD`, `NODE_CHANNEL_SERIALIZATION_MODE`, `NODE_UNIQUE_ID`) or `DSH_CLIENT_VERSION`.
 - The variant pins `SOLAR_BENCH_PLUGIN=<name>@<version>`, so a ledger never mixes runs of two plugin versions.
 
 ## Command line
@@ -61,7 +62,7 @@ Comparisons pair tasks: the mean over tasks of (variant − baseline) success ra
 | `launcher` | the app CLI launcher | Launcher argv prefix of `dsh` for run children. |
 | `sourceProfile` | `desktop` | Profile under `$DSH_HOME/profiles` whose enabled plugins can be compared. |
 | `runTimeoutMs` | `600000` | Wall-time limit of one run. |
-| `prices` | deepseek-v4-flash: input 0.2778, cache hit 0.0056, output 1.1111 | USD per million tokens. The default row is the table the DSH 3.x ledger was priced with, recovered from its records: ¥2 / ¥0.04 / ¥8 at 7.2 CNY per USD. |
+| `prices` | `deepseek-v4-flash` and `deepseek-flash`: input 0.2778, cache hit 0.0056, output 1.1111 | USD per million tokens. The rows are the table the DSH 3.x ledger was priced with, recovered from its records: ¥2 / ¥0.04 / ¥8 at 7.2 CNY per USD. `deepseek-flash` is rc.2's configured default model id; which id rc.2 logs on assistant messages has not been observed yet. |
 | `analysis` | confidence 0.95, resamples 2000, seed 1, margin 0.05, minTasks 10, invalidTolerance 0.1 | Settings applied to served experiments. |
 
 ## Data

@@ -55,7 +55,11 @@ export const benchDataDir = (home = resolveDshHome()): string => join(home, 'sol
  * ablation ledger was priced with, recovered from its records: ¥2 / ¥0.04 /
  * ¥8 per million input / cache-hit / output tokens at 7.2 CNY per USD.
  */
-export const DEFAULT_PRICES: readonly ModelPrice[] = [{ model: 'deepseek-v4-flash', input: 0.2778, cacheRead: 0.0056, output: 1.1111 }]
+export const DEFAULT_PRICES: readonly ModelPrice[] = [
+  { model: 'deepseek-v4-flash', input: 0.2778, cacheRead: 0.0056, output: 1.1111 },
+  // rc.2's default model id for one-shot runs; which id assistant messages log in rc.2 is not yet observed.
+  { model: 'deepseek-flash', input: 0.2778, cacheRead: 0.0056, output: 1.1111 },
+]
 
 /** Plugin config. */
 export interface Config {
