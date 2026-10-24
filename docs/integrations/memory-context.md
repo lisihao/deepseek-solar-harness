@@ -102,12 +102,19 @@ this is an offline reference measurement, not provider input usage or a live
 saving. Replaying the historical no-tools marker removed five stale automatic
 Graph snapshots from the effective surface; original archive markers remained.
 
-Desktop was normally restarted. One existing header-only empty session file
-changed after that restart; its current journal contains no message/request
-history. The pre-relaunch byte check passed, but there was no retained prior
-body copy for attributing that header rewrite. Do not claim every compressed
-file stayed byte-identical after restart. Existing Solar JSON hashes were
-unchanged and this installation made no model/browser submission.
+Desktop was normally restarted. One existing compressed session file changed
+after that restart. The pre-relaunch byte check passed, but there was no retained
+prior body copy for attributing that exact change. An earlier first-frame-only
+inspection was insufficient to classify this multi-frame Zstandard journal as
+empty or header-only; that description is withdrawn. Do not claim every
+compressed file stayed byte-identical after restart. Existing Solar JSON hashes
+were unchanged and this installation made no model/browser submission.
+
+The later Grok paragraph repair preserved an affected-session backup and decoded
+all Zstandard frames for comparison: all 72 prior records remained byte-value
+equivalent and in order, with only a native `session/end-seed` record appended on
+restart. This later prefix check does not reconstruct the earlier missing body
+copy or retroactively attribute its change.
 
 On 2026-10-24 the user directly confirmed that **Solar 记忆上下文** appears enabled
 in Settings → Plugin Market → Installed. This closes the installed-entry check;
