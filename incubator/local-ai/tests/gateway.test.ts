@@ -145,6 +145,16 @@ describe('tailnet gateway', () => {
     expect(socks.requested).toEqual([])
   })
 
+  test('refuses browser-origin and rebound-host requests before contacting the proxy', async () => {
+    const { gateway, socks } = await fixture()
+    const path = '/tailnet/100.114.161.62:8000/v1/models'
+    expect((await call(gateway.port, path, { headers: { origin: 'https://evil.example' } })).status).toBe(403)
+    expect((await call(gateway.port, path, { headers: { 'sec-fetch-site': 'cross-site' } })).status).toBe(403)
+    expect((await call(gateway.port, path, { headers: { host: `rebind.example:${String(gateway.port)}` } })).status).toBe(403)
+    expect(socks.requested).toEqual([])
+    expect((await call(gateway.port, path)).status).toBe(200)
+  })
+
   test('reports an unreachable proxy as a 502 that names it', async () => {
     const free = createTcpServer()
     await new Promise<void>(resolve => free.listen(0, '127.0.0.1', resolve))

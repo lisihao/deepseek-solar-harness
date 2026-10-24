@@ -64,6 +64,16 @@ export async function startTailnetGateway(options: TailnetGatewayOptions): Promi
   const agent = new SocksProxyAgent(proxyAgentURL(options.proxy))
 
   const relay = (incoming: IncomingMessage, response: ServerResponse): void => {
+    // Model adapters call from the Host process and send neither header.
+    // Refusing browser-origin requests and any other Host (DNS rebinding)
+    // keeps web pages from reaching the tailnet through this gateway.
+    const listening = (server.address() as AddressInfo).port
+    if (incoming.headers.host !== `${GATEWAY_HOST}:${String(listening)}`
+      || incoming.headers.origin !== undefined
+      || incoming.headers['sec-fetch-site'] !== undefined) {
+      fail(response, 403, 'The Tailscale gateway accepts only local requests addressed to 127.0.0.1 without a browser origin')
+      return
+    }
     const target = parseGatewayPath(incoming.url ?? '')
     if (target === undefined) {
       fail(response, 404, 'Expected a path of the form /tailnet/<host>:<port>/…')
