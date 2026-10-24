@@ -1,0 +1,6 @@
+- insert:
+    - id: solar-memory-context
+      name: '@lisihao/dsh-solar-memory-context'
+      config:
+        maxFacts: 4
+        historyFallbackFacts: 2

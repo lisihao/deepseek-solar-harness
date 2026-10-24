@@ -1,0 +1,78 @@
+{
+  "name": "@lisihao/dsh-solar-memory-context",
+  "version": "0.0.0-preview.0",
+  "private": true,
+  "description": "Projects automatic Graph Memory recall and compacts verified Hindsight guides while preserving original logs and tools.",
+  "license": "MIT",
+  "author": {
+    "email": "haogege1977@gmail.com"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./graph-memory": {
+      "types": "./lib/graph-memory.d.ts",
+      "default": "./lib/graph-memory.js"
+    },
+    "./hindsight": {
+      "types": "./lib/hindsight.d.ts",
+      "default": "./lib/hindsight.js"
+    },
+    "./hindsight-session": {
+      "types": "./lib/hindsight-session.d.ts",
+      "default": "./lib/hindsight-session.js"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
+    "README.md",
+    "UPGRADING.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19 || >=24",
+    "dsh": ">=0.2.1-rc.2 <0.2.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.5"
+  },
+  "dependencies": {
+    "saxes": "6.0.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.5",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "scripts": {
+    "build": "node build.mjs && tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:plugin": "node tools/plugin-test.mjs"
+  }
+}
