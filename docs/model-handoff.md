@@ -84,5 +84,7 @@ billion-context state/logs, Hindsight configuration, existing Solar records and
 post-restart audit found no changed/new session files or Solar JSON records.
 
 The native UI tool could not uniquely match the selected window to Accessibility.
-Human confirmation of the Grok model entry is pending; live Grok generation and
-result-carrying handoff remain unrun. Installation is not a release or a merge.
+On 2026-10-24 the user directly confirmed that the model picker shows
+**Grok 网页算子**. This confirms entry visibility, not an actual Grok route switch
+or result-carrying handoff. Live Grok generation and result-carrying handoff
+remain unrun. Installation is not a release or a merge.
